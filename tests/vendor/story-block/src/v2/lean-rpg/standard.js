@@ -1,6 +1,6 @@
 // The Standard formula's roll (formula.js has the numbers; resolve.js dispatches here when the recorded rules say `formula: 'standard'`).
 //
-// What is different from Classic (resolve.js):
+// How the roll works:
 // - a roll is typed: physical, magic, defence, social or check (plan.js). The stat part is formula.js statPart: a skill's stat takes the
 //   main slot, half of the type's second stat is added, the sum is halved once. Class = the level bonus (floor(level / divisor); before levels classWeight × Soul Class), then the skill's rank,
 //   then the situation's edge held inside LUK's window (formula.js luckWindow, edgeWithLuck).

@@ -1,4 +1,6 @@
-## Unreleased
+## 1.13.0
+
+- Requires Story Block 2.25.0 or later (the catch-up and "Start from the chat" use `restored`, `progress`, `skip` and `asOf`). Story Block testkit re-synced to 2.25.0.
 
 - **After Story Block falls back to an earlier saved point, the dossiers catch up on the replies they missed.** Delta reads them in order, as each reply was when it was new (Story Block's state as of that reply, the reply's own time), on a copy, and installs the result once, with one publication. Nothing is sent to Story Block again: it already holds those changes. At most the last 40 missed replies are read; older ones are marked read. Sending waits until it finishes ("Sending waits until the dossiers catch up (reply N of M)."), with **Skip**. A failure, a chat switch or a reload leaves the dossiers as they were, and it tries again when the chat is opened. While it waits for the model, the dossier panel shows the installed dossiers, and an edit made then is kept (the catch-up runs again on top of it).
 - **"Start this branch's dossiers from the chat"** (Story Block's banner) rebuilds a branch's dossiers with the same replay from an empty start, from the last 40 replies or the whole chat, with progress.

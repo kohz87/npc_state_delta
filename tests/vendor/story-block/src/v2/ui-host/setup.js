@@ -53,8 +53,6 @@ export function createHostSetup({ runtime, ctx, doc, registry, store, sdk, openS
         directorOn: () => registry.lifecycle?.('story-director')?.status === 'ready',
         // Off unless Story Block's core is there to own the switch (unlike coreOn, which counts a missing feature as on).
         leanRpgOn: () => (registry.feature?.(CORE_FEATURE.leanRpg) ? registry.featureOn(CORE_FEATURE.leanRpg) : false),
-        // The stat formula Story Block's settings say (Classic only when the reader chose it): which RPG templates the chooser offers.
-        rpgFormula: () => { try { return runtime.settings?.('story-block')?.rpgFormula === 'classic' ? 'classic' : 'standard'; } catch { return 'standard'; } },
         // A block card's "Edit fields": the editor is on Settings → Blocks.
         navigate: () => { openSettings().select('blocks'); return true; } });
     // The host's own widgets: the Inspector (over the store's replay) and the save points (over the chat).

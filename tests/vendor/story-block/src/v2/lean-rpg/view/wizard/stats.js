@@ -5,7 +5,7 @@ export function createStatsStep(ctx) {
     let handles = [], steppers = [], radarHandle = null;
     // ---- Stats ----
     const axes = now => STATS.map(stat => ({ label: stat.toUpperCase(), value: now.stats[stat], max: 20, before: now.from ? now.from.stats[stat] : draftCreation(now).start }));
-    // The Standard formula's one line of what the next points buy; Classic's bars do not grow with stats.
+    // One line of what the next points buy (the bars grow with stats).
     const growth = now => (draftCreation(now).standard ? growthText(growthOf(now.stats, { statMax: draftCreation(now).statMax })) : '');
     let growthNode = null;
     function refreshStats() {

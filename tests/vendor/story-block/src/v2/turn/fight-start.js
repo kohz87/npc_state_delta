@@ -1,5 +1,5 @@
 // A fight-start choice belongs to the reader's message and the reply it follows.
-// Chat metadata keeps the choice and a seeded opening across reloads; it never changes the sheet.
+// Chat metadata keeps the choice and the typed attack's hold across reloads; it never changes the sheet.
 
 import { hashText } from '../assist/common.js';
 import { readRecord } from '../persist.js';
@@ -18,7 +18,7 @@ export function pendingStart(meta, chat) {
 export function holdStart(meta, chat, value = {}) {
     const last = chat?.at(-1), anchor = anchorOf(chat);
     if (!meta || typeof meta !== 'object' || !last?.is_user || !anchor || !String(last.mes ?? '').trim()) return null;
-    const pending = { anchor, message: keyOf(last), mode: value.mode === 'new' ? 'new' : 'known', choice: null, ...value };
+    const pending = { anchor, message: keyOf(last), mode: 'known', choice: null, ...value };
     meta[KEY] = pending;
     return pending;
 }
@@ -38,7 +38,3 @@ export function fightsInMessage(text, sheet) {
         return name.length >= 4 && message.includes(name);
     }));
 }
-
-// The planner's answer for a message that engages (not just prepares) a fight: approach checks and new foes, but maybe no act of its own.
-const ENGAGE = /\b(?:engag\w*|attack\w*|strik\w*|struck|charg\w*|ambush\w*|assault\w*|lunge\w*|lung(?:e|ed|es|ing)|fall(?:s|ing)?\s+upon|fell\s+upon|jump\w*|pounc\w*|leap\w*|leapt)\b/iu;
-export const engagesFight = text => ENGAGE.test(String(text ?? ''));

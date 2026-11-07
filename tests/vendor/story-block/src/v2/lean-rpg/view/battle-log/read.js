@@ -1,4 +1,4 @@
-// Reads a reply's recorded roll (the `rpg.resolve` receipt) into the battle log's lines: Classic and Standard roll
+// Reads a reply's recorded roll (the `rpg.resolve` receipt) into the battle log's lines: old and Standard roll
 // text, breakdowns, gear, costs, moves, turn order and an ambush check. A line that is not whole is left out.
 
 import { RESOLVE } from '../../index.js';
@@ -90,7 +90,7 @@ function lineOf(raw, soulOf = () => null, lv = false, divisor = null, members = 
     const against = raw.kind === 'check' ? (Number.isFinite(raw.dc) ? raw.dc : null) : foeSide?.total ?? null;
     const theirs = foeSide ? rollText(foeRoll(foeSide, soul, lv)) : against !== null ? `DC ${against}` : '';
     const detail = (raw.kind === 'foe' ? [theirs, rollText(mine)] : [rollText(mine), theirs]).filter(Boolean).join(' vs ');
-    // A Standard line (typed, with both stats of the pair recorded) tells its roll as the formula makes it; a Classic one is as it was.
+    // A Standard line (typed, with both stats of the pair recorded) tells its roll as the formula makes it; an older one is as it was.
     const standard = typeof raw.type === 'string' && Number.isFinite(raw.pc.mainValue) && Number.isFinite(raw.pc.secondValue);
     const breakdown = told || (standard ? breakdownStandard(raw, skill, soul, foeSide, against, lv) : why ? `${detail} · ${why}` : detail);
     const gear = gearText(raw.pc.gear);

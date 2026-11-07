@@ -114,7 +114,7 @@ export function createFightWidget({ headState = () => null, readerName = () => '
                 board?.offer(root, draw);
 
                 // The turn order rolled at the start of this fight (the Standard formula records it with the rolls): "1 Wessel 21 · 2 Weir-drake 18 …".
-                // A record without one (Classic, or no roll yet) draws nothing here.
+                // A record without one (an old record, or no roll yet) draws nothing here.
                 const order = shown?.model?.orderEntries ?? [];
                 if (order.length) {
                     const row = h(doc, 'div', 'rpg-order');

@@ -19,7 +19,7 @@ import { HOLD_WIDGET, createStart } from './start.js';
 import { WIZARD_WIDGET, createWizard } from './wizard.js';
 import { EXPORT_WIDGET, createExporter } from './export.js';
 import { packLevelsOf } from '../levels.js';
-import { practiceFromRollsOnly } from '../names.js';
+import { autoCapFrom, practiceFromRollsOnly } from '../names.js';
 import { planGear } from '../gear.js';
 import { readSheet } from '../read.js';
 import { readRecord } from '../../persist.js';
@@ -103,12 +103,12 @@ export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets,
     widgets[HOLD_WIDGET] = start.holdWidget;
     let board;
     const fightStart = createStartController({ doc, chat: () => ctx?.chat ?? [], meta, state: headState, preview: previewStart,
-        board: () => board, on: () => featureOn() && boardOn(), save, refresh, generate: generateHeld, show: () => openScreen(FIGHT_SCREEN_ID), close: () => closeView?.() });
-    board = createBoardView({ doc, headState: () => fightStart.state(), meta, save, store, rules, query, readerName, roleOf, levels, on: boardOn, start: fightStart });
+        board: () => board, on: () => featureOn() && boardOn(), save, refresh, generate: generateHeld, cap: () => autoCapFrom(values()), show: () => openScreen(FIGHT_SCREEN_ID), close: () => closeView?.() });
+    board = createBoardView({ doc, headState: () => fightStart.state(), meta, save, store, rules, query, readerName, roleOf, levels, on: boardOn, start: fightStart, cap: () => autoCapFrom(values()) });
     let offers;
-    const offerView = createOfferLineView({ doc, onFight: data => offers.choose(data, true), onNarrate: data => offers.choose(data, false) });
+    const offerView = createOfferLineView({ doc, onFight: data => offers.choose(data, 'board'), onAuto: data => offers.choose(data, 'auto') });
     offers = createFightOffers({ ctx, doc, store, meta, on: () => featureOn() && boardOn() && isStandard(rules()), view: offerView,
-        open: () => { if (!board.open()) return false; openScreen(FIGHT_SCREEN_ID); return true; }, save, refresh });
+        open: ({ auto = false } = {}) => { if (!board.open()) return false; if (auto) board.auto(); openScreen(FIGHT_SCREEN_ID); return true; }, save, refresh });
     const battleLog = createBattleLog({ ctx, doc, store, events, featureOn, roleOf, levels, offer: offers });
     widgets[FIGHT_WIDGET] = createFightWidget({ headState, readerName, roleOf, battleLog, closeView, levels, board, start: fightStart });
     screens.setPack(PACK, [createPartyScreen(), createFightScreen({ roleOf, offer: () => Boolean(offers.find()), waiting: () => Boolean(fightStart.current()) }), wizard.screen, exporter.screen, start.holdScreen]);
@@ -119,7 +119,7 @@ export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets,
         fightStart.changed();
         if (info.reason !== 'fight-start') return;
         const waiting = fightStart.current();
-        if (waiting && waiting.mode !== 'working') openScreen(FIGHT_SCREEN_ID);
+        if (waiting) openScreen(FIGHT_SCREEN_ID);
     });
     start.attach();
     battleLog.refreshAll();

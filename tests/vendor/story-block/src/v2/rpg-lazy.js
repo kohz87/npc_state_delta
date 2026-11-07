@@ -13,7 +13,7 @@
 // cards, queries, hooks, settings and guard as lean-rpg/index.js createLeanRpgPart, handed to the real part once the
 // library is there), the loader (`createRpgLoader`) and the check of a chat (`holdsRpg`). No DOM, no SillyTavern.
 import { CORE_FEATURE } from './features.js';
-import { BOARD_SKILL, BOARD_SKILL_CARRY, FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PLANNER_LIMIT, PLANNER_LIMIT_SETTING, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING, plannerLimitMs } from './lean-rpg/names.js';
+import { AUTO_CAP, AUTO_CAP_SETTING, BOARD_SKILL, BOARD_SKILL_CARRY, FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING } from './lean-rpg/names.js';
 import { noRoll } from './lean-rpg/noroll.js';
 import { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, rankQuery } from './lean-rpg/levels.js';
 import { rosterQueries } from './lean-rpg/roster.js';
@@ -26,9 +26,6 @@ export const rpgLib = () => library;
 /** Hands over the library (the loader does; a test host that wants the RPG at once does too). `null` lets it go. */
 export function setRpgLib(lib) { library = lib && typeof lib === 'object' ? lib : null; }
 
-// How much longer the pre-call hook may take than the planner's call (the same as lean-rpg/index.js HOOK_MARGIN_MS).
-const HOOK_MARGIN_MS = 2000;
-export const LAZY_HOOK_MARGIN_MS = HOOK_MARGIN_MS;
 // The names join.js and index.js give these (a test holds them equal to the real part's keys).
 const JOIN_NO = 'rpg.joinNo';
 const JOINS_QUERY = 'rpg.joins';
@@ -105,8 +102,6 @@ export function createLazyRpgPart(deps = {}) {
     };
     const waiting = ctx => ctx.fail('FAILED', 'The RPG is still loading. Try again in a moment.');
     const run = (name, fallback) => (...args) => { const made = part(); return made ? made.commands[name](...args) : fallback(...args); };
-    const timeoutMs = deps?.timeoutMs;
-    const plannerValues = () => { try { const values = deps?.plannerValues?.(); return values && typeof values === 'object' ? values : {}; } catch { return {}; } };
     return {
         commands: {
             [BOARD_SKILL]: Object.assign(run(BOARD_SKILL, ctx => waiting(ctx)), { feature: CORE_FEATURE.fightBoard }),
@@ -131,11 +126,11 @@ export function createLazyRpgPart(deps = {}) {
         },
         hooks: {
             canGenerate: Object.assign((view, info) => part()?.hooks.canGenerate(view, info), { feature: LEAN_RPG_FEATURE }),
-            beforeGenerate: Object.defineProperty((view, info) => part()?.hooks.beforeGenerate(view, info), 'timeoutMs', { enumerable: true, get: () => plannerLimitMs(plannerValues(), timeoutMs) + HOOK_MARGIN_MS }),
+            beforeGenerate: (view, info) => part()?.hooks.beforeGenerate(view, info),
             afterCapture: (view, info) => part()?.hooks.afterCapture(view, info),
             afterReceive: (view, info) => { part()?.hooks.afterReceive(view, info); },
         },
-        settings: { defaults: { [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [PLANNER_LIMIT_SETTING]: PLANNER_LIMIT.default }, schema: SETTINGS_SCHEMA },
+        settings: { defaults: { [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [AUTO_CAP_SETTING]: AUTO_CAP.default }, schema: SETTINGS_SCHEMA },
         guard: (view, info) => { const made = part(); return made ? made.guard(view, info) : { ok: false, reason: 'The RPG is not loaded.' }; },
     };
 }

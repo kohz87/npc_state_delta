@@ -10,7 +10,7 @@ import { refusalText } from '../../strings.js';
 import { LEVEL, FORMULA, RANK_NAMES } from '../names.js';
 import { skillSlots } from '../../skill-slots.js';
 import { RPG_STRINGS, fill } from '../strings.js';
-import { classTerm, hasLevels, isStandard, statShare } from '../rules.js';
+import { classTerm, hasLevels, isStandard } from '../rules.js';
 import { levelBonus, statPart } from '../formula.js';
 import { skillFlags, skillKey } from '../board/flags.js';
 import { drawSkillFlags } from '../board/skill-editor.js';
@@ -47,7 +47,7 @@ export function rollOf(skill, character, rules = FORMULA) {
         const second = character.stats.find(stat => stat.key === part.second);
         return { total: part.value + skill.rank + bonus, stat: entry.label, value: entry.value, half: part.value, rank: skill.rank, bonus, second: second?.label ?? part.second.toUpperCase(), secondValue: second?.value ?? 0 };
     }
-    const half = entry ? statShare(entry.value, rules) : 0;
+    const half = entry ? Math.floor(entry.value / 2) : 0;
     return { total: half + skill.rank + bonus, stat: entry?.label ?? null, value: entry?.value ?? 0, half, rank: skill.rank, bonus };
 }
 

@@ -129,11 +129,11 @@ export const RPG_RANK_LIMITS = Object.freeze({ entries: 20, name: 12, maxLevel: 
 // `content.rpg.playerRank`: { module, field, label } names a data-module field as the party's rank (shown "Lv 14 · Guild F"); module and field are text of 1 to `ref`, the label 1 to `label`.
 export const RPG_PLAYER_RANK_FIELDS = Object.freeze(['module', 'field', 'label']);
 export const RPG_PLAYER_RANK_LIMITS = Object.freeze({ ref: 40, label: 12 });
-// A pack may also say which stat formula its story plays on and the numbers of it (`content.rpg.formula`: 'standard' | 'classic'; `content.rpg.numbers`:
-// whole numbers by name, the names of src/v2/lean-rpg/rules.js STANDARD_RULE_KEYS and RULE_KEYS, kept apart so packs need nothing of it). They are
+// A pack may also say which stat formula its story plays on and the numbers of it (`content.rpg.formula`: 'standard' only, Classic rules are gone and a pack that asks for them is refused; `content.rpg.numbers`:
+// whole numbers by name, the names of src/v2/lean-rpg/rules.js STANDARD_RULE_KEYS, kept apart so packs need nothing of it). They are
 // kept as one more record of the list, `{ id, slug: 'formula', pack, formula?, numbers? }`, which the skill-set readers pass over.
-export const RPG_FORMULAS = Object.freeze(['standard', 'classic']);
-export const RPG_NUMBER_KEYS = Object.freeze(['foeBase', 'foeClassWeight', 'classWeight', 'statDivisor', 'costMargin', 'decisiveMargin', 'roundCap', 'quickStartMargin',
+export const RPG_FORMULAS = Object.freeze(['standard']);
+export const RPG_NUMBER_KEYS = Object.freeze(['foeBase', 'foeClassWeight', 'classWeight', 'costMargin', 'decisiveMargin', 'roundCap', 'quickStartMargin',
     'startStat', 'createPoints', 'createMin', 'createMax', 'pointsPerSoul', 'statMax']);
 export const SKILL_SET_FIELDS = Object.freeze(['name', 'slug', 'about', 'skills']);
 export const SKILL_SET_SKILL_FIELDS = Object.freeze(['name', 'about', 'stat', 'uses']);

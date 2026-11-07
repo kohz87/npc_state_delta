@@ -3,10 +3,8 @@
 
 import { h } from '../../../view/widgets/dom.js';
 import { refusalText } from '../../../strings.js';
-import { LEAN_RPG_TEMPLATES } from '../../templates.js';
-import { formulaOf } from '../../rules.js';
 import { fill } from '../../strings.js';
-import { COMBAT_MAX, combatBlock, combatDefault, combatTemplate, withPrompt } from '../settings-data.js';
+import { COMBAT_MAX, COMBAT_DEFAULT, combatBlock, combatTemplate, withPrompt } from '../settings-data.js';
 import { oneLine } from '../../../../text.js';
 import { S } from './constants.js';
 
@@ -26,7 +24,7 @@ export function createCombatSection({ doc, root, card, values, pack, roleOf, com
                 add.setAttribute('type', 'button');
                 add.setAttribute('data-act', 'combat-add');
                 add.addEventListener('click', async () => {
-                    const definition = combatTemplate(LEAN_RPG_TEMPLATES, formulaOf(values(), pack()));
+                    const definition = combatTemplate();
                     const result = definition ? await command('dm.define', { definition }) : null;
                     state.note = result?.ok ? S.combatAdded : refusalText(result, S.combatFailed, { pinsFull: S.combatPinsFull });
                     if (isAlive()) redraw('[data-act="combat-add"]');
@@ -82,7 +80,7 @@ export function createCombatSection({ doc, root, card, values, pack, roleOf, com
             area.addEventListener('input', tally);
             area.addEventListener('change', save);
             area.addEventListener('focusout', save);
-            reset.addEventListener('click', () => { area.value = combatDefault(formulaOf(values(), pack())); tally(); save(); });
+            reset.addEventListener('click', () => { area.value = COMBAT_DEFAULT; tally(); save(); });
             row.append(reset, count);
             box.append(area, row, status);
             tally();

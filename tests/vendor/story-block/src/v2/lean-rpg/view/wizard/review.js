@@ -120,7 +120,7 @@ export function createReviewStep(ctx) {
         if (!failure) {
             unadded = where.extras.skipped.map(item => ({ role: item.role, why: whyNot([item]) }));
             const used = [...where.used, `pack.chat/${definitions.character.slug}`, `pack.chat/${definitions.skills.slug}`];
-            for (const definition of extraDefinitions(where.extras.add, { used, formula: draftCreation(now).standard ? 'standard' : 'classic' })) {
+            for (const definition of extraDefinitions(where.extras.add, { used })) {
                 const made = await call('dm.define', { definition });
                 if (!made.ok) unadded.push({ role: definition.role, why: refusalText(made, W.generic) });
             }

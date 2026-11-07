@@ -10,6 +10,7 @@ import { orderOf } from '../resolve.js';
 import { hashText } from '../../assist/common.js';
 import { readRecord } from '../../persist.js';
 import { carriedFrom } from './members.js';
+import { resumeMembers } from './resume.js';
 
 const KEY = 'rpgFightBoard', ATTEMPTS = 'rpgFightAttempts', LAST = 'rpgFightLast';
 const LINKS = 'rpgFightLinks', SEND = 'rpgFightSend';
@@ -22,7 +23,7 @@ const openingContext = setup => Object.fromEntries(OPENING_KEYS.filter(key => Ob
 export const boardSession = meta => (object(meta?.[KEY]) ? meta[KEY] : null);
 
 /** Open on a carrier: its ID and discard count determine the fight's seed. */
-export function openBoard(meta, state, { sid, rules, gear = null, weapons = {} } = {}) {
+export function openBoard(meta, state, { sid, rules, gear = null, weapons = {}, records = [] } = {}) {
     if (!object(meta) || typeof sid !== 'string' || !sid) return { error: 'There is no reply to open a fight from.' };
     const sheet = readSheet(state), groups = sheet.foes.filter(foe => foe.filled && foe.hurt > 0).map(foe => foe.slot);
     if (!sheet.characters.some(actor => actor.alive !== false && actor.health !== 0) || !groups.length) return { error: 'There is no fight to open.' };
@@ -30,8 +31,10 @@ export function openBoard(meta, state, { sid, rules, gear = null, weapons = {} }
     const seed = fightSeed(sid, attempt);
     const pending = object(meta[START]) && meta[START].anchor === sid ? meta[START] : null;
     const opened = Array.isArray(pending?.result?.opened) && pending.result.opened.length ? structuredClone(pending.result.opened) : null;
-    const session = { id: `${sid}:${attempt}`, origin: sid, anchor: sid, groups,
-        setup: { seed, offset: 0, rules: structuredClone(rules), members: 1, ...(opened ? { opened } : {}),
+    // A fight against the foes a fled or lost fight left starts from that fight's exact bars (resume.js), if the Foes block still reads what the board left.
+    const resumed = resumeMembers(records, groups, sheet.foes);
+    const session = { id: `${sid}:${attempt}`, origin: sid, anchor: sid, groups, ...(resumed ? { resumed: true } : {}),
+        setup: { seed, offset: 0, rules: structuredClone(rules), members: 1, ...(resumed ? { carriedMembers: resumed } : {}), ...(opened ? { opened } : {}),
             flags: boardFlags(state), weapons: structuredClone(weapons), ...(gear ? { gear: structuredClone(gear) } : {}) }, exchanges: [] };
     const preview = playBoard(state, session.setup, []);
     if (preview.error) return preview;

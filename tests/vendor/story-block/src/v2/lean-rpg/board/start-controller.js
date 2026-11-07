@@ -7,25 +7,22 @@ import { pendingStart } from '../../turn/fight-start.js';
 import { readSheet } from '../read.js';
 import { boardSession, clearSend, markSend } from './session.js';
 
-export function createStartController({ doc, chat, meta, state, preview, board, on, save, refresh, generate, show = () => {}, close = () => {} } = {}) {
+export function createStartController({ doc, chat, meta, state, preview, board, on, save, refresh, generate, cap = () => 3, show = () => {}, close = () => {} } = {}) {
     const listeners = new Set();
     let sending = false, error = '';
     const current = () => on() ? pendingStart(meta(), chat()) : null;
     const tell = () => { for (const draw of [...listeners]) draw(); refresh?.(); };
     const persist = () => { try { save?.(); } catch { /* kept in this page */ } };
-    const begin = () => {
+    const begin = (auto = false) => {
         const pending = current();
         if (!pending || pending.choice) return;
-        const opened = pending.opening ? preview?.() : null;
-        if (pending.opening && (!opened || JSON.stringify(opened.result?.checks ?? []) !== JSON.stringify(pending.result?.checks ?? [])
-            || JSON.stringify(opened.result?.opened ?? []) !== JSON.stringify(pending.result?.opened ?? []))) {
-            error = 'The sheet changed. Restore it before opening the fight, or choose narration.'; tell(); return;
-        }
-        if (!board()?.open({ state: opened?.state ?? state(), opening: pending.opening, result: opened?.result })) {
+        if (!board()?.open({ state: state() })) {
             error = 'The fight could not be opened. Check the party and foes.'; tell(); return;
         }
         error = '';
         pending.choice = 'board';
+        // Auto-fight plays the cap's exchanges at once; the reader then sends with the fight or takes over by hand.
+        if (auto === true) board()?.auto?.();
         persist(); tell();
     };
     const send = () => {
@@ -46,17 +43,8 @@ export function createStartController({ doc, chat, meta, state, preview, board, 
             Promise.resolve(running).finally(() => { sending = false; tell(); }).catch(() => {});
         } catch { sending = false; clearSend(meta()); tell(); }
     };
-    const narrate = () => {
-        const pending = current();
-        if (!pending || pending.choice) return;
-        if (boardSession(meta())?.exchanges?.length === 0) delete meta().rpgFightBoard;
-        pending.choice = 'narrate';
-        clearSend(meta());
-        persist(); tell();
-        if (pending.mode !== 'working') send();
-    };
-    const pause = createPauseView({ doc, onBoard: begin, onNarrate: narrate });
-    // The original message is already in the chat. A second Send must not append another one while it waits.
+    const pause = createPauseView({ doc, onBoard: () => begin(false), onAuto: () => begin(true) });
+    // The reader's message is already in the chat. A second Send must not append another one while it waits.
     const stopSend = event => {
         if (!current()) return;
         event.preventDefault?.(); event.stopImmediatePropagation?.(); event.stopPropagation?.();
@@ -71,13 +59,13 @@ export function createStartController({ doc, chat, meta, state, preview, board, 
     };
     doc.addEventListener?.('click', click, true);
     doc.addEventListener?.('keydown', key, true);
-    const sheetState = () => current()?.opening ? (preview?.()?.state ?? state()) : state();
+    const sheetState = () => state();
     const draw = root => {
         const pending = current();
         if (!pending || pending.choice) { error = ''; pause.clear(); return false; }
         const live = state(), sheet = readSheet(live);
         const fight = { groups: sheet.foes.filter(foe => foe.filled && foe.hurt > 0).map(foe => foe.slot) };
-        const data = pauseViewData({ fight, opening: pending.result, state: live, waiting: pending.mode === 'working' });
+        const data = pauseViewData({ fight, state: live, cap: cap() });
         if (!data) return false;
         pause.render(root, error ? { ...data, note: error } : data);
         return true;

@@ -186,7 +186,7 @@ export function createParty(deps) {
         const made = rpg().joinDefinitions({ ...request, skills: seeds }, { used: Object.keys(domain?.active ?? {}), soul, rules, cap: rpg().levelCapFor(settings(), packLevelsOf(rpgRecords)?.levelCap), legacy });
         // The story's first character also brings the Combat rules and Foes blocks it lacks, as far as they fit (nothing is refused for them).
         const first = rpg().partyOf(prefix).length === 0, plan = first ? rpg().extrasPlan(prefix) : { add: [], skipped: [] };
-        const extras = rpg().extraDefinitions(plan.add, { used: [...Object.keys(domain?.active ?? {}), made.character.slug, made.skills.slug], formula: rpg().isStandard(rules) ? 'standard' : 'classic' });
+        const extras = rpg().extraDefinitions(plan.add, { used: [...Object.keys(domain?.active ?? {}), made.character.slug, made.skills.slug] });
         const catalog = Object.keys(domain?.active ?? {}).map(id => activeDefinition(prefix, id)).filter(Boolean);
         const checked = validateDataModules([made.character, made.skills, ...extras], { packId: 'chat', capabilities: ['data-modules-v1', 'story-director'], definitions: catalog });
         if (!checked.ok) refuse(checked.errors[0].code, checked.errors[0].path, checked.errors[0].message);

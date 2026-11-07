@@ -45,7 +45,7 @@ import { pageStorage, saveOnUnload, storeSaving } from './runtime/saving.js';
 export { initialWithStart, packsFor, withPackCurrency } from './runtime/start.js';
 export { SAVE_SEQ_KEY, MEMO_PREFIX, markUsed, saveOnUnload, storeSaving } from './runtime/saving.js';
 
-export const VERSION = '2.24.0';
+export const VERSION = '2.25.0';
 
 /**
  * createRuntime({ ctx, packs?, core = true, modules = [], createStore?, createCommandBus?, notify?,
@@ -138,8 +138,8 @@ export function createRuntime({
             version: VERSION,
             timeline: () => timeline,
             dataModules: { state: () => store.head(), lifecycle: id => registry.lifecycle(id), restore: () => registry.restore(), boardOn: () => registry.featureOn(CORE_FEATURE.leanRpg) && registry.featureOn(CORE_FEATURE.fightBoard), persona: () => { try { return (live() ?? ctx)?.name1 ?? ''; } catch { return ctx?.name1 ?? ''; } } },
-            // The RPG's pre-call asks through the same queued call as Assist's helpers (assistCall, set below).
-            leanRpg: { callModel: (prompt, options = {}) => assistCall(prompt, options), chat: () => ctx.chat, chatId: () => ctx.getCurrentChatId?.() ?? ctx.chatId ?? '', metadata: () => { try { return (live() ?? ctx)?.chatMetadata ?? null; } catch { return ctx?.chatMetadata ?? null; } }, onPlanning: working => events?.emit('head', { index: store.headIndex(), reason: working ? 'fight-start' : 'fight-start-done' }) },
+            // The RPG's hooks read the chat and its metadata; no model is asked for rolls.
+            leanRpg: { chat: () => ctx.chat, metadata: () => { try { return (live() ?? ctx)?.chatMetadata ?? null; } catch { return ctx?.chatMetadata ?? null; } } },
             packs: packPart,
             // Due events are the host's own system cues: straight to the bus (the public sdk only runs
             // the reader's 'ui' actions), with the same 'committed' event the sdk sends.

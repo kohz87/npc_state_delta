@@ -45,12 +45,6 @@ export function ambushRecord(ambush, _checks, fight) {
     return { ambush: { ...ambush, ...(ambush.success ? { drop: true } : {}) } };
 }
 
-/** Classic: the act as it rolls in round 1 of an ambush that worked (its edge up by AMBUSH_EDGE, at most the edge limit). Other entries and rounds as they are. */
-export function ambushedClassic(entry, round, ambush) {
-    if (!ambush?.success || round !== 1 || entry.kind !== 'act') return entry;
-    return { ...entry, pc: { ...entry.pc, edge: Math.min(FORMULA.edgeMax, entry.pc.edge + AMBUSH_EDGE) } };
-}
-
 // Standard: the situation edge goes up and passes through LUK's window again (formula.js edgeWithLuck), from the window the side recorded.
 const sideStd = pc => {
     const situation = Math.min(FORMULA.edgeMax, (pc.situation ?? 0) + AMBUSH_EDGE);

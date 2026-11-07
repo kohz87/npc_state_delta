@@ -3,18 +3,17 @@
 
 import { h } from '../../../view/widgets/dom.js';
 import { LEVEL } from '../../names.js';
-import { CUSTOM_SETTING, DIFFICULTIES, DIFFICULTY_SETTING, RULE_RANGES, STANDARD_RANGES, STANDARD_SETTING, difficultyOf, formulaOf, normalizeRules, normalizeStandard, rulesFromSettings } from '../../rules.js';
+import { DIFFICULTIES, DIFFICULTY_SETTING, STANDARD_RANGES, STANDARD_SETTING, difficultyOf, normalizeStandard, rulesFromSettings } from '../../rules.js';
 import { fill } from '../../strings.js';
 import { customOf, oddsView, soulLabelFor } from '../settings-data.js';
-import { S, SETTINGS_MODULE, NUMBER_FIELDS, STANDARD_FIELDS } from './constants.js';
+import { S, SETTINGS_MODULE, STANDARD_FIELDS } from './constants.js';
 
 export function createDifficultySection({ doc, card, chips, field, packNote, values, settings, put, live, pack, headState, readerName, gearOf, getOddsParts, setOddsParts }) {
     function drawDifficulty() {
         const box = card('difficulty', S.difficulty);
         const now = difficultyOf(values());
-        // Each formula keeps its own Custom numbers (Classic's six, Standard's thirteen).
-        const standard = formulaOf(values(), pack()) === 'standard';
-        const customKey = standard ? STANDARD_SETTING : CUSTOM_SETTING, fields = standard ? STANDARD_FIELDS : NUMBER_FIELDS, ranges = standard ? STANDARD_RANGES : RULE_RANGES;
+        // The Custom numbers (Standard's thirteen) are kept in `rpgStandard`.
+        const customKey = STANDARD_SETTING, fields = STANDARD_FIELDS, ranges = STANDARD_RANGES;
         chips(box, S.difficulty, DIFFICULTIES.map(name => [name, S[name]]), now, value => {
             // A first switch to Custom starts from the numbers in force, so nothing jumps.
             if (value === 'custom' && !values()[customKey]) settings.set(SETTINGS_MODULE, customKey, customOf(values(), pack()));
@@ -58,7 +57,7 @@ export function createDifficultySection({ doc, card, chips, field, packNote, val
                     const next = entry.options ? (entry.options.some(([value]) => value === typed) ? typed : have[entry.key] ?? LEVEL.divisor)
                         : Number.isFinite(typed) && String(input.value).trim() !== '' ? Math.min(range.max, Math.max(range.min, Math.round(typed))) : have[entry.key];
                     input.value = String(next);
-                    put(customKey, standard ? normalizeStandard({ ...have, [entry.key]: next }) : normalizeRules({ ...have, [entry.key]: next }));
+                    put(customKey, normalizeStandard({ ...have, [entry.key]: next }));
                     live();
                 });
                 slot.add(input);

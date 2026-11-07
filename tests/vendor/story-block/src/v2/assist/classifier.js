@@ -175,7 +175,7 @@ export function createClassifier({ callModel, settings, chat, chatId, hasKind, l
     async function beforeGenerate(view, info = {}) {
         const values = settings(view);
         if (values?.[SETTING.classifier] !== true) return null;
-        // The RPG plans the rolls itself (src/v2/lean-rpg/precall.js): with it on and a Character block in the chat, this pre-roll steps aside.
+        // The RPG rolls only on its fight board: with it on and a Character block in the chat, this pre-roll steps aside (two sets of dice would disagree).
         if (view?.feature?.(LEAN_RPG_FEATURE) === true && readSheet(view.state).characters.length) return null;
         const type = normalizeType(info?.type);
         if (BACKGROUND.includes(type) || !['normal', 'regenerate', 'swipe'].includes(type)) return null;

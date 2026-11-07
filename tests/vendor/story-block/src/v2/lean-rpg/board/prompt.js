@@ -3,7 +3,10 @@
 import { activeDefinition } from '../../data-modules/adapters.js';
 import { moduleGrammar, referenceOf } from '../../data-modules/grammar.js';
 import { oneLine } from '../../../text.js';
-import { narratedFoeGrammar } from './narrated-grammar.js';
+import { CLEAR_ONLY, narratedFoeGrammar } from './narrated-grammar.js';
+
+// How a fight starts under the board: the story sets a foe slot, the offer line appears, and code plays the blows.
+const START = 'A fight starts when you set a foe slot; the reader plays it on the board, so tell no blows yourself.';
 
 export { boardGrammar, boardXpGuide } from '../../data-modules/board-static.js';
 
@@ -29,6 +32,7 @@ export function boardReplyGrammar(state, { fight = false, manual = false, practi
         }
         return [];
     });
-    if (fight && manual) lines.push(...narratedFoeGrammar(state));
+    if (!fight) { if (ids.some(id => activeDefinition(state, id)?.role === 'foes')) lines.push(START); }
+    else lines.push(...narratedFoeGrammar(state, manual ? undefined : CLEAR_ONLY));
     return lines;
 }

@@ -1,12 +1,8 @@
 // The Standard stat formula (agreed 1 Nov): the pure numbers shared by the roll math, the bars and the turn order.
 //
-// Classic (rules.js `statShare`: one stat, half / a third / "full above 10") stays as it was. Standard pairs a main stat
+// Standard pairs a main stat
 // with half of a second one and halves the sum, rounded down once at the end: (main + second/2)/2 = floor((2·main + second)/4).
 // A skill puts its own stat in the main slot; nothing is added on top. Pure: no DOM, no state, no randomness.
-
-/** The two formulas a chat can use (Settings → RPG). */
-export const FORMULAS = Object.freeze(['standard', 'classic']);
-export const DEFAULT_FORMULA = 'standard';
 
 /** The seven stats, in sheet order. */
 export const STAT_KEYS = Object.freeze(['str', 'vit', 'agi', 'dex', 'int', 'luk', 'cha']);

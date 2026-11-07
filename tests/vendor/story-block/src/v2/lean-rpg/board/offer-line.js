@@ -1,16 +1,16 @@
 // The small fight offer under a narrator reply that set foes (the Fight tab's alert is the badge in view/fight.js).
-// It draws only from offerLineData and hands the two choices back to the caller; it keeps no fight state itself.
+// It draws only from offerLineData and hands the two choices (Fight on the board, Auto-fight) back to the caller; it keeps no fight state itself.
 
 import { button, h, text } from '../../view/widgets/dom.js';
 
 export const OFFER_LINE_ROOT = 'rpg-fight-offer';
 
 /**
- * createOfferLineView({ doc, onFight, onNarrate })
+ * createOfferLineView({ doc, onFight, onAuto })
  * → { render(container, data), update(data), clear(), destroy(), element }.
- * `render` appends under the reply; `data.visible: false` removes the line (the reader kept narrating).
+ * `render` appends under the reply; `data.visible: false` removes the line (the reader chose a fight, so it is done).
  */
-export function createOfferLineView({ doc = globalThis.document, onFight = () => {}, onNarrate = () => {} } = {}) {
+export function createOfferLineView({ doc = globalThis.document, onFight = () => {}, onAuto = () => {} } = {}) {
     let host = null, root = null, shown = null;
     const clear = () => { root?.remove?.(); root = null; return null; };
 
@@ -28,7 +28,7 @@ export function createOfferLineView({ doc = globalThis.document, onFight = () =>
         root.appendChild(line);
         const actions = h(doc, 'div', 'rpg-fight-offer-actions');
         actions.appendChild(button(doc, text(shown.boardLabel, 120) || 'Fight on the board', 'ss-button ss-button-primary rpg-fight-offer-fight', () => onFight?.(shown)));
-        actions.appendChild(button(doc, text(shown.narrateLabel, 120) || 'Keep narrating', 'ss-button rpg-fight-offer-narrate', () => onNarrate?.(shown)));
+        actions.appendChild(button(doc, text(shown.autoLabel, 120) || 'Auto-fight', 'ss-button rpg-fight-offer-auto', () => onAuto?.(shown)));
         root.appendChild(actions);
         if (root.parentNode !== host) host.appendChild(root);
         return root;
