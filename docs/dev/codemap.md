@@ -38,3 +38,13 @@ Generated 2026-11-07.
 - `src/storysuite-participant/participant/publication.js`: Native-change pairing, publication, retry and flush.
 - `src/storysuite-participant/participant/session-ops.js`: Session hydration, checkpoints, identity lines and commit-probe comparisons.
 - `src/storysuite-participant/participant/support.js`: Shared participant envelopes, prepared ids and index normalization.
+- `branch-constants.js`: Branch lineage, snapshot and rollback-journal limits split from `branch.js`.
+- `branch-lineage.js`: Message fingerprints, lineage keys and hidden-message key repair split from `branch.js`.
+- `branch-util.js`: Byte-size, JSON-equality and NPC-list cloning helpers split from `branch.js`.
+- `branch-rollback-undo.js`: Incremental dossier, social-graph and scalar undo records split from `branch.js`.
+- `branch-rollback-journal.js`: Rollback-journal normalization, retention, baseline and mutation settlement split from `branch.js`.
+- `branch-checkpoints.js`: Full branch checkpoint normalization, retention budgets, parent anchors and recording split from `branch.js`.
+- `branch-recovery.js`: Dismissal, message-position, checkpoint-matching and linear restore helpers split from `branch.js`.
+- `branch-delete-recovery.js`: Deleted-block NPC reversion, social-graph undo and cleanup split from `branch.js`.
+- `branch-reconcile.js`: `reconcileBranchState` and its exact journal/checkpoint recovery split from `branch.js`.
+- `branch-ancestry.js`: Cross-chat `bestAncestorState` and explicit-parent matching split from `branch.js`.
