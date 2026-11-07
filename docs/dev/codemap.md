@@ -114,3 +114,9 @@ Generated 2026-11-07.
 - `runtime-inline-cards/mode.js`: Present-cast display choice, launcher flags and Story Block cast HTML split from `runtime-inline-cards.js`.
 - `runtime-inline-cards/megumin.js`: Megumin block tab/pane integration and cleanup split from `runtime-inline-cards.js`.
 - `runtime-inline-cards/mount.js`: Chat observer, watchdog, renderer and debounced render queue split from `runtime-inline-cards.js`.
+- `bundle-codec.js`: Bundle framing, portrait binary encoding and bundle decoding split from `bundle.js`.
+- `bundle-import-helpers.js`: Import identity matching, id/slot reconciliation and manual-lock helpers split from `bundle.js`.
+- `portrait-tools-targets.js`: Form-aware portrait resolution and target selection UI split from `portrait-tools.js`.
+- `portrait-tools-actions.js`: Upload completion, generated portrait previews/seeds and removal split from `portrait-tools.js`.
+- `dossier-experience-state.js`: Life-state projection, current selection and DOM write guards split from `dossier-experience.js`.
+- `dossier-experience-styles.js`: Extension-wide dossier, editor and settings CSS split from `dossier-experience.js`.
