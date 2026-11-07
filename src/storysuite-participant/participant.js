@@ -9,7 +9,6 @@
 //   abort({ return, prepared })                 -> { aborted: true }               before the commit only
 //   status({ return })                          -> { checkpoint, hash, status }
 //   applyEvent({ event, nativeKey, kind })      -> { event, checkpoint, hash, ack }  a confirmed death, once per event
-//   rebuild({ return, replies?, all? })         -> { rebuilt, lineage, checkpoint }  clears this branch's native state, scans the chat, publishes it
 //   attach(handle)                              the host's handle { head(), nativeMutation(input) }
 // and the query `npc.identity({ id } | { name })`. Every answer is `{ ok: true, ... }` or `{ ok: false, code, message }`; the callbacks run
 // one at a time. Nothing here reads the chat or prompts: Delta's prompt text is not touched.
@@ -23,7 +22,6 @@
 //   busy()               whether a scan or dossier pass is in flight for the open chat (optional)
 //   idle(ms)             resolves true when none is, false after `ms` (optional)
 //   headSource()         the Source of the reply at the head, for a host whose head() carries no `source` (optional; the host's head().source is used first)
-//   rebuildScan({replies}) Delta's normal scanner over the last `replies` replies (null: the whole chat), for `rebuild` (optional; without it rebuild is UNSUPPORTED)
 //   restored()           told after a restore installed a state (optional)
 //   warn(text)           where problems are told (optional)
 //   ready()              whether Delta has loaded the open chat's state (optional; without it the state is taken as loaded)
@@ -39,7 +37,6 @@ import { timelineOf } from './timeline.js';
 import { manualLifeStateRecord } from '../../terminal-lifecycle.js';
 import { createParticipantHandlers } from './participant/handlers.js';
 import { createPublication } from './participant/publication.js';
-import { createRebuild } from './participant/rebuild.js';
 import { createSessionOps } from './participant/session-ops.js';
 import { fail, isRecord, plain } from './participant/support.js';
 
@@ -278,8 +275,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         setSession: value => { session = value; },
     });
     const { hydrate, made, verified, verifyOnly, started, busy: scanBusy, stands, standsOnBytes, hand, quiet } = sessionOps;
-    let rebuilding = false;   // a rebuild is running: the participant is not at rest (a save point waits, `current` says no)
-    const busy = () => rebuilding || scanBusy();
+    const busy = scanBusy;
     const publication = createPublication({
         cancel, exclusive, getAnnounced: () => announced, getHandle: () => handle,
         hydrate, made, module, port, preparedAt, preparing, retryMs, save, schedule, started, verified, warn, keyNow,
@@ -290,17 +286,6 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         schedulePublish: publication.schedulePublish, setHandle: value => { handle = value; }, stands, standsOnBytes, verified, verifyOnly, vault,
     });
     const { nativeChange, schedulePublish, flush, getLast } = publication;
-    // The rebuild does not run inside the participant's queue: its publication goes through that queue (the normal route), which it would
-    // wait on for ever. A second rebuild is refused while one runs, and `busy` holds save points off meanwhile.
-    const { rebuild: runRebuild } = createRebuild({
-        port, random, keyNow, usable, hydrate, warn, getHandle: () => handle, publish: flush,
-        setSession: value => { session = value; },
-    });
-    participant.rebuild = async input => {
-        if (rebuilding) return fail('STALE', 'NPC State Delta is already starting this branch\'s dossiers from the chat.');
-        rebuilding = true;
-        try { return await runRebuild(input); } finally { rebuilding = false; }
-    };
     return {
         module,
         participant,

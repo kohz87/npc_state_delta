@@ -68,12 +68,12 @@ export function createParticipantHandlers({
             verify: bounded((input, until) => verifyOnly(input, until)),
 
             prepare: bounded(async (input, until) => {
-                const named = isRecord(input) && typeof input.checkpoint === 'string' && typeof input.hash === 'string';
-                const s = await hydrate(until, null, named ? { checkpoint: input.checkpoint, hash: input.hash } : null);
+                // The input is checked before anything is adopted or persisted: a malformed call changes nothing.
+                if (!isRecord(input) || typeof input.checkpoint !== 'string' || typeof input.return !== 'string' || typeof input.hash !== 'string') return fail('INVALID', 'prepare takes { return, checkpoint, hash }.');
+                const s = await hydrate(until, null, { checkpoint: input.checkpoint, hash: input.hash });
                 if (s?.ok === false) return s;
                 if (!s) return fail('FAILED', 'There is no open chat.');
                 const idx = s.index;
-                if (!isRecord(input) || typeof input.checkpoint !== 'string' || typeof input.return !== 'string' || typeof input.hash !== 'string') return fail('INVALID', 'prepare takes { return, checkpoint, hash }.');
                 const held = idx.returns[input.return];
                 if (held && held.status !== 'aborted' && (held.checkpoint !== input.checkpoint || held.hash !== input.hash)) return fail('CONFLICT', 'That return was prepared for another checkpoint.');
                 if (held && held.status !== 'aborted') return { ok: true, prepared: held.prepared, hash: held.hash };

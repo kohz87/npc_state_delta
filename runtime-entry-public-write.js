@@ -2,6 +2,8 @@
    second half of the window.NPCStateDelta surface split from index.js. Built by index.js with the controller closure;
    index.js still assigns and freezes the combined object in its original property order. */
 
+import { replyScanned } from './scan-context.js';
+
 export function createPublicApiStatePart(deps) {
     const {
         normalizeChatState, getChatKey, requestHeaders, ensureFreshMutationBoundary, quietly, setChatState,
@@ -13,6 +15,7 @@ export function createPublicApiStatePart(deps) {
         stateWritePromises, stateWriteTimers, hydratedRevision, hydratedStateMeta, undurableNpcStateSnapshot,
         runFreshMutation, updateNpcAppearance, updateNpcLifeState, setNpcPortrait, setNpcPortraitSeed,
         removeNpcPortrait, flushStateFile, setNpcArchiveStateById, deleteNpcById, storySuiteV2Meters,
+        queuePendingAutoScan, drainPendingAutoScan, latestMessageId,
     } = deps;
 
     return {
@@ -67,6 +70,17 @@ export function createPublicApiStatePart(deps) {
     stateLoading: () => chatHydrationStatus() === 'loading',
     scanActive: () => scanWorkPending(),
     scanIdle: ms => scanIdle(ms),
+    // After the host installed an earlier checkpoint (its selection fell back): the replies after the saved scan marker are read now, by the
+    // ordinary automatic scan (oldest first, at most one window, then the next reply scans at once), never before the host's barrier is down
+    // (the scan waits for the message gate). Nothing is read when the marker already reaches the newest reply. → whether a scan was queued.
+    catchUpAfterRestore: () => {
+        const key = getChatKey();
+        const id = latestMessageId(true);
+        if (!Number.isInteger(id) || id < 0 || replyScanned(getChatState(key), id)) return false;
+        if (!queuePendingAutoScan(key, id, 'restore-catch-up')) return false;
+        setTimeout(() => { void drainPendingAutoScan(key); }, 0);
+        return true;
+    },
     // Which messages the story stands on (the Story Suite adapter's gate): scans do not read what Story Block faded.
     useMessageGate: gate => useMessageGate(gate),
     // (v2 meters) Delta's base relationship values: where a new NPC's slice meters start.

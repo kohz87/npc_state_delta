@@ -159,6 +159,8 @@ export function createTimelinePart(session, deps) {
             writeTimeline: block => runtime().writeTimeline(block),
             busy: () => runtime()?.scanActive?.() === true,
             idle: ms => (typeof runtime()?.scanIdle === 'function' ? runtime().scanIdle(ms) : Promise.resolve(true)),
+            // The host installed an earlier checkpoint (its selection fell back): the replies after it are read by Delta's own catch-up.
+            restored: () => { runtime()?.catchUpAfterRestore?.(); },
             warn: text => warn(text),
         },
         vault: participantVault ?? fileVault({ headers: () => runtime()?.requestHeaders?.() ?? {} }),

@@ -93,3 +93,16 @@ test('a read that throws is not turned into a new line', async () => {
     assert.equal(out.ok, false);
     assert.equal(timelineOf(r.live.state).lineage, null, 'nothing was minted over a failed read');
 });
+
+test('a malformed prepare changes nothing: no line adopted, minted or written', async () => {
+    const r = makeDelta({ state: { npcs: [] } });
+    const cp = await keep(r.vault, JOURNAL, { npcs: [] });
+    for (const input of [undefined, null, {}, { checkpoint: cp.id, hash: cp.hash }, { return: 'rt_nokind001', checkpoint: cp.id }, { return: 7, checkpoint: cp.id, hash: cp.hash }]) {
+        const out = await r.delta.participant.prepare(input);
+        assert.equal(out.code, 'INVALID');
+    }
+    assert.equal(timelineOf(r.live.state).lineage, null);
+    assert.equal(r.writes.timeline, 0);
+    assert.equal(r.writes.install, 0);
+    assert.equal(r.delta.index(), null);
+});
