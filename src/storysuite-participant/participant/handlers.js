@@ -70,6 +70,7 @@ export function createParticipantHandlers({
             prepare: bounded(async (input, until) => {
                 const named = isRecord(input) && typeof input.checkpoint === 'string' && typeof input.hash === 'string';
                 const s = await hydrate(until, null, named ? { checkpoint: input.checkpoint, hash: input.hash } : null);
+                if (s?.ok === false) return s;
                 if (!s) return fail('FAILED', 'There is no open chat.');
                 const idx = s.index;
                 if (!isRecord(input) || typeof input.checkpoint !== 'string' || typeof input.return !== 'string' || typeof input.hash !== 'string') return fail('INVALID', 'prepare takes { return, checkpoint, hash }.');

@@ -54,7 +54,11 @@ export function createSessionOps({
             const got = await verified(adopt.checkpoint, adopt.hash, { adopt: true });
             guard?.check();
             if (keyNow() !== key) return null;
-            if (got.ok && !timelineOf(port.readState()).lineage) { block.lineage = got.doc.lineage; write = true; }
+            // A failed selected checkpoint must leave this branch unlined, so the host can try an earlier checkpoint on its own line.
+            if (!got.ok) return got;
+            if (hashJson(port.readState()) !== hashJson(state)) return fail('STALE', 'NPC State Delta changed while checking the selected checkpoint; try again.');
+            block.lineage = got.doc.lineage;
+            write = true;
         }
         if (!block.lineage) {
             block.lineage = mintLineage(random);
