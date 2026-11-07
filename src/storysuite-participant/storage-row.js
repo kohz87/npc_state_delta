@@ -2,7 +2,7 @@
 // 30 days, and a Clean up button with a confirmation. Story Block answers which checkpoint files every chat and branch still uses (the query
 // `timeline.referenced`); vault-sweep.js plans and removes. If ANY chat could not be read the answer is incomplete, the button is off with the
 // reason, and nothing is ever removed. The final check and the deletion are ONE step inside the participant's exclusive queue (`exclusive`, the one
-// checkpoint writes take), with the references read again inside it, so no checkpoint write can land between them. The open state must be readable, and a file that a lineage index names (or whose lineage cannot be read) is kept. Nothing runs on its own except the first check when the panel opens; removal needs the confirmation.
+// checkpoint writes take), with the references read again inside it, so no checkpoint write can land between them. The open state must be readable, and a file that ANY lineage's index names is kept; a missing or unreadable index (or file) turns removal off. Nothing runs on its own except the first check when the panel opens (it never asks Data Maid); "Find older files" asks SillyTavern's Data Maid listing only when pressed, and removal needs the confirmation.
 // All text goes in with textContent (no markup from text). `mount()` fills the settings slot `storage`; it does nothing without the slot.
 
 import { createVaultSweep } from './vault-sweep.js';
@@ -31,23 +31,38 @@ function indexIds(value, out = new Set(), depth = 0) {
 }
 
 /**
- * Story Block's journals do not name what a lineage index holds (acks, prepared, returns, selected, base). Every checkpoint file carries its own
- * lineage, and the index of that lineage is the only index that can name it: so each candidate is read, its lineage's index is read, and a candidate
- * that index names, or one whose file or index cannot be read, is kept. Returns the ids that must NOT be removed.
+ * Story Block's journals do not name what a lineage index holds (acks, prepared, returns, selected, base), and a newer lineage can prepare an
+ * older lineage's checkpoint. So the indexes of EVERY lineage found in the vault (each file carries its lineage) are read, and a candidate named by
+ * ANY of them is kept. A file or index that cannot be read, or a lineage whose index is missing or null, means "unknown": `unknown` is true and
+ * removal is off. A candidate with no lineage is kept. Returns { keep: ids that must NOT be removed, unknown }.
  */
 async function indexProtected(vault, candidates) {
     const keep = new Set();
-    const indexes = new Map();
-    for (const { id } of candidates) {
+    const named = new Set();
+    let unknown = false;
+    const lineages = new Set();
+    try {
+        const raw = await vault.list();
+        const files = Array.isArray(raw) ? raw : Array.isArray(raw?.files) ? raw.files : [];
+        const ids = new Set([...files.map(file => file?.id), ...candidates.map(file => file.id)].filter(id => typeof id === 'string'));
+        for (const id of ids) {
+            const isCandidate = candidates.some(file => file.id === id);
+            try {
+                const lineage = (await vault.get(id))?.lineage;
+                if (typeof lineage === 'string' && lineage) lineages.add(lineage);
+                else if (isCandidate) keep.add(id);
+            } catch { if (isCandidate) keep.add(id); unknown = true; }
+        }
+    } catch { unknown = true; }
+    for (const lineage of lineages) {
         try {
-            const doc = await vault.get(id);
-            const lineage = typeof doc?.lineage === 'string' ? doc.lineage : '';
-            if (!lineage) { keep.add(id); continue; }
-            if (!indexes.has(lineage)) indexes.set(lineage, indexIds(await vault.getIndex(lineage)));
-            if (indexes.get(lineage).has(id)) keep.add(id);
-        } catch { keep.add(id); }
+            const index = await vault.getIndex(lineage);
+            if (index === null || index === undefined) unknown = true;
+            else indexIds(index, named);
+        } catch { unknown = true; }
     }
-    return keep;
+    for (const { id } of candidates) if (named.has(id)) keep.add(id);
+    return { keep, unknown };
 }
 
 /** Why clean-up is off, in the mockup's words. */
@@ -63,6 +78,10 @@ export function offReason(answer, plan, liveReadable = true) {
             : newer > 1 ? ` (${newer} are from a newer version)` : '';
     return `Clean-up is off: ${count === 1 ? '1 chat' : `${count} chats`} could not be read${extra}, so it can't be sure which files are still used.`;
 }
+
+export const INDEX_UNKNOWN = 'Clean-up is off: a dossier index could not be read, so it can\'t be sure which files are still used.';
+export const COUNTS_LINE = 'Counts the chats SillyTavern lists; chats of deleted characters are not checked.';
+export const DATA_MAID_LINE = 'This uses SillyTavern\'s Data Maid listing and replaces any Data Maid report you have open.';
 
 export function createStorageRow({ doc, vault, ask, exclusive, live = () => null, now = () => Date.now(), warn = () => {} } = {}) {
     const capable = typeof vault?.list === 'function' && typeof vault?.remove === 'function';
@@ -98,7 +117,8 @@ export function createStorageRow({ doc, vault, ask, exclusive, live = () => null
         const referenced = [answer?.referenced, current];
         let plan = await sweeper.plan({ referenced, complete });
         if (plan.canSweep && plan.candidates.length) {
-            const keep = await indexProtected(vault, plan.candidates);
+            const { keep, unknown } = await indexProtected(vault, plan.candidates);
+            if (unknown) return { kind: 'off', plan, reason: INDEX_UNKNOWN };
             if (keep.size) plan = await sweeper.plan({ referenced: [...referenced, [...keep]], complete });
         }
         return plan.canSweep ? { kind: 'ready', plan } : { kind: 'off', plan, reason: offReason(answer, plan, liveReadable) };
@@ -112,6 +132,28 @@ export function createStorageRow({ doc, vault, ask, exclusive, live = () => null
         if (token !== checkId) return;
         view = next;
         draw();
+    }
+
+    // Only on the press: the vault asks Data Maid; what it names joins the list, and the same check and rules apply.
+    async function findOlder() {
+        ++checkId;
+        busy = true;
+        draw();
+        let note = '';
+        try {
+            const named = await vault.findOlder();
+            note = `Data Maid named ${filesText(named)} like dossier files.`;
+        } catch { note = 'The older files could not be listed. Nothing was changed.'; }
+        busy = false;
+        await check();
+        view = { ...view, note };
+        draw();
+    }
+
+    // The one line before the button, and the button (only for a vault that can ask).
+    function findControls() {
+        if (typeof vault?.findOlder !== 'function') return [];
+        return [el('p', 'npc-state-delta-storage-muted', DATA_MAID_LINE), button('Find older files', 'npc-state-delta-storage-find', () => { void findOlder(); }, view.kind === 'working')];
     }
 
     async function run() {
@@ -178,10 +220,10 @@ export function createStorageRow({ doc, vault, ask, exclusive, live = () => null
             card.append(el('p', 'npc-state-delta-storage-line', 'Checking which dossier files are still used…'));
             return;
         }
-        card.append(totals(plan));
+        card.append(totals(plan), el('p', 'npc-state-delta-storage-muted', COUNTS_LINE));
         if (view.kind === 'off') {
             card.append(button('Clean up', '', () => {}, true), el('p', 'npc-state-delta-storage-muted', view.reason));
-            card.append(button('Check again', '', () => { void check(); }));
+            card.append(button('Check again', '', () => { void check(); }), ...findControls());
             if (view.note) card.append(el('p', 'npc-state-delta-storage-muted', view.note));
             return;
         }
@@ -192,6 +234,7 @@ export function createStorageRow({ doc, vault, ask, exclusive, live = () => null
         if (view.kind === 'confirm') { card.append(dialog(plan)); return; }
         if (plan.count) card.append(button(`Clean up ${filesText(plan.count)} (${sizeText(plan.bytes)})`, 'npc-state-delta-storage-clean', () => { view = { kind: 'confirm', plan }; draw(); }, view.kind === 'working'));
         card.append(button('Check again', '', () => { void check(); }, view.kind === 'working'));
+        card.append(...findControls());
         card.append(el('p', 'npc-state-delta-storage-muted', 'Only files that no chat or branch on this install uses, and older than 30 days, are removed.'));
         if (view.note) card.append(el('p', 'npc-state-delta-storage-muted', view.note));
     }

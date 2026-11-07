@@ -9,6 +9,9 @@
 //                        the user's files without side effects (its Data Maid report replaces the user's own Data Maid token, so it is never used),
 //                        so the file vault lists what it wrote itself (a small registry file) and says `complete: false`: files written before
 //                        the registry existed are not known by name, so they are never offered, and the totals are "at least".
+//   findOlder()          file vault only, and only when the user presses "Find older files": asks SillyTavern's Data Maid report for loose files named like
+//                        a dossier checkpoint and adds them (name, size, time) to what list() returns for this session; it replaces any Data Maid
+//                        report the user has open, so nothing else ever calls it. Returns how many checkpoint files the report named.
 //   remove(id, { referenced })  deletes one checkpoint; false (and nothing deleted) when `id` is in `referenced` (a Set or list) or is not there
 //
 
@@ -114,6 +117,8 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
         try { return JSON.parse(await response.text()); } catch { return null; }
     }
     // The registry: {v:1, files:{id:[size, writtenAtMs]}}, kept beside the checkpoints. Changes to it run one after another in this vault.
+    // Files named by an on-demand Data Maid report (findOlder): id -> {size, modifiedAt}. Held for this session only; list() merges them in.
+    const found = new Map();
     let registryChain = Promise.resolve();
     const readRegistry = async () => {
         if ((await absent(REGISTRY_NAME))) return {};
@@ -136,7 +141,31 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
     async function listCheckpoints() {
         const files = await registryChain.then(readRegistry);
         const out = Object.entries(files).flatMap(([id, entry]) => (CHECKPOINT_ID.test(id) && Array.isArray(entry) ? [{ id, size: entry[0], modifiedAt: entry[1] }] : []));
+        for (const [id, entry] of found) if (!files[id]) out.push({ id, ...entry });
         return { files: out, complete: false };
+    }
+    // Data Maid reports loose files with their actual size and modification time. Its report is only a source of candidates (it does not know
+    // Delta's references). The report token is finalized at once, with no category chosen, so nothing is deleted through Data Maid.
+    async function findOlder() {
+        const response = await request('/api/data-maid/report', { method: 'POST', headers: headersNow(), body: '{}' });
+        if (!response?.ok) throw new Error('The dossier file list could not be read.');
+        const answer = await response.json();
+        const token = typeof answer?.token === 'string' ? answer.token : '';
+        try {
+            if (!token || !Array.isArray(answer?.report?.files)) throw new Error('The dossier file list was incomplete.');
+            const prefix = 'npc-state-delta-checkpoint-';
+            let named = 0;
+            for (const entry of answer.report.files) {
+                const name = typeof entry?.name === 'string' ? entry.name : '';
+                const id = name.startsWith(prefix) && name.endsWith('.json') ? name.slice(prefix.length, -5) : '';
+                if (!CHECKPOINT_ID.test(id)) continue;
+                named += 1;
+                found.set(id, { size: entry.size, modifiedAt: entry.mtime });
+            }
+            return named;
+        } finally {
+            try { await request('/api/data-maid/finalize', { method: 'POST', headers: headersNow(), body: JSON.stringify({ token }) }); } catch { /* the token is not used for deletion */ }
+        }
     }
     /** True only when the server says the file is not there; false when it is, or when it cannot say (the caller then reads it). */
     const absent = async name => (await dataFileExists(`${base}/${name}`, { fetchFn: request, headers: headersNow() })) === false;
@@ -146,7 +175,8 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
             const name = nameOf(id);
             const json = JSON.stringify(doc);
             if (!(await absent(name)) && await read(name)) {
-                // Already kept: a new reference may follow, so a registered file counts as written now. An unregistered one stays unknown.
+                // Already kept: a new reference may follow, so a registered (or found) file counts as written now. An unknown one stays unknown.
+                if (found.has(id)) found.get(id).modifiedAt = now();
                 try { await changeRegistry(files => { if (!files[id]) return false; files[id][1] = now(); }); } catch { /* the file itself is kept */ }
                 return;
             }
@@ -157,9 +187,11 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
             void changeRegistry(files => { files[id] = entry; }).catch(() => {});
         },
         list: listCheckpoints,
+        findOlder,
         async remove(id, { referenced } = {}) {
             if (!CHECKPOINT_ID.test(String(id)) || isReferenced(referenced, id)) return false;
             const removed = await deleteNpcStateDataFile({ path: `${base}/${nameOf(id)}` }, { fetchFn: request, headers: headersNow() });
+            if (removed) found.delete(id);
             if (removed) { try { await changeRegistry(files => { if (!files[id]) return false; delete files[id]; }); } catch { /* a stale entry only fails to remove later */ } }
             return removed;
         },

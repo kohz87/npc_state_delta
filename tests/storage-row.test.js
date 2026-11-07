@@ -39,6 +39,7 @@ async function seeded(ids) {
     let t = 1000 * DAY;
     const vault = memoryVault({ now: () => t });
     for (const [id, bytesAgo] of ids) { await vault.put(id, { id, lineage: 'lg_seeded01', pad: 'x'.repeat(2000) }); vault.age(id, bytesAgo); }
+    await vault.putIndex('lg_seeded01', { v: 2, acks: {}, prepared: {}, returns: {}, selected: null, base: null });
     return { vault, now: () => t };
 }
 
@@ -56,17 +57,20 @@ test('memory vault: list() reports id, size and time; remove(id) refuses an id i
 
 // A fake SillyTavern user-files server. `calls` records every URL, so a test can prove which endpoints were (not) used.
 function fakeServer(now) {
-    const files = new Map(); const times = new Map(); const calls = [];
+    const files = new Map(); const times = new Map(); const calls = []; const server = { files, times, calls };
     const fetchFn = async (url, options = {}) => {
         calls.push(url);
         const name = url.split('/').pop();
         if (url === '/api/files/upload') { const body = JSON.parse(options.body); files.set(body.name, Buffer.from(body.data, 'base64').toString()); times.set(body.name, now()); return { ok: true, status: 200 }; }
         if (url === '/api/files/verify') { const body = JSON.parse(options.body); return { ok: true, status: 200, json: async () => Object.fromEntries(body.urls.map(u => [u, files.has(u.split('/').pop())])) }; }
         if (url === '/api/files/delete') { const n = JSON.parse(options.body).path.split('/').pop(); const had = files.delete(n); return { ok: had, status: had ? 200 : 404, text: async () => '' }; }
+        if (url === '/api/data-maid/report') { server.maid = (server.maid ?? 0) + 1; if (server.maidFails) return { ok: false, status: 500 }; return { ok: true, status: 200, json: async () => ({ token: 'tok', report: { files: [...files].map(([n, data]) => ({ name: n, size: data.length, mtime: times.get(n) })) } }) }; }
+        if (url === '/api/data-maid/finalize') { server.finalized = (server.finalized ?? 0) + 1; return { ok: true, status: 200 }; }
         if (files.has(name)) return { ok: true, status: 200, text: async () => files.get(name) };
         return { ok: false, status: 404, text: async () => '' };
     };
-    return { files, times, calls, fetchFn };
+    server.fetchFn = fetchFn;
+    return server;
 }
 
 test('file vault never calls Data Maid; it lists what it registered, says the list is not complete, and refuses referenced ids', async () => {
@@ -233,7 +237,36 @@ test('a checkpoint only a lineage index names is kept; one whose file or index c
     const row2 = createStorageRow({ exclusive: queue().exclusive, doc: doc2, vault: broken, now, live, ask: async () => proof() });
     row2.mount(doc2);
     await settle();
-    assert.equal(row2.state().plan?.count ?? 0, 0, 'an unreadable index proves nothing, so nothing is offered');
+    assert.equal(row2.state().kind, 'off', 'an unreadable index proves nothing, so removal is off');
+    assert.match(row2.state().reason, /index could not be read/);
+});
+
+test('an index of ANOTHER lineage that names an older lineage\'s checkpoint keeps it; a lineage with no index (null) turns removal off', async () => {
+    const { vault, now } = await seeded([['nk_hhhhhhh1', 90 * DAY], ['nk_hhhhhhh2', 90 * DAY]]);
+    await vault.put('nk_hhhhhhh5', { lineage: 'lg_newer001' }); vault.age('nk_hhhhhhh5', 1 * DAY);
+    await vault.putIndex('lg_newer001', { v: 2, acks: {}, prepared: { p1: { checkpoint: 'nk_hhhhhhh1' } }, returns: {}, selected: null, base: null });
+    const doc = fakeDoc();
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now, live, ask: async () => proof() });
+    row.mount(doc);
+    await settle();
+    assert.equal(row.state().kind, 'ready');
+    assert.deepEqual(row.state().plan.candidates.map(file => file.id), ['nk_hhhhhhh2'], 'named only by the newer lineage\'s index: kept');
+    const nullIndex = { ...vault, getIndex: async lineage => (lineage === 'lg_newer001' ? null : vault.getIndex(lineage)) };
+    const doc2 = fakeDoc();
+    const row2 = createStorageRow({ exclusive: queue().exclusive, doc: doc2, vault: nullIndex, now, live, ask: async () => proof() });
+    row2.mount(doc2);
+    await settle();
+    assert.equal(row2.state().kind, 'off', 'a null index means unknown');
+    assert.ok(doc2.slot.all().some(node => node.tag === 'button' && node.textContent === 'Clean up' && node.disabled));
+});
+
+test('the row carries the mockup line about which chats are counted', async () => {
+    const { vault, now } = await seeded([['nk_iiiiiii1', 90 * DAY]]);
+    const doc = fakeDoc();
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now, live, ask: async () => proof() });
+    row.mount(doc);
+    await settle();
+    assert.ok(doc.slot.textContent.includes('Counts the chats SillyTavern lists; chats of deleted characters are not checked.'));
 });
 
 test('a checkpoint newly referenced while confirmation is open is not removed', async () => {
@@ -283,4 +316,62 @@ test('mount does nothing without the slot or for a vault that cannot list; sizes
     assert.equal(sizeText(1536 * 1024), '1.5 MB');
     assert.equal(sizeText(300), '1 KB');
     assert.match(offReason({ unreadable: [{ reason: 'newer' }] }), /^Clean-up is off: 1 chat could not be read \(it is from a newer version\)/);
+});
+
+// "Find older files": Data Maid is asked only on the press; what it names joins the list under the same rules.
+test('Data Maid is never requested on mount or Check again; only "Find older files" asks, and the line before it says what it does', async () => {
+    let t = 100 * DAY;
+    const server = fakeServer(() => t);
+    const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
+    server.files.set('npc-state-delta-checkpoint-nk_ooooooo1.json', JSON.stringify({ lineage: 'lg_a' })); server.times.set('npc-state-delta-checkpoint-nk_ooooooo1.json', t - 60 * DAY);
+    server.files.set('npc-state-delta-checkpoint-nk_ooooooo2.json', JSON.stringify({ lineage: 'lg_a' })); server.times.set('npc-state-delta-checkpoint-nk_ooooooo2.json', t - 60 * DAY);
+    server.files.set('npc-state-delta-checkpoint-nk_ooooooo3.json', JSON.stringify({ lineage: 'lg_a' })); server.times.set('npc-state-delta-checkpoint-nk_ooooooo3.json', t - 2 * DAY);
+    server.files.set('other-file.json', '{}'); server.times.set('other-file.json', t - 90 * DAY);
+    await vault.putIndex('lg_a', { v: 2, acks: {}, prepared: {}, returns: {}, selected: null, base: null });
+    const doc = fakeDoc();
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now: () => t, live, ask: async () => proof(['nk_ooooooo2']) });
+    row.mount(doc);
+    await settle();
+    doc.slot.button('Check again').listeners.click();
+    await settle();
+    assert.equal(server.maid ?? 0, 0, 'no Data Maid request on load or on Check again');
+    assert.equal(row.state().plan.totalFiles, 0);
+    assert.match(doc.slot.textContent, /This uses SillyTavern's Data Maid listing and replaces any Data Maid report you have open\./);
+    doc.slot.button('Find older files').listeners.click();
+    await settle();
+    assert.equal(server.maid, 1);
+    assert.equal(server.finalized, 1, 'the report token is closed again; nothing is chosen for deletion');
+    assert.match(doc.slot.textContent, /Old dossier files: at least 3 files/);
+    assert.deepEqual(row.state().plan.candidates.map(f => f.id), ['nk_ooooooo1'], 'only unused files older than 30 days are offered');
+    // The final check inside the exclusive step re-checks, then removes only the confirmed file.
+    doc.slot.all().find(n => n.textContent.startsWith('Clean up 1 file (')).listeners.click();
+    doc.slot.button('Remove 1 file').listeners.click();
+    await settle();
+    assert.equal(server.files.has('npc-state-delta-checkpoint-nk_ooooooo1.json'), false);
+    assert.equal(server.files.has('npc-state-delta-checkpoint-nk_ooooooo2.json'), true);
+    assert.equal(server.files.has('npc-state-delta-checkpoint-nk_ooooooo3.json'), true);
+    assert.equal(server.files.has('other-file.json'), true);
+    assert.equal(server.maid, 1, 'removal does not ask Data Maid again');
+});
+
+test('found old files keep the rules: a chat that cannot be read turns removal off; a failed Data Maid listing changes nothing', async () => {
+    let t = 100 * DAY;
+    const server = fakeServer(() => t);
+    const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
+    server.files.set('npc-state-delta-checkpoint-nk_ppppppp1.json', '{}'); server.times.set('npc-state-delta-checkpoint-nk_ppppppp1.json', t - 60 * DAY);
+    const doc = fakeDoc();
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now: () => t, live, ask: async () => ({ complete: false, unreadable: [{ id: 'chat' }], referenced: [] }) });
+    row.mount(doc);
+    await settle();
+    doc.slot.button('Find older files').listeners.click();
+    await settle();
+    assert.equal(row.state().kind, 'off');
+    assert.match(doc.slot.textContent, /Clean-up is off: 1 chat could not be read/);
+    assert.ok(doc.slot.button('Clean up').disabled);
+    assert.equal(server.files.size, 1);
+    server.maidFails = true;
+    doc.slot.button('Find older files').listeners.click();
+    await settle();
+    assert.match(doc.slot.textContent, /The older files could not be listed\. Nothing was changed\./);
+    assert.equal(server.files.size, 1);
 });
