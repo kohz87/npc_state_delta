@@ -1,7 +1,7 @@
 /* NPC State Delta targeted backfill (role: targeted-backfill). The history backfill for one NPC and the queue
    of pending backfills. Split from runtime-targeted.js; bodies are moved without change. */
 
-import { chatContext as getContext } from './runtime-scan-helpers.js';
+import { chatContext as getContext, awayFromReplay } from './runtime-scan-helpers.js';
 import { isScannerRoutingError } from './scanner-routing.js';
 import { automaticBackfillStillRelevant, backfillNeedsRequest } from './scan-context.js';
 import { recentTranscript, recentUserDevelopmentContext, currentExchangeTranscript, refreshMessageGate } from './src/transcript.js';
@@ -38,7 +38,7 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
         if (isScanBusy(chatKey)) return false;
         if (!await prepareCanonicalScanBase(chatKey, 'dossier backfill')) return false;
         // (timeline) The window is read from the messages the story stands on: the gate is asked first.
-        await refreshMessageGate();
+        await awayFromReplay(refreshMessageGate());   // a history replay's scope steps aside while the host answers (no-op live)
         if (getChatKey() !== chatKey) return false;
         const state = getChatState(chatKey);
         const existing = state.npcs.find(npc => npc.id === request.npcId);

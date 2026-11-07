@@ -391,6 +391,35 @@ test('live readers and writers during a catch-up that awaits the model: they see
     });
 });
 
+test('a catch-up whose backfill waits for the host gate: live readers see the installed state, a manual edit is kept (the short await steps aside too)', () => {
+    runScenario('live-during-gate', async h => {
+        await h.turn('We meet.', 'Yunyun speaks, mark-1.');
+        const chatKey = h.runtime.uiStatus().chatKey;
+        const npc = h.runtime.getState().npcs[0];
+        h.addReplies(4);
+        const live = JSON.parse(JSON.stringify(h.runtime.getState()));
+        live.pendingBackfills = [{ queueVersion: 1, reason: 'new-admission', npcId: npc.id, label: npc.name, requestedMessageId: null, preserveLiveState: false, silent: true, requestedAt: Date.now(), attempts: 0, lastAttemptAt: 0 }];
+        await h.runtime.installState(live);
+        const installed = JSON.stringify(h.runtime.getDossierState().npcs);
+        let release = null;
+        let asked = 0;
+        h.runtime.useMessageGate({ refresh: async () => { asked += 1; if (!release) await new Promise(resolve => { release = resolve; }); return null; }, settled: async () => true });
+        const catchUp = h.controller();
+        catchUp.restored();
+        for (let i = 0; i < 200 && !release; i += 1) await h.sleep(10);
+        h.check(release, `the catch-up is waiting for the host gate (asked ${asked}, ${JSON.stringify(catchUp.status())}, pending ${JSON.stringify(h.runtime.getState().pendingBackfills)}, calls ${h.mockState.fakeCalls.length})`);
+        h.equal(JSON.stringify(h.runtime.getDossierState().npcs), installed, 'live readers see the installed state');
+        h.check(await h.runtime.setPortraitSeed(npc.id, 4242, { chatKey }) === true, 'the manual edit was accepted');
+        await h.runtime.flush();
+        h.equal(h.runtime.getState().npcs.find(n => n.id === npc.id).portraitSeed, 4242, 'the edit is in the live state and saved');
+        release();
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'the catch-up finished on top of the edit');
+        h.equal(h.runtime.getState().npcs.find(n => n.id === npc.id).portraitSeed, 4242, 'the manual edit was not lost');
+        h.check(catchUp.canGenerate() === true, 'sending is back');
+    });
+});
+
 test('a publication that fails after a successful install: the catch-up is done, installed, and the publication is retried by the normal path', () => {
     runScenario('publish-fails', async h => {
         h.addReplies(3);
