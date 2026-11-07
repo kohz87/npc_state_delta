@@ -117,6 +117,8 @@ export function createEventRegistration(rt, deps) {
             if (typeof source.makeFirst === 'function') source.makeFirst(events.MESSAGE_RECEIVED, stripCapture);
             else source.on(events.MESSAGE_RECEIVED, stripCapture);
             source.on(events.MESSAGE_RECEIVED, async (messageId) => {
+                // The host saves the chat around a reply, so a new chat still waiting for its file can hydrate now.
+                if (branchInheritancePending()) queueBranchReconcile({ chatKey: getChatKey(), rescan: false, reason: 'message-received-pending' }, 400);
                 await handleAssistantMessageReceived(messageId);
             });
         }

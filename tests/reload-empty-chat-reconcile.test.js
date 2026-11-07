@@ -117,6 +117,19 @@ async function emptyChatChecks(mockState, eventSource, manualAddNpc, sleep) {
     await sleep(900);
     if (runtime.branchPending() || !names().includes('Lena Empty')) fail('the loaded branch did not inherit its parent checkpoint');
 
+    // A brand-new chat whose host file is not readable yet stays pending without writing, and hydrates once the file appears (a received reply asks again).
+    mockState.context.chatId = 'brand-new-chat';
+    mockState.context.chatMetadata = {};
+    load(2);
+    eventSource.emit('chat_changed');
+    await sleep(300);
+    if (!runtime.branchPending() || runtime.dataFile()) fail('a new chat without a host file was not left pending');
+    files.set('brand-new-chat', [{ chat_metadata: {} }, ...messages.slice(0, 2)]);
+    eventSource.emit('message_received', 0);
+    await sleep(900);
+    if (runtime.branchPending()) fail('a new chat stayed pending after its host file appeared');
+    mockState.context.chatMetadata = { main_chat: 'reload-empty' }; // (later checks reuse the branch metadata)
+
     // A real delete while a branch waits for its parent stays a delete across the deferred retry.
     blockedParent = parentPath;
     mockState.context.chatId = 'deleted-branch';

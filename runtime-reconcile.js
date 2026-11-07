@@ -197,6 +197,9 @@ export function createReconcilePart(rt, deps) {
     // Loading may expose no messages or only a prefix. Keep one bounded retry per chat opening; a later host load or explicit event can try again.
     const EMPTY_CHAT_RETRY_MS = 400;
     const EMPTY_CHAT_RETRY_LIMIT = 25;
+    // After the fast tries a new chat whose file is not saved yet is still waited for, slowly; the next received reply also asks again.
+    const SLOW_CHAT_RETRY_MS = 5000;
+    const SLOW_CHAT_RETRY_LIMIT = 12;
     let loadingRetry = null;
     function deferLoadingChat(key, options, before, lineage) {
         const sequence = rt.chatOpenSequence || 0;
@@ -211,14 +214,15 @@ export function createReconcilePart(rt, deps) {
             result: { recoveryOperation: options.operation, lineageRelation: 'unknown', recoveryAction: 'deferred-chat-not-loaded', invalidated: false },
             beforeNpcCount: before?.npcs?.length || 0, previousLength: before?.lineage?.length || 0, currentLength: lineage.length,
         });
-        if (!retry.timer && retry.attempts < EMPTY_CHAT_RETRY_LIMIT) {
+        if (!retry.timer && retry.attempts < EMPTY_CHAT_RETRY_LIMIT + SLOW_CHAT_RETRY_LIMIT) {
+            const delay = retry.attempts < EMPTY_CHAT_RETRY_LIMIT ? EMPTY_CHAT_RETRY_MS : SLOW_CHAT_RETRY_MS;
             retry.attempts += 1;
             retry.timer = setTimeout(() => {
                 retry.timer = null;
                 const pending = retry.options;
                 retry.options = null;
                 if (getChatKey() === key && (rt.chatOpenSequence || 0) === sequence) queueBranchReconcile(pending, 0);
-            }, EMPTY_CHAT_RETRY_MS);
+            }, delay);
         }
     }
     function clearLoadingRetry(key) {
@@ -257,7 +261,7 @@ export function createReconcilePart(rt, deps) {
         const divergence = firstLineageDivergence(before.lineage || [], lineageBefore);
         if (!explicit && String(operation || 'auto').toLowerCase() === 'auto'
             && divergence >= 0 && divergence < previousLength) {
-            if (!await hostChatComplete(key)) {
+            if (!await hostChatComplete(key, { absentOk: true })) {
                 if (getChatKey() === key && (rt.chatOpenSequence || 0) === sequence) deferLoadingChat(key, { explicitDivergence, rescan, reason, operation, explicit }, before, lineageBefore);
                 return null;
             }
