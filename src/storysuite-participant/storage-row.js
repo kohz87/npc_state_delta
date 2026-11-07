@@ -169,7 +169,7 @@ export function createStorageRow({ doc, vault, ask, exclusive, live = () => null
             try {
                 result = await exclusive(async () => {
                     const fresh = await inspect();
-                    const same = fresh.plan.canSweep && JSON.stringify(fresh.plan.candidates) === JSON.stringify(confirmed.candidates);
+                    const same = fresh.kind === 'ready' && fresh.plan.canSweep && JSON.stringify(fresh.plan.candidates) === JSON.stringify(confirmed.candidates);
                     return same ? { rowDone: await sweeper.sweep() } : { rowChanged: fresh };
                 });
             } catch { result = null; }

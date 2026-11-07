@@ -260,6 +260,23 @@ test('an index of ANOTHER lineage that names an older lineage\'s checkpoint keep
     assert.ok(doc2.slot.all().some(node => node.tag === 'button' && node.textContent === 'Clean up' && node.disabled));
 });
 
+test('an index that becomes unreadable while confirmation is open stops the removal inside the exclusive step', async () => {
+    const { vault, now } = await seeded([['nk_jjjjjjj1', 90 * DAY]]);
+    let broken = false;
+    const flaky = { ...vault, getIndex: async lineage => (broken ? null : vault.getIndex(lineage)), remove: async (...args) => vault.remove(...args) };
+    const doc = fakeDoc();
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault: flaky, now, live, ask: async () => proof() });
+    row.mount(doc);
+    await settle();
+    assert.equal(row.state().kind, 'ready');
+    doc.slot.all().find(node => node.tag === 'button' && node.textContent.startsWith('Clean up 1 file')).listeners.click();
+    broken = true;
+    doc.slot.button('Remove 1 file').listeners.click();
+    await settle();
+    assert.ok(await vault.get('nk_jjjjjjj1'), 'nothing removed');
+    assert.equal(row.state().kind, 'off');
+});
+
 test('the row carries the mockup line about which chats are counted', async () => {
     const { vault, now } = await seeded([['nk_iiiiiii1', 90 * DAY]]);
     const doc = fakeDoc();
