@@ -126,3 +126,12 @@ Generated 2026-11-07.
 - `core-merge-aliases.js`: Alias-linked duplicate consolidation, canonical-name choice and locked-field merging split from `core-merge.js`.
 - `core-merge-names.js`: NPC name-in-text matching tables and normalized phrase counts split from `core-merge.js`.
 - `launcher-ui-position.js`: Launcher viewport clamping, compact position records, saved-position access and viewport sizing split from `launcher-ui.js`.
+- `core-portrait-visuals.js`: Portrait appearance typing, visual-anchor tags, hair/eye/feature extraction and contradiction negatives split from `core-portrait.js`.
+- `core-portrait-prose.js`: Natural-language portrait sentence assembly split from `core-portrait.js`.
+- `core-injection-selection.js`: Behavior guidance, relevance scoring, NPC selection and injection-budget normalization split from `core-injection.js`.
+- `core-injection-parts.js`: Injection text trimming, identity/agency/state blocks, optional fields and mentioned/deceased reference blocks split from `core-injection.js`.
+- `core-durable-identity.js`: Morality polarity and evolution-language checks split from `core-durable.js`.
+- `core-durable-grounding.js`: Source grounding, speech attribution, appearance correction/change and unmarked refinement admission split from `core-durable.js`.
+- `core-durable-episodes.js`: Mannerism normalization, safe refinement filtering and development-episode scoping split from `core-durable.js`.
+- `runtime-editor-save.js`: Dossier editor save, hosted-meter changes, social reconciliation and durable persistence split from `runtime-editor.js`.
+- `runtime-lifecycle-delete.js`: Transactional chat-deletion retirement, recovery-copy handling and tombstone publication split from `runtime-lifecycle.js`.
