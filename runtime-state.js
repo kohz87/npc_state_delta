@@ -24,6 +24,7 @@ export function createRuntimeState() {
         lastScanMetrics: null,
         branchReconcileTimer: null,
         branchReconcilePending: null,
+        chatOpenSequence: 0,
         swipeSettlementTimer: null,
         swipeSettlementPending: null,
         deferredSwipeMessageId: null,

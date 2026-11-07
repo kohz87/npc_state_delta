@@ -128,7 +128,7 @@ export function createPublicApiReadPart(deps) {
         if (!await ensureFreshMutationBoundary('import a dossier', key)) return false;
         return importBundleBytes(bytes);
     },
-    reconcile: (options = {}) => reconcileCurrentBranch(options),
+    reconcile: (options = {}) => reconcileCurrentBranch({ ...options, explicit: true }),
     scanMetrics: () => rt.lastScanMetrics ? { ...rt.lastScanMetrics } : null,
     diagnosticsSummary: () => diagnosticStore.summary(getChatKey()),
     diagnosticsRecords: options => diagnosticStore.records(getChatKey(), options || {}),

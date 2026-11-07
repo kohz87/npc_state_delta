@@ -1,7 +1,8 @@
 import test from 'node:test';
 import fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // The stale-chat mark protects a dossier adopted from another session while this browser still
 // holds the older chat. A host chat load (CHAT_CHANGED) reads the chat from the server, so it is
@@ -13,11 +14,17 @@ async function hostReloadChecks(mockState, eventSource, manualAddNpc, sleep, uiH
     const previousToastr = { ...globalThis.toastr };
     globalThis.toastr.warning = message => warnings.push(String(message));
     const fail = message => { throw new Error(message); };
+    const previousFetch = globalThis.fetch;
+    let hostFile = null;
+    globalThis.fetch = async (url, options) => url === '/api/chats/get' && hostFile
+        ? { ok: true, status: 200, json: async () => structuredClone(hostFile) }
+        : previousFetch(url, options);
     const open = async (id, lines) => {
         mockState.context.groupId = null;
         mockState.context.chatId = id;
         mockState.context.getCurrentChatId = () => mockState.context.chatId;
         mockState.context.chat = lines.map((mes, i) => ({ is_user: i % 2 === 0, is_system: false, name: i % 2 === 0 ? 'Kazuma' : 'Narrator', mes }));
+        hostFile = [{ chat_metadata: {} }, ...structuredClone(mockState.context.chat)];
         eventSource.emit('chat_changed');
         await sleep(150);
     };
@@ -47,6 +54,7 @@ async function hostReloadChecks(mockState, eventSource, manualAddNpc, sleep, uiH
     await runtime.flush();
     const lenaId = runtime.getState().npcs.find(npc => npc.name === 'Lena Reload').id;
     mockState.context.chat.length = 2;
+    hostFile = [{ chat_metadata: {} }, ...structuredClone(mockState.context.chat)];
     writeServerCopy(() => {});
     eventSource.emit('chat_changed');
     await sleep(400);
@@ -80,20 +88,22 @@ async function hostReloadChecks(mockState, eventSource, manualAddNpc, sleep, uiH
     if (await clickRefresh(miraId) !== 1) fail(`Refresh stayed blocked after the chat reloaded: ${warnings.join(' | ')}`);
 
     mockState.quietResponder = previousResponder;
+    globalThis.fetch = previousFetch;
     Object.assign(globalThis.toastr, previousToastr);
-    setTimeout(() => process.exit(0), 300);
 }
 
-test('a host chat reload clears the stale-chat mark and Scan/Refresh dispatch', () => {
+test('a host chat reload clears the stale-chat mark and Scan/Refresh dispatch', { timeout: 90000 }, async () => {
     let source = fs.readFileSync(new URL('./runtime-smoke.mjs', import.meta.url), 'utf8');
     source = source.replace('const here = path.dirname(fileURLToPath(import.meta.url));', `const here = ${JSON.stringify(fileURLToPath(new URL('.', import.meta.url)))};`);
     const marker = "    console.log('Runtime smoke:";
     if (!source.includes(marker)) throw new Error('Runtime smoke cleanup marker changed');
     source = source.replace(marker, `    await (${hostReloadChecks.toString()})(mockState, eventSource, manualAddNpc, sleep, uiHandlers);\n${marker}`);
-    execFileSync(process.execPath, ['--import', new URL('./active-runtime-test-setup.mjs', import.meta.url).href, '--input-type=module'], {
-        input: source,
-        encoding: 'utf8',
-        timeout: 90000,
-        maxBuffer: 8 * 1024 * 1024,
-    });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'npc-stale-reload-test-'));
+    const file = path.join(dir, 'host.mjs');
+    try {
+        fs.writeFileSync(file, source);
+        await import(pathToFileURL(file).href);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
 });

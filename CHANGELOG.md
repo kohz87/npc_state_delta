@@ -1,3 +1,7 @@
+## Unreleased
+
+- **A page reload no longer rolls the dossiers back.** After a reload, an automatic branch check could run before SillyTavern had loaded the chat; it saw an empty chat, took it for a deleted one, and restored the dossiers to the chat's first saved point on disk (NPCs, roles, seen counts, `present`, archive flags lost). Automatic rollbacks, branch inheritance and new-chat setup now wait until the chat's file is loaded and matches; a missing or unreadable file never triggers a rollback. A real delete of the messages still works as before. Found by the new SillyTavern soak test.
+
 ## 1.13.0
 
 - Requires Story Block 2.25.0 or later (the catch-up and "Start from the chat" use `restored`, `progress`, `skip` and `asOf`). Story Block testkit re-synced to 2.25.0.
