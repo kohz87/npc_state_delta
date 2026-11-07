@@ -3,16 +3,13 @@
    once per module instance with the shared runtime state. Bodies are moved from index.js without change. */
 
 import { getContext } from '../../../extensions.js';
-import { isScannerRoutingError } from './scanner-routing.js';
-import { automaticBackfillStillRelevant, backfillNeedsRequest } from './scan-context.js';
 import { REFRESH_CHANGED_FIELDS } from './src/fields/registry.js';
-import { recentTranscript, recentUserDevelopmentContext, currentExchangeTranscript, storyDayAt, storyDaysForTranscript, currentExclusions, refreshMessageGate, activeChat } from './src/transcript.js';
+import { storyDayAt, currentExclusions, refreshMessageGate, activeChat } from './src/transcript.js';
 import { BACKFILL_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
-import { DEFAULT_RELATIONSHIP, IMPORTANT_MEMORY_LIMIT, inferNpcIdentityKind, relationshipSummaryConsistent, calibrateRelationshipSummary, npcCurrentlyAbsentInText, buildBackfillPrompt, buildDossierImportPrompt, buildProfileRefreshPrompt, mergeScanResult, protectTerminalNpc, npcMatchesLabel, normalizeName, extractExplicitKeyRelationshipEdges, normalizeCustomFields } from './core.js';
+import { buildDossierImportPrompt, mergeScanResult, protectTerminalNpc } from './core.js';
 import { chatLineage } from './branch.js';
-import { resolveNpcReference } from './social.js';
 import { getSettings } from './runtime-settings.js';
-import { setNpcDossierScanIndicator, setNpcChatRefreshIndicator, lineageMoved, setScanIndicator, relationshipNumber, latestMessageId } from './runtime-scan-helpers.js';
+import { setNpcDossierScanIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
 import { createTargetedRefreshPart } from './runtime-targeted-refresh.js';
 import { createTargetedBackfillPart } from './runtime-targeted-backfill.js';
