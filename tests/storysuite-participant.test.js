@@ -285,7 +285,7 @@ test('the file vault writes SillyTavern\'s user files and reads them back; a che
     assert.equal(await vault.getIndex('chat:x'), null);
     await vault.putIndex('chat:x', { v: 1, n: 2 });
     assert.deepEqual(await vault.getIndex('chat:x'), { v: 1, n: 2 });
-    assert.deepEqual([...files.keys()].filter(name => name.startsWith('npc-state-delta-')).length, 2);
+    assert.deepEqual([...files.keys()].filter(name => name.startsWith('npc-state-delta-') && !name.includes('registry')).length, 2, 'the checkpoint and the index (the clean-up registry is a third, separate file)');
     const refusing = fileVault({ fetchFn: async () => ({ ok: false, status: 500 }) });
     await assert.rejects(() => refusing.putIndex('chat:x', {}));
 });
@@ -442,12 +442,12 @@ test('the file vault asks whether a file exists before a first write reads it: a
     await vault.putIndex('lg_aaaaaaaa', { v: 1 });
     assert.deepEqual(gets(), [], 'nothing was fetched that is not there: no 404');
     assert.deepEqual(JSON.parse(files.get('npc-state-delta-checkpoint-nk_00000001.json')), doc, 'stored as before');
-    assert.deepEqual(calls.filter(call => call.url === '/api/files/upload').length, 2);
+    assert.deepEqual(calls.filter(call => call.url === '/api/files/upload').length, 3, 'the checkpoint, the index and the clean-up registry');
     // What is there is read, and a checkpoint already kept is not written again.
     assert.deepEqual(await vault.getIndex('lg_aaaaaaaa'), { v: 1 });
     await vault.put('nk_00000001', doc);
-    assert.equal(calls.filter(call => call.url === '/api/files/upload').length, 2, 'not written twice');
-    assert.equal(gets().length, 2, 'the existing index and checkpoint were read');
+    assert.equal(calls.filter(call => call.url === '/api/files/upload').length, 3, 'not written twice (the checkpoint and the registry entry are not written again)');
+    assert.equal(gets().length, 3, 'the existing index, the checkpoint and the clean-up registry were read');
     // A save point is read straight (no verify): a checkpoint that is gone is still told by its 404.
     const before = calls.length;
     assert.equal(await vault.get('nk_0000ffff'), null);
@@ -458,7 +458,7 @@ test('the file vault asks whether a file exists before a first write reads it: a
         const id = `nk_${mode}`;
         const mark = calls.length;
         await vault.put(id, { mode });
-        assert.deepEqual(gets().slice(-1), [`/user/files/npc-state-delta-checkpoint-${id}.json`], `${mode}: read first, as before`);
+        assert.deepEqual(gets().filter(url => !url.includes('registry')).slice(-1), [`/user/files/npc-state-delta-checkpoint-${id}.json`], `${mode}: read first, as before`);
         assert.deepEqual(JSON.parse(files.get(`npc-state-delta-checkpoint-${id}.json`)), { mode }, `${mode}: written`);
         assert.ok(calls.length > mark);
     }

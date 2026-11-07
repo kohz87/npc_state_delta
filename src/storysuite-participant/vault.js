@@ -5,12 +5,19 @@
 //   put(id, doc)         keeps a checkpoint; the same id again is the same bytes (the id is derived from the hash)
 //   get(id)              the checkpoint, or null when its bytes are gone
 //   getIndex(lineage)    the lineage's index or null; putIndex(lineage, index) replaces it (a lineage id is in the chat's state, not its key)
+//   list()               [{ id, size, modifiedAt }] for the clean-up report (vault-sweep.js); only checkpoints this vault knows of
+//   remove(id, { referenced })  deletes one checkpoint; false (and nothing deleted) when `id` is in `referenced` (a Set or list) or is not there
 //
+
 // `memoryVault` is for tests (with `lose(id)` to forget bytes, `fail` to make a write throw). `fileVault` writes SillyTavern's user files
 // the way Delta's own sidecar does (storage.js: POST /api/files/upload, read back from /user/files/<name>), one file per checkpoint.
 // A first write (a new checkpoint, a new lineage's index) asks SillyTavern whether the file exists (storage.js `dataFileExists`) before it
 // reads it, so a file that is not there yet makes no 404 request (a red line in the browser's console); a server that cannot say is read as before.
-import { dataFileExists } from '../../storage.js';
+import { dataFileExists, deleteNpcStateDataFile } from '../../storage.js';
+import { CHECKPOINT_ID } from './checkpoint.js';
+
+/** True when `id` is in the referenced set the caller passed (a Set, a list or nothing). A vault never removes such a checkpoint. */
+const isReferenced = (referenced, id) => (referenced instanceof Set ? referenced.has(id) : Array.isArray(referenced) && referenced.includes(id));
 
 const fnv1a = text => {
     let hash = 0x811c9dc5;
@@ -21,8 +28,9 @@ const fnv1a = text => {
     return hash.toString(36);
 };
 
-export function memoryVault() {
+export function memoryVault({ now = () => Date.now() } = {}) {
     const docs = new Map();
+    const meta = new Map();
     const indexes = new Map();
     return {
         kind: 'memory',
@@ -31,7 +39,22 @@ export function memoryVault() {
         fail: new Set(),
         async put(id, doc) {
             if (this.fail.has('put')) throw new Error('The vault could not write (test).');
-            if (!docs.has(id)) docs.set(id, JSON.stringify(doc));
+            if (docs.has(id)) return;
+            docs.set(id, JSON.stringify(doc));
+            meta.set(id, { size: docs.get(id).length, modifiedAt: now() });
+        },
+        async list() {
+            return [...meta].map(([id, entry]) => ({ id, ...entry }));
+        },
+        async remove(id, { referenced } = {}) {
+            if (isReferenced(referenced, id) || !docs.has(id)) return false;
+            docs.delete(id);
+            meta.delete(id);
+            return true;
+        },
+        /** Test helper: make a checkpoint look `ms` older. */
+        age(id, ms) {
+            if (meta.has(id)) meta.get(id).modifiedAt -= ms;
         },
         async get(id) {
             return docs.has(id) ? JSON.parse(docs.get(id)) : null;
@@ -49,7 +72,7 @@ export function memoryVault() {
     };
 }
 
-export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/user/files', timeoutMs = 15000 } = {}) {
+export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/user/files', timeoutMs = 15000, now = () => Date.now() } = {}) {
     // `headers` may be a function: SillyTavern's request headers (a token) are read when a request is made, not when the vault is.
     const headersNow = () => (typeof headers === 'function' ? headers() : headers) ?? {};
     const nameOf = id => `npc-state-delta-checkpoint-${id}.json`;
@@ -84,14 +107,45 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
         if (!response?.ok) throw new Error(`The participant's file ${name} could not be read (${response?.status ?? 'no answer'}).`);
         try { return JSON.parse(await response.text()); } catch { return null; }
     }
+    // SillyTavern cannot list a user's files, so the vault keeps a small registry of the checkpoints it wrote or first saw (id, size, the time it first
+    // knew the file): list() reports only those, so a file the vault never saw is never offered for removal. Registry writes never fail a put.
+    const registryName = 'npc-state-delta-checkpoint-registry.json';
+    let registryQueue = Promise.resolve();
+    const readRegistry = async () => {
+        const doc = (await absent(registryName)) ? null : await read(registryName);
+        return doc && typeof doc === 'object' && !Array.isArray(doc) && doc.files && typeof doc.files === 'object' ? doc.files : {};
+    };
+    const updateRegistry = change => {
+        registryQueue = registryQueue.then(async () => {
+            const files = await readRegistry();
+            if (change(files) !== false) await upload(registryName, JSON.stringify({ files }));
+        }).catch(() => { /* the registry is best effort */ });
+        return registryQueue;
+    };
     /** True only when the server says the file is not there; false when it is, or when it cannot say (the caller then reads it). */
     const absent = async name => (await dataFileExists(`${base}/${name}`, { fetchFn: request, headers: headersNow() })) === false;
     return {
         kind: 'file',
         async put(id, doc) {
             const name = nameOf(id);
-            if (!(await absent(name)) && await read(name)) return;
-            await upload(name, JSON.stringify(doc));
+            const json = JSON.stringify(doc);
+            const had = !(await absent(name)) && await read(name);
+            if (!had) await upload(name, json);
+            await updateRegistry(files => {
+                if (files[id]) return false;
+                files[id] = { size: json.length, modifiedAt: now() };
+                return true;
+            });
+        },
+        async list() {
+            const files = await readRegistry();
+            return Object.entries(files).filter(([id]) => CHECKPOINT_ID.test(id)).map(([id, entry]) => ({ id, size: entry?.size, modifiedAt: entry?.modifiedAt }));
+        },
+        async remove(id, { referenced } = {}) {
+            if (!CHECKPOINT_ID.test(String(id)) || isReferenced(referenced, id)) return false;
+            const gone = await deleteNpcStateDataFile({ path: `${base}/${nameOf(id)}` }, { fetchFn: request, headers: headersNow() });
+            await updateRegistry(files => (id in files ? delete files[id] : false));
+            return gone;
         },
         get: id => read(nameOf(id)),
         async getIndex(lineage) {

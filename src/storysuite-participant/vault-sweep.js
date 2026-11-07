@@ -188,7 +188,7 @@ export function createVaultSweep({ vault, now = () => Date.now(), keepNewerThanM
                     continue;
                 }
                 try {
-                    const outcome = await vault.remove(file.id);
+                    const outcome = await vault.remove(file.id, { referenced: plan.referenced });
                     if (outcome === false) skipped.push(file.id);
                     else deleted.push(file);
                 } catch (error) {
