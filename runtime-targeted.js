@@ -672,13 +672,13 @@ export function createTargetedPart(rt, deps) {
         });
     }
 
-    async function processPendingBackfillsInner(messageId = null, { limit = Infinity } = {}) {
+    async function processPendingBackfillsInner(messageId = null, { limit = Infinity, skipNpcIds = [] } = {}) {
         const chatKey = getChatKey();
         if (chatKey === 'no-chat' || !requireReadyChatMutation('process queued dossier backfills', chatKey, { notify: false }) || isScanBusy(chatKey) || isHostSwipeActive()) return 0;
         let processed = 0;
         // Model calls made (each backfill is one request, plus a compact retry at most).
         let calls = 0;
-        const attemptedNpcIds = new Set();
+        const attemptedNpcIds = new Set(skipNpcIds);
         while (getChatKey() === chatKey && !isScanBusy(chatKey) && calls < limit) {
             const state = getChatState(chatKey);
             if (!Array.isArray(state.pendingBackfills) || !state.pendingBackfills.length) break;

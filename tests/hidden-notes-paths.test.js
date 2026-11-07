@@ -221,7 +221,7 @@ test('hosted: a backfill of a new dossier asks for layered notes and keeps them;
             }
             return '{"npcs":[]}';
         };
-        // Replies 1 and 2: Yunyun is new, then the catch-up Refresh and the queued backfill run (the backfill after the Refresh).
+        // Replies 1 and 2: Yunyun is new (her backfill runs on reply 1), then the catch-up Refresh runs on reply 2.
         await reply('Yunyun, a young woman with crimson eyes, waves from the gate.', { npcs: [yunyun()] });
         await reply('Yunyun smiles at Kazuma.', { npcs: [yunyun({ relationshipDelta: ZERO })] });
         const afterTwo = globalThis.NPCStateDelta.getState().npcs.find(npc => npc.name === 'Yunyun');
@@ -243,12 +243,15 @@ test('hosted: a backfill of a new dossier asks for layered notes and keeps them;
     assert.equal(backfills[0].events, false);
     assert.deepEqual(out.secrets, [[null, NOTE_EVENT], ['trust', null]], 'and keeps what it returned');
     assert.ok(refreshes.length >= 2);
-    assert.equal(refreshes[0].events, false, 'the first Refresh ran before there was an event note');
+    assert.equal(refreshes[0].events, true, 'the backfill now runs on the first reply (own cadence), so the first Refresh already sees the event note');
     assert.equal(refreshes[0].layered, false, 'a Refresh never asks for layers');
     assert.equal(refreshes.at(-1).events, true, 'the later Refresh lists the event');
-    assert.equal(out.opened.length, 1, 'its answer held only the event, and it was sent');
-    assert.deepEqual(out.opened[0].payload, { name: 'Yunyun', open: [out.noteId], by: 'story' });
-    assert.deepEqual(out.opened[0].options, { background: true });
+    // The fake host never marks the note open, so each of the two Refreshes that now see the event sends the same open once.
+    assert.equal(out.opened.length, refreshes.length, 'each Refresh answer held only the event, and it was sent');
+    for (const sent of out.opened) {
+        assert.deepEqual(sent.payload, { name: 'Yunyun', open: [out.noteId], by: 'story' });
+        assert.deepEqual(sent.options, { background: true });
+    }
 });
 
 test('a backfill of a dossier that already has notes, and any pass without a host, asks for none', () => {
