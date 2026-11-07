@@ -56,6 +56,7 @@ Generated 2026-11-07.
 - `src/storysuite-participant/participant/publication.js`: Native-change pairing, publication, retry and flush.
 - `src/storysuite-participant/participant/session-ops.js`: Session hydration, checkpoints, identity lines and commit-probe comparisons.
 - `src/storysuite-participant/history-replay.js`: Bounded, all-or-nothing history replay: reads missed replies in order on a copy through injected live reply and state boundaries; cap, Skip, resume, one publication.
+- `src/storysuite-participant/history-replay-controller.js`: Catch-up task controller split from `history-replay.js`: plans and queues the open chat's fallback, resume and rebuild, bridges the replay engine to live boundaries, and owns status, Skip, the send hold and retry loop.
 - `src/storysuite-participant/participant/support.js`: Shared participant envelopes, prepared ids and index normalization.
 - `src/storysuite-participant/storage-row.js`: Settings Storage row: old dossier files, Check again, Find older files (Data Maid on press only), Clean up with confirmation; check and removal in one exclusive step; off with the reason when any listed chat or index can't be read.
 - `src/storysuite-participant/vault-sweep.js`: Plans and removes old checkpoint files that no listed chat and no lineage index names, older than 30 days.
