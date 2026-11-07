@@ -1,0 +1,133 @@
+/* NPC State Delta sidecar payload format: format markers, base64 encoding, retained portrait-asset
+   pruning, compact state preparation and JSON encode/decode. Moved unchanged out of storage.js;
+   storage.js re-exports every public name it exported before. Never imports storage.js. */
+import { isPortraitFileRecord } from './src/portrait-file.js';
+
+export const NPC_STATE_FILE_FORMAT = 'npc_state_delta_chat_data';
+export const NPC_STATE_FILE_FORMAT_VERSION = 1;
+
+// One String.fromCharCode call per 32 KB chunk (as vault.js and portrait-file.js do): building each chunk a
+// character at a time cost hundreds of milliseconds per save of a large sidecar on the main thread.
+export function bytesToBase64(bytes) {
+    const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const chunkSize = 0x8000;
+    const parts = [];
+    for (let i = 0; i < input.length; i += chunkSize) {
+        parts.push(String.fromCharCode.apply(null, input.subarray(i, Math.min(i + chunkSize, input.length))));
+    }
+    return globalThis.btoa(parts.join(''));
+}
+
+export function retainedPortraitAssetIds(state = {}) {
+    const retained = new Set();
+    const addNpcs = value => {
+        for (const npc of Array.isArray(value) ? value : []) {
+            const id = String(npc?.id || '').trim();
+            if (id) retained.add(id);
+        }
+    };
+    addNpcs(state.npcs);
+    for (const checkpoint of Array.isArray(state.checkpoints) ? state.checkpoints : []) addNpcs(checkpoint?.snapshot?.npcs);
+    addNpcs(state.branchRootSnapshot?.npcs);
+    // The reversible rollback journal can be the only remaining proof that an NPC
+    // existed before a deep tail deletion once byte-budgeted full checkpoints have
+    // been pruned. Keep that NPC's portrait asset reachable until the journal entry
+    // itself expires; the journal stores no portrait binary.
+    for (const entry of Array.isArray(state.rollbackJournal) ? state.rollbackJournal : []) {
+        const npcUndo = entry?.undo?.npcs;
+        addNpcs(npcUndo?.full);
+        for (const change of Array.isArray(npcUndo?.changes) ? npcUndo.changes : []) {
+            if (change?.restore && typeof change.restore === 'object') addNpcs([change.restore]);
+        }
+    }
+    const blocked = new Set((Array.isArray(state.userDismissedGroups) ? state.userDismissedGroups : [])
+        .flatMap(group => [...(Array.isArray(group?.ids) ? group.ids : []), group?.npcId])
+        .map(value => String(value || '').trim()).filter(Boolean));
+    for (const id of blocked) retained.delete(id);
+    return retained;
+}
+
+export function prunePortraitAssetsForState(state = {}) {
+    const assets = state?.portraitAssets && typeof state.portraitAssets === 'object' ? state.portraitAssets : {};
+    const retained = retainedPortraitAssetIds(state);
+    return Object.fromEntries(Object.entries(assets).filter(([id, portrait]) => retained.has(String(id)) && portrait?.dataUrl));
+}
+
+// Form portraits share the main portrait retention rule: they stay while any live, checkpointed
+// or journal-restorable record of that NPC can still show them.
+export function pruneFormPortraitAssetsForState(state = {}) {
+    const assets = state?.formPortraitAssets && typeof state.formPortraitAssets === 'object' ? state.formPortraitAssets : {};
+    const retained = retainedPortraitAssetIds(state);
+    const out = {};
+    for (const [id, forms] of Object.entries(assets)) {
+        if (!retained.has(String(id)) || !forms || typeof forms !== 'object') continue;
+        const kept = Object.entries(forms).filter(([, portrait]) => portrait?.dataUrl).slice(0, 8);
+        if (kept.length) out[id] = Object.fromEntries(kept);
+    }
+    return out;
+}
+
+export function prunePortraitAssetsInPlace(state = {}) {
+    if (!state || typeof state !== 'object') return state;
+    state.portraitAssets = prunePortraitAssetsForState(state);
+    if (state.formPortraitAssets && typeof state.formPortraitAssets === 'object') state.formPortraitAssets = pruneFormPortraitAssetsForState(state);
+    return state;
+}
+
+function compactStateForFile(state) {
+    const snapshot = structuredClone(state || {});
+    snapshot.portraitAssets = prunePortraitAssetsForState(snapshot);
+    snapshot.formPortraitAssets = pruneFormPortraitAssetsForState(snapshot);
+    for (const npc of Array.isArray(snapshot.npcs) ? snapshot.npcs : []) {
+        if (!npc?.id) continue;
+        if (npc.portrait?.dataUrl) snapshot.portraitAssets[npc.id] = structuredClone(npc.portrait);
+        if (snapshot.portraitAssets[npc.id]?.dataUrl && !(isPortraitFileRecord(npc.portrait) && !npc.portrait.dataUrl)) npc.portrait = null;
+    }
+    return snapshot;
+}
+
+export function encodeStateFilePayload(chatKey, state, appVersion = '', metadata = {}, writerId = '') {
+    const payload = {
+        format: NPC_STATE_FILE_FORMAT,
+        formatVersion: NPC_STATE_FILE_FORMAT_VERSION,
+        appVersion: String(appVersion || ''),
+        chatKey: String(chatKey || ''),
+        updatedAt: String(metadata?.updatedAt || new Date().toISOString()),
+        revision: Math.max(0, Math.trunc(Number(metadata?.revision) || 0)),
+        writerId: String(metadata?.writerId || writerId),
+        state: compactStateForFile(state),
+    };
+    return JSON.stringify(payload);
+}
+
+export function encodeRetiredStateFilePayload(chatKey, reason = 'retired', appVersion = '', metadata = {}, writerId = '') {
+    return JSON.stringify({
+        format: NPC_STATE_FILE_FORMAT,
+        formatVersion: NPC_STATE_FILE_FORMAT_VERSION,
+        appVersion: String(appVersion || ''),
+        chatKey: String(chatKey || ''),
+        updatedAt: new Date().toISOString(),
+        revision: Math.max(0, Math.trunc(Number(metadata?.revision) || 0)),
+        writerId: String(metadata?.writerId || writerId),
+        retired: true,
+        retiredAt: new Date().toISOString(),
+        retireReason: String(reason || 'retired').slice(0, 120),
+        // A Detach marker names the verified copy of the bytes it replaced, so any session that
+        // later finds the marker can register that backup instead of the empty marker.
+        ...(metadata?.recoveryPath ? { recoveryPath: String(metadata.recoveryPath), recoveryName: String(metadata.recoveryName || '') } : {}),
+        state: {},
+    }, null, 2);
+}
+
+export function decodeStateFilePayload(text) {
+    let payload;
+    try { payload = JSON.parse(String(text ?? '')); }
+    catch { throw new Error('NPC State Delta data file contains invalid JSON.'); }
+    if (!payload || payload.format !== NPC_STATE_FILE_FORMAT) throw new Error('Not an NPC State Delta chat data file.');
+    if (payload.formatVersion !== NPC_STATE_FILE_FORMAT_VERSION) throw new Error(`Unsupported NPC State Delta data file version: ${payload.formatVersion}.`);
+    if (!payload.state || typeof payload.state !== 'object' || Array.isArray(payload.state)) throw new Error('NPC State Delta data file is missing its state object.');
+    payload.retired = payload.retired === true;
+    payload.revision = Math.max(0, Math.trunc(Number(payload.revision) || 0));
+    payload.writerId = String(payload.writerId || '');
+    return payload;
+}
