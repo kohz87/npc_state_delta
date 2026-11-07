@@ -5,7 +5,7 @@
 //   put(id, doc)         keeps a checkpoint; the same id again is the same bytes (the id is derived from the hash)
 //   get(id)              the checkpoint, or null when its bytes are gone
 //   getIndex(lineage)    the lineage's index or null; putIndex(lineage, index) replaces it (a lineage id is in the chat's state, not its key)
-//   list()               [{ id, size, modifiedAt }] for the clean-up report (vault-sweep.js); only checkpoints this vault knows of
+//   list()               [{ id, size, modifiedAt }] for the clean-up report (vault-sweep.js), including files written before this version
 //   remove(id, { referenced })  deletes one checkpoint; false (and nothing deleted) when `id` is in `referenced` (a Set or list) or is not there
 //
 
@@ -72,7 +72,7 @@ export function memoryVault({ now = () => Date.now() } = {}) {
     };
 }
 
-export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/user/files', timeoutMs = 15000, now = () => Date.now() } = {}) {
+export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/user/files', timeoutMs = 15000 } = {}) {
     // `headers` may be a function: SillyTavern's request headers (a token) are read when a request is made, not when the vault is.
     const headersNow = () => (typeof headers === 'function' ? headers() : headers) ?? {};
     const nameOf = id => `npc-state-delta-checkpoint-${id}.json`;
@@ -107,45 +107,43 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
         if (!response?.ok) throw new Error(`The participant's file ${name} could not be read (${response?.status ?? 'no answer'}).`);
         try { return JSON.parse(await response.text()); } catch { return null; }
     }
-    // SillyTavern cannot list a user's files, so the vault keeps a small registry of the checkpoints it wrote or first saw (id, size, the time it first
-    // knew the file): list() reports only those, so a file the vault never saw is never offered for removal. Registry writes never fail a put.
-    const registryName = 'npc-state-delta-checkpoint-registry.json';
-    let registryQueue = Promise.resolve();
-    const readRegistry = async () => {
-        const doc = (await absent(registryName)) ? null : await read(registryName);
-        return doc && typeof doc === 'object' && !Array.isArray(doc) && doc.files && typeof doc.files === 'object' ? doc.files : {};
-    };
-    const updateRegistry = change => {
-        registryQueue = registryQueue.then(async () => {
-            const files = await readRegistry();
-            if (change(files) !== false) await upload(registryName, JSON.stringify({ files }));
-        }).catch(() => { /* the registry is best effort */ });
-        return registryQueue;
-    };
+    // Data Maid reports loose files with their actual size and modification time. Its report is only a source of candidates: it does not know
+    // Delta's timeline or lineage-index references. It excludes attached files, which must not be removed by this clean-up either.
+    async function listCheckpoints() {
+        const response = await request('/api/data-maid/report', { method: 'POST', headers: headersNow(), body: '{}' });
+        if (!response?.ok) throw new Error('The dossier file list could not be read.');
+        const answer = await response.json();
+        const token = typeof answer?.token === 'string' ? answer.token : '';
+        try {
+            if (!token || !Array.isArray(answer?.report?.files)) throw new Error('The dossier file list was incomplete.');
+            const prefix = 'npc-state-delta-checkpoint-';
+            return answer.report.files.flatMap(entry => {
+                const name = typeof entry?.name === 'string' ? entry.name : '';
+                if (!name.startsWith(prefix) || !name.endsWith('.json')) return [];
+                const id = name.slice(prefix.length, -5);
+                return CHECKPOINT_ID.test(id) ? [{ id, size: entry.size, modifiedAt: entry.mtime }] : [];
+            });
+        } finally {
+            if (token) {
+                try {
+                    await request('/api/data-maid/finalize', { method: 'POST', headers: headersNow(), body: JSON.stringify({ token }) });
+                } catch { /* The report token is not used for deletion. */ }
+            }
+        }
+    }
     /** True only when the server says the file is not there; false when it is, or when it cannot say (the caller then reads it). */
     const absent = async name => (await dataFileExists(`${base}/${name}`, { fetchFn: request, headers: headersNow() })) === false;
     return {
         kind: 'file',
         async put(id, doc) {
             const name = nameOf(id);
-            const json = JSON.stringify(doc);
-            const had = !(await absent(name)) && await read(name);
-            if (!had) await upload(name, json);
-            await updateRegistry(files => {
-                if (files[id]) return false;
-                files[id] = { size: json.length, modifiedAt: now() };
-                return true;
-            });
+            if (!(await absent(name)) && await read(name)) return;
+            await upload(name, JSON.stringify(doc));
         },
-        async list() {
-            const files = await readRegistry();
-            return Object.entries(files).filter(([id]) => CHECKPOINT_ID.test(id)).map(([id, entry]) => ({ id, size: entry?.size, modifiedAt: entry?.modifiedAt }));
-        },
+        list: listCheckpoints,
         async remove(id, { referenced } = {}) {
             if (!CHECKPOINT_ID.test(String(id)) || isReferenced(referenced, id)) return false;
-            const gone = await deleteNpcStateDataFile({ path: `${base}/${nameOf(id)}` }, { fetchFn: request, headers: headersNow() });
-            await updateRegistry(files => (id in files ? delete files[id] : false));
-            return gone;
+            return deleteNpcStateDataFile({ path: `${base}/${nameOf(id)}` }, { fetchFn: request, headers: headersNow() });
         },
         get: id => read(nameOf(id)),
         async getIndex(lineage) {

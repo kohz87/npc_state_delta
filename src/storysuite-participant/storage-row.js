@@ -1,10 +1,11 @@
 // NPC State Delta settings, the Storage row (approved mockup B5): how many old dossier files there are, how many of them are unused and older than
 // 30 days, and a Clean up button with a confirmation. Story Block answers which checkpoint files every chat and branch still uses (the query
 // `timeline.referenced`); vault-sweep.js plans and removes. If ANY chat could not be read the answer is incomplete, the button is off with the
-// reason, and nothing is ever removed. Nothing runs on its own except the first check when the panel opens; removal needs the confirmation.
+// reason, and nothing is ever removed. The open state must be readable, and a file that a lineage index names (or whose lineage cannot be read) is kept. Nothing runs on its own except the first check when the panel opens; removal needs the confirmation.
 // All text goes in with textContent (no markup from text). `mount()` fills the settings slot `storage`; it does nothing without the slot.
 
 import { createVaultSweep } from './vault-sweep.js';
+import { CHECKPOINT_ID } from './checkpoint.js';
 
 export const REFERENCED_QUERY = 'timeline.referenced';
 const SLOT = '[data-delta-settings-slot="storage"]';
@@ -19,9 +20,39 @@ export function sizeText(bytes) {
     return `${Math.max(n > 0 ? 1 : 0, Math.round(n / 1024))} KB`;
 }
 const filesText = n => `${n} ${n === 1 ? 'file' : 'files'}`;
+const validIds = value => Array.isArray(value) && value.every(id => typeof id === 'string' && CHECKPOINT_ID.test(id));
+
+/** Every checkpoint id named anywhere in a lineage index (acks, prepared, returns, selected, base). */
+function indexIds(value, out = new Set(), depth = 0) {
+    if (typeof value === 'string') { if (CHECKPOINT_ID.test(value.trim())) out.add(value.trim()); }
+    else if (value && typeof value === 'object' && depth < 8) for (const entry of Object.values(value)) indexIds(entry, out, depth + 1);
+    return out;
+}
+
+/**
+ * Story Block's journals do not name what a lineage index holds (acks, prepared, returns, selected, base). Every checkpoint file carries its own
+ * lineage, and the index of that lineage is the only index that can name it: so each candidate is read, its lineage's index is read, and a candidate
+ * that index names, or one whose file or index cannot be read, is kept. Returns the ids that must NOT be removed.
+ */
+async function indexProtected(vault, candidates) {
+    const keep = new Set();
+    const indexes = new Map();
+    for (const { id } of candidates) {
+        try {
+            const doc = await vault.get(id);
+            const lineage = typeof doc?.lineage === 'string' ? doc.lineage : '';
+            if (!lineage) { keep.add(id); continue; }
+            if (!indexes.has(lineage)) indexes.set(lineage, indexIds(await vault.getIndex(lineage)));
+            if (indexes.get(lineage).has(id)) keep.add(id);
+        } catch { keep.add(id); }
+    }
+    return keep;
+}
 
 /** Why clean-up is off, in the mockup's words. */
-export function offReason(answer) {
+export function offReason(answer, plan, liveReadable = true) {
+    if (plan?.code === 'VAULT_UNREADABLE') return 'Clean-up is off: the dossier files could not be checked, so it can\'t be sure which files are still used.';
+    if (answer?.complete === true && !liveReadable) return 'Clean-up is off: the open dossier state could not be checked, so it can\'t be sure which files are still used.';
     const unreadable = Array.isArray(answer?.unreadable) ? answer.unreadable : [];
     if (!unreadable.length) return 'Clean-up is off: the chats could not be checked, so it can\'t be sure which files are still used.';
     const newer = unreadable.filter(item => /newer/i.test(String(item?.reason ?? item?.code ?? item ?? ''))).length;
@@ -38,6 +69,7 @@ export function createStorageRow({ doc, vault, ask, live = () => null, now = () 
     let card = null;
     let busy = false;
     let view = { kind: 'checking' };
+    let checkId = 0;
 
     const el = (tag, className, text) => {
         const node = doc.createElement(tag);
@@ -54,21 +86,47 @@ export function createStorageRow({ doc, vault, ask, live = () => null, now = () 
     };
     const totals = plan => el('p', 'npc-state-delta-storage-line', `Old dossier files: ${filesText(plan.totalFiles)}, ${sizeText(plan.totalBytes)}`);
 
-    async function check() {
-        view = { kind: 'checking' };
-        draw();
+    async function inspect() {
         let answer = null;
         try { answer = await ask(); } catch (error) { warn('The referenced-checkpoints query failed', error); }
-        const referenced = [answer?.referenced, live()];
-        const plan = await sweeper.plan({ referenced, complete: answer?.complete === true });
-        view = plan.canSweep ? { kind: 'ready', plan } : { kind: 'off', plan, reason: offReason(answer) };
+        let current = null;
+        try { current = live(); } catch { /* an unreadable open state cannot prove that files are unused */ }
+        const liveReadable = current !== null && typeof current === 'object' && !Array.isArray(current);
+        const complete = answer?.complete === true && validIds(answer.referenced) && liveReadable;
+        const referenced = [answer?.referenced, current];
+        let plan = await sweeper.plan({ referenced, complete });
+        if (plan.canSweep && plan.candidates.length) {
+            const keep = await indexProtected(vault, plan.candidates);
+            if (keep.size) plan = await sweeper.plan({ referenced: [...referenced, [...keep]], complete });
+        }
+        return plan.canSweep ? { kind: 'ready', plan } : { kind: 'off', plan, reason: offReason(answer, plan, liveReadable) };
+    }
+
+    async function check() {
+        const token = ++checkId;
+        view = { kind: 'checking' };
+        draw();
+        const next = await inspect();
+        if (token !== checkId) return;
+        view = next;
         draw();
     }
 
     async function run() {
+        const confirmed = view.plan;
+        ++checkId;
         busy = true;
-        view = { kind: 'working', plan: view.plan };
+        view = { kind: 'working', plan: confirmed };
         draw();
+        // The confirmation may have stayed open while a chat or index changed. Recheck and require another confirmation if the candidates changed.
+        const fresh = await inspect();
+        const same = fresh.plan.canSweep && JSON.stringify(fresh.plan.candidates) === JSON.stringify(confirmed.candidates);
+        if (!same) {
+            busy = false;
+            view = { ...fresh, note: 'The file check changed. Review the updated results.' };
+            draw();
+            return;
+        }
         const done = await sweeper.sweep();
         busy = false;
         await check();
@@ -106,6 +164,7 @@ export function createStorageRow({ doc, vault, ask, live = () => null, now = () 
         if (view.kind === 'off') {
             card.append(button('Clean up', '', () => {}, true), el('p', 'npc-state-delta-storage-muted', view.reason));
             card.append(button('Check again', '', () => { void check(); }));
+            if (view.note) card.append(el('p', 'npc-state-delta-storage-muted', view.note));
             return;
         }
         const old = el('p', 'npc-state-delta-storage-line', plan.count
