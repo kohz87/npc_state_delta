@@ -120,3 +120,9 @@ Generated 2026-11-07.
 - `portrait-tools-actions.js`: Upload completion, generated portrait previews/seeds and removal split from `portrait-tools.js`.
 - `dossier-experience-state.js`: Life-state projection, current selection and DOM write guards split from `dossier-experience.js`.
 - `dossier-experience-styles.js`: Extension-wide dossier, editor and settings CSS split from `dossier-experience.js`.
+- `runtime-hydration-state.js`: Fresh/normalized chat state, cached-copy accessors, hydration metadata, freshness events, dirty marks and native-change notices split from `runtime-hydration.js`.
+- `runtime-hydration-freshness.js`: Revision conflicts, server-copy freshness checks, preserved local work and canonical-state installation split from `runtime-hydration.js`.
+- `runtime-hydration-load.js`: Sidecar discovery and retry, loaded-state installation, freshness-gated mutations and hydration write gates split from `runtime-hydration.js`.
+- `core-merge-aliases.js`: Alias-linked duplicate consolidation, canonical-name choice and locked-field merging split from `core-merge.js`.
+- `core-merge-names.js`: NPC name-in-text matching tables and normalized phrase counts split from `core-merge.js`.
+- `launcher-ui-position.js`: Launcher viewport clamping, compact position records, saved-position access and viewport sizing split from `launcher-ui.js`.
