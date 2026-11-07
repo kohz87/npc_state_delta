@@ -38,3 +38,7 @@ Generated 2026-11-07.
 - `src/storysuite-participant/participant/publication.js`: Native-change pairing, publication, retry and flush.
 - `src/storysuite-participant/participant/session-ops.js`: Session hydration, checkpoints, identity lines and commit-probe comparisons.
 - `src/storysuite-participant/participant/support.js`: Shared participant envelopes, prepared ids and index normalization.
+- `runtime-scan-backfill.js`: Pending-backfill queue entry and one-pass admission cap split from `runtime-scan.js`.
+- `runtime-scan-stale.js`: Stale-cleanup protected references and archive/delete pass split from `runtime-scan.js`.
+- `runtime-scan-reply.js`: Reply parent/rewrite checks, earlier-only scene stripping and first-scan window split from `runtime-scan.js`.
+- `runtime-scan-handler.js`: Assistant-message receipt, swipe guard, scan cadence and reply-name check split from `runtime-scan.js`.
