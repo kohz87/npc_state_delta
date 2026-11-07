@@ -1,0 +1,122 @@
+/* NPC State Delta record shared primitives: admission/portrait constants, cast-appearance preservation, appearance canon,
+   stored-memory normalization, label matching and scanner-citation stripping. Split from core-record.js without change;
+   core-record.js re-exports the names it exported before. Never imports core-record.js, core-mechanics.js or core.js. */
+import { AGE_NUMBER_WORD_RE } from './core-identity.js';
+import { compactDurableText, DURABLE_PROFILE_LIMITS, semanticDedupeItems } from './core-relationship.js';
+import { cleanList, cleanText, normalizeName, stripMessageCitations } from './core-text.js';
+import { TEXT_FIELDS } from './src/fields/registry.js';
+export const NPC_ADMISSION_MODES = Object.freeze(['conservative', 'balanced', 'manual_only']);
+export const IMPORTANT_MEMORY_LIMIT = 5;
+
+export const PORTRAIT_SEED_MAX = Number.MAX_SAFE_INTEGER;
+
+export function normalizePortraitSeed(value) {
+    if (value === null || value === undefined || String(value).trim() === '') return null;
+    const seed = Number(value);
+    return Number.isSafeInteger(seed) && seed >= 0 && seed <= PORTRAIT_SEED_MAX ? seed : null;
+}
+
+export function normalizeNpcAdmissionMode(value) {
+    const mode = String(value ?? '').trim().toLowerCase();
+    return NPC_ADMISSION_MODES.includes(mode) ? mode : 'conservative';
+}
+
+export function normalizeLifeStateCertainty(value) {
+    const certainty = String(value ?? '').trim().toLowerCase();
+    return ['explicit', 'inferred'].includes(certainty) ? certainty : '';
+}
+
+/** The longest a cast dossier's stored appearance can be: the pack's look and wears (1800 each) joined by "; ". */
+export const CAST_APPEARANCE_WIDE = 3700;
+
+/**
+ * (the living cast) Which of a cast dossier's appearance fields still are the pack's own words (`castFrom.first`), and the stored
+ * current appearance split into its parts. The stored `appearance` is the RESOLVED text, "<overallAppearance>; <current part>", so the
+ * pack's `wears` is compared with the part after the physical words, not with the whole. Returns
+ * { overall, appearance, head, part } where `overall` / `appearance` say the field still is the pack's words, `head` is the physical
+ * text and `part` the stored text after it (the whole stored text when it does not start with the physical words).
+ */
+export function castAppearanceKept(raw) {
+    const first = raw?.castFrom && typeof raw.castFrom.first === 'object' && raw.castFrom.first ? raw.castFrom.first : {};
+    const text = (value, max) => (typeof value === 'string' ? cleanText(value, max) : '');
+    const physical = text(raw?.overallAppearance, 1800);
+    const stored = text(raw?.appearance, CAST_APPEARANCE_WIDE);
+    const head = physical.replace(/[\s.;,]+$/, '');
+    let part = stored;
+    let split = false;
+    if (physical) {
+        if (stored === physical || stored === head) { part = ''; split = true; }
+        else if (stored.startsWith(`${head}; `)) { part = stored.slice(head.length + 2); split = true; }
+    }
+    const firstPhysical = text(first.overallAppearance, 1800);
+    const firstCurrent = text(first.appearance, 1800);
+    const overall = Boolean(physical) && physical === firstPhysical;
+    // No pack words for the current part (an entry without `wears`): the stored text is the physical words alone while it still is them.
+    const appearance = Boolean(stored) && (firstCurrent ? part === firstCurrent : (overall && part === ''));
+    return { overall, appearance, head, part, split };
+}
+
+export const NPC_CANDIDATE_TTL_TURNS = 15;
+export const NPC_CANDIDATE_LIMIT = 60;
+
+export function normalizeAppearanceCanon(value) {
+    let text = compactDurableText(value, DURABLE_PROFILE_LIMITS.appearance, 10);
+    if (!text) return '';
+    const ageToken = `(?:\\d{1,3}|${AGE_NUMBER_WORD_RE})`;
+    const articlePattern = new RegExp(`^(\\s*(?:a|an)\\s+)${ageToken}(?:[-\\s]+years?[-\\s]+old)\\s+`, 'i');
+    const barePattern = new RegExp(`^\\s*${ageToken}(?:[-\\s]+years?[-\\s]+old)\\s+`, 'i');
+    text = text.replace(articlePattern, '$1').replace(barePattern, '');
+    text = text.replace(new RegExp(`^\\s*(?:aged|age)\\s+${ageToken}\\s*[,;:-]?\\s*`, 'i'), '');
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text && /^[a-z]/.test(text)) text = text.charAt(0).toUpperCase() + text.slice(1);
+    return cleanText(text, DURABLE_PROFILE_LIMITS.appearance);
+}
+
+export function npcMatchesLabel(npc, label) {
+    const key = normalizeName(label);
+    if (!key || !npc) return false;
+    return [npc.name, ...(npc.aliases || [])].some(value => normalizeName(value) === key);
+}
+
+export function normalizeStoredMemories(value) {
+    const cleaned = semanticDedupeItems(cleanList(value, 64, DURABLE_PROFILE_LIMITS.memory), {
+        maxItems: 64,
+        maxChars: DURABLE_PROFILE_LIMITS.memory,
+        similarity: 0.58,
+    });
+    if (cleaned.length <= IMPORTANT_MEMORY_LIMIT) return cleaned;
+    // Keep only the most recent bounded set after semantic dedupe.
+    return cleaned.slice(-IMPORTANT_MEMORY_LIMIT);
+}
+
+
+// (stage 73) Message citations ("[m1, m2]") the scanner's model appended to a field are not dossier text: normalizeNpcRecord strips them from
+// every stored text field and list item, so a saved dossier is cleaned the next time it is normalized. An evidence item keeps its intended
+// leading "[mN] " tag (message attribution); only citations after it go.
+const CITATION_LIST_FIELDS = ['aliases', 'mannerisms', 'behaviorProfile', 'behavior_profile', 'memories', 'manualMemories', 'keyRelationships', 'key_relationships', 'innerCircle', 'inner_circle', 'family'];
+const CITATION_TEXT_FIELDS = [...TEXT_FIELDS, 'overallAppearance', 'unclassifiedAppearance', 'lifeStateReason'];
+const stripEvidenceCitations = item => {
+    if (typeof item !== 'string') return item;
+    const lead = item.match(/^\s*\[m\d+\]\s*/i);
+    return lead ? lead[0] + stripMessageCitations(item.slice(lead[0].length)) : stripMessageCitations(item);
+};
+export function stripRecordCitations(raw) {
+    const out = { ...raw };
+    // The reader's own fields (locked in the editor) and a cast pack's words still as the pack wrote them are not the scanner's: left as they are.
+    const locked = new Set(Array.isArray(raw?.manualProfileFields) ? raw.manualProfileFields.map(value => String(value || '').trim()) : []);
+    const first = raw?.castFrom?.first && typeof raw.castFrom.first === 'object' ? raw.castFrom.first : {};
+    const keep = key => locked.has(key) || (first[key] !== undefined && JSON.stringify(first[key]) === JSON.stringify(out[key]));
+    for (const key of CITATION_TEXT_FIELDS) if (typeof out[key] === 'string' && !keep(key)) out[key] = stripMessageCitations(out[key]);
+    for (const key of CITATION_LIST_FIELDS) if (Array.isArray(out[key]) && !keep(key)) out[key] = out[key].map(item => (typeof item === 'string' ? stripMessageCitations(item) : item));
+    if (Array.isArray(out.appearanceForms)) {
+        out.appearanceForms = out.appearanceForms.map(form => (form && typeof form.appearance === 'string' ? { ...form, appearance: stripMessageCitations(form.appearance) } : form));
+    }
+    for (const key of ['profileEvidence', 'profile_evidence']) {
+        const evidence = out[key];
+        if (evidence && typeof evidence === 'object' && !Array.isArray(evidence)) {
+            out[key] = Object.fromEntries(Object.entries(evidence).map(([field, list]) => [field, Array.isArray(list) ? list.map(stripEvidenceCitations) : list]));
+        }
+    }
+    return out;
+}
+

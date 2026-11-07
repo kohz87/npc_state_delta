@@ -19,6 +19,16 @@ Generated 2026-11-07.
 - `src/adapter/timeline.js`: Story Block module definition, restore participant, story-clock link, own prompt keys, diagnostics and host events.
 
 ## Split files
+- `core-record-shared.js`: Admission/portrait constants, cast-appearance preservation, appearance canon, stored-memory normalization, label matching and citation stripping split from `core-record.js`.
+- `core-record-scan.js`: Scan-row normalization, candidate records, admission/promotion and candidate matching split from `core-record.js`.
+- `core-record-custom-fields.js`: Custom-field parsing, value projection and grounded merge split from `core-record.js`.
+- `core-record-merge.js`: Label/place matching, list and Important Memory merging, and durable-text acceptance split from `core-record.js`.
+- `core-prompts-criteria.js`: Default scanner criteria, relationship stripping, payload preparation, prompt-name flattening and rubric compaction split from `core-prompts.js`.
+- `core-prompts-relationship.js`: The focused relationship-pass prompt split from `core-prompts.js`.
+- `core-prompts-select.js`: Scene-present focus, bounded context assembly and mention scoring split from `core-prompts.js`.
+- `core-prompts-targeted.js`: Output caps/return shapes plus backfill, dossier-import and profile-refresh prompts split from `core-prompts.js`.
+- `core-prompts-capture.js`: One-pass capture rules and hidden-note prompt fragments split from `core-prompts.js`.
+- `core-prompts-scanner.js`: Scanner context assembly and `buildScannerPrompt` split from `core-prompts.js`.
 - `src/npc-meters-commands.js`: Story-line capture, milestone intake and the hosted npc command handlers split from `src/npc-meters.js`.
 - `src/npc-meters-queries.js`: Read-only npc meter/cast/next/social queries and their screen views split from `src/npc-meters.js`.
 - `src/npc-meters-prompt.js`: The NPC meter prompt line, reminder tail and locked-note redaction split from `src/npc-meters.js`.
