@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { chooseDossierSelection, dossierIndexProjection, filterDossierIndex } from '../dossier-ui.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 const rows = [
     { id: 'mira', name: 'Mira', role: 'Scout', worldActive: true },
@@ -35,7 +36,7 @@ test('1.1.4: a dead dossier stays listed only while it is selected', () => {
 });
 
 test('1.1.4: the library offers All, Active and Archived only, and its counts leave out the dead', () => {
-    const source = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
+    const source = dossierUiSource();
     assert.match(source, /\['all', 'active', 'archived'\]\.map\(key =>/);
     assert.match(source, /if \(row\?\.bucket === 'dead'\) continue;/);
     assert.match(source, /keepId: this\.selectedNpcId/);

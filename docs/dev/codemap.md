@@ -19,6 +19,24 @@ Generated 2026-11-07.
 - `src/adapter/timeline.js`: Story Block module definition, restore participant, story-clock link, own prompt keys, diagnostics and host events.
 
 ## Split files
+- `core-record-shared.js`: Admission/portrait constants, cast-appearance preservation, appearance canon, stored-memory normalization, label matching and citation stripping split from `core-record.js`.
+- `core-record-scan.js`: Scan-row normalization, candidate records, admission/promotion and candidate matching split from `core-record.js`.
+- `core-record-custom-fields.js`: Custom-field parsing, value projection and grounded merge split from `core-record.js`.
+- `core-record-merge.js`: Label/place matching, list and Important Memory merging, and durable-text acceptance split from `core-record.js`.
+- `core-prompts-criteria.js`: Default scanner criteria, relationship stripping, payload preparation, prompt-name flattening and rubric compaction split from `core-prompts.js`.
+- `core-prompts-relationship.js`: The focused relationship-pass prompt split from `core-prompts.js`.
+- `core-prompts-select.js`: Scene-present focus, bounded context assembly and mention scoring split from `core-prompts.js`.
+- `core-prompts-targeted.js`: Output caps/return shapes plus backfill, dossier-import and profile-refresh prompts split from `core-prompts.js`.
+- `core-prompts-capture.js`: One-pass capture rules and hidden-note prompt fragments split from `core-prompts.js`.
+- `core-prompts-scanner.js`: Scanner context assembly and `buildScannerPrompt` split from `core-prompts.js`.
+- `core-relationship-model.js`: Relationship defaults, milestone thresholds and the baseline/caps/impact/delta/progress/milestone normalizers split from `core-relationship.js`.
+- `core-relationship-apply.js`: Relationship inertia, axis selection and the milestone-gated `applyRelationshipDelta` scorer split from `core-relationship.js`.
+- `core-relationship-events.js`: Relationship evidence grounding, event history, duplicate checks and summary calibration split from `core-relationship.js`.
+- `core-relationship-text.js`: Durable concept tokens, grounding coverage, semantic similarity and compact-text helpers split from `core-relationship.js`.
+- `storage-identity.js`: Per-storage-instance writer identity, sidecar path tokens and deterministic data/recovery file names split from `storage.js`.
+- `storage-payload.js`: Sidecar format markers, base64 encoding, portrait-asset pruning and JSON payload encode/decode split from `storage.js`.
+- `storage-files.js`: Sidecar upload/delete/existence calls and cast-portrait user-file helpers split from `storage.js`.
+- `storage-inspection.js`: Sidecar read slots, validator cache, revision inspection and pointer adoption split from `storage.js`.
 - `src/npc-meters-commands.js`: Story-line capture, milestone intake and the hosted npc command handlers split from `src/npc-meters.js`.
 - `src/npc-meters-queries.js`: Read-only npc meter/cast/next/social queries and their screen views split from `src/npc-meters.js`.
 - `src/npc-meters-prompt.js`: The NPC meter prompt line, reminder tail and locked-note redaction split from `src/npc-meters.js`.
@@ -38,3 +56,89 @@ Generated 2026-11-07.
 - `src/storysuite-participant/participant/publication.js`: Native-change pairing, publication, retry and flush.
 - `src/storysuite-participant/participant/session-ops.js`: Session hydration, checkpoints, identity lines and commit-probe comparisons.
 - `src/storysuite-participant/participant/support.js`: Shared participant envelopes, prepared ids and index normalization.
+- `branch-constants.js`: Branch lineage, snapshot and rollback-journal limits split from `branch.js`.
+- `branch-lineage.js`: Message fingerprints, lineage keys and hidden-message key repair split from `branch.js`.
+- `branch-util.js`: Byte-size, JSON-equality and NPC-list cloning helpers split from `branch.js`.
+- `branch-rollback-undo.js`: Incremental dossier, social-graph and scalar undo records split from `branch.js`.
+- `branch-rollback-journal.js`: Rollback-journal normalization, retention, baseline and mutation settlement split from `branch.js`.
+- `branch-checkpoints.js`: Full branch checkpoint normalization, retention budgets, parent anchors and recording split from `branch.js`.
+- `branch-recovery.js`: Dismissal, message-position, checkpoint-matching and linear restore helpers split from `branch.js`.
+- `branch-delete-recovery.js`: Deleted-block NPC reversion, social-graph undo and cleanup split from `branch.js`.
+- `branch-reconcile.js`: `reconcileBranchState` and its exact journal/checkpoint recovery split from `branch.js`.
+- `branch-ancestry.js`: Cross-chat `bestAncestorState` and explicit-parent matching split from `branch.js`.
+- `dossier-ui-catalog.js`: Index filtering, selection, key/cast projections and dossier-state shaping split from `dossier-ui.js`.
+- `dossier-ui-constants.js`: Dossier root, settings, style and observer constants shared by the split UI modules.
+- `dossier-ui-controller.js`: Dossier controller actions, refresh orchestration, editor and settings bridges split from `dossier-ui.js`.
+- `dossier-ui-html.js`: Escaped dossier markup, cards, appearance forms, portrait references and section helpers split from `dossier-ui.js`.
+- `dossier-ui-meters.js`: Hosted meter bars, rank, milestones and Secrets-section projections and markup split from `dossier-ui.js`.
+- `dossier-ui-model.js`: Dossier record lookups, change stamps and index/detail projections split from `dossier-ui.js`.
+- `dossier-ui-mount.js`: Singleton dossier UI mounting and open-dossier request forwarding split from `dossier-ui.js`.
+- `dossier-ui-panel.js`: Dossier panel lifecycle, shell, events, observers and portrait lightbox split from `dossier-ui.js`.
+- `dossier-ui-relationship.js`: Relationship meter steps, latest change and history markup split from `dossier-ui.js`.
+- `dossier-ui-render.js`: Cast rail, filters and selected-dossier rendering split from `dossier-ui.js`.
+- `dossier-ui-styles.js`: The dossier panel's scoped stylesheet split from `dossier-ui.js`.
+- `social-primitives.js`: Shared social-graph limits plus text normalization and similarity helpers split from `social.js`.
+- `social-relations.js`: Relation families, inverse/sanitization rules and shared relation parsing split from `social.js`.
+- `social-bonds.js`: Important-bond parsing, compaction and display formatting split from `social.js`.
+- `social-graph.js`: Social graph shapes, normalization, edge merging and reference resolution split from `social.js`.
+- `social-scan.js`: Scanner social edges and canonical relationship alignment split from `social.js`.
+- `social-facts.js`: Explicit unnamed social facts and unresolved graph slots split from `social.js`.
+- `social-inference.js`: Shared-parent sibling inference and its suppression rules split from `social.js`.
+- `social-projection.js`: Projection of the social graph into Important Bonds and id remapping split from `social.js`.
+- `social-manual.js`: Manual Important Bond edits, mirrored updates and repair split from `social.js`.
+- `runtime-entry-events.js`: SillyTavern generation, reply, branch, chat lifecycle and deletion listeners split from `index.js`.
+- `runtime-entry-ui-events.js`: Present-card activation, closest-target lookup and launcher-dossier event bridge split from `index.js`.
+- `runtime-entry-card-settings.js`: Character-card settings definition and panel-equivalent saves split from `index.js`.
+- `runtime-entry-startup.js`: Idempotent runtime initialization functions split from `index.js`.
+- `runtime-entry-public-read.js`: Public scan, portrait, status and diagnostics API split from `index.js`.
+- `runtime-entry-public-write.js`: Public state, host-integration and manual-mutation API split from `index.js`.
+- `core-profile-development-ledger.js`: Personality/Speech ledger config, bounded evidence parsing, concept/ledger normalization and the per-NPC ledger accessor split from `core-profile-development.js`.
+- `core-profile-development-observation.js`: Development record matching and non-duplicate observation intake split from `core-profile-development.js`.
+- `core-profile-development-readiness.js`: Spread readiness, aggregate provenance, durable-row selection and per-scan preparation split from `core-profile-development.js`.
+- `appearance-text.js`: Text/form primitives, shared-prefix combination and public appearance form/version limits split from `appearance.js`.
+- `appearance-physical.js`: Physical-trait keys, enduring-trait carry, shared-piece deduplication and refinement similarity split from `appearance.js`.
+- `appearance-model.js`: Form parsing, legacy-form conversion, canonical appearance model and resolution split from `appearance.js`.
+- `appearance-update.js`: Form reconciliation, omitted-trait carry and appearance update application split from `appearance.js`.
+- `appearance-portrait.js`: Per-form portrait assets and resolved-appearance fingerprint split from `appearance.js`.
+- `appearance-draft.js`: Appearance editor draft and lock handling split from `appearance.js`.
+- `calendar-config.js`: Calendar month parsing/normalization, active calendar and external calendar source split from `calendar.js`.
+- `calendar-clock.js`: Story Director clock source/memo, story-minute dates and hosted/current date fallbacks split from `calendar.js`.
+- `calendar-date.js`: Date normalization, ordinals, absolute day numbers and legacy story-day migration split from `calendar.js`.
+- `calendar-derived.js`: Deterministic birthdays, World State date extraction, age derivation and prompt date context split from `calendar.js`.
+- `core-development-time.js`: Development time-skip/reason grounding and user-canon checks split from `core-development.js`.
+- `core-development-episode.js`: Targeted/bounded development episodes and developmentScaleReady split from `core-development.js`.
+- `core-development-update.js`: Single-NPC durable profile update rules split from `core-development.js`.
+- `core-development-batch.js`: Batch profile updates and interim identity promotion split from `core-development.js`.
+- `runtime-inline-cards-state.js`: Inline-card state records and present-card lookups split from `runtime-inline-cards.js`.
+- `runtime-inline-cards-present.js`: Portrait/card/speaker markup, scene reads and roster HTML split from `runtime-inline-cards.js`.
+- `runtime-inline-cards-mode.js`: Present-cast display choice, launcher flags and Story Block cast HTML split from `runtime-inline-cards.js`.
+- `runtime-inline-cards-megumin.js`: Megumin block tab/pane integration and cleanup split from `runtime-inline-cards.js`.
+- `runtime-inline-cards-mount.js`: Chat observer, watchdog, renderer and debounced render queue split from `runtime-inline-cards.js`.
+- `bundle-codec.js`: Bundle framing, portrait binary encoding and bundle decoding split from `bundle.js`.
+- `bundle-import-helpers.js`: Import identity matching, id/slot reconciliation and manual-lock helpers split from `bundle.js`.
+- `portrait-tools-targets.js`: Form-aware portrait resolution and target selection UI split from `portrait-tools.js`.
+- `portrait-tools-actions.js`: Upload completion, generated portrait previews/seeds and removal split from `portrait-tools.js`.
+- `dossier-experience-state.js`: Life-state projection, current selection and DOM write guards split from `dossier-experience.js`.
+- `dossier-experience-styles.js`: Extension-wide dossier, editor and settings CSS split from `dossier-experience.js`.
+- `runtime-hydration-state.js`: Fresh/normalized chat state, cached-copy accessors, hydration metadata, freshness events, dirty marks and native-change notices split from `runtime-hydration.js`.
+- `runtime-hydration-freshness.js`: Revision conflicts, server-copy freshness checks, preserved local work and canonical-state installation split from `runtime-hydration.js`.
+- `runtime-hydration-load.js`: Sidecar discovery and retry, loaded-state installation, freshness-gated mutations and hydration write gates split from `runtime-hydration.js`.
+- `core-merge-aliases.js`: Alias-linked duplicate consolidation, canonical-name choice and locked-field merging split from `core-merge.js`.
+- `core-merge-names.js`: NPC name-in-text matching tables and normalized phrase counts split from `core-merge.js`.
+- `launcher-ui-position.js`: Launcher viewport clamping, compact position records, saved-position access and viewport sizing split from `launcher-ui.js`.
+- `core-portrait-visuals.js`: Portrait appearance typing, visual-anchor tags, hair/eye/feature extraction and contradiction negatives split from `core-portrait.js`.
+- `core-portrait-prose.js`: Natural-language portrait sentence assembly split from `core-portrait.js`.
+- `core-injection-selection.js`: Behavior guidance, relevance scoring, NPC selection and injection-budget normalization split from `core-injection.js`.
+- `core-injection-parts.js`: Injection text trimming, identity/agency/state blocks, optional fields and mentioned/deceased reference blocks split from `core-injection.js`.
+- `core-durable-identity.js`: Morality polarity and evolution-language checks split from `core-durable.js`.
+- `core-durable-grounding.js`: Source grounding, speech attribution, appearance correction/change and unmarked refinement admission split from `core-durable.js`.
+- `core-durable-episodes.js`: Mannerism normalization, safe refinement filtering and development-episode scoping split from `core-durable.js`.
+- `runtime-editor-save.js`: Dossier editor save, hosted-meter changes, social reconciliation and durable persistence split from `runtime-editor.js`.
+- `runtime-lifecycle-delete.js`: Transactional chat-deletion retirement, recovery-copy handling and tombstone publication split from `runtime-lifecycle.js`.
+- `runtime-scan-backfill.js`: Pending-backfill queue entry and one-pass admission cap split from `runtime-scan.js`.
+- `runtime-scan-stale.js`: Stale-cleanup protected references and archive/delete pass split from `runtime-scan.js`.
+- `runtime-scan-reply.js`: Reply parent/rewrite checks, earlier-only scene stripping and first-scan window split from `runtime-scan.js`.
+- `runtime-scan-handler.js`: Assistant-message receipt, swipe guard, scan cadence and reply-name check split from `runtime-scan.js`.
+- `runtime-targeted-scope.js`: Target-row admission and single-target profile/social channel scoping split from `runtime-targeted.js`.
+- `runtime-targeted-refresh.js`: Editor-field sync and the targeted Refresh pass split from `runtime-targeted.js`.
+- `runtime-targeted-backfill.js`: History backfill and the pending-backfill queue split from `runtime-targeted.js`.

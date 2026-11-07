@@ -1,176 +1,27 @@
-/* NPC State Delta reply scan (role: reply-scan). The scan of a reply: the handler of a new assistant message, the scan itself (one-pass capture or the
-   scanner request, merge, stale lifecycle, backfill queue, checkpoint), the capture catch-up and the checks that a reply was rewritten in place. Built by
-   index.js once per module instance with the shared runtime state. Bodies are moved from index.js without change. */
-
+/* NPC State Delta reply scan (role: reply-scan). The scan itself (one-pass capture or the scanner request, merge, stale
+   lifecycle, backfill queue, checkpoint) and the capture catch-up; its backfill, stale, reply identity and assistant-handler
+   parts are split beside this file, and this factory keeps the public scan part. Built by index.js once per module instance. */
 import { getContext } from '../../../extensions.js';
 import { isScannerRoutingError } from './scanner-routing.js';
-import { AUTOMATIC_BACKFILL_QUEUE_VERSION, AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT, autoScanDue as autoScanDueAfterReply, npcParticipatesInExchange, readAheadOf, replyMayChangeDossiers, replyScanned, settleScan } from './scan-context.js';
-import { recentTranscript, recentUserDevelopmentContext, currentExchangeUserDevelopmentContext, currentExchangeTranscript, skippedExchangesWindow, recentReplyIds, activeReplyIds, currentExchangeProse, currentExchangeBodies, storyDayAt, currentExclusions, refreshMessageGate } from './src/transcript.js';
+import { AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT, npcParticipatesInExchange, readAheadOf, settleScan } from './scan-context.js';
+import { recentTranscript, recentUserDevelopmentContext, currentExchangeUserDevelopmentContext, currentExchangeTranscript, skippedExchangesWindow, recentReplyIds, activeReplyIds, currentExchangeProse, storyDayAt, currentExclusions, refreshMessageGate } from './src/transcript.js';
 import { FULL_SCAN_RESPONSE_LENGTH, SCAN_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
-import { applyFocusedRelationshipDecisions, rawScanMatchesExisting, runFocusedRelationshipPass, suppressPrimaryRelationshipForFocusedDecisions } from './src/relationship-pass.js';
-import { prepareFullWindowRelationshipPayload, buildScannerPrompt, mergeScanResult, tagScanEvidence, npcMatchesLabel, normalizeName, resolveInterimIdentityPromotions, hasCompactMeguminWorldState, extractExplicitKeyRelationshipEdges, applyStaleNpcLifecycle } from './core.js';
-import { chatLineage, fingerprintMessage, lineageCheckpointKey, ensureBranchParentAnchor, migrateLegacyLineage } from './branch.js';
+import { applyFocusedRelationshipDecisions, runFocusedRelationshipPass, suppressPrimaryRelationshipForFocusedDecisions } from './src/relationship-pass.js';
+import { prepareFullWindowRelationshipPayload, buildScannerPrompt, mergeScanResult, tagScanEvidence, npcMatchesLabel, resolveInterimIdentityPromotions, hasCompactMeguminWorldState, extractExplicitKeyRelationshipEdges } from './core.js';
+import { chatLineage, fingerprintMessage } from './branch.js';
 import { getSettings } from './runtime-settings.js';
-import { narrationCaptureEnabled, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
-
+import { lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
+import { createCatchUpPart } from './runtime-catchup.js';
+import { capCaptureAdmissions, queueNpcBackfillInState } from './runtime-scan-backfill.js';
+import { applyStaleLifecycleAfterScan } from './runtime-scan-stale.js';
+import { createScanReplyPart } from './runtime-scan-reply.js';
+import { createAssistantHandlerPart } from './runtime-scan-handler.js';
 export function createScanPart(rt, deps) {
-    const { attachGeneratedSecrets, BACKFILLS_PER_REPLY, beginScanOperation, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, queueSettledSwipeReconcile, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanAfterEveryReply, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanNow, scanOperationCurrent, scanScenePresent, scenePresentAt, scheduleReplyBackfills, setChatState, staleHostActive, takeNarrationCapture, updateInjection } = deps;
-    const { assistantReceipts, narrationCaptures, catchUpChats, stateVersions, captureCatchUp } = rt;
-
-    function queueNpcBackfillInState(state, npcId, label, requestedMessageId = null, options = {}) {
-        const reason = String(options?.reason || '').trim();
-        if (!state || !npcId || !String(label || '').trim() || !['missed-participant', 'new-admission'].includes(reason)) return state;
-        if (!Array.isArray(state.pendingBackfills)) state.pendingBackfills = [];
-        const cleanLabel = String(label || '').trim().slice(0, 120);
-        state.pendingBackfills = state.pendingBackfills.filter(item => item?.npcId !== npcId);
-        state.pendingBackfills.push({
-            queueVersion: AUTOMATIC_BACKFILL_QUEUE_VERSION,
-            reason,
-            npcId: String(npcId).slice(0, 100),
-            label: cleanLabel,
-            requestedMessageId: Number.isInteger(requestedMessageId) ? requestedMessageId : null,
-            preserveLiveState: options?.preserveLiveState === true,
-            silent: options?.silent === true,
-            requestedAt: Date.now(),
-            attempts: 0,
-            lastAttemptAt: 0,
-        });
-        if (state.pendingBackfills.length > 100) state.pendingBackfills.splice(0, state.pendingBackfills.length - 100);
-        return state;
-    }
-
-    // (b6-soak-2) One capture block admits at most this many new people. A crowd scene (a block naming
-    // forty dockhands) otherwise makes forty dossiers, each with its own backfill request later; the
-    // people left out are admitted from a later reply that names them again.
-    const CAPTURE_NEW_NPCS_PER_BLOCK = 4;
-    function capCaptureAdmissions(parsed, npcs = []) {
-        const rows = Array.isArray(parsed?.npcs) ? parsed.npcs : [];
-        let fresh = 0;
-        const kept = rows.filter(raw => {
-            if (npcs.some(npc => rawScanMatchesExisting(raw, npc))) return true;
-            fresh += 1;
-            return fresh <= CAPTURE_NEW_NPCS_PER_BLOCK;
-        });
-        if (kept.length === rows.length) return;
-        console.info(`[NPC State Delta] a one-pass block named ${fresh} new people; ${CAPTURE_NEW_NPCS_PER_BLOCK} were admitted from it, the others wait for a later reply.`);
-        parsed.npcs = kept;
-    }
-
-    function collectStaleCleanupProtectedIds(state, scanResult, transcript = '') {
-        const ids = new Set();
-        const npcs = Array.isArray(state?.npcs) ? state.npcs : [];
-        const addReference = (id, label) => {
-            const directId = String(id || '').trim();
-            if (directId && npcs.some(npc => npc.id === directId)) ids.add(directId);
-            const name = String(label || '').trim();
-            if (!name) return;
-            const matched = npcs.find(npc => npcMatchesLabel(npc, name));
-            if (matched) ids.add(matched.id);
-        };
-
-        for (const raw of Array.isArray(scanResult?.npcs) ? scanResult.npcs : []) addReference(raw?.id, raw?.name);
-        for (const raw of Array.isArray(scanResult?.profileUpdates) ? scanResult.profileUpdates : []) addReference(raw?.id, raw?.name);
-        for (const edge of Array.isArray(scanResult?.keyRelationshipEdges) ? scanResult.keyRelationshipEdges : []) {
-            addReference(edge?.aId, edge?.a);
-            addReference(edge?.bId, edge?.b);
-        }
-
-        // Conservative local guard: if the current scan text explicitly names a stale NPC,
-        // never prune that dossier even if the model omitted its delta object.
-        const haystack = ` ${normalizeName(transcript)} `;
-        if (haystack.trim()) {
-            for (const npc of npcs) {
-                const labels = [npc.name, ...(npc.aliases || [])]
-                    .map(normalizeName)
-                    .filter(label => label.length >= 3);
-                if (labels.some(label => haystack.includes(` ${label} `))) ids.add(npc.id);
-            }
-        }
-        return ids;
-    }
-
-    function applyStaleLifecycleAfterScan(state, scanResult, transcript, settings, { onlyWhenAtCap = false } = {}) {
-        if (settings.autoPruneStale === false) return { state, archived: [], removed: [] };
-        const activeCount = (state.npcs || []).filter(npc => !npc?.archived).length;
-        if (onlyWhenAtCap && activeCount < Number(settings.maxNpcs || 40)) return { state, archived: [], removed: [] };
-        return applyStaleNpcLifecycle(state, {
-            turn: state.turn,
-            archiveAfter: settings.staleArchiveAfter,
-            deleteAfter: settings.staleDeleteAfter,
-            protectedIds: [...collectStaleCleanupProtectedIds(state, scanResult, transcript)],
-        });
-    }
-
-    // (1.2.11) One-pass catch-up. Mannerisms, levers and memories fill from evidence gathered over
-    // scenes, and a block written beside the story tends to leave them thin, while a Refresh (which
-    // reads a window of scenes) fills them. So every `narrationCaptureCatchUp` captured replies, the
-    // NPCs most in them get a quiet Refresh. Counted per chat in this session only; nothing is saved.
-    const CATCH_UP_TARGETS = 2;
-    const CATCH_UP_RETRY_MS = 3000;
-    const CATCH_UP_RETRIES = 20;
-
-    /** Counts one captured reply and the NPCs in it; the NPC ids due a catch-up now, or []. */
-    function noteCaptureCatchUp(chatKey, npcIds = []) {
-        const every = Math.max(0, Math.round(Number(getSettings().narrationCaptureCatchUp) || 0));
-        if (!every) return [];
-        const entry = captureCatchUp.get(chatKey) ?? { count: 0, seen: new Map() };
-        entry.count += 1;
-        for (const id of new Set(npcIds)) if (id) entry.seen.set(id, (entry.seen.get(id) || 0) + 1);
-        captureCatchUp.set(chatKey, entry);
-        if (entry.count < every) return [];
-        captureCatchUp.delete(chatKey);
-        return [...entry.seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, CATCH_UP_TARGETS).map(([id]) => id);
-    }
-
-    async function runCaptureCatchUp(chatKey, ids, tries = 0) {
-        if (!ids.length || getChatKey() !== chatKey) return;
-        if (isScanBusy(chatKey) || isHostSwipeActive()) {
-            if (tries < CATCH_UP_RETRIES) setTimeout(() => void runCaptureCatchUp(chatKey, ids, tries + 1), CATCH_UP_RETRY_MS);
-            return;
-        }
-        for (const id of ids) {
-            if (getChatKey() !== chatKey) return;
-            if (!getChatState(chatKey).npcs.some(npc => npc.id === id && !npc.archived)) continue;
-            await refreshNpcFromChat(id, { automatic: true });
-        }
-        // (user decision 5) Hosted one-pass mode runs the backfill queue here, on the catch-up schedule.
-        if (getChatKey() === chatKey && hostedOnePass()) await processPendingBackfills(latestMessageId(true), { limit: BACKFILLS_PER_REPLY });
-    }
-
-    // (1.2.9) Other extensions write into a reply just after it arrives: Story Block tidying its
-    // blocks, RPG Battle its Party sheet, Story Director a closing line. That is the same reply
-    // rewritten in place, not a new branch: its position and every message before it are unchanged.
-    // Treating it as a different reply left the one-pass capture block waiting, never merged.
-    function replyParentKey(messageId) {
-        return messageId > 0 ? lineageCheckpointKey(chatLineage(getContext().chat || []), messageId - 1) : 'root';
-    }
-    function sameReplyRewritten(chatKey, messageId, parentKey) {
-        if (getChatKey() !== chatKey || !Number.isInteger(messageId)) return false;
-        const message = getContext().chat?.[messageId];
-        return Boolean(message && !message.is_user && !message.is_system) && replyParentKey(messageId) === parentKey;
-    }
-
-    // Current presence, mood and location belong to the latest scene: an earlier-only window never sets them.
-    function stripLiveSceneFields(parsed) {
-        const rows = [...(Array.isArray(parsed?.npcs) ? parsed.npcs : []), ...(Array.isArray(parsed?.profileUpdates) ? parsed.profileUpdates : [])];
-        for (const row of rows) {
-            if (!row || typeof row !== 'object') continue;
-            for (const key of ['present', 'worldActive', 'world_active', 'activeOffscreen', 'active_offscreen', 'mood', 'moodState', 'mood_state', 'clearMood', 'clear_mood', 'location', 'locationState', 'location_state', 'clearLocation', 'clear_location']) delete row[key];
-        }
-    }
-
-    // A chat counts as new (its first scan reads from the start) only when nothing was ever applied to it: no scan, no dossier
-    // or candidate, and a history short enough for one window. An imported or cleared chat, or a long chat with no sidecar,
-    // reads the latest reply only.
-    const NEW_CHAT_MAX_REPLIES = 15;
-    function chatNeverScanned(state, messageId) {
-        if (Number(state?.scanCount || 0) > 0 || (state?.npcs || []).length || (state?.candidates || []).length) return false;
-        const chat = getContext().chat || [];
-        let replies = 0;
-        for (let i = 0; i <= Math.min(messageId, chat.length - 1); i += 1) if (chat[i] && !chat[i].is_system && !chat[i].is_user) replies += 1;
-        return replies <= NEW_CHAT_MAX_REPLIES;
-    }
-
+    const { attachGeneratedSecrets, beginScanOperation, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanOperationCurrent, scanScenePresent, scenePresentAt, setChatState, takeNarrationCapture, updateInjection } = deps;
+    const { narrationCaptures, catchUpChats, stateVersions } = rt;
+    const { noteCaptureCatchUp, runCaptureCatchUp } = createCatchUpPart(rt, { getChatKey, getChatState, hostedOnePass, isHostSwipeActive, isScanBusy, persist, processPendingBackfills, refreshNpcFromChat });
+    const { replyParentKey, sameReplyRewritten, stripLiveSceneFields, chatNeverScanned } = createScanReplyPart({ getChatKey });
+    const { handleAssistantMessageReceivedInner } = createAssistantHandlerPart(rt, deps, { replyParentKey, sameReplyRewritten });
     async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe = false } = {}) {
         const settings = getSettings();
         if (!settings.enabled) return false;
@@ -593,100 +444,6 @@ export function createScanPart(rt, deps) {
             if (getChatKey() === scanChatKey) void drainPendingAutoScan(scanChatKey);
             if (catchUpIds.length) void runCaptureCatchUp(scanChatKey, catchUpIds);
         }
-    }
-
-    async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard = false, forceBranchRescan = false } = {}) {
-        const settings = getSettings();
-        if (!settings.enabled) return;
-        const eventChatKey = getChatKey();
-        if (eventChatKey === 'no-chat' || !Number.isInteger(messageId) || messageId < 0) return;
-        const eventMessage = getContext().chat?.[messageId];
-        if (!eventMessage || eventMessage.is_user || eventMessage.is_system || !String(eventMessage.mes || '').trim()) return;
-        let eventSourceKey = lineageCheckpointKey(chatLineage(getContext().chat || []), messageId);
-        const eventParent = replyParentKey(messageId);
-        // (1.2.9) The same reply rewritten in place by another extension keeps its receipt.
-        const sourceStillHere = () => {
-            if (getChatKey() !== eventChatKey) return false;
-            const now = lineageCheckpointKey(chatLineage(getContext().chat || []), messageId);
-            if (now === eventSourceKey) return true;
-            if (!sameReplyRewritten(eventChatKey, messageId, eventParent)) return false;
-            eventSourceKey = now;
-            return true;
-        };
-        try { await ensureChatStateLoaded(eventChatKey); }
-        catch (error) {
-            console.error('[NPC State Delta] assistant event deferred because chat hydration failed.', error);
-            globalThis.toastr?.error?.('NPC State Delta could not load this chat dossier. Existing sidecar data was preserved; retry after the server is available.');
-            return;
-        }
-        if (!sourceStillHere()) return;
-
-        // SillyTavern 1.18 emits MESSAGE_SWIPED before starting Generate('swipe'). Some
-        // backends then emit MESSAGE_RECEIVED while swipeState is still SWIPING. Never run
-        // dossier generation in that window; settlement will replay this message safely.
-        if (!bypassSwipeGuard && isHostSwipeActive()) {
-            if (Number.isInteger(messageId)) rt.deferredSwipeMessageId = messageId;
-            queueSettledSwipeReconcile({
-                explicitDivergence: Number.isInteger(messageId) ? messageId : null,
-                rescan: true,
-                reason: 'message-swiped-received',
-            });
-            return;
-        }
-
-        const state = getChatState();
-        migrateLegacyLineage(state, getContext().chat || []);
-        const receipts = assistantReceipts.get(eventChatKey) || new Set();
-        if (!forceBranchRescan && (receipts.has(eventSourceKey)
-            || (replyScanned(state, messageId) && eventSourceKey === lineageCheckpointKey(state.lineage, messageId)))) return;
-        // Receipt deduplication is separate from successful scan completion and cadence.
-        // Store bounded source keys, never copies of narrative text or dossier state.
-        receipts.add(eventSourceKey);
-        while (receipts.size > 64) receipts.delete(receipts.values().next().value);
-        assistantReceipts.set(eventChatKey, receipts);
-        if (Number.isInteger(messageId) && !staleHostActive(eventChatKey)) ensureBranchParentAnchor(state, getContext().chat || [], messageId, 'assistant-parent');
-        state.turn = Number(state.turn || 0) + 1;
-        // Presence remains last-confirmed until a successful scanner observation replaces it.
-        // A skipped, busy, failed, or timed-out scan must not make every NPC disappear.
-        state.assistantSinceScan = Number(state.assistantSinceScan || 0) + 1;
-        const shouldForceBranchScan = forceBranchRescan && settings.branchRescan !== false;
-        const autoScanDue = autoScanDueAfterReply({
-            autoScan: settings.autoScan,
-            full: settings.fullScanEveryTurn,
-            sinceScan: state.assistantSinceScan,
-            scanEvery: settings.scanEvery,
-            everyReply: scanAfterEveryReply(),
-            catchUp: settings.autoScan && catchUpChats.has(eventChatKey),
-            replyChanges: settings.autoScan && !settings.fullScanEveryTurn && replyNamesSomeone(state, messageId),
-        });
-        // A complete capture block is a scan already paid for, so it merges whatever Scan every says.
-        const captureDue = narrationCaptureEnabled(settings) && narrationCaptures.has(narrationCaptureKey(eventChatKey, messageId));
-        const scanExpected = shouldForceBranchScan || autoScanDue || captureDue;
-        // Receipt state belongs to this assistant even if scanning fails, skips or is busy.
-        // A successful scan coalesces its changes into this same owned boundary.
-        commitBranchCheckpoint(state, messageId, 'turn');
-        persist();
-        renderDossier();
-        updateInjection();
-
-        if (scanExpected) {
-            if (await scanNow({ manual: false, messageId, allowDuringSwipe: bypassSwipeGuard }) === false) return;
-        }
-        if (getChatKey() !== eventChatKey || latestMessageId(true) !== messageId || !sourceStillHere()) return;
-        scheduleReplyBackfills(eventChatKey, messageId);
-    }
-
-    // (lean) The cheap local check before an automatic scan: a quiet reply (no new name, no tracked NPC, no NPC State line) waits
-    // for the safety scan every "Scan every" replies. The same text and roster give the same answer when a reply is replayed.
-    function replyNamesSomeone(state, messageId) {
-        try {
-            const ctx = getContext();
-            return replyMayChangeDossiers({
-                texts: currentExchangeBodies(messageId),
-                roster: [...(state?.npcs || []), ...(state?.candidates || [])],
-                ignore: [ctx.name1, ctx.name2],
-            });
-        } catch { return true; }
     }
 
     return { scanNowInner, handleAssistantMessageReceivedInner };

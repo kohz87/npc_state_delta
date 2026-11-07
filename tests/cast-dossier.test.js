@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createHost } from './vendor/story-block/testkit/index.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 import { buildInjection, createNpcRecord } from '../core.js';
 import { normalizeNpcRecord } from '../core-mechanics.js';
 import { mergeScanResult, normalizeNpcRecord as normalizeProduction } from '../core.js';
@@ -984,7 +985,7 @@ test('runtime: the dossier view offers the Pin button while Story Director offer
 });
 
 test('the section bar after the cast box starts where the box ends, and the "Next:" line has its own space under the meters', () => {
-    const ui = fs.readFileSync(fileURLToPath(new URL('../dossier-ui.js', import.meta.url)), 'utf8');
+    const ui = dossierUiSource();
     // The bar's -26px margin collapsed with the box's 10px: it pulled its opaque padding over the box's bottom edge.
     assert.match(ui, /\.delta-cast-from \+ \.delta-section-nav \{ margin-top:-10px; \}/, 'on the desktop the box margin and this one cancel: the bar starts at the box end');
     assert.match(ui, /@media \(max-width: 650px\)[\s\S]*\.delta-cast-from \+ \.delta-section-nav \{ margin-top:-4px; \}/, 'on a phone the same, with that layout\'s -4px');
@@ -997,7 +998,7 @@ test('the section bar after the cast box starts where the box ends, and the "Nex
 // ---- the opaque panel and section bar (a follow-up from the mockup) ----
 
 test('the dossier panel and its sticky section bar are opaque: a floor under the tint, the tint over it', () => {
-    const ui = fs.readFileSync(fileURLToPath(new URL('../dossier-ui.js', import.meta.url)), 'utf8');
+    const ui = dossierUiSource();
     assert.match(ui, /\.delta-panel \{[^}]*background-color:var\(--delta-floor\); background-image:linear-gradient\(var\(--delta-bg\),var\(--delta-bg\)\);/s);
     assert.match(ui, /\.delta-section-nav \{[^}]*background-color:var\(--delta-floor\); background-image:linear-gradient\(var\(--delta-bg\),var\(--delta-bg\)\);/s);
     // The bar reaches up over the panel's 22px top padding, so nothing scrolls into view above it (the chips stay where they were).

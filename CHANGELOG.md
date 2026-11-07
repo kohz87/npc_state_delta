@@ -1,3 +1,7 @@
+## Unreleased
+
+- **The large root-level runtime files are split into small parts (no behaviour change).** 24 files over 450 lines (among them `branch.js`, `dossier-ui.js`, `social.js` and `index.js`) are now small parts with header comments, named with the original file as a prefix; each original keeps its exports, so every import still works. All parts are in the runtime module list and the codemap. `runtime-scan.js` and `runtime-targeted.js` are still over 450 lines and are split next.
+
 ## 1.11.0
 
 - **A stalled timeline snapshot now gives a retryable reason.** Delta's 8-second wait budget covers earlier participant work, dossier inheritance, sidecar saves and checkpoint files instead of leaving those asynchronous waits to the host's timeout. Late work stays serialized and cannot turn an abandoned snapshot into the publication baseline.
@@ -19,7 +23,7 @@
 
 - **Settings are saved once per burst, not after every dossier change.** Every dossier change and every sidecar upload asked SillyTavern to save its whole settings file (mostly other extensions' data, about 1.9 MB), so one reply with a catch-up scan wrote it 6 to 7 times. Dossier changes now go to the chat's data file only; the settings file keeps just the pointer to that file, and the pointer is saved once, 8 seconds after the last upload (at most 30 seconds after the first), or handed to SillyTavern at once when the page is hidden or closed, the chat changes, a chat's data is reloaded by hand, or any other settings change is saved. Critical saves still save at once. If the page dies before the pointer is saved, the chat's data file is found again by its fixed name and its newest revision is adopted on load; nothing is lost.
 - **Delta's own scan changes are sent to Story Block as background changes.** The relationship changes and opened notes Delta forwards while it scans now ask Story Block to save them in its late window (`{ background: true }`), so a catch-up costs one chat-file save instead of one per change. Story Block versions that do not know the option ignore it and save as before. The reader's own edits are sent as before.
-- **No source file is over 450 lines, and every source file is in a codemap (no behaviour change).** `npc-meters.js`, `storysuite-participant/participant.js`, `adapter/cast-ui.js` and `adapter/queries.js` are now small parts with header comments; each original keeps its path and its exports, and the package ships every new file. `docs/dev/codemap.md` names every file the other docs do not.
+- **No file under `src/` is over 450 lines, and every source file is in a codemap (no behaviour change).** (Corrected after release: 26 root-level runtime files were still over 450 lines; they are split in the next version.) `npc-meters.js`, `storysuite-participant/participant.js`, `adapter/cast-ui.js` and `adapter/queries.js` are now small parts with header comments; each original keeps its path and its exports, and the package ships every new file. `docs/dev/codemap.md` names every file the other docs do not.
 - **The vendored Story Block testkit follows Story Block 2.23.0.**
 
 ## 1.10.2
