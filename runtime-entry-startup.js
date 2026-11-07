@@ -37,7 +37,7 @@ export function createStartup(rt, deps) {
             else if (globalThis.document?.visibilityState === 'visible') void refreshCurrentChatFromServer('visibility-resume');
         });
         scheduleSettingsMountRetries();
-    
+
         let key = getChatKey();
         try {
             if (isCanonicalChatKey(key)) {
@@ -55,7 +55,7 @@ export function createStartup(rt, deps) {
         evictDormantChatStates(getChatKey());
         console.log(`[NPC State Delta] v${NPC_STATE_VERSION} loaded`);
     }
-    
+
     async function safeInit() {
         try {
             await init();

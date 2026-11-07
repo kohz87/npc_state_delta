@@ -16,7 +16,7 @@ export function createEventRegistration(rt, deps) {
         closeNpcEditor, staleHostChats, retiredInSessionChats, openingHostChats, isCanonicalChatKey,
         maybeInheritKnownBranch, seedBranchTracking, persist, isScanBusy, renderDossier,
         ensureInlineObserver, drainPendingAutoScan, castPortraitDue, castSync, evictDormantChatStates,
-        runBoundedLifecycleEvent, removeDeletedChatState, moveRenamedChatState,
+        runBoundedLifecycleEvent, removeDeletedChatState, moveRenamedChatState, chatStateCache,
     } = deps;
     let lifecycleEventSequence = 0;
 
@@ -30,7 +30,7 @@ export function createEventRegistration(rt, deps) {
         for (const name of ['CONNECTION_PROFILE_CREATED', 'CONNECTION_PROFILE_UPDATED', 'CONNECTION_PROFILE_DELETED']) {
             if (events[name]) source.on(events[name], syncScannerProfileControl);
         }
-    
+
         if (events.MESSAGE_SENT) {
             source.on(events.MESSAGE_SENT, async (messageId) => {
                 rt.replacingReply = null;
@@ -109,7 +109,7 @@ export function createEventRegistration(rt, deps) {
         }
         if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { rt.sentCaptureRules = ''; rt.replacingReply = null; disarmNarrationCapture(); });
         if (events.CHAT_COMPLETION_PROMPT_READY) source.on(events.CHAT_COMPLETION_PROMPT_READY, eventData => keepCaptureRules(eventData));
-    
+
         if (events.MESSAGE_RECEIVED) {
             // The capture block leaves the reply before any other listener (TTS, full cast, other
             // extensions) or lineage key reads it.
@@ -135,7 +135,7 @@ export function createEventRegistration(rt, deps) {
                 console.error('[NPC State Delta] post-load hydration/render failed; durable data was not overwritten.', error);
             }
         });
-    
+
         if (events.MESSAGE_DELETED) {
             source.on(events.MESSAGE_DELETED, (messageId) => {
                 dropNarrationCaptures();
@@ -183,7 +183,7 @@ export function createEventRegistration(rt, deps) {
                 }, 110);
             });
         }
-    
+
         if (events.CHAT_CHANGED) {
             source.on(events.CHAT_CHANGED, async () => {
                 flushPendingSettingsSave();
@@ -232,7 +232,7 @@ export function createEventRegistration(rt, deps) {
                 }
             });
         }
-    
+
         // CHAT_DELETED carries only a filename in SillyTavern. Never borrow the currently active
         // owner as proof: bulk deletion can target a different character. Ambiguous equal filenames
         // fail closed and CHARACTER_DELETED later retires the exact owner-qualified states.
