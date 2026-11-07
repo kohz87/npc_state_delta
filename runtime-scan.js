@@ -13,9 +13,12 @@ import { chatLineage, fingerprintMessage, lineageCheckpointKey, ensureBranchPare
 import { getSettings } from './runtime-settings.js';
 import { narrationCaptureEnabled, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 
+import { createCatchUpPart } from './runtime-catchup.js';
+
 export function createScanPart(rt, deps) {
-    const { attachGeneratedSecrets, BACKFILLS_PER_REPLY, beginScanOperation, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, queueSettledSwipeReconcile, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanAfterEveryReply, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanNow, scanOperationCurrent, scanScenePresent, scenePresentAt, scheduleReplyBackfills, setChatState, staleHostActive, takeNarrationCapture, updateInjection } = deps;
-    const { assistantReceipts, narrationCaptures, catchUpChats, stateVersions, captureCatchUp } = rt;
+    const { attachGeneratedSecrets, beginScanOperation, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, queueSettledSwipeReconcile, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanAfterEveryReply, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanNow, scanOperationCurrent, scanScenePresent, scenePresentAt, scheduleReplyBackfills, setChatState, staleHostActive, takeNarrationCapture, updateInjection } = deps;
+    const { assistantReceipts, narrationCaptures, catchUpChats, stateVersions } = rt;
+    const { noteCaptureCatchUp, runCaptureCatchUp } = createCatchUpPart(rt, { getChatKey, getChatState, hostedOnePass, isHostSwipeActive, isScanBusy, persist, processPendingBackfills, refreshNpcFromChat });
 
     function queueNpcBackfillInState(state, npcId, label, requestedMessageId = null, options = {}) {
         const reason = String(options?.reason || '').trim();
@@ -99,42 +102,6 @@ export function createScanPart(rt, deps) {
             deleteAfter: settings.staleDeleteAfter,
             protectedIds: [...collectStaleCleanupProtectedIds(state, scanResult, transcript)],
         });
-    }
-
-    // (1.2.11) One-pass catch-up. Mannerisms, levers and memories fill from evidence gathered over
-    // scenes, and a block written beside the story tends to leave them thin, while a Refresh (which
-    // reads a window of scenes) fills them. So every `narrationCaptureCatchUp` captured replies, the
-    // NPCs most in them get a quiet Refresh. Counted per chat in this session only; nothing is saved.
-    const CATCH_UP_TARGETS = 2;
-    const CATCH_UP_RETRY_MS = 3000;
-    const CATCH_UP_RETRIES = 20;
-
-    /** Counts one captured reply and the NPCs in it; the NPC ids due a catch-up now, or []. */
-    function noteCaptureCatchUp(chatKey, npcIds = []) {
-        const every = Math.max(0, Math.round(Number(getSettings().narrationCaptureCatchUp) || 0));
-        if (!every) return [];
-        const entry = captureCatchUp.get(chatKey) ?? { count: 0, seen: new Map() };
-        entry.count += 1;
-        for (const id of new Set(npcIds)) if (id) entry.seen.set(id, (entry.seen.get(id) || 0) + 1);
-        captureCatchUp.set(chatKey, entry);
-        if (entry.count < every) return [];
-        captureCatchUp.delete(chatKey);
-        return [...entry.seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, CATCH_UP_TARGETS).map(([id]) => id);
-    }
-
-    async function runCaptureCatchUp(chatKey, ids, tries = 0) {
-        if (!ids.length || getChatKey() !== chatKey) return;
-        if (isScanBusy(chatKey) || isHostSwipeActive()) {
-            if (tries < CATCH_UP_RETRIES) setTimeout(() => void runCaptureCatchUp(chatKey, ids, tries + 1), CATCH_UP_RETRY_MS);
-            return;
-        }
-        for (const id of ids) {
-            if (getChatKey() !== chatKey) return;
-            if (!getChatState(chatKey).npcs.some(npc => npc.id === id && !npc.archived)) continue;
-            await refreshNpcFromChat(id, { automatic: true });
-        }
-        // (user decision 5) Hosted one-pass mode runs the backfill queue here, on the catch-up schedule.
-        if (getChatKey() === chatKey && hostedOnePass()) await processPendingBackfills(latestMessageId(true), { limit: BACKFILLS_PER_REPLY });
     }
 
     // (1.2.9) Other extensions write into a reply just after it arrives: Story Block tidying its

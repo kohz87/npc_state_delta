@@ -292,12 +292,15 @@ export function createScanOpsPart(rt, deps) {
     // listener before it draws the reply and gives back the Send button. The queue is started, not
     // awaited, so the handler returns at once; at most BACKFILLS_PER_REPLY model calls per reply, the
     // rest stay queued for the next one.
+    // Hosted one-pass mode runs the queue here too, on its own cadence (not the Refresh's), one call per reply, and
+    // never for an NPC the same reply's catch-up Refresh has in hand (one model call per NPC per reply).
     const BACKFILLS_PER_REPLY = 2;
     function scheduleReplyBackfills(chatKey, messageId) {
-        if (hostedOnePass()) return;
+        const limit = hostedOnePass() ? 1 : BACKFILLS_PER_REPLY;
         queueMicrotask(() => {
             if (getChatKey() !== chatKey || latestMessageId(true) !== messageId) return;
-            processPendingBackfills(messageId, { limit: BACKFILLS_PER_REPLY })
+            const skipNpcIds = [...(rt.catchUpTaken?.get(chatKey) || [])];
+            processPendingBackfills(messageId, { limit, skipNpcIds })
                 .catch(error => console.warn('[NPC State Delta] queued dossier backfills stopped.', error));
         });
     }
