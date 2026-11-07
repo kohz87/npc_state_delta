@@ -10,14 +10,30 @@
 // `pack` is the pack as given (validated). It is checked again on read, so a hand-edited
 // settings file cannot slip anything past the validator; a stored pack that no longer
 // passes stays listed with its problem and gives no content.
+//
+// The pack checker (validate.js and its parts, about 1,500 lines) is loaded when it is first needed, not at startup (Story Block 2.23.x,
+// "lazy checker"): `ensure()` fetches it when packs are stored (the runtime starts that when it is built) or when `ready()`, `install` or the
+// card offer ask for it. Until it is there a stored pack is listed as "still loading" and gives no content, and that answer is never
+// kept; the turn awaits `ready()` through `prepare` before a chat is read (runtime.js), so replay never sees the gap.
 
 import { HOST_CAPABILITIES, LIMITS } from './limits.js';
-import { validatePack, HOST_VERSION } from './validate.js';
+import { HOST_VERSION } from './validate/core.js';
 import { findPackEntries } from './lorebook.js';
 import { byteLength } from './safety.js';
 import { packTag } from './kind.js';
 
 const SOURCES = ['file', 'lorebook'];
+
+// The checker, once loaded (shared by every installed list), and the load on its way.
+let validator = null;
+let loading = null;
+const loadChecker = () => {
+    loading ??= import('./validate.js').then(lib => { validator = lib.validatePack; return validator; }, error => { loading = null; throw error; });
+    return loading;
+};
+/** Whether the pack checker is loaded (tests). */
+export const checkerLoaded = () => validator !== null;
+const STILL_LOADING = { ok: false, errors: [{ code: 'LOADING', path: '', message: 'The pack checker is still loading.' }] };
 
 const countOf = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /** What a normalized pack adds beside its content lists, in words: "coins", "a calendar", "3 weather tables"… */
@@ -50,6 +66,16 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
     // (a stored pack is not held to the strict `when` check of install: an installed pack with one unreadable condition keeps working, that event alone invalid)
     const checked = new WeakMap();  // stored pack object → validatePack result
     const listeners = new Set();
+    // → a promise while the checker is to be fetched (it is wanted: packs are stored, or `force`), else undefined (nothing to wait for).
+    // Never rejects: a load that failed leaves the packs unchecked (listed as loading) and asks again at the next call.
+    let announced = false, failed = false;
+    // stored packs the checker has not yet looked at → 'loading' | 'failed' | null (the turn writes no pack-dependent state while this is set)
+    const stored = () => { try { const list = settings.read()?.packs; return Array.isArray(list) && list.some(entry => entry && typeof entry === 'object'); } catch { return false; } };
+    const ensure = ({ force = false } = {}) => {
+        if (validator) return undefined;
+        if (!force && !stored()) return undefined;
+        return loadChecker().then(() => { failed = false; if (!announced) { announced = true; for (const fn of listeners) fn(); } return true; }, () => { failed = true; return false; });
+    };
 
     const root = () => {
         const value = settings.read();
@@ -59,7 +85,8 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
     const entries = () => root().packs.filter(entry => entry && typeof entry === 'object');
     const check = entry => {
         if (!entry.pack || typeof entry.pack !== 'object') return { ok: false, errors: [{ code: 'NOT_OBJECT', path: '', message: 'The stored pack is missing.' }] };
-        if (!checked.has(entry.pack)) checked.set(entry.pack, validatePack(entry.pack, { hostVersion: host(), limits, readableConditions: false }));
+        if (!validator) { ensure(); return STILL_LOADING; }
+        if (!checked.has(entry.pack)) checked.set(entry.pack, validator(entry.pack, { hostVersion: host(), limits, readableConditions: false }));
         return checked.get(entry.pack);
     };
     const changed = async () => {
@@ -83,11 +110,18 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
          * The card offer (card-offer.js) uses it to tell "cannot install yet" from "refused".
          */
         inspect(input) {
-            const result = validatePack(input, { hostVersion: host(), capabilities: null, limits });
+            if (!validator) { ensure({ force: true }); return STILL_LOADING; }
+            const result = validator(input, { hostVersion: host(), capabilities: null, limits });
             if (!result.ok) return result;
             const names = have();
             return { ok: true, pack: result.pack, raw: result.raw, missing: names ? result.pack.requires.capabilities.filter(name => !names.includes(name)) : [] };
         },
+
+        /** → a promise while the checker is being fetched (stored packs, or it was asked for), else undefined: the turn awaits it before a chat is read. */
+        ready: (options = {}) => ensure(options),
+
+        /** → 'loading' | 'failed' while stored packs wait for the checker, else null: nothing that depends on the packs' start is written meanwhile. */
+        unchecked: () => (validator || !stored() ? null : failed ? 'failed' : 'loading'),
 
         /** The installed packs for the settings list, in order. */
         list() {
@@ -130,7 +164,9 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
          * portraits.js apply's report (`{ stored, refused, missing, dropped }`) whenever the pack names portraits or images were picked.
          */
         async install(input, { source = 'file', origin = '', files = [] } = {}) {
-            const result = validatePack(input, { hostVersion: host(), capabilities: have(), limits });
+            await ensure({ force: true });
+            if (!validator) return STILL_LOADING;
+            const result = validator(input, { hostVersion: host(), capabilities: have(), limits });
             if (!result.ok) return result;
             const { pack, raw } = result;
             const list = root().packs;

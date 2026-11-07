@@ -6,7 +6,7 @@ import { buildCheckpoint, checkpointProblem } from '../checkpoint.js';
 import { hydrateIdentity } from '../identity.js';
 import { hashJson } from '../hash.js';
 import { LINEAGE_ID, mintLineage, restoredState, storedTimeline, timelineOf } from '../timeline.js';
-import { cleanIndex, fail, plain } from './support.js';
+import { cleanIndex, fail, isRecord, plain } from './support.js';
 
 export function createSessionOps({
     port, vault, now, random, idleMs, keyNow, usable, loaded, restoreIndex, writtenIndexes, getSession, setSession,
@@ -18,9 +18,12 @@ export function createSessionOps({
      * written into the state (durably) when it changed. The chat is looked at again after every await: a chat that changed meanwhile ends it.
      * Only a chat that uses the timeline gets here: a save point, a restore, a death, a published change of a chat that has its line already, or a
      * question to `npc.identity`. Opening a chat, a reply, or a scan writes nothing (`started`).
+     * `adopt` ({ checkpoint, hash }, only from `prepare`, the host's journal-selected checkpoint): a branch with no story line and no dossiers
+     * takes the line of that checkpoint (when its file is there, its hash is right and it is well formed) instead of minting a new one, so the
+     * journal's checkpoints stay its own. A chat with dossiers or a line is never changed by it. A failed read is thrown, never turned into a new line.
      * → the session { key, lineage, index } or null (no chat, or it changed).
      */
-    async function hydrate(until = null, guard = null) {
+    async function hydrate(until = null, guard = null, adopt = null) {
         const key = keyNow();
         if (!usable(key)) return null;
         // Nothing is read, minted or written before the chat's state is loaded: a retryable failure (the host asks again later).
@@ -46,6 +49,17 @@ export function createSessionOps({
             block = timelineOf(state);
         }
         let write = false;
+        if (!block.lineage && adopt && !(Array.isArray(state?.npcs) && state.npcs.length)) {
+            guard?.enter('reading the selected checkpoint');
+            const got = await verified(adopt.checkpoint, adopt.hash, { adopt: true });
+            guard?.check();
+            if (keyNow() !== key) return null;
+            // A failed selected checkpoint must leave this branch unlined, so the host can try an earlier checkpoint on its own line.
+            if (!got.ok) return got;
+            if (hashJson(port.readState()) !== hashJson(state)) return fail('STALE', 'NPC State Delta changed while checking the selected checkpoint; try again.');
+            block.lineage = got.doc.lineage;
+            write = true;
+        }
         if (!block.lineage) {
             block.lineage = mintLineage(random);
             write = true;
@@ -99,6 +113,24 @@ export function createSessionOps({
         return getSession();
     }
 
+    /**
+     * The host's `verify({ checkpoint, hash })`: the checks of `prepare` and `activate` with nothing installed, written or minted (no hydrate).
+     * The line it is held against is read, never made: this chat's session, else the state's own, else (a branch with neither and no dossiers)
+     * the line `hydrate` would adopt. → { ok: true, checkpoint, hash } or the failure `prepare` would give.
+     */
+    async function verifyOnly(input, until) {
+        if (!isRecord(input) || typeof input.checkpoint !== 'string' || typeof input.hash !== 'string') return fail('INVALID', 'verify takes { checkpoint, hash }.');
+        const key = keyNow();
+        if (!usable(key)) return fail('FAILED', 'There is no open chat.');
+        if (!await loaded(until)) throw new Error('NPC State Delta has not loaded this chat\'s dossiers yet; it is tried again in a moment.');
+        if (keyNow() !== key) return fail('FAILED', 'There is no open chat.');
+        const state = port.readState();
+        const own = getSession()?.key === key ? getSession().lineage : timelineOf(state).lineage;
+        const empty = !own && !(Array.isArray(state?.npcs) && state.npcs.length);
+        const got = await verified(input.checkpoint, input.hash, own ? { lineage: own } : empty ? { adopt: true } : { lineage: null });
+        return got.ok ? { ok: true, checkpoint: input.checkpoint, hash: input.hash } : got;
+    }
+
     async function made({ state = port.readState(), cursor = null, headHash = null }, guard = null) {
         const s = getSession() ?? await hydrate();
         if (!s) throw new Error('There is no open chat to take a checkpoint of.');
@@ -110,14 +142,18 @@ export function createSessionOps({
         return built;
     }
 
-    /** The checkpoint `id` from the vault, checked against `hash`: { doc } or a failure. */
-    async function verified(id, hash) {
+    /**
+     * The checkpoint `id` from the vault, checked against `hash`: { doc } or a failure. `lineage` is the line it must belong to (the session's
+     * by default); `adopt` accepts any well-formed line (a branch with no line yet would take it, see `hydrate`).
+     */
+    async function verified(id, hash, { lineage, adopt = false } = {}) {
         const doc = await vault.get(id);
         if (!doc) return fail('SNAPSHOT_UNAVAILABLE', `The native checkpoint ${id} is gone, so its dossiers cannot be put back.`);
         const problem = checkpointProblem(doc, doc?.kind ? hashJson(doc) : '');
         if (problem && /newer|not a native|missing|plain/.test(problem)) return fail('SNAPSHOT_UNAVAILABLE', problem);
         if (hashJson(doc) !== hash) return fail('CONFLICT', `The native checkpoint ${id} is not the one that was saved (another hash).`);
-        if (doc.lineage !== getSession()?.lineage && !await formerLine(doc)) return fail('CONFLICT', `The native checkpoint ${id} belongs to another story line.`);
+        const line = lineage === undefined ? getSession()?.lineage : lineage;
+        if (adopt ? !LINEAGE_ID.test(String(doc.lineage)) : doc.lineage !== line && !await formerLine(doc)) return fail('CONFLICT', `The native checkpoint ${id} belongs to another story line.`);
         return { ok: true, doc };
     }
 
@@ -173,5 +209,5 @@ export function createSessionOps({
     // Ends inside the host's bound for the callback (`until`): longer than that, the host gives up on the call and calls the save a failure.
     const quiet = async until => (typeof port.idle === 'function' ? (await port.idle(Math.max(0, Math.min(idleMs, until - now())))) !== false : true);
 
-    return { hydrate, made, verified, started, busy, stands, standsOnBytes, hand, quiet };
+    return { hydrate, made, verified, verifyOnly, started, busy, stands, standsOnBytes, hand, quiet };
 }

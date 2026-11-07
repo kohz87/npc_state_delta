@@ -8,7 +8,7 @@ import { buildBlock, partKey } from '../../data-modules/block-builder.js';
 import { BLOCK_STARTERS } from '../../data-modules/block-starters.js';
 import { cardRoles, layoutShape } from '../../data-modules/block-layout.js';
 import { DM_LIMITS } from '../../data-modules/schema.js';
-import { slugify } from '../../packs/validate.js';
+import { slugify } from '../../packs/validate/core.js';
 import { STRINGS, fill } from '../../strings.js';
 import { S, PART_TYPES, PART_NAMES, LAYOUT_NAMES } from './constants.js';
 import { createLayoutPart } from './layout.js';

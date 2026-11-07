@@ -1,6 +1,6 @@
 // Build ordinary data-module definitions from the small in-chat editor; the interpreter is shared with packs.
 import { oneLine } from '../../text.js';
-import { slugify } from '../packs/validate.js';
+import { slugify } from '../packs/validate/core.js';
 import { DM_LIMITS as L, dmDefaultTone } from './schema.js';
 import { validateDataModules, dataModuleDefaults } from './check.js';
 import { bytes, cleanList, titlePart } from './interpreter.js';

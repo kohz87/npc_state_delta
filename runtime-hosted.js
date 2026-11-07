@@ -3,7 +3,7 @@
    relationship changes, secret events and hidden-note options Delta sends back, and the words for why no one shows as present. Built by index.js once per module instance with the shared
    runtime state and the controller functions it calls. Bodies are moved from index.js without change. */
 
-import { getContext } from '../../../extensions.js';
+import { chatContext as getContext, replayScope, scopedAdapter } from './runtime-scan-helpers.js';
 import { replyScanned } from './scan-context.js';
 import { normalizeRelationshipBaseline, isTerminalNpcDeath, npcMatchesLabel, storyMinuteText } from './core.js';
 import { defersArea, resolveDossierTarget } from './suite-handshake.js';
@@ -22,7 +22,9 @@ export function createHostedPart(rt, deps) {
     // (v2 meters, F81/F90) While hosted, Story Block's per-reply `npc` slice holds the meter values. Every
     // helper here is a no-op without a host: the records pass through untouched and nothing is sent.
     function storySuiteV2Meters() {
-        return storyBlockV2Hosted() && rt.storySuiteV2?.hosted?.() ? rt.storySuiteV2 : null;
+        const adapter = storyBlockV2Hosted() && rt.storySuiteV2?.hosted?.() ? rt.storySuiteV2 : null;
+        const scope = replayScope();
+        return adapter && scope ? scopedAdapter(adapter, scope.at, scope.sink) : adapter;   // a history replay reads Story Block as of its reply
     }
     // (v2) Story Suite's "Scan after every reply" switch (feature npc-state-delta.scan-every-reply, on by default).
     // Off, the automatic scan waits for three replies (or "Scan every" when larger), as in 1.7.4, and then reads every reply since the last scan. True without a host, or when
@@ -221,6 +223,7 @@ export function createHostedPart(rt, deps) {
     // then, nothing is sent; the changes belonged to a reply that is no longer the one Story Block
     // would write them on, and the reply now shown gets its own scan.
     function forwardRelationshipChangesToHost(before, after, messageId, head = null) {
+        if (replayScope()) return;   // Story Block already holds these changes in its own per-reply records
         const adapter = storySuiteV2Meters();
         if (!adapter) return;
         const dropped = () => {
@@ -284,6 +287,7 @@ export function createHostedPart(rt, deps) {
     // as npc.open (cause ui, recorded on the head reply, so a swipe takes them back). Nothing is sent when the chat moved
     // on during the scan (as forwardRelationshipChangesToHost).
     function forwardSecretEventsToHost(watched, answered, head = null) {
+        if (replayScope()) return;
         const adapter = storySuiteV2Meters();
         if (!adapter || !Array.isArray(watched) || !watched.length || !Array.isArray(answered) || !answered.length) return;
         if (!chatHeadUnchanged(head)) {

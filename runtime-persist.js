@@ -2,6 +2,7 @@
    the flush with its ownership and conflict handling, settling a write, and the persist calls the rest of Delta makes (normal, critical, critical and
    durable). Built by index.js once per module instance with the shared runtime state. Bodies are moved from index.js without change. */
 
+import { replayScope } from './runtime-scan-helpers.js';
 import { NPC_STATE_VERSION } from './core.js';
 import { writeNpcStateDataFile } from './storage.js';
 import { persistSettings, persistSettingsLazy, getSettings } from './runtime-settings.js';
@@ -107,6 +108,7 @@ export function createPersistPart(rt, deps) {
     }
 
     function persist(key = getChatKey()) {
+        if (replayScope()) return true;   // a history replay saves nothing: the copy is installed once, at the end
         if (!requireReadyChatMutation('save chat dossier changes', key, { notify: false })) {
             console.warn(`[NPC State Delta] refused to persist unhydrated chat state for ${key}.`);
             return false;
@@ -117,6 +119,7 @@ export function createPersistPart(rt, deps) {
     }
 
     function persistCritical(key = getChatKey()) {
+        if (replayScope()) return true;
         if (!requireReadyChatMutation('save chat dossier changes', key, { notify: false })) return false;
         persistSettings();
         markStateDirty(key);

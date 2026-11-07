@@ -170,6 +170,12 @@ export function createTimelinePart(session, deps) {
             writeTimeline: block => runtime().writeTimeline(block),
             busy: () => runtime()?.scanActive?.() === true,
             idle: ms => (typeof runtime()?.scanIdle === 'function' ? runtime().scanIdle(ms) : Promise.resolve(true)),
+            // History replay (the catch-up after a fallback, the rebuild): the runtime's boundaries, Delta's switch, the one publication after an install.
+            enabled: () => enabled() && Boolean(runtime()?.replay),
+            live: () => runtime()?.replay,
+            changed: () => notifyChange(),
+            // Story Block calls `restored` while its barrier is still up; the dossiers are read as of each reply only once it is down.
+            settled: () => headSettled(),
             warn: text => warn(text),
         },
         vault,
@@ -226,7 +232,8 @@ export function createTimelinePart(session, deps) {
         // and what Delta sends under its own prompt keys (`ownPrompt`, Story Block's prompt size). `redactSent` is for
         // "Show what's sent": the text of this module's tail with each locked note's line as "Name: 1 hidden note"
         // (a host that does not call it shows the raw text; SillyTavern's own prompt view always does).
-        hooks: Object.freeze({ diagnostics: () => diagnosticsLines(), ownPrompt: () => ownPrompt(), redactSent: text => part.redact(text) }),
+        // canGenerate: sending waits while the dossiers catch up after a fallback (history-replay.js).
+        hooks: Object.freeze({ diagnostics: () => diagnosticsLines(), ownPrompt: () => ownPrompt(), redactSent: text => part.redact(text), canGenerate: () => timeline.catchUp.canGenerate() }),
         screens: [metersCardScreen, castScreen],
         widgets: { [CAST_WIDGET]: castWidget },
         tabs: [{
@@ -299,7 +306,7 @@ export function createTimelinePart(session, deps) {
             try {
                 const key = chatKeyOf();
                 if (key !== session.baselineKey) {
-                    if (dossiersReady()) { session.baselineKey = key; rebaselinePublicPaths(); }
+                    if (dossiersReady()) { session.baselineKey = key; rebaselinePublicPaths(); void timeline.catchUp.resume(); }
                 } else session.offPublicPaths?.changed?.();
             } catch (error) { warn('Story Block public paths change failed', error); }
             // Story Director's World screen (the page API's subscribers) redraws its cards too.

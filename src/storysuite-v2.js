@@ -81,7 +81,7 @@ export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
 // Story Director's reader-only pin for key people (its feature switch is `story-director.key-people`).
 const KEY_PIN_COMMAND = 'keypeople.pin';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity']);
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity', 'npc.catchUp']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.open', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
@@ -208,6 +208,8 @@ export function createStorySuiteV2Adapter({
 
     return Object.freeze({
         definition,
+        /** The catch-up after a fallback and the rebuild: status() for the banner, skip() (not a Story Block command: that would write an op), rebuild({ replies }). */
+        catchUp: timelinePart.timeline.catchUp,
         /** The page API Story Director's World screen uses (PAGE_API). */
         pageApi,
         /** While hosted: Delta's scanner changes for one NPC → `npc.adjust` (a promise of the result, or null). */
@@ -223,6 +225,13 @@ export function createStorySuiteV2Adapter({
             return entries ? entryFor(entries, npc) : null;
         },
         sliceView,
+        /** Runs the synchronous reads of `fn` against Story Block's state after reply `index` (query { asOf }); nothing is written or moved. */
+        at: (index, fn) => {
+            const real = session.sdkRef;
+            if (typeof real?.query !== 'function') return fn();
+            session.sdkRef = Object.create(real, { query: { value: (name, args) => real.query(name, { ...args, asOf: index }) } });
+            try { return fn(); } finally { session.sdkRef = real; }
+        },
         /** While hosted: Story Director's key people (`director.keyPeople`) as it answers, or null when it cannot. */
         keyPeopleAnswer,
         /** While hosted: the memory of key people's last absences (npc.keyAway), {} without one. */

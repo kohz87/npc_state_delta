@@ -4,12 +4,12 @@
    itself is created in index.js (the chat-key part takes isScanBusy at construction). Built by index.js once per module instance with the shared
    runtime state. Bodies are moved from index.js without change. */
 
-import { getContext } from '../../../extensions.js';
+import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { isEmptyScannerAnswer } from './scanner-routing.js';
 import { refreshMessageGate, messageGateSettled } from './src/transcript.js';
 import { chatLineage, fingerprintMessage, lineageCheckpointKey } from './branch.js';
 import { getSettings } from './runtime-settings.js';
-import { setNpcDossierScanIndicator, setNpcChatRefreshIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
+import { replayScope, setNpcDossierScanIndicator, setNpcChatRefreshIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 
 export function createScanOpsPart(rt, deps) {
     const { chatHeadMark, diagnosticStore, drainPendingAutoScan, ensureHydratedStateFresh, getChatKey, hostedOnePass, hydratedRevision, isHostSwipeActive, isScanBusy, localWorkingStateDirty, processPendingBackfills, recordFreshnessEvent, SCAN_OPERATION_TIMEOUT_MS, scanNow, scanOperations, updateInjection } = deps;
@@ -71,6 +71,7 @@ export function createScanOpsPart(rt, deps) {
     }
     function scanOperationCurrent(key, operation) { return scanOperations.isCurrent(key, operation); }
     async function scanCanonicalBaseCurrent(key, operation, label = 'scan') {
+        if (replayScope()?.key === key) return getChatKey() === key && scanOperationCurrent(key, operation);
         const baseRevision = Math.max(0, Math.trunc(Number(operation?.canonicalRevision) || 0));
         try {
             await ensureHydratedStateFresh(key, { reason: `${label}-commit` });

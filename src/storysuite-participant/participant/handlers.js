@@ -10,7 +10,7 @@ import { fail, isRecord, plain, preparedId } from './support.js';
 
 export function createParticipantHandlers({
     abort, bounded, boundedCheckpoint, busy, confirmedDeath, getAnnounced, getHandle, getLast, hand, hostExclusive,
-    hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, vault,
+    hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, verifyOnly, vault,
 }) {
     return {
         participant: {
@@ -64,11 +64,16 @@ export function createParticipantHandlers({
              */
             current: input => ({ ok: true, current: isRecord(input) && stands(input.checkpoint, input.hash) && !busy() }),
 
+            /** Whether `prepare` would accept this checkpoint (file, hash, line), changing nothing: the host's fallback asks it of each candidate. */
+            verify: bounded((input, until) => verifyOnly(input, until)),
+
             prepare: bounded(async (input, until) => {
-                const s = await hydrate(until);
+                // The input is checked before anything is adopted or persisted: a malformed call changes nothing.
+                if (!isRecord(input) || ![input.checkpoint, input.return, input.hash].every(value => typeof value === 'string' && value.trim() !== '')) return fail('INVALID', 'prepare takes { return, checkpoint, hash }, each a non-empty string.');
+                const s = await hydrate(until, null, { checkpoint: input.checkpoint, hash: input.hash });
+                if (s?.ok === false) return s;
                 if (!s) return fail('FAILED', 'There is no open chat.');
                 const idx = s.index;
-                if (!isRecord(input) || typeof input.checkpoint !== 'string' || typeof input.return !== 'string' || typeof input.hash !== 'string') return fail('INVALID', 'prepare takes { return, checkpoint, hash }.');
                 const held = idx.returns[input.return];
                 if (held && held.status !== 'aborted' && (held.checkpoint !== input.checkpoint || held.hash !== input.hash)) return fail('CONFLICT', 'That return was prepared for another checkpoint.');
                 if (held && held.status !== 'aborted') return { ok: true, prepared: held.prepared, hash: held.hash };
@@ -114,7 +119,6 @@ export function createParticipantHandlers({
                 if (install) {
                     // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).
                     await port.installState(restoredState(got.doc.state, live));
-                    try { port.restored?.(); } catch { /* the restore is done; telling is best effort */ }
                     // The state now is the selected bytes (the timeline block aside, which keeps both timelines' reserved ids): read back and compared,
                     // then recorded as handed over so the probe `current` answers for it like for any checkpoint. Not acknowledged otherwise.
                     const now = port.readState();

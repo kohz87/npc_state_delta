@@ -10,7 +10,7 @@ import { cleanMessage, recentTranscript } from './src/transcript.js';
 import { buildInjection, npcNamedInText, isTerminalNpcDeath, buildNarrationCaptureParts } from './core.js';
 import { defersArea, storyBlockIsV2 } from './suite-handshake.js';
 import { injectDepthOf, getSettings } from './runtime-settings.js';
-import { narrationCaptureEnabled } from './runtime-scan-helpers.js';
+import { narrationCaptureEnabled, replayScope } from './runtime-scan-helpers.js';
 
 export function createInjectionPart(rt, deps) {
     const { CAPTURE_PROMPT_DEPTH, CAPTURE_PROMPT_KEY, CAPTURE_RULES_KEY, chatHydrationStatus, getChatKey, getChatState, hostedMeterView, hostedNotePromptOptions, keyReturnNotes, LEGACY_PROMPT_KEYS, PROMPT_KEY, scenePresenceView, storySuiteV2Meters } = deps;
@@ -69,6 +69,7 @@ export function createInjectionPart(rt, deps) {
     }
 
     function updateInjection() {
+        if (replayScope()) return;   // the injection is built once the replay is installed
         const settings = getSettings();
         const ctx = getContext();
         const injectionKey = getChatKey();

@@ -5,7 +5,7 @@
 // item name two packs both define and for the start place.
 
 import { CONTENT_KINDS, DEFAULT_CRAFTS } from './limits.js';
-import { slugify } from './validate.js';
+import { slugify } from './validate/core.js';
 import { foldKey } from '../../text.js';
 
 // The inventory def fields (SPEC §7), in a fixed order.

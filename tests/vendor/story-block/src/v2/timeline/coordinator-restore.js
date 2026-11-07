@@ -178,7 +178,7 @@ export function createRestore(s, deps) {
         // was damaged or edited. Finishing one would let go of the barrier with the other still undone, so none is touched, the chat stays
         // barred and nothing is announced ready: it fails safe until the file is put right.
         const unfinished = archive.entries().filter(entry => (entry.kind === 'restore' && ['committed', 'participants-pending', 'acked'].includes(entry.phase))
-            || (entry.kind === 'selection' && entry.phase !== 'complete')
+            || (entry.kind === 'selection' && !['complete', 'rebuilt'].includes(entry.phase))
             || (['native-mutation', 'native-event'].includes(entry.kind) && entry.phase === 'prepared'));
         if (unfinished.length > 1) {
             if (s.barrierOwner === null) raise('A restore is finishing; every part must agree before the story goes on.');
@@ -216,7 +216,7 @@ export function createRestore(s, deps) {
                     if (done.status === 'complete' || done.status === 'retracted') ret = null;
                 }
             } else if (entry.kind === 'selection') {
-                if (entry.phase !== 'complete') {
+                if (!['complete', 'rebuilt'].includes(entry.phase)) {
                     const done = await finishSelection(entry);
                     if (!done.ok) return done;
                 }

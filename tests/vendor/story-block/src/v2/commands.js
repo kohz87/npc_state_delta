@@ -50,13 +50,13 @@
 import { apply } from './ops.js';
 import { operationKey } from './evidence.js';
 import { seed as freshSeed } from './rng.js';
-import { MAX_DEPTH, MAX_PREVIEWS, CommandError, asCommandError, fail, headReply, newId } from './commands/shared.js';
+import { MAX_DEPTH, MAX_PREVIEWS, CommandError, asCommandError, fail, headReply, newId, replyAt } from './commands/shared.js';
 import { createStateTools } from './commands/state.js';
 import { createGuards } from './commands/guards.js';
 import { createCtxTools } from './commands/ctx.js';
 import { createTransact } from './commands/transact.js';
 
-export { MAX_DEPTH, CommandError, headReply, newId };
+export { MAX_DEPTH, CommandError, headReply, newId, replyAt };
 
 /**
  * createCommandBus({ store, registry, settings, onCommitted?, id?, seed? })

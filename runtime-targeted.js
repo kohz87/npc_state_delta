@@ -2,14 +2,14 @@
    chat, the history backfill and the queue of pending backfills, with the rules that scope a pass's rows and edges to its target. Built by index.js
    once per module instance with the shared runtime state. Bodies are moved from index.js without change. */
 
-import { getContext } from '../../../extensions.js';
+import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { REFRESH_CHANGED_FIELDS } from './src/fields/registry.js';
 import { storyDayAt, currentExclusions, refreshMessageGate, activeChat } from './src/transcript.js';
 import { BACKFILL_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { buildDossierImportPrompt, mergeScanResult, protectTerminalNpc } from './core.js';
 import { chatLineage } from './branch.js';
 import { getSettings } from './runtime-settings.js';
-import { setNpcDossierScanIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
+import { replayScope, setNpcDossierScanIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
 import { createTargetedRefreshPart } from './runtime-targeted-refresh.js';
 import { createTargetedBackfillPart } from './runtime-targeted-backfill.js';
@@ -20,6 +20,7 @@ export function createTargetedPart(rt, deps) {
     const { backfillScanMatchesTarget, rowContradictsTarget, soleRowMayBeTarget, scopeProfileUpdatesToTarget, edgeTouchesResolvedTarget } = createTargetedScopePart();
 
     async function prepareCanonicalScanBase(key, label = 'scan') {
+        if (replayScope()?.key === key) return getChatKey() === key;
         try {
             await settleStateFileWrite(key, { flush: true });
             await ensureHydratedStateFresh(key, { reason: `${label}-start` });

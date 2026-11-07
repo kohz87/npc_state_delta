@@ -7,7 +7,7 @@
 // keeps its path, builds the sdk, and re-exports every public name.
 
 import { INIT_PREFIX, normalizeField } from './registry.js';
-import { headReply } from './commands.js';
+import { headReply, replyAt } from './commands.js';
 import { KEY as RECORD_KEY, isCarrier, recordFault } from './persist.js';
 import { cutAt } from '../text.js';
 import { MODEL_CALL_ERRORS, MODEL_CALL_TEXT, profileName } from './model-call.js';
@@ -68,8 +68,15 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
         timeline?.settle();
         // A chat with a message but no state yet (Story Block has not heard of the chat, turn.seed): the state starts first.
         if (typeof seed === 'function' && !store.head?.()) {
-            try { seed(); } catch (error) { console.warn('[Story Suite] the chat\'s state could not be started', error); }
+            const warn = error => console.warn('[Story Suite] the chat\'s state could not be started', error);
+            try {
+                const started = seed();
+                if (started && typeof started.then === 'function') return started.catch(warn).then(() => afterSeed());   // the checker was on its way
+            } catch (error) { warn(error); }
         }
+        return afterSeed();
+    };
+    const afterSeed = () => {
         announceModules(registry, events);
         if (registry.restore?.().state === 'pending' || store.headIndex?.() < 0) return null;
         const head = store.head?.();
@@ -127,7 +134,19 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
             return held(type) ?? bus.preview(type, payload);
         },
         commit: async token => saved(committed(await bus.commit(token))),
-        query: (name, args) => { timeline?.settle(); return runQuery(registry, store.head(), name, args, { receipts: () => store.receipts?.() ?? [], reply: headReply(store) }); },
+        // `{ asOf: index }` in args is read-only history: the answer is Story Block's state after that reply (store.at), with only the receipts
+        // up to it and that reply as `tools.reply`; the head, the chat and the saves are not touched. Without it the head answers as before.
+        query: (name, args) => {
+            timeline?.settle();
+            if (isObject(args) && Object.hasOwn(args, 'asOf')) {
+                const { asOf, ...rest } = args;
+                if (!Number.isInteger(asOf) || asOf < 0) throw new RangeError('asOf must be a reply index (a whole number, 0 or more).');
+                const state = store.at(asOf);
+                const upTo = () => (store.receipts?.() ?? []).filter(item => item.index <= asOf);
+                return runQuery(registry, state, name, rest, { receipts: upTo, reply: replyAt(store, asOf) });
+            }
+            return runQuery(registry, store.head(), name, args, { receipts: () => store.receipts?.() ?? [], reply: headReply(store) });
+        },
         /** The stored receipts on the current line of history, in chat order: [{ index, receipt }]. */
         receipts: () => withCue(store.receipts?.() ?? []),
         /**

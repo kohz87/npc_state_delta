@@ -40,13 +40,13 @@ import { createPortraits } from './portraits.js';
 import { browserImageIo } from './portrait-fit.js';
 import { calendarOf, contentOf, craftsOf, economyOf, itemDefsIn, mergeStart, resolveItemIn, applyStart, weatherOf, youRankOf } from './content.js';
 import { renderPacksPanel } from './panel.js';
-import { HOST_VERSION, validatePack, slugify } from './validate.js';
+import { HOST_VERSION, slugify } from './validate/core.js';
 import { readCharacterLorebook, stCapabilities, stHostVersion, stPortraitFiles, stSettings } from './st-adapter.js';
 import { marketEntries } from './lorebook.js';
 import { castGearOf, gearLine } from './cast-gear.js';
 import { readSheet, sameWho } from '../lean-rpg/read.js';
 
-export { validatePack, slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, youRankOf, createInstalled, renderPacksPanel };
+export { slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, youRankOf, createInstalled, renderPacksPanel };
 export { LIMITS, CONTENT_KINDS, DEFAULT_CRAFTS, STATIONS } from './limits.js';
 export { findPackEntries, marketEntries, readMarketLine, PACK_TAG } from './lorebook.js';
 export { satisfies } from './version.js';

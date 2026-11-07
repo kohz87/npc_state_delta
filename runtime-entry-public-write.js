@@ -2,6 +2,71 @@
    second half of the window.NPCStateDelta surface split from index.js. Built by index.js with the controller closure;
    index.js still assigns and freezes the combined object in its original property order. */
 
+import { readAheadOf } from './scan-context.js';
+import { activeReplyIds } from './src/transcript.js';
+import { chatContext, inReplay } from './runtime-scan-helpers.js';
+
+const quietKeys = new Set(['timeline', 'catchUp']);
+
+/**
+ * What a history replay needs of the live runtime. Nothing here changes the open chat's dossiers except install (the finished copy, once) and the
+ * quiet writes of the catch-up field and of the scan marker; none of them is a native change. `reply` runs the live per-reply path on the copy: the
+ * chat is the messages up to that reply, Story Block is read as of it, its time is that reply's send date, and every outward write goes to the sink.
+ */
+function createReplayBoundaries(deps) {
+    const { getChatKey, getChatState, freshChatState, normalizeChatState, installState, handleAssistantMessageReceivedInner, processPendingBackfills, hostedOnePass, BACKFILLS_PER_REPLY, quietly, persistCriticalDurable } = deps;
+    const runs = new WeakMap();   // copy -> the receipts and catch-up marks the replay keeps for itself
+    const fingerprint = state => JSON.stringify(Object.fromEntries(Object.entries(state ?? {}).filter(([key]) => !quietKeys.has(key))));
+    const writeLive = async change => {
+        const key = getChatKey();
+        return quietly(key, async () => {
+            change(getChatState(key));
+            if (!await persistCriticalDurable(key)) throw new Error('The catch-up could not be saved yet.');
+            return true;
+        });
+    };
+    const markRead = (state, id) => Object.assign(state, { lastScannedMessageId: id, assistantSinceScan: 0, readAhead: [] });
+    return {
+        // The surviving replies the saved scan marker has not reached, oldest first, and whether every one of `ids` is still a reply of the chat.
+        pending: () => {
+            const state = getChatState();
+            const after = Number.isInteger(state.lastScannedMessageId) ? state.lastScannedMessageId : -1;
+            const read = new Set(readAheadOf(state));
+            return { ids: activeReplyIds().filter(id => id > after && !read.has(id)), marker: after >= 0 ? after : null };
+        },
+        all: () => activeReplyIds(),
+        active: ids => { const now = new Set(activeReplyIds()); return ids.every(id => now.has(id)); },
+        copy: () => structuredClone(normalizeChatState(getChatState())),
+        empty: () => structuredClone(freshChatState()),
+        state: () => getChatState(),
+        markRead,
+        head: () => {
+            const chat = chatContext().chat || [];
+            const last = chat[chat.length - 1] ?? null;
+            return { key: getChatKey(), length: chat.length, last, swipe: Number.isInteger(last?.swipe_id) ? last.swipe_id : null, state: fingerprint(getChatState()) };
+        },
+        install: async state => { await installState(state); },
+        writeCatchUp: field => writeLive(live => { if (field) live.catchUp = field; else delete live.catchUp; }),
+        markReadLive: id => writeLive(live => { markRead(live, id); delete live.catchUp; }),
+        reply: async (copy, id, sink, key) => {
+            if (getChatKey() !== key) return { ok: false, message: 'The chat changed.' };
+            const real = chatContext().chat || [];
+            if (!real[id]) return { ok: false, message: `Reply ${id} is not in the chat.` };
+            const run = runs.get(copy) ?? runs.set(copy, { receipts: new Map(), catchUp: new Set(), time: null }).get(copy);
+            const sent = Date.parse(real[id]?.send_date);
+            if (Number.isFinite(sent)) run.time = sent;
+            const scope = {
+                key, state: copy, chat: real.slice(0, id + 1), at: id, sink, receipts: run.receipts, catchUp: run.catchUp, failed: null,
+                now: () => run.time ?? Date.now(),
+                replace: next => { for (const name of Object.keys(copy)) delete copy[name]; return Object.assign(copy, next); },
+                backfills: mid => processPendingBackfills(mid, { limit: hostedOnePass() ? 1 : BACKFILLS_PER_REPLY, skipNpcIds: [] }).catch(() => {}),
+            };
+            await inReplay(scope, () => handleAssistantMessageReceivedInner(id, { bypassSwipeGuard: true }));
+            return scope.failed ? { ok: false, message: scope.failed } : undefined;
+        },
+    };
+}
+
 export function createPublicApiStatePart(deps) {
     const {
         normalizeChatState, getChatKey, requestHeaders, ensureFreshMutationBoundary, quietly, setChatState,
@@ -67,6 +132,8 @@ export function createPublicApiStatePart(deps) {
     stateLoading: () => chatHydrationStatus() === 'loading',
     scanActive: () => scanWorkPending(),
     scanIdle: ms => scanIdle(ms),
+    // History replay (src/storysuite-participant/history-replay.js reads these): the boundaries between the engine and the live scan path.
+    replay: createReplayBoundaries(deps),
     // Which messages the story stands on (the Story Suite adapter's gate): scans do not read what Story Block faded.
     useMessageGate: gate => useMessageGate(gate),
     // (v2 meters) Delta's base relationship values: where a new NPC's slice meters start.

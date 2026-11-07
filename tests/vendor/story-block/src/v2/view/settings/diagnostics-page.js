@@ -107,7 +107,8 @@ export function diagnosticsBody(pane, ctx) {
         if (typeof diagnostics.sample === 'function') {
             const sample = action('story-suite-diagnostics-sample', 'fa-swatchbook', T.sample);
             sample.title = T.sampleTitle;
-            sample.addEventListener('click', () => { try { diagnostics.sample(); } catch (error) { status.textContent = fill(T.sampleFailed, { why: error?.message ?? error }); } });
+            const failed = error => { status.textContent = fill(T.sampleFailed, { why: error?.message ?? error }); };
+            sample.addEventListener('click', () => { try { Promise.resolve(diagnostics.sample()).catch(failed); } catch (error) { failed(error); } });
         }
         // The tools below the fold, in a glass card of their own (the credit needs a surface behind it, as the cards have): the
         // buttons, the status line, then the icon credit with a hairline above it.

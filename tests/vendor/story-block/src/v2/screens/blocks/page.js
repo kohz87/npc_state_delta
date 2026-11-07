@@ -79,9 +79,9 @@ export function createBlocksPage({ shared, tell, templates, rpgState, loadRpg, o
                 if (result?.code === 'EXISTS' && confirm(doc, S.confirmReplace)) result = await templates.put(definition, { replace: true });
                 say(result?.ok ? S.templateSaved : result?.message ?? STRINGS.editable.failed);
             });
-            button(doc, menu, S.exportPack, () => {
+            button(doc, menu, S.exportPack, async () => {
                 closeMenu();
-                const result = exportBlockPack(definition);
+                const result = await exportBlockPack(definition);
                 if (!result.ok) { say(result.errors?.[0]?.message ?? S.exportFailed); return; }
                 try { saveTextFile(doc, result.text, result.filename, 'application/json;charset=utf-8'); }
                 catch { say(S.exportFailed); }

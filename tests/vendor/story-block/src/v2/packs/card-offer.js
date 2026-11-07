@@ -117,6 +117,9 @@ export function createCardOffer({ readLorebook, packs, cardSettings, remember, s
         const entries = read.entries ?? [];
         const found = findPackEntries(entries);
         if (!found.length) return;
+        // (the pack checker is fetched the first time a card offers a pack; the offers are read once it is there)
+        try { await packs.ready?.({ force: true }); } catch { /* the checker's own load reports itself by refusing below */ }
+        if (mine !== token) return;
         const installed = new Map(packs.list().map(entry => [entry.id, entry.version]));
         const offers = [];
         const cardIds = new Set();

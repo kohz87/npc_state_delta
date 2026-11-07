@@ -21,14 +21,13 @@
 // A section with its own body is not drawn by the shared host (it never gets a pane), so its old folds go away with
 // the entry.
 
-import { FEATURES_FOLD, SUB_FOLD, renderSettingsHost } from '../../host-ui.js';
+import { DIAGNOSTICS_FOLD, FEATURES_FOLD, SUB_FOLD, renderSettingsHost } from '../../host-ui.js';
 import { HOST_SETTINGS_SCHEMA } from '../../sdk.js';
 import { renderFeaturesForm } from '../form/features.js';
 import { staticTextWith } from '../../prompt.js';
 import { renderSettingsForm } from '../form/form.js';
 import { assistBody } from './assist.js';
 import { blocksBody } from './blocks.js';
-import { diagnosticsBody } from './diagnostics-page.js';
 import { modulesBody } from './modules.js';
 import { moneyBody } from './money.js';
 import { tabsPacksBody } from './tabs-packs.js';
@@ -107,6 +106,51 @@ function featuresBody(pane, ctx) {
     };
 }
 
+/**
+ * The Diagnostics page loads when it is first used (diagnostics-page.js is not part of startup): the body made here is a stand-in with
+ * the same calls. `show` (the page is shown), a search, `open` and `has` bring the page in; `has` answers for the report's own fold and the
+ * folds and modules placed here from the registry alone, so a deep link finds the page before it is loaded. While the page is on its way
+ * `loading()` is its promise (the window searches again when it lands); `show`/`open`/`filter` calls that came first are carried over.
+ */
+function lazyDiagnosticsBody(pane, ctx) {
+    let real = null, loading = null, gone = false, shown = false, wantedOpen = null, query = '';
+    const load = () => {
+        loading ??= import('./diagnostics-page.js').then(lib => {
+            if (!gone) real = lib.diagnosticsBody(pane, ctx);
+            loading = null;
+            if (real) {
+                if (query) real.filter(query);
+                if (shown) real.show?.();
+                if (wantedOpen !== null) real.open(wantedOpen);
+            }
+        }, () => { loading = null; });
+        return loading;
+    };
+    const placed = () => {
+        const defs = typeof ctx.options.registry?.settingsDefs === 'function' ? ctx.options.registry.settingsDefs() : [];
+        return defs.flatMap(def => [...(def.place === 'diagnostics' ? [def.moduleId] : []), ...(def.folds ?? []).filter(item => item.place === 'diagnostics').map(item => `${def.moduleId}/${item.id}`)]);
+    };
+    return {
+        filter(text) {
+            if (real) return real.filter(text);
+            query = String(text ?? '');
+            if (query.trim()) load();
+            return 0;
+        },
+        refresh: () => real?.refresh(),
+        show() { shown = true; if (real) real.show?.(); else load(); },
+        destroy() { gone = true; real?.destroy(); },
+        has: key => (real ? real.has(key) : (key === DIAGNOSTICS_FOLD && typeof ctx.options.diagnostics?.report === 'function') || placed().includes(key)),
+        open(key) {
+            if (real) return real.open(key);
+            wantedOpen = key;
+            load();
+            return true;
+        },
+        loading: () => (real ? null : loading),
+    };
+}
+
 /** Section id → body. Replace an entry to move that section to the form engine (see the top of this file). */
 export const SECTION_BODIES = Object.freeze({
     ...Object.fromEntries(SECTION_IDS.map(id => [id, legacyBody(id)])),
@@ -117,5 +161,5 @@ export const SECTION_BODIES = Object.freeze({
     tabs: tabsPacksBody,
     blocks: blocksBody,
     modules: modulesBody,
-    diagnostics: diagnosticsBody,
+    diagnostics: lazyDiagnosticsBody,
 });

@@ -1,3 +1,9 @@
+## Unreleased
+
+- **After Story Block falls back to an earlier saved point, the dossiers catch up on the replies they missed.** Delta reads them in order, as each reply was when it was new (Story Block's state as of that reply, the reply's own time), on a copy, and installs the result once, with one publication. Nothing is sent to Story Block again: it already holds those changes. At most the last 40 missed replies are read; older ones are marked read. Sending waits until it finishes ("Sending waits until the dossiers catch up (reply N of M)."), with **Skip**. A failure, a chat switch or a reload leaves the dossiers as they were, and it tries again when the chat is opened. While it waits for the model, the dossier panel shows the installed dossiers, and an edit made then is kept (the catch-up runs again on top of it).
+- **"Start this branch's dossiers from the chat"** (Story Block's banner) rebuilds a branch's dossiers with the same replay from an empty start, from the last 40 replies or the whole chat, with progress.
+- Requires the Story Block that offers `restored`, `progress`, `skip` and `query(..., { asOf })` for these; with an older Story Block nothing changes.
+
 ## 1.12.0
 
 - **Fewer model calls per reply.** Backfills no longer wait for the Refresh cadence: with a hosted one-pass helper a reply runs at most one backfill, and an NPC gets one model call per reply (the narration catch-up and the backfill skip each other's NPCs; a successful automatic Refresh drops that NPC's queued repair).

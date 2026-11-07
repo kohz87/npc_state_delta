@@ -8,12 +8,13 @@
 import { hashJson, isHash, isRecordId, sourceProblem } from '../replay.js';
 import { HOST_DOMAIN } from './gate.js';
 import { stateHash } from './host-block.js';
+import { boundaryMatches, canFallback, createSelectionFallback, fellNotice, settledPlan } from './selection-fallback.js';
 import { crashing, fail, isObject, isStaleChat, makeId } from './util.js';
 
 export function createNative(s, deps) {
     const {
-        store, registry, activeHistory, archive, ask, block, availability, brokenProblem, callParticipant, durable, exclusive, guarded, head, headNow, here,
-        makeNow, participants, pendingNow, point, pointsOf, raise, release, session, stillHere, unmaterializedMarkers,
+        store, registry, activeHistory, activeLine, archive, ask, block, availability, brokenProblem, callParticipant, durable, exclusive, guarded, head, headNow, here,
+        makeNow, participants, pendingNow, point, pointsOf, problem, raise, release, session, stillHere, unmaterializedMarkers,
     } = deps;
 
     // One selection rule for every head change. Prefix identity AND replayed state must match;
@@ -36,7 +37,7 @@ export function createNative(s, deps) {
                 for (const mapping of archive.prefixes(module)) {
                     if (!mapping.boundary || !mapping.after) continue;
                     const witness = store.prefixWitness(mapping.boundary.cursor);
-                    if (witness && (!through || witness.index < through.index || (witness.index === through.index && witness.op <= through.op)) && witness.prefixHash === mapping.boundary.prefixHash && witnessStateHash(witness.state) === mapping.boundary.stateHash) {
+                    if (boundaryMatches(mapping, witness, { through, stateHashOf: witnessStateHash })) {
                         candidates.push({ mapping, index: witness.index, op: witness.op });
                     }
                 }
@@ -53,7 +54,38 @@ export function createNative(s, deps) {
         try { store.lifecycleChanged?.(); return fn(); }
         finally { registry.setRestore(was.state, was.reason, { temporary: true }); store.lifecycleChanged?.(); }
     }
-    const selectionNeeded = () => hashJson(selectionPlan()) !== hashJson(archive.selection());
+    // (a module that fell to an earlier point is settled where the journal left it, not planned again at every look)
+    const selectionNeeded = () => hashJson(settledPlan(selectionPlan(), archive.selection(), archive.entries())) !== hashJson(archive.selection());
+    const fallback = createSelectionFallback({ archive, store, witnessStateHash });
+    const LABELS = { 'npc-state-delta': 'Dossiers' };
+
+    // A head selection whose chosen checkpoint is gone or belongs to another line walks to the nearest earlier one that holds (spec 3a).
+    // Only a head selection comes here: a reader's Return here and every save point are restores, which stay exact and never fall back.
+    async function fallBack(entry, module, target, failure) {
+        const { headIndex, chain, replyIndexes } = withWholePrefixes(() => {
+            const head = headNow();
+            const line = activeLine();
+            const replyIndexes = line.messages.flatMap((message, index) => message && !message.is_user && !message.is_system && !line.at.has(index) ? [index] : []);
+            return { headIndex: head ? store.prefixWitness(head.cursor)?.index : null, chain: fallback.fallbackChain(module), replyIndexes };
+        });
+        const verify = typeof participants.get(module)?.verify === 'function' ? input => callParticipant(module, 'verify', input) : null;
+        const walked = await fallback.walkSelectionFallback(module, {
+            from: target, headIndex, verify, failure, chain,
+            countReplies: index => Number.isInteger(headIndex) ? replyIndexes.filter(at => at > (index ?? -1) && at <= headIndex).length : null,
+            prepare: input => callParticipant(module, 'prepare', { return: entry.id, ...input }),
+        });
+        // The whole chain was walked and none held (the original failure comes back unchanged, with no candidate): nothing is left to fall back to.
+        if (!walked.ok && !walked.target && !walked.replan && canFallback(walked.code)) s.exhausted.set(module, archive.holder());
+        if (!walked.ok) return walked;
+        s.exhausted.delete(module);
+        const to = { module, checkpoint: walked.target.checkpoint, hash: walked.target.hash, schema: walked.target.schema };
+        const slot = { prepared: walked.prepared.prepared, ack: false };
+        const previous = archive.get(entry.id);
+        archive.patch(entry.id, { desired: { ...previous.desired, [module]: to }, slots: { ...previous.slots, [module]: slot },
+            ...(previous.fell ? { fellOthers: [...(previous.fellOthers ?? []), walked.fell] } : { fell: walked.fell }) });
+        await durable();
+        return { ok: true, target: to, slot };
+    }
 
     // Owners may declare a native dependency through a synchronous, read-only hook. Check it only after
     // checkpoint selection, on the whole selected story, while the barrier still holds every public reader.
@@ -80,7 +112,7 @@ export function createNative(s, deps) {
 
     async function selectHead() {
         if (!selectionNeeded()) return { ok: true };
-        const desired = selectionPlan();
+        const desired = settledPlan(selectionPlan(), archive.selection(), archive.entries());
         const lacking = availability(Object.values(desired));
         if (lacking) return block.note(null, fail('SNAPSHOT_UNAVAILABLE', lacking));
         const entry = archive.add({ id: makeId('hs'), kind: 'selection', phase: 'prepared', desired, slots: {} });
@@ -93,17 +125,32 @@ export function createNative(s, deps) {
         // (a block that is being retried keeps its own reason up; a first try says only that it is waiting)
         if (!block.current()) raise(WAITING);
         await durable();
-        for (const [module, target] of Object.entries(entry.desired)) {
+        for (const [module, planned] of Object.entries(entry.desired)) {
+            let target = planned;
             const registered = participants.get(module);
             if (!registered || registered.schema !== target.schema) return block.note(module, fail('SNAPSHOT_UNAVAILABLE', `The participant ${module} is unavailable for the selected head.`));
             let slot = archive.get(entry.id).slots[module];
             if (!slot) {
                 const prepared = await callParticipant(module, 'prepare', { return: entry.id, checkpoint: target.checkpoint, hash: target.hash });
-                if (!prepared.ok) return block.note(module, prepared);
-                if (prepared.hash !== target.hash) return block.note(module, fail('CONFLICT', 'The participant prepared other selected bytes.'));
-                slot = { prepared: prepared.prepared, ack: false };
-                archive.patch(entry.id, { slots: { ...archive.get(entry.id).slots, [module]: slot } });
-                await durable();
+                if (!prepared.ok && canFallback(prepared.code)) {
+                    const fell = await fallBack(entry, module, target, prepared);
+                    if (fell.replan) {
+                        // The head moved while the first prepare waited and the point dropped out of the chain: this selection is
+                        // closed with nothing selected, and the head is planned again (no permanent block).
+                        archive.patch(entry.id, { phase: 'complete', replanned: true, why: fell.message });
+                        await durable();
+                        return selectHead();
+                    }
+                    if (!fell.ok) return block.note(module, fell);
+                    target = fell.target;
+                    slot = fell.slot;
+                } else if (!prepared.ok) return block.note(module, prepared);
+                else if (prepared.hash !== target.hash) return block.note(module, fail('CONFLICT', 'The participant prepared other selected bytes.'));
+                else {
+                    slot = { prepared: prepared.prepared, ack: false };
+                    archive.patch(entry.id, { slots: { ...archive.get(entry.id).slots, [module]: slot } });
+                    await durable();
+                }
             }
             if (!slot.ack) {
                 const done = await callParticipant(module, 'activate', { return: entry.id, prepared: slot.prepared });
@@ -117,6 +164,16 @@ export function createNative(s, deps) {
         archive.select(entry.desired);
         archive.patch(entry.id, { phase: 'complete' });
         await durable();
+        for (const fell of [].concat(entry.fell ?? [], entry.fellOthers ?? [])) {
+            const chosen = withWholePrefixes(() => fallback.fallbackChain(fell.module).find(item => item.checkpoint === fell.to.checkpoint && item.hash === fell.to.hash));
+            // The participant is told once, now that the selection is durable, to read the replies it missed (same catch-up as a reader restore).
+            if (typeof participants.get(fell.module)?.restored === 'function') {
+                const told = await callParticipant(fell.module, 'restored', { from: fell.from, to: fell.to, reason: 'fallback' });
+                if (!told.ok) try { problem?.({ module: fell.module, code: 'SELECTION_FELL_SCAN', quiet: true, message: `${LABELS[fell.module] ?? fell.module} could not start reading the replies it missed: ${told.message}` }); } catch { /* a listener is not the timeline's business */ }
+            }
+            const message = fellNotice(LABELS[fell.module] ?? registry.module?.(fell.module)?.name ?? fell.module, { index: chosen?.index, replies: fell.replies });
+            try { problem?.({ module: fell.module, code: 'SELECTION_FELL', quiet: true, message }); } catch { /* a listener is not the timeline's business */ }
+        }
         block.clear();
         return { ok: true };
     }

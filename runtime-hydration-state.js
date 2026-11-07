@@ -2,6 +2,7 @@
    accessors, hydration revision metadata, freshness events, dirty marks and native-change notices.
    Split from runtime-hydration.js without change; the factory keeps the public exports. */
 
+import { replayScope } from './runtime-scan-helpers.js';
 import { normalizeAutomaticBackfillRequest } from './scan-context.js';
 import { normalizeNpcRecord, normalizeNpcCandidate, normalizeFormPortraitAssets, withStoryDateMemo } from './core.js';
 import { BRANCH_LINEAGE_VERSION, ROLLBACK_JOURNAL_VERSION, normalizeUserDismissedGroups } from './branch.js';
@@ -119,6 +120,7 @@ export function installHydrationState(api, rt, deps) {
 
     function getChatState(key = getChatKey()) {
         if (key === 'no-chat') return freshChatState();
+        if (replayScope()?.key === key) return replayScope().state;   // a history replay works on its private copy
         if (!chatStateCache.has(key)) chatStateCache.set(key, freshChatState());
         touchChatCache(key);
         return chatStateCache.get(key);
@@ -126,6 +128,7 @@ export function installHydrationState(api, rt, deps) {
 
     function setChatState(key, state, { markLoaded = false } = {}) {
         if (!key || key === 'no-chat') return state;
+        if (replayScope()?.key === key) return replayScope().replace(normalizeChatState(state));   // into the copy, in place
         const normalized = normalizeChatState(state);
         chatStateCache.set(key, normalized);
         touchChatCache(key);

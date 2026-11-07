@@ -4,6 +4,9 @@ export const SCANNER_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 export const SCANNER_MAX_OUTPUT_TOKENS_MIN = 128;
 export const SCANNER_MAX_OUTPUT_TOKENS_MAX = 15000;
 const inflight = new Map();
+// The one place the scanner waits for the model: a caller (a history replay) may step aside for that wait, so live readers see the live state.
+let aroundWait = promise => promise;
+export function setScannerWaitAround(wrap) { aroundWait = typeof wrap === 'function' ? wrap : (promise => promise); }
 let sequence = 0;
 const metrics = {
     attempts: 0, total: 0, defaultRoute: 0, profileRoute: 0,
@@ -233,7 +236,7 @@ export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
         record.sent = true;
         metrics.total += 1;
         metrics[profileId ? 'profileRoute' : 'defaultRoute'] += 1;
-        const response = await Promise.race([invoke(), stopped]);
+        const response = await aroundWait(Promise.race([invoke(), stopped]));
         assertCurrent();
         verifyProfile();
         let value = response;

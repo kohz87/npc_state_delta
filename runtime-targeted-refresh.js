@@ -1,7 +1,7 @@
 /* NPC State Delta targeted Refresh (role: targeted-refresh). The editor-field sync and the Refresh-from-chat pass
    for one existing NPC. Split from runtime-targeted.js; bodies are moved without change. */
 
-import { getContext } from '../../../extensions.js';
+import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { recentTranscript, recentUserDevelopmentContext, currentExclusions, storyDayAt, storyDaysForTranscript, refreshMessageGate } from './src/transcript.js';
 import { DEFAULT_RELATIONSHIP, relationshipSummaryConsistent, calibrateRelationshipSummary, npcMatchesLabel, buildProfileRefreshPrompt, extractExplicitKeyRelationshipEdges, normalizeCustomFields } from './core.js';
 import { setNpcChatRefreshIndicator, relationshipNumber, latestMessageId } from './runtime-scan-helpers.js';
