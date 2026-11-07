@@ -3,10 +3,10 @@
    runtime-inline-cards.js with unchanged function bodies; the original factory closure is passed
    in explicitly and the original path keeps the public exports. */
 
-import { getContext } from '../../../../extensions.js';
-import { snapshotNpc } from '../src/fields/registry.js';
-import { npcMatchesLabel, normalizeName } from '../core.js';
-import { fingerprintMessage } from '../branch.js';
+import { getContext } from '../../../extensions.js';
+import { snapshotNpc } from './src/fields/registry.js';
+import { npcMatchesLabel, normalizeName } from './core.js';
+import { fingerprintMessage } from './branch.js';
 
 export function createInlineCardsStatePart(deps) {
     const { chatHydrationStatus, currentLineageKeyForMessage, getChatKey, getChatState, INLINE_HISTORY_LIMIT } = deps;

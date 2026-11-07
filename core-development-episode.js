@@ -2,10 +2,10 @@
    developmentScaleReady. Split from core-development.js as a line-for-line part; the original keeps
    the public exports. */
 
-import { cleanText, normalizeName } from '../core-text.js';
-import { DURABLE_PROFILE_LIMITS, durableRefinementTokens } from '../core-relationship.js';
-import { BATCH_EPISODE_MAX_CHARS, developmentBindingLabels, developmentContextSegments, normalizedPhrasePresent, scopedEpisodeText } from '../core-durable.js';
-import { BATCH_DEVELOPMENT_CUE_RE, contextWindowGroundsReason, declarativeUserDevelopmentSegment, developmentReasonGrounded, explicitDevelopmentContextGrounded, hasNarratedTimeSkip, isBareTimePassageDevelopmentReason } from './time.js';
+import { cleanText, normalizeName } from './core-text.js';
+import { DURABLE_PROFILE_LIMITS, durableRefinementTokens } from './core-relationship.js';
+import { BATCH_EPISODE_MAX_CHARS, developmentBindingLabels, developmentContextSegments, normalizedPhrasePresent, scopedEpisodeText } from './core-durable.js';
+import { BATCH_DEVELOPMENT_CUE_RE, contextWindowGroundsReason, declarativeUserDevelopmentSegment, developmentReasonGrounded, explicitDevelopmentContextGrounded, hasNarratedTimeSkip, isBareTimePassageDevelopmentReason } from './core-development-time.js';
 
 const BATCH_TEMPORAL_CONTINUATION_RE = /\b(?:during that time|during this time|over that period|over this period|throughout that time|throughout this period|by then|over the interval|during the interval)\b/;
 const BATCH_WEAK_TRANSITION_CUE_RE = /\b(?:chang(?:e|ed|es|ing)|adopt(?:ed|ing)|replac(?:ed|ing)|discard(?:ed|ing)|transition(?:ed|ing)|shift(?:ed|ing))\b/;

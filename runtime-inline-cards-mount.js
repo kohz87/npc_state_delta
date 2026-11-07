@@ -3,7 +3,7 @@
    timers and observer state remain per module instance in this factory, the original factory closure
    is passed in explicitly, and the original path keeps the public exports. */
 
-import { fillPresentSceneText } from '../present-scene.js';
+import { fillPresentSceneText } from './present-scene.js';
 
 export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObserver, messageElement, inlineRosterHtml, inChatCastMode, inlineEntriesForRender, meguminIntegrationMessageId, meguminBlockCardForMessage, cleanupStaleMeguminIntegrations, inlineAnchorMessageId, mountNpcStateInsideMeguminBlock }) {
     const { chatHydrationStatus, getChatKey, getChatState } = deps;

@@ -3,8 +3,8 @@
    runtime-inline-cards.js with unchanged function bodies; the original factory closure is passed in
    explicitly and the original path keeps the public exports. */
 
-import { snapshotNpc } from '../src/fields/registry.js';
-import { getSettings, normalizePresentCastDisplay } from '../runtime-settings.js';
+import { snapshotNpc } from './src/fields/registry.js';
+import { getSettings, normalizePresentCastDisplay } from './runtime-settings.js';
 
 export function createInlineCardsModePart(deps, inlineRosterHtml) {
     const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, scenePresenceView, storyBlockV2Hosted } = deps;

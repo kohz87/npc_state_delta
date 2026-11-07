@@ -2,7 +2,7 @@
    ordinals, absolute day numbers, legacy story-day migration and the current calendar date.
    Split from calendar.js as a line-for-line part; the original keeps the public exports. */
 
-import { calendarYearLength, cleanText, getActiveCalendarConfig, MAX_CALENDAR_DAYS_PER_MONTH, normalizeCalendarConfig, normalizeMonthKey, parseInteger } from './config.js';
+import { calendarYearLength, cleanText, getActiveCalendarConfig, MAX_CALENDAR_DAYS_PER_MONTH, normalizeCalendarConfig, normalizeMonthKey, parseInteger } from './calendar-config.js';
 
 export function legacyLeapYear(year) {
     return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);

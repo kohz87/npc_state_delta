@@ -28,7 +28,7 @@ export const RUNTIME_SOURCE_PARTS = [
     { file: 'runtime-hosted.js', before: 'const { storyBlockV2Hosted' },
     { file: 'runtime-injection.js', before: 'const { liveInjectionText,' },
     { file: 'runtime-narration.js', before: 'const { narrationCaptureStats,' },
-    { files: ['runtime-inline-cards/state.js', 'runtime-inline-cards/present.js', 'runtime-inline-cards/mode.js', 'runtime-inline-cards/megumin.js', 'runtime-inline-cards/mount.js'], before: 'const { recordInlineCardsInState' },
+    { files: ['runtime-inline-cards-state.js', 'runtime-inline-cards-present.js', 'runtime-inline-cards-mode.js', 'runtime-inline-cards-megumin.js', 'runtime-inline-cards-mount.js'], before: 'const { recordInlineCardsInState' },
     { file: 'runtime-editor.js', before: 'const { editorIsMounted' },
     { file: 'runtime-cast-sync.js', before: 'const { castPortraitDue' },
     { file: 'runtime-mutations.js', before: 'const { updateNpcAppearance' },

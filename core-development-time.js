@@ -2,9 +2,9 @@
    development-reason grounding and user-canon declarative checks. Split from core-development.js
    as a line-for-line part; the original keeps the public exports. */
 
-import { cleanText, normalizeName } from '../core-text.js';
-import { durableRefinementTokens } from '../core-relationship.js';
-import { developmentContextSegments } from '../core-durable.js';
+import { cleanText, normalizeName } from './core-text.js';
+import { durableRefinementTokens } from './core-relationship.js';
+import { developmentContextSegments } from './core-durable.js';
 
 export function isBareTimePassageDevelopmentReason(value) {
     const text = normalizeName(value);

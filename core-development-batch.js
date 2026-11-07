@@ -2,10 +2,10 @@
    and resolveInterimIdentityPromotions. Split from core-development.js as a line-for-line part; the
    original keeps the public exports. */
 
-import { cleanText, normalizeName } from '../core-text.js';
-import { mergeLists, normalizeScanNpc, npcMatchesLabel } from '../core-record.js';
-import { findInterimIdentityPromotionIndex, inferNpcIdentityKind } from '../core-identity.js';
-import { applyDurableProfileUpdate } from './update.js';
+import { cleanText, normalizeName } from './core-text.js';
+import { mergeLists, normalizeScanNpc, npcMatchesLabel } from './core-record.js';
+import { findInterimIdentityPromotionIndex, inferNpcIdentityKind } from './core-identity.js';
+import { applyDurableProfileUpdate } from './core-development-update.js';
 
 export function applyDurableProfileUpdates(state, scanResult, excludeNames, report, options = {}) {
     const rawUpdates = Array.isArray(scanResult?.profileUpdates) ? scanResult.profileUpdates

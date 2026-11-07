@@ -5,11 +5,11 @@
    own timers. The implementation is split across runtime-inline-cards/; this path keeps the original
    public factory/export and existing importers unchanged. */
 
-import { createInlineCardsStatePart } from './runtime-inline-cards/state.js';
-import { createInlineCardsPresentPart } from './runtime-inline-cards/present.js';
-import { createInlineCardsModePart } from './runtime-inline-cards/mode.js';
-import { createInlineCardsMeguminPart } from './runtime-inline-cards/megumin.js';
-import { createInlineCardsMountPart } from './runtime-inline-cards/mount.js';
+import { createInlineCardsStatePart } from './runtime-inline-cards-state.js';
+import { createInlineCardsPresentPart } from './runtime-inline-cards-present.js';
+import { createInlineCardsModePart } from './runtime-inline-cards-mode.js';
+import { createInlineCardsMeguminPart } from './runtime-inline-cards-megumin.js';
+import { createInlineCardsMountPart } from './runtime-inline-cards-mount.js';
 
 export function createInlineCardsPart(rt, deps) {
     let inChatCastMode = () => 'full';

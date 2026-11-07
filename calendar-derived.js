@@ -2,9 +2,9 @@
    age/birth-date derivation and the prompt date context. Split from calendar.js as a line-for-line
    part; the original keeps the public exports. */
 
-import { calendarYearLength, cleanText, normalizeCalendarConfig, normalizeMonthKey } from './config.js';
-import { storyCurrentDate } from './clock.js';
-import { dateOrdinal, escapeRegex, formatCalendarDate, legacyMonthDays, normalizeCalendarDate } from './date.js';
+import { calendarYearLength, cleanText, normalizeCalendarConfig, normalizeMonthKey } from './calendar-config.js';
+import { storyCurrentDate } from './calendar-clock.js';
+import { dateOrdinal, escapeRegex, formatCalendarDate, legacyMonthDays, normalizeCalendarDate } from './calendar-date.js';
 
 function stableHash(value) {
     const text = String(value || '').normalize('NFKC').toLocaleLowerCase();

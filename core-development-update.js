@@ -3,14 +3,14 @@
    behavior profile, extra durable facts and memories. Split from core-development.js as a line-for-line
    part; the original keeps the public exports. */
 
-import { durableProfileEvidenceReason, gradualProfileEvolutionReady, mergeProfileEvidence, mergeRecentProfileEvidence, normalizeProfileEvidence, profileEvidenceCount, unresolvedCollectionEvidence, unresolvedProfileEvidence } from '../core-evidence.js';
-import { cleanText, normalizeName } from '../core-text.js';
-import { DURABLE_PROFILE_LIMITS, durableEvidenceGroundsValue, durableSeedGrounded } from '../core-relationship.js';
-import { durableRefinementCandidateGrounded, filterSafeMannerismRefinements, groundedAppearanceChange, groundedAppearanceCorrection, identityMoralityConflict, isExplicitRecurringMannerism, isSafeIdentityTextRefinement, isSafeSpeechRefinement, isSafeUnmarkedDurableFieldReplacement, isSafeUnmarkedDurableRefinement, mergeDurableTextRefinement, normalizeMannerisms, presentationContinuationEvidence, speechSupportContext } from '../core-durable.js';
-import { durableTextAccepted, incomingCustomFields, incomingKeyRelationships, mergeImportantMemories, normalizeScanNpc, PROFILE_UPDATE_TEXT_FIELDS } from '../core-record.js';
-import { PROFILE_EVIDENCE_FIELDS } from '../src/fields/registry.js';
-import { durableProfileCollectionCandidateGrounded, durableProfileCollectionEquivalent, groundedBehaviorProfile, mergeBehaviorProfileRefinements, normalizeBehaviorProfile, reconcileBehaviorProfileWithPersonality, recoverBehaviorProfileKeepAdditions } from '../core-behavior.js';
-import { developmentScaleReady } from './episode.js';
+import { durableProfileEvidenceReason, gradualProfileEvolutionReady, mergeProfileEvidence, mergeRecentProfileEvidence, normalizeProfileEvidence, profileEvidenceCount, unresolvedCollectionEvidence, unresolvedProfileEvidence } from './core-evidence.js';
+import { cleanText, normalizeName } from './core-text.js';
+import { DURABLE_PROFILE_LIMITS, durableEvidenceGroundsValue, durableSeedGrounded } from './core-relationship.js';
+import { durableRefinementCandidateGrounded, filterSafeMannerismRefinements, groundedAppearanceChange, groundedAppearanceCorrection, identityMoralityConflict, isExplicitRecurringMannerism, isSafeIdentityTextRefinement, isSafeSpeechRefinement, isSafeUnmarkedDurableFieldReplacement, isSafeUnmarkedDurableRefinement, mergeDurableTextRefinement, normalizeMannerisms, presentationContinuationEvidence, speechSupportContext } from './core-durable.js';
+import { durableTextAccepted, incomingCustomFields, incomingKeyRelationships, mergeImportantMemories, normalizeScanNpc, PROFILE_UPDATE_TEXT_FIELDS } from './core-record.js';
+import { PROFILE_EVIDENCE_FIELDS } from './src/fields/registry.js';
+import { durableProfileCollectionCandidateGrounded, durableProfileCollectionEquivalent, groundedBehaviorProfile, mergeBehaviorProfileRefinements, normalizeBehaviorProfile, reconcileBehaviorProfileWithPersonality, recoverBehaviorProfileKeepAdditions } from './core-behavior.js';
+import { developmentScaleReady } from './core-development-episode.js';
 
 function normalizeProfileUpdateEvidence(raw = {}) {
     return normalizeProfileEvidence(raw.evidence ?? raw.profileEvidence ?? raw.profile_evidence ?? raw.observations ?? {});

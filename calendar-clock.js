@@ -2,8 +2,8 @@
    formatting, agreement with Delta's calendar, and hosted/current date fallbacks. Split from
    calendar.js as a line-for-line part; the original keeps the public exports. */
 
-import { getActiveCalendarConfig, MAX_CALENDAR_DAYS_PER_MONTH, MAX_CALENDAR_MONTHS, normalizeCalendarConfig, normalizeMonthKey } from './config.js';
-import { currentCalendarDate, legacyLeapYear, normalizeCalendarDate } from './date.js';
+import { getActiveCalendarConfig, MAX_CALENDAR_DAYS_PER_MONTH, MAX_CALENDAR_MONTHS, normalizeCalendarConfig, normalizeMonthKey } from './calendar-config.js';
+import { currentCalendarDate, legacyLeapYear, normalizeCalendarDate } from './calendar-date.js';
 
 // (v2) Hosted by Story Block v2, the story's date can come from Story Director's clock: index.js sets a
 // source that answers { minutes, calendar } (its `director.time` minutes and `director.calendar` config)
