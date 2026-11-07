@@ -1,6 +1,6 @@
 /* NPC State Delta portrait actions: upload completion, generated portrait previews/seeds, and removal. */
 import {
-    api, closeOverlay, currentSessionIs, flushDurably, keepPromptDraft,
+    api, closeOverlay, currentSessionIs, flushDurably,
     npcById, recordToolEvent, setBusy, stage1Refresh, validatePortraitFile,
 } from './dossier-tools-core.js';
 import { targetPortrait } from './portrait-tools-targets.js';

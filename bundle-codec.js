@@ -1,8 +1,6 @@
 /* NPC State Delta native bundle codec: manifest framing, portrait binary encoding, and bundle decoding. */
-import { formPortraitKey, isTerminalNpcDeath, normalizeFormPortraitAssets, normalizeName, normalizeNpcRecord, protectTerminalNpc } from './core.js';
-import { normalizeSocialGraph, remapSocialGraphNpcIds } from './social.js';
-import { LOCKED_FIELD_KEYS } from './src/dossier-edit.js';
-import { portraitHasImage } from './src/portrait-file.js';
+import { formPortraitKey, normalizeFormPortraitAssets } from './core.js';
+import { normalizeSocialGraph } from './social.js';
 
 const MAGIC = new Uint8Array([0x4e, 0x50, 0x43, 0x53, 0x54, 0x42, 0x30, 0x31]); // NPCSTB01
 const HEADER_SIZE = 12;

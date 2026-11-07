@@ -29,4 +29,3 @@ export function portraitTargetHtml(npc, form) {
         .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === form ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
     return `<label class="delta-tools-portrait-target">Portrait for<select data-portrait-target>${options}</select></label>`;
 }
-

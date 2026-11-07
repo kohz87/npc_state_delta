@@ -155,4 +155,3 @@ export function withoutSourceReplyNumbers(npc) {
     }
     delete npc.fieldChangeMessages;
 }
-
