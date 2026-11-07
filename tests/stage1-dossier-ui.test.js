@@ -13,10 +13,11 @@ import {
   projectDossierState,
   sortDossierIndex,
 } from '../dossier-ui.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const uiSource = fs.readFileSync(path.join(root, 'dossier-ui.js'), 'utf8');
+const uiSource = dossierUiSource();
 const bootstrap = fs.readFileSync(path.join(root, 'bootstrap.js'), 'utf8');
 
 const cast = [

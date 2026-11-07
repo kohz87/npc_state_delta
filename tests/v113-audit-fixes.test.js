@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as branch from '../branch.js';
 import * as branchCore from '../branch-core.js';
+import { shippedModulePaths } from './helpers/shipped-modules.js';
 
 const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-const modules = JSON.parse(read('runtime-modules.json')).modules.map(module => module.path);
+const modules = shippedModulePaths();
 const sources = Object.fromEntries(modules.map(path => [path, read(path)]));
 const all = Object.values(sources).join('\n');
 

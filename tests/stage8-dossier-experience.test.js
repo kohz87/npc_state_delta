@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { lifeStateChoice, setNodeTextIfChanged } from '../dossier-experience.js';
 import { runtimeSource } from './helpers/runtime-source.js';
 
-const source = fs.readFileSync(fileURLToPath(new URL('../dossier-experience.js', import.meta.url)), 'utf8');
+const source = [
+    fs.readFileSync(fileURLToPath(new URL('../dossier-experience.js', import.meta.url)), 'utf8'),
+    fs.readFileSync(fileURLToPath(new URL('../dossier-experience-styles.js', import.meta.url)), 'utf8'),
+].join('\n');
 
 test('manual life-state projection distinguishes unknown alive terminal death and the short-lived manual dead shape', () => {
     assert.equal(lifeStateChoice({ lifeState: 'unknown' }), 'unknown');

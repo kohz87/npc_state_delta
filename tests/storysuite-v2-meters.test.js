@@ -13,6 +13,7 @@ import { assemble } from './vendor/story-block/src/v2/prompt.js';
 import { escapeHtml } from '../src/util/html.js';
 import fs from 'node:fs';
 import { projectDossierState, v2SecretsHtml, v2MetersProjection } from '../dossier-ui.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 import { hiddenNotePromptRules } from '../core-mechanics.js';
 import { METERS_CARD_ID, metersCardScreen } from '../src/npc-meters-screen.js';
 import { buildInjection, buildNarrationCapturePrompt, buildProfileRefreshPrompt, buildScannerPrompt, normalizeNpcRecord } from '../core.js';
@@ -964,7 +965,7 @@ test('secrets: the scanner prompt asks for layered notes and watches story event
 });
 
 test('secrets: the dossier\'s Secrets section follows Background / History, with a Secrets chip, and only for a dossier with notes', () => {
-    const ui = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
+    const ui = dossierUiSource();
     assert.match(ui, /<h3>Background \/ History\$\{changedMark\(selected, 'background'\)\}<\/h3>[^`]*?<\/section>\s*\$\{v2SecretsHtml\(selected\.v2Meters\)\}/, 'right after History');
     assert.match(ui, /\$\{sectionNavHtml\(Boolean\(selected\.v2Meters\?\.secrets\?\.length\)\)\}/);
     assert.match(ui, /secrets \? \[\.\.\.DOSSIER_SECTIONS, \['secrets', 'Secrets'\]\] : DOSSIER_SECTIONS/, 'the chip comes after History');
