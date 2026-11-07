@@ -92,15 +92,15 @@ function checkpointFiles(raw) {
     return files;
 }
 
-function totalsOf(files) {
+function totalsOf(files, exact = true) {
     let bytes = 0;
     for (const file of files.values()) bytes += file.bytes;
-    return { totalFiles: files.size, totalBytes: bytes };
+    return { totalFiles: files.size, totalBytes: bytes, exact };
 }
 
-function report({ ok, complete, canSweep, code = 'OK', message = '', totalFiles = 0, totalBytes = 0, candidates = [], keepNewerThanMs = DEFAULT_KEEP_NEWER_THAN_MS }) {
+function report({ ok, complete, canSweep, code = 'OK', message = '', totalFiles = 0, totalBytes = 0, exact = true, candidates = [], keepNewerThanMs = DEFAULT_KEEP_NEWER_THAN_MS }) {
     const bytes = candidates.reduce((sum, file) => sum + file.bytes, 0);
-    return { ok, complete, canSweep, code, message, totalFiles, totalBytes, candidates, count: candidates.length, bytes, keepNewerThanMs };
+    return { ok, complete, canSweep, code, message, totalFiles, totalBytes, exact, candidates, count: candidates.length, bytes, keepNewerThanMs };
 }
 
 function refusal(code, message, totals = {}, keepNewerThanMs = DEFAULT_KEEP_NEWER_THAN_MS) {
@@ -134,7 +134,9 @@ export function createVaultSweep({ vault, now = () => Date.now(), keepNewerThanM
             }
             const files = checkpointFiles(raw);
             if (!files) return remember(token, refusal('VAULT_UNREADABLE', 'The checkpoint vault did not return a file list.'));
-            const totals = totalsOf(files);
+            // A list that says `complete: false` cannot prove it saw every file: the totals are "at least", and only the files it names (by name, age
+            // and references) can ever be candidates.
+            const totals = totalsOf(files, raw?.complete !== false);
             if (token !== generation) return refusal('SUPERSEDED', 'A newer clean-up check replaced this one.', totals, requestedGrace);
 
             if (typeof requestedGrace !== 'number' || !Number.isFinite(requestedGrace) || requestedGrace < 0) {

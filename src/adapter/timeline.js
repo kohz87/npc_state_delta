@@ -144,6 +144,8 @@ export function createTimelinePart(session, deps) {
     // which checkpoint files every chat uses.
     const storageRow = createStorageRow({
         doc, vault, warn,
+        // The participant's own exclusive queue (checkpoint writes run in it); `timeline` is made just below, before any click can happen.
+        exclusive: fn => timeline.exclusive(fn),
         ask: async () => session.sdkRef.query(REFERENCED_QUERY, {}),
         live: () => { try { return runtime()?.getState?.() ?? null; } catch { return null; } },
     });

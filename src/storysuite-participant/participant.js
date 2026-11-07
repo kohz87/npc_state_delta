@@ -308,6 +308,8 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         },
         /** Hydrates the open chat now, making its line if it has none. */
         hydrate: () => exclusive(async () => { const s = await hydrate(); return s ? { ok: true, npcs: Object.keys(timelineOf(port.readState()).identity.byKey).length, lineage: s.lineage } : fail('FAILED', 'There is no open chat.'); }),
+        /** Runs `fn` in the exclusive queue every checkpoint write takes (the Storage clean-up checks and deletes inside it). */
+        exclusive,
         nativeChange,
         /** Delta's state was written durably by something other than the participant: publish it as a native change (debounced). */
         noteChange: () => {

@@ -9,6 +9,12 @@ import { createVaultSweep } from '../src/storysuite-participant/vault-sweep.js';
 const DAY = 24 * 60 * 60 * 1000;
 const proof = (referenced = []) => ({ complete: true, referenced });
 const live = () => ({});
+// A stand-in for the participant's exclusive queue: one thing at a time, in order; `inside` says whether a callback is running.
+function queue() {
+    let tail = Promise.resolve();
+    const q = { inside: false, exclusive: fn => { const run = tail.then(async () => { q.inside = true; try { return await fn(); } finally { q.inside = false; } }); tail = run.catch(() => {}); return run; } };
+    return q;
+}
 
 class Node {
     constructor(tag) { this.tag = tag; this.children = []; this.listeners = {}; this.className = ''; this._text = ''; this.disabled = false; this.parent = null; }
@@ -38,7 +44,7 @@ async function seeded(ids) {
 
 test('memory vault: list() reports id, size and time; remove(id) refuses an id in the referenced set and keeps the file', async () => {
     const { vault } = await seeded([['nk_aaaaaaa1', 40 * DAY], ['nk_aaaaaaa2', 1 * DAY]]);
-    const listed = await vault.list();
+    const listed = (await vault.list()).files;
     assert.deepEqual(listed.map(f => f.id).sort(), ['nk_aaaaaaa1', 'nk_aaaaaaa2']);
     assert.ok(listed.every(f => f.size > 2000 && Number.isFinite(f.modifiedAt)));
     assert.equal(await vault.remove('nk_aaaaaaa1', { referenced: new Set(['nk_aaaaaaa1']) }), false);
@@ -48,51 +54,118 @@ test('memory vault: list() reports id, size and time; remove(id) refuses an id i
     assert.equal(await vault.remove('nk_aaaaaaa1'), false);
 });
 
-test('file vault discovers old unregistered checkpoint files with host metadata and protects referenced files', async () => {
-    const files = new Map();
-    const times = new Map();
-    const calls = [];
-    const now = 100 * DAY;
-    const oldName = 'npc-state-delta-checkpoint-nk_bbbbbbb1.json';
-    const protectedName = 'npc-state-delta-checkpoint-nk_bbbbbbb2.json';
-    files.set(oldName, '{"old":true}');
-    files.set(protectedName, '{"used":true}');
-    files.set('npc-state-delta-checkpoint-not-an-id.json', '{}');
-    times.set(oldName, now - 60 * DAY);
-    times.set(protectedName, now - 60 * DAY);
+// A fake SillyTavern user-files server. `calls` records every URL, so a test can prove which endpoints were (not) used.
+function fakeServer(now) {
+    const files = new Map(); const times = new Map(); const calls = [];
     const fetchFn = async (url, options = {}) => {
         calls.push(url);
         const name = url.split('/').pop();
-        if (url === '/api/files/upload') { const body = JSON.parse(options.body); files.set(body.name, Buffer.from(body.data, 'base64').toString()); times.set(body.name, now); return { ok: true, status: 200 }; }
+        if (url === '/api/files/upload') { const body = JSON.parse(options.body); files.set(body.name, Buffer.from(body.data, 'base64').toString()); times.set(body.name, now()); return { ok: true, status: 200 }; }
         if (url === '/api/files/verify') { const body = JSON.parse(options.body); return { ok: true, status: 200, json: async () => Object.fromEntries(body.urls.map(u => [u, files.has(u.split('/').pop())])) }; }
-        if (url === '/api/data-maid/report') return { ok: true, json: async () => ({ token: 'test-token', report: { files: [...files].map(([n, text]) => ({ name: n, size: Buffer.byteLength(text), mtime: times.get(n) })) } }) };
-        if (url === '/api/data-maid/finalize') return { ok: true, status: 204 };
         if (url === '/api/files/delete') { const n = JSON.parse(options.body).path.split('/').pop(); const had = files.delete(n); return { ok: had, status: had ? 200 : 404, text: async () => '' }; }
         if (files.has(name)) return { ok: true, status: 200, text: async () => files.get(name) };
         return { ok: false, status: 404, text: async () => '' };
     };
-    const vault = fileVault({ fetchFn });
-    await vault.put('nk_bbbbbbb3', { new: true });
+    return { files, times, calls, fetchFn };
+}
+
+test('file vault never calls Data Maid; it lists what it registered, says the list is not complete, and refuses referenced ids', async () => {
+    let t = 100 * DAY;
+    const server = fakeServer(() => t);
+    const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
+    server.files.set('npc-state-delta-checkpoint-nk_bbbbbbb1.json', '{"pre-release":true}'); // written before the registry: never named
+    await vault.put('nk_bbbbbbb2', { lineage: 'lg_a' });
+    await vault.put('nk_bbbbbbb3', { lineage: 'lg_a' });
     const listed = await vault.list();
-    assert.deepEqual(listed.map(f => [f.id, f.modifiedAt]), [['nk_bbbbbbb1', now - 60 * DAY], ['nk_bbbbbbb2', now - 60 * DAY], ['nk_bbbbbbb3', now]]);
-    assert.ok(calls.includes('/api/data-maid/finalize'));
-    const before = calls.filter(u => u === '/api/files/delete').length;
+    assert.equal(listed.complete, false);
+    assert.deepEqual(listed.files.map(f => f.id).sort(), ['nk_bbbbbbb2', 'nk_bbbbbbb3']);
+    assert.ok(listed.files.every(f => f.size > 0 && f.modifiedAt === t));
+    assert.ok(!server.calls.some(u => u.includes('data-maid')), 'the user\'s Data Maid token is never touched');
+    const deletes = () => server.calls.filter(u => u === '/api/files/delete').length;
     assert.equal(await vault.remove('nk_bbbbbbb2', { referenced: new Set(['nk_bbbbbbb2']) }), false);
-    assert.equal(calls.filter(u => u === '/api/files/delete').length, before, 'no delete request for a referenced id');
+    assert.equal(deletes(), 0, 'no delete request for a referenced id');
     assert.equal(await vault.remove('../etc/passwd'), false);
-    const sweep = createVaultSweep({ vault, now: () => now });
-    const plan = await sweep.plan({ complete: true, referenced: ['nk_bbbbbbb2'] });
-    assert.deepEqual(plan.candidates.map(file => file.id), ['nk_bbbbbbb1']);
-    assert.deepEqual((await sweep.sweep()).deleted, ['nk_bbbbbbb1']);
-    assert.equal(files.has(oldName), false);
-    assert.equal(files.has(protectedName), true);
-    assert.equal(files.has('npc-state-delta-checkpoint-nk_bbbbbbb3.json'), true);
+    t += 60 * DAY;
+    const sweep = createVaultSweep({ vault, now: () => t });
+    const plan = await sweep.plan({ complete: true, referenced: ['nk_bbbbbbb3'] });
+    assert.equal(plan.exact, false);
+    assert.deepEqual(plan.candidates.map(file => file.id), ['nk_bbbbbbb2'], 'the unregistered pre-release file is never a candidate');
+    assert.deepEqual((await sweep.sweep()).deleted, ['nk_bbbbbbb2']);
+    assert.equal(server.files.has('npc-state-delta-checkpoint-nk_bbbbbbb2.json'), false);
+    assert.equal(server.files.has('npc-state-delta-checkpoint-nk_bbbbbbb1.json'), true);
+    assert.deepEqual((await vault.list()).files.map(f => f.id), ['nk_bbbbbbb3'], 'a removed file leaves the registry');
+});
+
+test('writing an already-kept checkpoint again makes it young (a new reference may follow); a damaged registry means no list at all', async () => {
+    let t = 100 * DAY;
+    const server = fakeServer(() => t);
+    const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
+    await vault.put('nk_iiiiiii1', { lineage: 'lg_a' });
+    t += 60 * DAY;
+    await vault.put('nk_iiiiiii1', { lineage: 'lg_a' });
+    assert.equal((await vault.list()).files[0].modifiedAt, t);
+    const plan = await createVaultSweep({ vault, now: () => t }).plan({ complete: true, referenced: [] });
+    assert.equal(plan.count, 0);
+    server.files.set('npc-state-delta-checkpoint-registry.json', '{broken');
+    await assert.rejects(vault.list());
+    const refused = await createVaultSweep({ vault, now: () => t }).plan({ complete: true, referenced: [] });
+    assert.equal(refused.code, 'VAULT_UNREADABLE');
+    assert.equal(refused.canSweep, false);
+});
+
+test('the row shows "at least" when the list cannot prove it is complete', async () => {
+    let t = 40 * DAY;
+    const server = fakeServer(() => t);
+    const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
+    await vault.put('nk_jjjjjjj1', { lineage: 'lg_a' });
+    t = 100 * DAY;
+    const doc = fakeDoc();
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now: () => t, live, ask: async () => proof() });
+    row.mount(doc);
+    await settle();
+    assert.match(doc.slot.textContent, /Old dossier files: at least 1 file, \d+ KB/);
+    assert.equal(row.state().plan.count, 1);
+});
+
+test('the final check and the deletion run inside the exclusive queue, so a checkpoint write waits and cannot land between them', async () => {
+    const { vault, now } = await seeded([['nk_kkkkkkk1', 90 * DAY]]);
+    const q = queue();
+    const order = [];
+    const asked = [];
+    const doc = fakeDoc();
+    const row2 = createStorageRow({ exclusive: q.exclusive, doc, vault: { ...vault, remove: async (...args) => { order.push(`remove inside=${q.inside}`); return vault.remove(...args); } }, now, live, ask: async () => { asked.push(q.inside); return proof(); } });
+    row2.mount(doc);
+    await settle();
+    doc.slot.all().find(n => n.tag === 'button' && n.textContent.startsWith('Clean up 1 file')).listeners.click();
+    const first = asked.length;
+    doc.slot.button('Remove 1 file').listeners.click();
+    // A checkpoint write arrives while the removal is under way: it is queued behind it.
+    const write = q.exclusive(async () => { order.push('write'); });
+    await settle(); await write;
+    assert.equal(asked[first], true, 'the references are read again inside the exclusive step');
+    assert.deepEqual(order, ['remove inside=true', 'write'], 'the deletion ran inside it, before the queued write');
+    assert.equal(await vault.get('nk_kkkkkkk1'), null);
+});
+
+test('without an exclusive step, or when it fails, nothing is removed and the reader is told', async () => {
+    for (const exclusive of [undefined, async () => ({ ok: false, code: 'FAILED' })]) {
+        const { vault, now } = await seeded([['nk_lllllll1', 90 * DAY]]);
+        const doc = fakeDoc();
+        const row = createStorageRow({ exclusive, doc, vault, now, live, ask: async () => proof() });
+        row.mount(doc);
+        await settle();
+        doc.slot.all().find(n => n.tag === 'button' && n.textContent.startsWith('Clean up 1 file')).listeners.click();
+        doc.slot.button('Remove 1 file').listeners.click();
+        await settle();
+        assert.ok(await vault.get('nk_lllllll1'));
+        assert.match(doc.slot.textContent, /Nothing was removed/);
+    }
 });
 
 test('the row shows the mockup text, asks for confirmation, and removes only after Remove', async () => {
     const { vault, now } = await seeded([['nk_ccccccc1', 40 * DAY], ['nk_ccccccc2', 50 * DAY], ['nk_ccccccc3', 60 * DAY], ['nk_ccccccc4', 2 * DAY]]);
     const doc = fakeDoc();
-    const row = createStorageRow({ doc, vault, now, live, ask: async () => proof(['nk_ccccccc3']) });
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now, live, ask: async () => proof(['nk_ccccccc3']) });
     assert.equal(row.mount(doc), true);
     await settle();
     const text = doc.slot.textContent;
@@ -103,15 +176,15 @@ test('the row shows the mockup text, asks for confirmation, and removes only aft
     const clean = doc.slot.all().find(n => n.tag === 'button' && n.textContent.startsWith('Clean up 2 files ('));
     assert.ok(clean && doc.slot.button('Check again'));
     clean.listeners.click();
-    assert.equal((await vault.list()).length, 4, 'nothing is removed before the confirmation');
+    assert.equal((await vault.list()).files.length, 4, 'nothing is removed before the confirmation');
     assert.match(doc.slot.textContent, /Remove 2 old dossier files \(\d+ KB\)\?/);
     assert.match(doc.slot.textContent, /No chat or branch uses these files, and each is older than 30 days\. Dossiers in your chats are not changed\. If you later restore an old chat from a backup, its dossiers may need to start from the chat\./);
     doc.slot.button('Cancel').listeners.click();
-    assert.equal((await vault.list()).length, 4);
+    assert.equal((await vault.list()).files.length, 4);
     doc.slot.all().find(n => n.textContent.startsWith('Clean up 2 files (')).listeners.click();
     doc.slot.button('Remove 2 files').listeners.click();
     await settle();
-    assert.deepEqual((await vault.list()).map(f => f.id).sort(), ['nk_ccccccc3', 'nk_ccccccc4']);
+    assert.deepEqual((await vault.list()).files.map(f => f.id).sort(), ['nk_ccccccc3', 'nk_ccccccc4']);
     assert.match(doc.slot.textContent, /Old dossier files: 2 files/);
 });
 
@@ -119,14 +192,14 @@ test('an unreadable chat disables Clean up with the reason and nothing can be re
     const { vault, now } = await seeded([['nk_ddddddd1', 90 * DAY], ['nk_ddddddd2', 90 * DAY]]);
     const doc = fakeDoc();
     const answer = { complete: false, unreadable: [{ reason: 'newer-version' }, { reason: 'unreadable' }] };
-    const row = createStorageRow({ doc, vault, now, ask: async () => answer });
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now, ask: async () => answer });
     row.mount(doc);
     await settle();
     const off = doc.slot.button('Clean up');
     assert.ok(off && off.disabled);
     assert.match(doc.slot.textContent, /Old dossier files: 2 files/);
     assert.match(doc.slot.textContent, /Clean-up is off: 2 chats could not be read \(one is from a newer version\), so it can't be sure which files are still used\./);
-    assert.equal((await vault.list()).length, 2);
+    assert.equal((await vault.list()).files.length, 2);
     assert.equal(row.state().kind, 'off');
 });
 
@@ -134,7 +207,7 @@ test('a failed or missing referenced query is an incomplete check; Check again a
     const { vault, now } = await seeded([['nk_eeeeeee1', 90 * DAY]]);
     const doc = fakeDoc();
     let asks = 0;
-    const row = createStorageRow({ doc, vault, now, live, ask: async () => { asks += 1; if (asks === 1) throw new Error('no host'); return proof(); } });
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now, live, ask: async () => { asks += 1; if (asks === 1) throw new Error('no host'); return proof(); } });
     row.mount(doc);
     await settle();
     assert.equal(row.state().kind, 'off');
@@ -150,14 +223,14 @@ test('a checkpoint only a lineage index names is kept; one whose file or index c
     await vault.putIndex('lg_seeded01', { v: 2, acks: { e1: { checkpoint: 'nk_fffffff1', hash: 'h' } }, prepared: {}, returns: {}, selected: null, base: null });
     await vault.put('nk_fffffff9', { lineage: '' }); vault.age('nk_fffffff9', 90 * DAY);
     const doc = fakeDoc();
-    const row = createStorageRow({ doc, vault, now, live, ask: async () => proof() });
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now, live, ask: async () => proof() });
     row.mount(doc);
     await settle();
     assert.equal(row.state().kind, 'ready');
     assert.deepEqual(row.state().plan.candidates.map(file => file.id).sort(), ['nk_fffffff2', 'nk_fffffff3'], 'named by the index, or no lineage: kept');
     const broken = { ...vault, getIndex: async () => { throw new Error('unreadable'); } };
     const doc2 = fakeDoc();
-    const row2 = createStorageRow({ doc: doc2, vault: broken, now, live, ask: async () => proof() });
+    const row2 = createStorageRow({ exclusive: queue().exclusive, doc: doc2, vault: broken, now, live, ask: async () => proof() });
     row2.mount(doc2);
     await settle();
     assert.equal(row2.state().plan?.count ?? 0, 0, 'an unreadable index proves nothing, so nothing is offered');
@@ -167,7 +240,7 @@ test('a checkpoint newly referenced while confirmation is open is not removed', 
     const { vault, now } = await seeded([['nk_ggggggg1', 90 * DAY]]);
     const doc = fakeDoc();
     let asks = 0;
-    const row = createStorageRow({ doc, vault, now, live, ask: async () => (++asks === 1 ? proof() : proof(['nk_ggggggg1'])) });
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now, live, ask: async () => (++asks === 1 ? proof() : proof(['nk_ggggggg1'])) });
     row.mount(doc);
     await settle();
     doc.slot.all().find(node => node.tag === 'button' && node.textContent.startsWith('Clean up 1 file')).listeners.click();
@@ -186,7 +259,7 @@ test('malformed reference proof, an unreadable open state, or an unavailable hos
         [proof(), () => null, /open dossier state/],
     ]) {
         const doc = fakeDoc();
-        const row = createStorageRow({ doc, vault, now, live: current, ask: async () => answer });
+        const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now, live: current, ask: async () => answer });
         row.mount(doc);
         await settle();
         assert.equal(row.state().kind, 'off');
@@ -195,7 +268,7 @@ test('malformed reference proof, an unreadable open state, or an unavailable hos
     }
     const unavailable = fileVault({ fetchFn: async () => ({ ok: false, status: 404 }) });
     const doc = fakeDoc();
-    const row = createStorageRow({ doc, vault: unavailable, now, live, ask: async () => proof() });
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault: unavailable, now, live, ask: async () => proof() });
     row.mount(doc);
     await settle();
     assert.equal(row.state().kind, 'off');

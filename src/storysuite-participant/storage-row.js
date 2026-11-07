@@ -1,7 +1,8 @@
 // NPC State Delta settings, the Storage row (approved mockup B5): how many old dossier files there are, how many of them are unused and older than
 // 30 days, and a Clean up button with a confirmation. Story Block answers which checkpoint files every chat and branch still uses (the query
 // `timeline.referenced`); vault-sweep.js plans and removes. If ANY chat could not be read the answer is incomplete, the button is off with the
-// reason, and nothing is ever removed. The open state must be readable, and a file that a lineage index names (or whose lineage cannot be read) is kept. Nothing runs on its own except the first check when the panel opens; removal needs the confirmation.
+// reason, and nothing is ever removed. The final check and the deletion are ONE step inside the participant's exclusive queue (`exclusive`, the one
+// checkpoint writes take), with the references read again inside it, so no checkpoint write can land between them. The open state must be readable, and a file that a lineage index names (or whose lineage cannot be read) is kept. Nothing runs on its own except the first check when the panel opens; removal needs the confirmation.
 // All text goes in with textContent (no markup from text). `mount()` fills the settings slot `storage`; it does nothing without the slot.
 
 import { createVaultSweep } from './vault-sweep.js';
@@ -63,7 +64,7 @@ export function offReason(answer, plan, liveReadable = true) {
     return `Clean-up is off: ${count === 1 ? '1 chat' : `${count} chats`} could not be read${extra}, so it can't be sure which files are still used.`;
 }
 
-export function createStorageRow({ doc, vault, ask, live = () => null, now = () => Date.now(), warn = () => {} } = {}) {
+export function createStorageRow({ doc, vault, ask, exclusive, live = () => null, now = () => Date.now(), warn = () => {} } = {}) {
     const capable = typeof vault?.list === 'function' && typeof vault?.remove === 'function';
     const sweeper = capable ? createVaultSweep({ vault, now }) : null;
     let card = null;
@@ -84,7 +85,8 @@ export function createStorageRow({ doc, vault, ask, live = () => null, now = () 
         node.addEventListener('click', onClick);
         return node;
     };
-    const totals = plan => el('p', 'npc-state-delta-storage-line', `Old dossier files: ${filesText(plan.totalFiles)}, ${sizeText(plan.totalBytes)}`);
+    // A list that cannot prove it saw every file (plan.exact === false) shows its size as "at least".
+    const totals = plan => el('p', 'npc-state-delta-storage-line', `Old dossier files: ${plan.exact === false ? 'at least ' : ''}${filesText(plan.totalFiles)}, ${sizeText(plan.totalBytes)}`);
 
     async function inspect() {
         let answer = null;
@@ -118,16 +120,32 @@ export function createStorageRow({ doc, vault, ask, live = () => null, now = () 
         busy = true;
         view = { kind: 'working', plan: confirmed };
         draw();
-        // The confirmation may have stayed open while a chat or index changed. Recheck and require another confirmation if the candidates changed.
-        const fresh = await inspect();
-        const same = fresh.plan.canSweep && JSON.stringify(fresh.plan.candidates) === JSON.stringify(confirmed.candidates);
-        if (!same) {
+        // The confirmation may have stayed open while a chat or index changed. Inside the participant's exclusive queue (where checkpoint writes
+        // run) the references are read again and, only if the candidates are the confirmed ones, the sweep runs: one step, no write between.
+        let result = null;
+        if (typeof exclusive === 'function') {
+            try {
+                result = await exclusive(async () => {
+                    const fresh = await inspect();
+                    const same = fresh.plan.canSweep && JSON.stringify(fresh.plan.candidates) === JSON.stringify(confirmed.candidates);
+                    return same ? { rowDone: await sweeper.sweep() } : { rowChanged: fresh };
+                });
+            } catch { result = null; }
+        }
+        if (result?.rowChanged) {
             busy = false;
-            view = { ...fresh, note: 'The file check changed. Review the updated results.' };
+            view = { ...result.rowChanged, note: 'The file check changed. Review the updated results.' };
             draw();
             return;
         }
-        const done = await sweeper.sweep();
+        const done = result?.rowDone;
+        if (!done) {
+            busy = false;
+            await check();
+            view = { ...view, note: 'Nothing was removed. The dossier files could not be locked for the check; try again in a moment.' };
+            draw();
+            return;
+        }
         busy = false;
         await check();
         if (!done.ok) {
