@@ -9,7 +9,7 @@ const sourceRoot = path.resolve(here, '..');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'npc-state-delta-runtime-'));
 const extRoot = path.join(tempRoot, 'public', 'scripts', 'extensions', 'third-party', 'npc_state_delta');
 fs.mkdirSync(extRoot, { recursive: true });
-for (const name of ['index.js', 'core.js', 'core-mechanics.js', 'bundle.js', 'branch.js', 'branch-core.js', 'social.js', 'storage.js', 'identity.js', 'hardening-core.js']) {
+for (const name of ['index.js', 'core.js', 'core-mechanics.js', 'bundle.js', 'branch.js', 'branch-core.js', 'social.js', 'storage.js', 'identity.js', 'hardening-core.js', 'runtime-targeted-scope.js', 'runtime-targeted-refresh.js', 'runtime-targeted-backfill.js']) {
     fs.copyFileSync(path.join(sourceRoot, name), path.join(extRoot, name));
 }
 fs.writeFileSync(path.join(tempRoot, 'package.json'), JSON.stringify({ type: 'module' }));

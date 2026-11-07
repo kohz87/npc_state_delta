@@ -139,3 +139,6 @@ Generated 2026-11-07.
 - `runtime-scan-stale.js`: Stale-cleanup protected references and archive/delete pass split from `runtime-scan.js`.
 - `runtime-scan-reply.js`: Reply parent/rewrite checks, earlier-only scene stripping and first-scan window split from `runtime-scan.js`.
 - `runtime-scan-handler.js`: Assistant-message receipt, swipe guard, scan cadence and reply-name check split from `runtime-scan.js`.
+- `runtime-targeted-scope.js`: Target-row admission and single-target profile/social channel scoping split from `runtime-targeted.js`.
+- `runtime-targeted-refresh.js`: Editor-field sync and the targeted Refresh pass split from `runtime-targeted.js`.
+- `runtime-targeted-backfill.js`: History backfill and the pending-backfill queue split from `runtime-targeted.js`.
