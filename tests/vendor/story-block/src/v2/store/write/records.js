@@ -158,7 +158,8 @@ export function createRecords(s, deps) {
         /**
          * How much replay work the store has done (for tests that count work rather than time): `replays`
          * (state rebuilt from a checkpoint), `recordsRead` (carriers replayed), `lineScans` (whole-chat
-         * passes for receipts or untold), `witnessMisses` (timeline witnesses worked out, not found in the memo). A copy.
+         * passes for receipts or untold), `witnessMisses` (timeline witnesses worked out, not found in the memo),
+         * `prefixHits` / `prefixSteps` / `prefixReplays` (prefix memo: state found, one record stepped, full replay). A copy.
          */
         work() {
             return { ...s.counts };

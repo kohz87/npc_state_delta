@@ -195,8 +195,13 @@
 .rpg-out-cost { color: var(--ss-warn-text, var(--ss-warn)); }
 .rpg-arrow { color: var(--ss-text); }
 .rpg-why { margin: 0 0 2px 22px; color: var(--ss-muted); overflow-wrap: anywhere; }
-.rpg-bl-note, .rpg-bl-ended { margin: 4px 0 0; }
-.rpg-bl-ended { font-weight: 700; }
+.rpg-bl-note { margin: 4px 0 0; }
+.rpg-bl-stop { margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--ss-accent-soft, var(--ss-glass)); font-size: 13px; }
+.rpg-bl-stop small { display: block; margin-top: 2px; color: var(--ss-muted); }
+.rpg-bl-receipt { margin-top: 6px; border-top: 1px solid var(--ss-border); }
+.rpg-bl-receipt summary { cursor: pointer; padding: 8px 2px; min-height: 24px; list-style: none; }
+.rpg-bl-receipt summary::-webkit-details-marker { display: none; }
+.rpg-bl-receipt pre { margin: 0; padding: 8px 2px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 180px; overflow-y: auto; color: var(--ss-muted); border-top: 1px dashed var(--ss-border); }
 .rpg-bl-status { display: grid; gap: 4px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--ss-border); }
 .rpg-bl-status-title { margin: 0; font-weight: 700; }
 .rpg-bl-who { display: grid; gap: 2px; }

@@ -2,11 +2,11 @@
 // text, breakdowns, gear, costs, moves, turn order and an ambush check. A line that is not whole is left out.
 
 import { RESOLVE } from '../../index.js';
-import { LEVEL, CLASS_NAMES, RANK_NAMES, STAGES, stageWord } from '../../names.js';
+import { LEVEL, CLASS_NAMES, RANK_NAMES, STAGES, LIMITS, stageWord } from '../../names.js';
 import { fold } from '../../read.js';
 import { soulShortOf } from '../../soul.js';
 import { RPG_STRINGS, fill } from '../../strings.js';
-import { wearLine } from '../../cue.js';
+import { wearLine, cueOfResult } from '../../cue.js';
 import { memberOrderEntries } from '../../board/order.js';
 import { B, IDLE } from './constants.js';
 import { isRecord, list, words } from './util.js';
@@ -115,11 +115,24 @@ function lineOf(raw, soulOf = () => null, lv = false, divisor = null, members = 
     return { ...base, who: words(raw.pc.who, 40), target: words(foeSide?.name, 40), stat: words(raw.pc.stat, 12).toUpperCase(), foe: false };
 }
 
+// Why the roll stopped and the numbers it ran under, read from the record only (nothing is stored new). `receipt` is the cue the narrator was told,
+// rebuilt by cueOfResult; a record with no stop, pace or rules (an old chat) gets none, so it draws as it always did.
+function whyOf(result, shape) {
+    const stop = typeof result.stop === 'string' ? result.stop : '';
+    const pace = typeof result.pace === 'string' ? result.pace : '';
+    const flow = result.flow === 2 ? 2 : 0;
+    const cap = Number.isSafeInteger(result.rules?.roundCap) ? result.rules.roundCap : flow === 2 ? LIMITS.roundCapDefault : LIMITS.roundCap;
+    const margin = Number.isSafeInteger(result.rules?.decisiveMargin) ? result.rules.decisiveMargin : null;
+    const recorded = stop || pace || isRecord(result.rules);
+    const receipt = recorded ? cueOfResult(result, shape) : '';
+    return { stop, pace, flow, cap, board: isRecord(result.board) || result.board === true, ...(margin !== null ? { margin } : {}), ...(receipt ? { receipt } : {}) };
+}
+
 /**
- * A's result record as the panel draws it: `{ rounds: [{ n, lines, skipped?: [{ who, why }] }], checks, order, orderEntries?, quickStart?, opening?, ended, refused }` or null when the
+ * A's result record as the panel draws it: `{ rounds: [{ n, lines, skipped?: [{ who, why }] }], checks, order, orderEntries?, quickStart?, opening?, refused, stop, pace, flow, cap, board, margin?, receipt }` or null when the
  * record holds nothing to show. A Line that is not whole is left out, never thrown on.
  */
-export function readResolve(result, { soulOf = () => null } = {}) {
+export function readResolve(result, { soulOf = () => null, shape = 0 } = {}) {
     if (!isRecord(result)) return null;
     const lv = result.lv === 1;
     const divisor = Number.isInteger(result.rules?.levelDivisor) ? result.rules.levelDivisor : null;
@@ -162,7 +175,7 @@ export function readResolve(result, { soulOf = () => null } = {}) {
     // An ambush check's result (ambush.js): told in one line before Round 1.
     const ambush = isRecord(result.ambush) && words(result.ambush.who, 40) && typeof result.ambush.success === 'boolean'
         ? { who: words(result.ambush.who, 40), what: words(result.ambush.skill, 40) ? `${words(result.ambush.skill, 40)} check` : 'check', success: result.ambush.success, half: result.ambush.outcome === 'cost', drop: result.ambush.drop === true, total: Number.isFinite(result.ambush.total) ? result.ambush.total : '?', dc: Number.isFinite(result.ambush.dc) ? result.ambush.dc : '?' } : null;
-    return { rounds, checks, refused, order, ...(memberList ? { virtualGroups: [...new Set(virtual.map(item => item.group))] } : {}), ...(ambush ? { ambush } : {}), ...(entries.length ? { orderEntries: entries } : {}), ...(quickStart.length ? { quickStart } : {}), ...(opening.length ? { opening } : {}), ended: '' };
+    return { rounds, checks, refused, order, ...(memberList ? { virtualGroups: [...new Set(virtual.map(item => item.group))] } : {}), ...(ambush ? { ambush } : {}), ...(entries.length ? { orderEntries: entries } : {}), ...(quickStart.length ? { quickStart } : {}), ...(opening.length ? { opening } : {}), ...whyOf(result, shape) };
 }
 
 /** The recorded rolls of a reply's record: the result of its `rpg.resolve` receipt that the replay kept, or null. */
@@ -172,7 +185,7 @@ export function resolveOf(record, problems = [], options = {}) {
     const board = receipts.findLast(receipt => receipt?.type === RESOLVE && receipt?.data?.v2?.result?.board && !skipped.has(receipt.id));
     for (const receipt of board ? [board, ...receipts.filter(item => item !== board)] : receipts) {
         if (receipt?.type !== RESOLVE || skipped.has(receipt.id)) continue;
-        const read = readResolve(receipt.data?.v2?.result, options);
+        const read = readResolve(receipt.data?.v2?.result, { ...options, shape: Number.isSafeInteger(receipt.data?.v2?.shape) ? receipt.data.v2.shape : 0 });
         if (read) return read;
     }
     return null;
