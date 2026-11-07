@@ -18,6 +18,7 @@ import { blockCardSlots, tailLines, tailRoom } from './prompt.js';
 import { B, initial } from './shared.js';
 
 export function createDataModulesPart(opts = {}) {
+    // Build parts in order: act.js and blocks.js read earlier parts when they are created.
     const d = createCore(opts);
     d.resolveModule = resolveModule;
     Object.assign(d, createSkills(d));

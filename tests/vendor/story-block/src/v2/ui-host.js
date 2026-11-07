@@ -37,113 +37,25 @@
 // Every text is set with textContent; nothing a module or a pack wrote becomes markup here. The texts are
 // in src/v2/strings.js.
 
-import { formatAmount } from './domains/money.js';
-import { PACKS_FOLD, TABS_TEXT, createTabHost } from './host-ui.js';
-import { openSettingsWindow } from './view/settings/window.js';
-import { mountQuery } from './sdk.js';
-import { createMounts } from './view/mounts/index.js';
-import { TEMPLATES, applyScreenCss, createScreenRenderer } from './view/render-screen.js';
-import { formatStoryTime, storyCalendar } from './view/clock.js';
-import { gameHeroProps, readHeroContext } from './view/game-header.js';
-import { HOME_ID, createScreens } from './view/screens.js';
-import { slotsForWidth } from './view/screen-bar.js';
-import { createTabOrderStore, isDefaultChoice, isHiddenNav, isInBar, moveNav, navKey, orderNav, setNavHidden, setNavInBar, visibleNav } from './view/tab-order.js';
-import { CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, changesSummary, replyCardLines } from './screens/index.js';
-import { mergeRpgLines } from './screens/changes-card.js';
+import { HOME_SCREEN_ID } from './screens/index.js';
 import { createReplyNotes } from './reply-notes.js';
 import { createReplyExtras } from './extras-ui.js';
 import { displayLines } from './extras.js';
-import { STRINGS, fill } from './strings.js';
-import { readRecord } from './persist.js';
-import { laterStore, replyEdits, replyRules, scanReplyCards } from './reply-cards.js';
-import { drawReplyCard } from './view/reply-cards-ui.js';
-import { CORE_FEATURE, GEAR_FEATURE, withHiddenFeatures } from './features.js';
-import { createBlockTemplates } from './data-modules/block-templates.js';
-import { createBlockWidgets } from './screens/blocks.js';
-import { createFieldsWidgets } from './screens/block-fields.js';
-import { renderBlockPreview } from './screens/block-layouts.js';
-import { mergeTabs } from './view/tab-merge.js';
-import { ROLES_WITHOUT_TAB } from './lean-rpg/names.js';
-import { createInspectorSource } from './inspect.js';
-import { createSavePoints } from './rewind.js';
-import { createInspectorWidget, INSPECTOR_WIDGET } from './screens/inspector.js';
-import { createSavePointsWidget, SAVEPOINTS_WIDGET } from './screens/savepoints.js';
-import { createReadyHintWidget, READY_HINT_WIDGET } from './screens/ready-hint.js';
-import { RPG_START_WIDGET } from './screens/home.js';
-import { createShowMoreWidget, SHOW_MORE_WIDGET } from './screens/show-more.js';
-import { createInventoryAddWidget, INVENTORY_ADD_WIDGET } from './screens/inventory-add.js';
+import { fill } from './strings.js';
+import { CORE_FEATURE, GEAR_FEATURE } from './features.js';
 import { createCardOffer, enableDataModules } from './packs/card-offer.js';
 import { renderCardOffers } from './packs/card-offer-ui.js';
 import { readCharacterLorebook, saveSettingsNow } from './packs/st-adapter.js';
-import { buildReport, captureConsole, caughtSoFar, reportFileName } from './diagnostics.js';
-import { createThemeBridge } from './view/theme.js';
-import { activeNow } from './view/mounts/common.js';
-import { openUiSample } from './screens/ui-sample.js';
-
-const IDS = Object.freeze({ bar: 'story_suite_v2_bar', panel: 'story_suite_v2_panel', drawer: 'story_suite_v2_drawer', menu: 'story_suite_v2_menu' });
-
-function el(doc, tag, className = '', text = '') {
-    const node = doc.createElement(tag);
-    if (className) node.className = className;
-    if (text) node.textContent = text;
-    return node;
-}
-
-function iconButton(doc, className, iconName, label, title = label) {
-    const node = el(doc, 'button', `menu_button ${className}`);
-    node.type = 'button';
-    node.title = title;
-    node.setAttribute('aria-label', title);
-    const glyph = el(doc, 'i', `fa-solid ${iconName}`);
-    glyph.setAttribute('aria-hidden', 'true');
-    node.append(glyph, el(doc, 'span', 'story-suite-label', label));
-    return node;
-}
-
-const S = STRINGS;
-
-/** True for Alt+G alone (no Ctrl, Meta or Shift); `code` so it works whatever Alt types on a Mac. */
-export const isGameViewKey = event => Boolean(event?.altKey) && !event.ctrlKey && !event.metaKey && !event.shiftKey
-    && (event.code === 'KeyG' || String(event.key ?? '').toLowerCase() === 'g');
-
-/**
- * Does message `index` of `chat` get inline cards? Only a reply after the reader's first message (not the
- * greeting) that carries a v2 record for its shown swipe.
- */
-export function hasReplyRecord(chat, index) {
-    const message = chat?.[index];
-    if (!message || message.is_user) return false;
-    const firstUser = chat.findIndex(item => item?.is_user);
-    if (firstUser < 0 || index < firstUser) return false;
-    return readRecord(message) !== null;
-}
-
-/**
- * The status strip is on unless the reader turned it off (MODULES §F54): the feature `story-block.hud`
- * when the reader has set it, else the drawer switch older versions kept (`storySuite.hud`).
- */
-export function hudOn(extensionSettings) {
-    const suite = extensionSettings?.storySuite;
-    const choice = suite?.features?.[CORE_FEATURE.hud];
-    return typeof choice === 'boolean' ? choice : suite?.hud !== false;
-}
-
-/** Reader choices for screens and cards: extension_settings.storySuite.{screens, cards}. */
-function readerStore(ctx) {
-    const root = () => {
-        const es = ctx.extensionSettings ?? {};
-        if (!es.storySuite || typeof es.storySuite !== 'object') es.storySuite = {};
-        return es.storySuite;
-    };
-    return {
-        reader: () => ({ screens: root().screens ?? {}, cards: root().cards ?? {} }),
-        saveReader(next) {
-            root().screens = next.screens ?? {};
-            root().cards = next.cards ?? {};
-            ctx.saveSettingsDebounced?.();
-        },
-    };
-}
+import { createReplyCards } from './ui-host/replies.js';
+import { createUiMounts } from './ui-host/mounts.js';
+import { createUiNavigation } from './ui-host/navigation.js';
+import { createUiSettings } from './ui-host/settings.js';
+import { installUiEvents } from './ui-host/events.js';
+import { createUiPanel } from './ui-host/panel.js';
+import { createHostSetup } from './ui-host/setup.js';
+import { createScreenSync } from './ui-host/screens.js';
+import { IDS, el, iconButton, S, isGameViewKey, hasReplyRecord, hudOn } from './ui-host/shared.js';
+export { isGameViewKey, hasReplyRecord, hudOn } from './ui-host/shared.js';
 
 /**
  * mountUi({ runtime, ctx, doc?, version?, loadLeanRpg? }) → { refresh(), blocked(reason, moduleId), clearBlocked(),
@@ -154,167 +66,11 @@ function readerStore(ctx) {
  */
 export function mountUi({ runtime, ctx, doc = globalThis.document, version = '', loadLeanRpg = () => import('./lean-rpg/view/index.js'), readLorebook = readCharacterLorebook, flushSettings = saveSettingsNow }) {
     const { registry, store, sdk, settings, events } = runtime;
-    // A screen asking a query no module answers (an optional module that is not installed, like NSD's
-    // npc.portrait) gets null, not a problem line.
-    const runAt = mountQuery(registry, () => store.receipts());
-    const queryAt = (name, args, state) => (registry.query(name) ? runAt(name, args, state) : null);
-    // A widget whose feature is off draws nothing (instead of "there is no widget called …").
-    const hiddenWidget = Object.freeze({ render: el => { el.hidden = true; return null; } });
-    // The host's own two (the Inspector, the save points) after the modules' ones; each checks its
-    // feature itself (the Inspector's screen is left out while it is off, the save points draw nothing).
-    const widgets = () => ({
-        ...Object.fromEntries([
-            ...(registry.widgetsOff?.() ?? []).map(name => [name, { ...hiddenWidget, name }]),
-            ...registry.widgets().map(widget => [widget.name, widget]),
-        ]),
-        ...hostWidgets,
+    const { queryAt, widgets, coreOn, blockTemplates, blockWidgets, liveCtx, savePoints, inspector, hostWidgets, renderer,
+        screens, tabOrder, extraTabs, navPresent, barDeclared, setSharedTabs } = createHostSetup({
+        runtime, ctx, doc, registry, store, sdk, openSettings, inspectorProblems, getRpg: () => rpg,
     });
-    // A feature of a module that is not here (a runtime without Story Block's core) counts as on.
-    const coreOn = id => (registry.feature?.(id) ? registry.featureOn(id) : true);
-    const blockTemplates = createBlockTemplates({ read: () => {
-        const es = ctx.extensionSettings;
-        if (!es.storySuite || typeof es.storySuite !== 'object') es.storySuite = {};
-        return es.storySuite;
-    }, save: () => ctx.saveSettingsDebounced?.() });
-    // The tabs screens share (a pack's `tab` ids and titles), for a block's Show in tab.
-    let sharedTabs = [];
-    const blockWidgets = createBlockWidgets({ templates: blockTemplates, tabs: () => sharedTabs, renderPreview: renderBlockPreview,
-        directorOn: () => registry.lifecycle?.('story-director')?.status === 'ready',
-        // Off unless Story Block's core is there to own the switch (unlike coreOn, which counts a missing feature as on).
-        leanRpgOn: () => (registry.feature?.(CORE_FEATURE.leanRpg) ? registry.featureOn(CORE_FEATURE.leanRpg) : false),
-        // The stat formula Story Block's settings say (Classic only when the reader chose it): which RPG templates the chooser offers.
-        rpgFormula: () => { try { return runtime.settings?.('story-block')?.rpgFormula === 'classic' ? 'classic' : 'standard'; } catch { return 'standard'; } },
-        // A block card's "Edit fields": the editor is on Settings → Blocks.
-        navigate: () => { openSettings().select('blocks'); return true; } });
-    // The host's own widgets: the Inspector (over the store's replay) and the save points (over the chat).
-    const liveCtx = () => globalThis.SillyTavern?.getContext?.() ?? ctx;
-    const savePoints = createSavePoints({ ctx, store, live: liveCtx, ...(runtime.createBranch ? { createBranch: runtime.createBranch } : {}) });
-    const inspector = createInspectorSource({
-        store,
-        chat: () => ctx.chat ?? [],
-        chatId: () => (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx.chatId),
-        problems: index => inspectorProblems(index),
-    });
-    const hostWidgets = {
-        ...blockWidgets.widgets,
-        ...createFieldsWidgets(),
-        [INSPECTOR_WIDGET]: createInspectorWidget(inspector, { enabled: () => coreOn(CORE_FEATURE.inspector) }),
-        [SAVEPOINTS_WIDGET]: createSavePointsWidget({
-            points: savePoints,
-            enabled: () => coreOn(CORE_FEATURE.savepoints),
-            notify: text => globalThis.toastr?.warning?.(text, S.savepoints.title),
-        }),
-        // Home's "Before you start" while a module's canGenerate holds the story back (MODULES §F12).
-        // A long card's "Show all" / "Show less" (screens/show-more.js).
-        [SHOW_MORE_WIDGET]: createShowMoreWidget(),
-        [INVENTORY_ADD_WIDGET]: createInventoryAddWidget(),
-        // Home's "Your character" card (the RPG's, lean-rpg/view/start.js): this stands in for it while the RPG screens are not loaded.
-        [RPG_START_WIDGET]: Object.freeze({
-            props: {}, primary: null, validate: () => [],
-            render(el, props, api) {
-                const widget = rpg?.start?.widget;
-                if (!widget) { el.hidden = true; return null; }
-                el.hidden = false;
-                return widget.render(el, props, api);
-            },
-        }),
-        [READY_HINT_WIDGET]: createReadyHintWidget({
-            blockers: () => (typeof runtime.turn?.blockers === 'function' ? runtime.turn.blockers() : []),
-            unblock: (moduleId, reason) => runtime.turn?.unblock?.(moduleId, reason) ?? false,
-        }),
-    };
-    const renderer = createScreenRenderer({
-        queryAt,
-        widgets,
-        headIndex: () => store.headIndex(),
-        sanitize: globalThis.SillyTavern?.libs?.DOMPurify?.sanitize?.bind(globalThis.SillyTavern.libs.DOMPurify) ?? null,
-        formatters: () => {
-            let currency = null;
-            try { currency = sdk.query('inventory.currency'); } catch { currency = null; }
-            // fmt.time: the story clock on its calendar (Story Director's, else the pack's, else Gregorian).
-            const calendar = storyCalendar((name, args) => (registry.query(name) ? sdk.query(name, args) : null));
-            return {
-                // "1 mark", "44 marks": the currency's plural for any amount but one (MODULES §F1); with coins
-                // the mixed coins, "3 silver 5 copper", or the smallest unit when the reader prefers (§F108).
-                ...(currency?.name ? { money: n => (!Number.isInteger(n) ? '' : n < 0 ? `-${formatAmount(-n, currency)}` : formatAmount(n, currency)) } : {}),
-                time: minutes => formatStoryTime(minutes, calendar),
-            };
-        },
-    });
-    // The screen registry as the mounts see it: a screen under a feature that is off is not there, and the
-    // game view's and the tab strip's screens come in the reader's order (Settings → Tabs & Packs → Tabs).
-    const allScreens = createScreens(readerStore(ctx));
-    const screenOff = id => registry.screenOff?.(id) === true;
-    const tabOrder = createTabOrderStore(ctx);
-    const screens = Object.freeze({
-        ...allScreens,
-        resolve: id => (screenOff(id) ? null : allScreens.resolve(id)),
-        list: (mount = null) => {
-            const list = allScreens.list(mount).filter(entry => !screenOff(entry.id));
-            return mount === 'screen' || mount === 'tab' ? orderNav(list, tabOrder.choice(), entry => entry.id, entry => entry.screen.order) : list;
-        },
-    });
-    const extraTabs = [];
-    // Whether a screen is there now (a screen hidden by default while another is: Scene while World is).
-    const navPresent = id => Boolean(screens.resolve(id));
-    // Whether a screen or a module's tab says `bar: true` on its own registration (in the bar until the reader moves it).
-    const barDeclared = id => screens.declaredBar(id) || registry.tabs().some(tab => navKey(tab) === id && tab.bar === true);
-
-    // ---- screens from the modules and the packs ----------------------------------------------
-    // The screen ids each pack gave at the last sync, by pack: a pack that is disabled, removed or no longer has a screen takes
-    // those screens and their stylesheets away, and a replaced pack's new stylesheets replace the old ones.
-    const packScreenIds = new Map();
-    const rpgOn = () => registry.featureOn?.(CORE_FEATURE.leanRpg) === true;
-    // The pinned blocks' screens. A block with an RPG role (character, skills, foes, rules) never gets a tab of its own: with the feature on
-    // the Party and Fight tabs draw them, with it off they are only data (they stay in Settings → Blocks, and come back to use when it is on).
-    const blockPresentation = () => sdk.query('dataModules.presentation', { kind: 'screens', noTab: ROLES_WITHOUT_TAB });
-    function syncScreens(pinned = null) {
-        const byModule = new Map();
-        // Every module with screens, even one whose screens are all off just now (its list is then empty).
-        for (const def of registry.modules()) if (Array.isArray(def.screens) && def.screens.length) byModule.set(def.id, []);
-        for (const screen of registry.screens()) {
-            const { moduleId, ...def } = screen;
-            if (!byModule.has(moduleId)) byModule.set(moduleId, []);
-            byModule.get(moduleId).push(def);
-        }
-        for (const [moduleId, list] of byModule) {
-            try { screens.addModule(moduleId, list); } catch (error) { console.warn('[Story Suite]', error?.message ?? error); }
-        }
-        let packScreens = [];
-        try { packScreens = sdk.query('packs.content', { kind: 'screens' }) ?? []; } catch { packScreens = []; }
-        try {
-            for (const { id, title, icon, pack, ...layout } of sdk.query('packs.content', { kind: 'layouts' }) ?? []) {
-                if (!packScreens.some(screen => screen.pack === pack && screen.id === id)) packScreens.push({ id, title, icon, mounts: ['tab'], layout, pack });
-            }
-        } catch { /* older host */ }
-        try { packScreens.push(...(pinned ?? blockPresentation() ?? [])); } catch { /* older host */ }
-        // Screens that name one `tab` (a pack's, or a block's show.into) become sections of one tab.
-        sharedTabs = [...new Map(packScreens.filter(screen => typeof screen?.tab === 'string' && screen.tab).map(screen => [screen.tab, { id: screen.tab, title: screen.tabTitle ?? screen.title ?? screen.tab }])).values()];
-        packScreens = mergeTabs(packScreens);
-        const byPack = new Map();
-        for (const screen of packScreens) {
-            const { pack, ...def } = screen ?? {};
-            if (!pack) continue;
-            if (!byPack.has(pack)) byPack.set(pack, []);
-            byPack.get(pack).push(def);
-        }
-        for (const [pack, ids] of packScreenIds) {
-            if (byPack.has(pack)) continue;
-            screens.removePack(pack);
-            for (const id of ids) applyScreenCss(doc, { id, css: '' });
-            packScreenIds.delete(pack);
-        }
-        for (const [pack, list] of byPack) {
-            const before = packScreenIds.get(pack) ?? [];
-            const now = list.map(def => def.id);
-            for (const id of before) if (!now.includes(id)) applyScreenCss(doc, { id, css: '' });
-            try {
-                screens.setPack(pack, list);
-                packScreenIds.set(pack, now);
-                for (const def of list) applyScreenCss(doc, def, TEMPLATES.scopeCss);
-            } catch (error) { console.warn('[Story Suite]', error?.message ?? error); }
-        }
-    }
+    const { rpgOn, blockPresentation, syncScreens } = createScreenSync({ doc, registry, sdk, screens, setSharedTabs });
 
     const api = Object.freeze({
         command: (type, payload, options) => sdk.command(type, payload, options),
@@ -374,376 +130,34 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         if (!told.length) for (const item of notes.refusedAt(index)) out.push({ code: 'REFUSED', message: item.reason ? `"${item.line}": ${item.reason}` : `"${item.line}"` });
         return out;
     }
-    // A card's scope also gets `refused`: that reply's change lines the code did not apply; the "Changed this
-    // reply" card also `moduleLines`: the modules' own lines for that reply (hooks.replyCard, MODULES §F125).
-    const recordAt = index => readRecord(ctx.chat?.[index]);
-    const editsAt = index => replyEdits(recordAt(index), store.problems?.() ?? [], index);
     // The RPG's screens (src/v2/lean-rpg/view/): loaded by import() only while its feature is on, taken away when it goes off.
     let rpg = null, rpgLoading = false, rpgGone = false;
-    const cardLines = (index, state, changes, before = null) => {
-        const lines = [
-            ...replyCardLines(registry.hookEntries?.('replyCard') ?? [], { index, state, changes }),
-            ...replyRules(recordAt(index), store.problems?.() ?? [], index, { state, before }),
-        ];
-        // The RPG's own lines (rolls, class and rank rises), only while its screens are mounted.
-        return rpg ? mergeRpgLines(lines, rpg.cardLines({ state, before, record: recordAt(index), problems: (store.problems?.() ?? []).filter(item => item?.index === index) })) : lines;
-    };
-    const drawScreen = renderer.render;
-    // …and `assisted`: the lines the Assist safety net applied on it (its receipts marked `assist`).
-    const assistedAt = index => {
-        try {
-            return (readRecord(ctx.chat?.[index])?.receipts ?? []).filter(receipt => receipt?.assist === 'now' || receipt?.assist === 'late')
-                .map(receipt => ({ line: String(receipt.assistLine ?? receipt.summary ?? ''), late: receipt.assist === 'late' }));
-        } catch { return []; }
-    };
-    renderer.render = (el, screen, scope) => drawScreen(el, screen, scope?.mount === 'card'
-        ? { ...scope, refused: notes.refusedAt(scope.index), assisted: assistedAt(scope.index), ...(screen?.id === CHANGES_CARD_SCREEN_ID ? { moduleLines: cardLines(scope.index, scope.state, scope.changes, scope.before), edits: editsAt(scope.index), editableHead: scope.index === store.headIndex() } : {}) }
-        : scope);
-    // The story head a dialog was opened on (mounts/dialog.js): the head's index and record. Which swipe is shown is not part of
-    // it: a swipe that keeps the head record is not a move (the chat's id is checked on its own).
-    const branchNow = () => {
-        const index = store.headIndex();
-        if (!Number.isInteger(index) || index < 0) return `${index}`;
-        return `${index}|${readRecord(ctx.chat?.[index])?.sid ?? ''}`;
-    };
-    // ---- cards under replies (reply-cards.js): each card is asked once, on the head reply's state; the scan is kept per chat, head and rev ----
-    const replyLater = laterStore();
-    let replyScan = null;          // { key, map } for the chat, head and rev it was made on
-    let replyNodes = new Map();    // drawn card nodes by `${chat}|${index}|${card key}`, reused while the card is the same
-    const pageFolds = new Set();   // folds of a chat with no id: this page only, never saved
-    const dropReplyScan = () => { replyScan = null; };
-    const replyOffs = ['head', 'committed', 'turn', 'feature'].map(name => events.on(name, dropReplyScan));
-    const replyChatTypes = ctx.eventTypes ?? ctx.event_types ?? {};
-    if (typeof ctx.eventSource?.on === 'function' && replyChatTypes.CHAT_CHANGED) {
-        const chatLeft = () => { dropReplyScan(); pageFolds.clear(); replyNodes = new Map(); };
-        ctx.eventSource.on(replyChatTypes.CHAT_CHANGED, chatLeft);
-        replyOffs.push(() => (ctx.eventSource.removeListener ?? ctx.eventSource.off)?.call(ctx.eventSource, replyChatTypes.CHAT_CHANGED, chatLeft));
-    }
-    const chatKeyNow = () => String(ctx.getCurrentChatId?.() ?? ctx.chatId ?? '');
-    // The Later fold is kept per chat and card key (not per message: a new reply does not reset it); a chat with no id keeps it
-    // for this page only.
-    const foldKey = (chat, key) => (chat ? `${chat}|${key}` : '');
-    const foldedNow = (chat, key) => (chat ? replyLater.has(foldKey(chat, key)) : pageFolds.has(key));
-    const setFold = (chat, key, on) => {
-        if (chat) replyLater.set(foldKey(chat, key), on);
-        else if (on) pageFolds.add(key);
-        else pageFolds.delete(key);
-    };
-    const replyHead = () => {
-        const index = store.headIndex();
-        return Number.isInteger(index) && index >= 0 && index < (ctx.chat?.length ?? 0) ? index : -1;
-    };
-    const replyScanAt = (head, chat) => {
-        const stored = head >= 0 ? store.at(head) : null;
-        const key = `${chat}|${head}|${stored?.meta?.rev ?? ''}`;
-        if (replyScan?.key === key) return replyScan.map;
-        const entries = registry.cardEntries?.() ?? [];
-        // A brand-new chat holds only the greeting and no story record yet (nothing has been read or written): the head has no state, so
-        // the cards are asked on the initial one, and a start card shows before the first reply.
-        let state = stored;
-        if (!state && head >= 0 && entries.length) {
-            try { state = runtime.initial?.() ?? null; } catch { state = null; }
-        }
-        const map = entries.length && state ? scanReplyCards(entries, {
-            head,
-            messageAt: i => ctx.chat?.[i] ?? null,
-            stateAt: () => state,
-            query: (name, args, at) => queryAt(name, args, at),
-            chatId: chat,
-            // A card that stops being drawn drops its fold: a later card of the same id starts unfolded.
-            onEnded: id => { if (foldedNow(chat, id)) setFold(chat, id, false); },
-        }) : new Map();
-        replyScan = { key, map };
-        return map;
-    };
-    const replyCardsAt = index => {
-        // Cards follow the head: only the head reply carries them (the greeting when it is the only reply).
-        const head = replyHead();
-        if (index !== head) return [];
-        const chat = chatKeyNow();
-        const items = replyScanAt(head, chat).get(head) ?? [];
-        const drawn = new Map();
-        const nodes = items.map(item => {
-            const folded = foldedNow(chat, item.key);
-            const nodeKey = `${chat}|${index}|${item.key}`;
-            let sign = null;
-            try { sign = JSON.stringify([item.card, folded]); } catch { sign = null; }
-            const kept = replyNodes.get(nodeKey);
-            const node = sign !== null && kept?.sign === sign ? kept.node : drawReplyCard(doc, item, {
-                head: true,
-                folded,
-                onFold: on => { setFold(chat, item.key, on); mounts?.card?.refresh?.(index, { force: false }); },
-                onAct: action => runReplyAction(action),
-            });
-            drawn.set(nodeKey, { sign, node });
-            return node;
-        });
-        replyNodes = drawn;
-        return nodes;
-    };
-    // A card's "open" names a screen: the game view when the screen has a screen mount, else its dialog (a wizard is dialog-only;
-    // the action's `payload` is the dialog's starting draft), else nothing; that is said once per screen.
-    const unopened = new Set();
-    function openReplyScreen(id, payload) {
-        // The card that asks to add a companion opens the New character window filled in (lean-rpg/join.js): the wizard keeps its own draft.
-        if (id === 'story-block/new-character' && rpg?.wizard?.open(payload && typeof payload === 'object' ? payload : null)) return;
-        const mountsOf = screens.resolve(id)?.screen?.mounts ?? [];
-        if (mountsOf.includes('screen') && api.openScreen(id)) return;
-        if (mountsOf.includes('dialog')) {
-            let draft = {};
-            try { draft = JSON.parse(JSON.stringify(payload ?? {})); } catch { draft = {}; }
-            if (api.dialog.open(id, { draft })) return;
-        }
-        if (unopened.has(id)) return;
-        unopened.add(id);
-        console.warn(`[Story Suite] a card asked to open "${id}", which has no screen or dialog to show.`);
-    }
-    // A reply card's action: "open" shows the screen; "command" sends the command (sdk.command, recorded with the reply).
-    function runReplyAction(action) {
-        if (action.open) { openReplyScreen(action.open, action.payload); return; }
-        if (action.command) {
-            try { Promise.resolve(api.command(action.command, JSON.parse(JSON.stringify(action.payload ?? {})), { cause: 'ui' })).catch(() => {}); } catch { /* the host reports its own failures */ }
-        }
-    }
-    const mounts = createMounts({
-        screens,
-        render: renderer.render,
-        replyCards: index => replyCardsAt(index),
-        hasReplyCards: () => (registry.cardEntries?.().length ?? 0) > 0,
-        chatScope: () => ({ chat: String(ctx.getCurrentChatId?.() ?? ctx.chatId ?? ''), branch: branchNow() }),
-        // A chat with no carrier has head index -1 (and a stale index can point past the end): no
-        // state there, so the mounts show nothing instead of failing on store.at's RangeError.
-        stateAt: index => (Number.isInteger(index) && index >= 0 && index < (ctx.chat?.length ?? 0) ? store.at(index) : null),
-        headIndex: () => store.headIndex(),
-        query: queryAt,
-        changesAt: index => store.changesAt(index),
-        opsAt: index => store.opsAt(index),
-        // The card under a reply is one card; its closed line is each card's own summary, Changes first (this hook is the changes card's).
-        first: [CHANGES_CARD_SCREEN_ID],
-        summary(screen, { index, state, before, changes }) {
-            if (screen?.id !== CHANGES_CARD_SCREEN_ID) return null;
-            let currency = null;
-            try { currency = sdk.query('inventory.currency'); } catch { currency = null; }
-            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, assisted: assistedAt(index).length, lines: cardLines(index, state, changes, before) });
-        },
-        settings: screenId => {
-            const owner = String(screenId ?? '').split('/')[0];
-            const current = sdk.settings(registry.has(owner) ? owner : 'story-block');
-            return owner === 'story-block' ? { ...current, _weatherEnabled: coreOn(CORE_FEATURE.weather) } : current;
-        },
-        // Cards: the reader's switch per card screen, under Story Block's `story-block.cards` feature.
-        enabled: (mount, screenId) => (mount === 'card' ? coreOn(CORE_FEATURE.cards) && screens.cardsOn(screenId) : true),
-        api,
-        // The game view's header (UI stage 5a): the lead and the scene, read through the queries, the story time through
-        // the host's own calendar formatter (the same one the screens' fmt.time uses).
-        heroOf: state => gameHeroProps({
-            state,
-            query: (name, args) => queryAt(name, args, state),
-            context: readHeroContext(),
-            formatTime: minutes => formatStoryTime(minutes, storyCalendar((name, args) => (registry.query(name) ? sdk.query(name, args) : null))),
-            weatherOn: coreOn(CORE_FEATURE.weather),
-            // The RPG keeps its character in a block, not behind `party.pc`: its stage bars are the header's (lean-rpg/view/hero-data.js).
-            rpgLead: rpg?.heroLead?.(state) ?? null,
-        }),
-        on: (name, fn) => events.on(name, fn),
-        carriers,
-        hasCard,
-        swipeAt: index => ctx.chat?.[index]?.swipe_id ?? 0,
-        eventSource: ctx.eventSource,
-        eventTypes: ctx.eventTypes ?? ctx.event_types,
-        // The game view's navigation leaves out the screens the reader hid (they still open by name).
-        inNav: screenId => !isHiddenNav(tabOrder.choice(), screenId, navPresent),
-        // Which screens sit in the bar, as against under More (the reader's choice, else the default bar).
-        inBar: screenId => isInBar(tabOrder.choice(), screenId, barDeclared(screenId)),
-        addTab(tab) {
-            extraTabs.push(tab);
-            return () => {
-                const at = extraTabs.indexOf(tab);
-                if (at >= 0) extraTabs.splice(at, 1);
-            };
-        },
-        document: doc,
+    const { cardLines, assistedAt, branchNow, replyCardsAt, replyOffs } = createReplyCards({
+        runtime, ctx, doc, store, registry, events, queryAt, renderer, notes, screens, api, getRpg: () => rpg, getMounts: () => mounts,
+    });
+    const mounts = createUiMounts({
+        screens, renderer, registry, ctx, store, sdk, queryAt, notes, assistedAt, cardLines, replyCardsAt, branchNow, coreOn,
+        api, events, carriers, hasCard, tabOrder, navPresent, barDeclared, extraTabs, doc, getRpg: () => rpg,
     });
     runtime.setDialog?.((screenId, opts) => mounts.dialog.open(screenId, opts), () => mounts.dialog.current?.() ?? null);
-    // The tab host sees the module tabs and the tab screens as one list, in the reader's order (else the
-    // default: screens.js screenOrder), without the ones the reader hid. A module tab goes by
-    // "<module>/<id>" there, so NPC State Delta's Cast tab and its Cast screen are one entry.
-    const panelTabs = () => [...registry.tabs(), ...extraTabs.map(tab => ({ ...tab, moduleId: 'screens' }))];
-    // A module's tab that is active only sometimes is listed while its `active` says so (its alert is read at each draw).
-    const headStateNow = () => { const index = store.headIndex(); return Number.isInteger(index) && index >= 0 ? store.at(index) : null; };
-    const activeTabs = () => panelTabs()
-        .filter(tab => typeof tab.active !== 'function' || activeNow(tab, headStateNow(), queryAt).on)
-        .map(tab => {
-            if (typeof tab.active !== 'function') return tab;
-            const now = activeNow(tab, headStateNow(), queryAt);
-            return { ...tab, alert: now.alert, alertText: now.badge ?? '' };
-        });
-    const tabSource = { tabs: () => visibleNav(activeTabs(), tabOrder.choice(), navKey, tab => tab.order, navPresent) };
-
-    // Settings → Tabs & Packs → Tabs: every tab and screen once (by id), where it shows, in the reader's order.
-    function tabRows() {
-        const rows = new Map();
-        const add = (id, screen, where) => {
-            if (!id) return;
-            const { title, icon, order } = screen ?? {};
-            const row = rows.get(id) ?? { id, title: String(title || id), icon: icon || '', order, where: [] };
-            if (!row.where.includes(where)) row.where.push(where);
-            // A tab or screen that is shown only while active: Settings says so instead of a switch (its own note, if it gave one).
-            if (typeof screen?.active === 'function') row.activeNote = typeof screen.activeNote === 'string' && screen.activeNote ? screen.activeNote : TABS_TEXT.activeNote;
-            rows.set(id, row);
-        };
-        for (const mount of ['screen', 'tab']) for (const entry of screens.list(mount)) add(entry.id, entry.screen, mount);
-        for (const tab of registry.tabs()) add(navKey(tab), tab, 'tab');
-        const choice = tabOrder.choice();
-        // Two tabs with the same name (two blocks, a pack's tab and a module's) are told apart: the later ones are numbered, "Notes (2)".
-        const seen = new Map();
-        const named = title => {
-            const plain = title.replace(/\s+/g, ' ').trim();
-            const count = (seen.get(plain.toLowerCase()) ?? 0) + 1;
-            seen.set(plain.toLowerCase(), count);
-            return count > 1 ? `${plain} (${count})` : title;
-        };
-        return orderNav([...rows.values()], choice).map(row => ({
-            ...row,
-            title: named(row.title),
-            fixed: row.id === HOME_ID,
-            hidden: isHiddenNav(choice, row.id, navPresent),
-            inBar: isInBar(choice, row.id, barDeclared(row.id)),
-        }));
-    }
-    // After a change: the tab strip and the game view's navigation follow at once.
-    function refreshNav() {
-        if (!panel.hidden) tabHost?.refresh();
-        mounts.screen.update();
-    }
-    const tabsControl = Object.freeze({
-        rows: tabRows,
-        move(id, delta) {
-            const ids = tabRows().filter(row => !row.fixed).map(row => row.id);
-            tabOrder.set(moveNav(tabOrder.choice(), ids, id, delta));
-            refreshNav();
-        },
-        setHidden(id, hidden) {
-            tabOrder.set(setNavHidden(tabOrder.choice(), id, hidden));
-            refreshNav();
-        },
-        setInBar(id, inBar) {
-            tabOrder.set(setNavInBar(tabOrder.choice(), id, inBar, barDeclared(id)));
-            refreshNav();
-        },
-        reset() {
-            tabOrder.reset();
-            refreshNav();
-        },
-        isDefault: () => isDefaultChoice(tabOrder.choice()),
+    const { headStateNow, tabSource, tabsControl } = createUiNavigation({
+        registry, extraTabs, store, queryAt, screens, tabOrder, navPresent, barDeclared, mounts,
+        getPanel: () => panel, getTabHost: () => tabHost,
     });
 
-    // ---- the panel ---------------------------------------------------------------------------
     let tabHost = null;
-    const panel = el(doc, 'div', 'story-suite-sheet');
-    panel.id = IDS.panel;
-    panel.hidden = true;
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', S.panel.title);
-    const panelHead = el(doc, 'div', 'story-suite-sheet-head');
-    panelHead.appendChild(el(doc, 'b', '', S.panel.title));
-    const panelClose = iconButton(doc, 'story-suite-sheet-close', 'fa-xmark', '', S.panel.close);
-    panelHead.appendChild(panelClose);
-    const panelBody = el(doc, 'div', 'story-suite-sheet-body');
-    // The card's offer (packs/card-offer.js): one notice per pack the open card brings, between the head and the tabs.
-    const offerBox = el(doc, 'div', 'ss-card-offers');
-    offerBox.hidden = true;
-    panel.append(panelHead, offerBox, panelBody);
-    doc.body.appendChild(panel);
-
-    // The strip's slots before More: four on a phone's bottom sheet; on the side sheet (from 760px, the game view's line) as many as its width holds.
-    const panelSlots = () => slotsForWidth(Number(panel.clientWidth), { wide: doc.defaultView?.matchMedia?.('(min-width: 760px)')?.matches === true });
-    function openPanel() {
-        panel.hidden = false;
-        doc.body.classList.add('story-suite-sheet-open');
-        if (!tabHost) tabHost = createTabHost(panelBody, { registry: tabSource, view: () => sdk.view(), api: sdk, doc, barHost: panel, slots: panelSlots,
-            inBar: tab => isInBar(tabOrder.choice(), navKey(tab), barDeclared(navKey(tab))) });
-        else tabHost.refresh();
-    }
-    function closePanel() {
-        // More's sheet, if it is open, goes with the panel: its scrim and its keys (the focus does not go to a hidden tile). The
-        // dialogs the panel opened go too (their opener is in the panel, and it is about to be hidden).
-        tabHost?.bar?.closeMore({ focus: false });
-        mounts.dialog?.closeOpenedIn?.(panel);
-        panel.hidden = true;
-        doc.body.classList.remove('story-suite-sheet-open');
-    }
-    panelClose.addEventListener('click', closePanel);
-
-    // The settings overlay. Its prompt size is what the next ordinary reply would be sent (turn.preview:
-    // built on demand, never sent, nothing changed), counted with SillyTavern's tokenizer when the context
-    // has one; it is counted again when a feature flips or the story moves while the overlay is open.
-    let overlay = null;
-    const countTokens = () => {
-        const live = liveCtx();
-        return typeof live?.getTokenCountAsync === 'function' ? text => live.getTokenCountAsync(text) : null;
-    };
-    // Settings → Diagnostics (diagnostics.js): the report's parts, read when it is built. SillyTavern's
-    // version is the one its page shows (else its /version answer). Each module's `hooks.diagnostics`
-    // adds its own section.
-    const promptParts = typeof runtime.turn?.previewFit === 'function' ? () => runtime.turn.previewFit()
-        : typeof runtime.turn?.preview === 'function' ? () => runtime.turn.preview() : null;
-    const stVersion = async () => {
-        const shown = doc.querySelector?.('#version_display')?.textContent?.trim();
-        if (shown && shown !== 'SillyTavern') return shown;
-        const fetcher = (doc.defaultView ?? globalThis).fetch;
-        if (typeof fetcher !== 'function') return '';
-        const answer = await fetcher('/version');
-        const data = answer?.ok ? await answer.json() : null;
-        return data?.pkgVersion ? `SillyTavern ${data.pkgVersion}` : '';
-    };
-    // Story Suite's look (view/theme.js): light or dark from SillyTavern's theme, the reader's panel style
-    // and font, on every Story Suite root; SillyTavern's own elements are never touched.
-    const theme = createThemeBridge({ doc, settings: () => settings() });
-    const sanitizer = globalThis.SillyTavern?.libs?.DOMPurify?.sanitize?.bind(globalThis.SillyTavern.libs.DOMPurify) ?? null;
-    const diagnostics = Object.freeze({
-        // Settings → Diagnostics → Show the UI sample: every building block, light and dark (screens/ui-sample.js).
-        sample: () => {
-            overlay?.close?.();
-            return openUiSample({ doc, widgets, sanitize: sanitizer });
-        },
-        report: () => buildReport({
-            stVersion,
-            hostVersion: version || registry.hostVersion?.() || '',
-            modules: () => registry.modules().map(def => ({ id: def.id, name: def.name ?? def.id, version: def.version ?? '' })),
-            refusals: () => registry.refusals?.() ?? [],
-            features: () => runtime.features?.list?.() ?? [],
-            hostSettings: () => settings(),
-            settingsOf: id => settings(id),
-            promptParts,
-            problems: () => runtime.turn?.problems?.() ?? [],
-            save: () => ({ failing: store.failing?.(), dirty: store.dirty?.(), suspect: typeof store.suspect === 'function' ? store.suspect() : undefined }),
-            calls: () => runtime.callQueue?.stats?.() ?? null,
-            caught: caughtSoFar,
-            chat: () => liveCtx()?.chat ?? [],
-            chatOpen: () => Boolean(liveCtx()?.getCurrentChatId?.() ?? liveCtx()?.chatId),
-            hooks: () => registry.hookEntries?.('diagnostics') ?? [],
-            cardOffers: () => cardLog.slice(),
-        }),
-        fileName: () => reportFileName(),
-        // A story Story Block keeps as it is (read-only) can be repaired, only when the reader says so (turn.repair).
-        repairActions: () => runtime.turn?.repairActions?.() ?? [],
-        repair: id => runtime.turn?.repair?.(id, { confirmed: true }),
+    const { panel, offerBox, openPanel, closePanel } = createUiPanel({
+        doc, sdk, tabSource, tabOrder, barDeclared, mounts, getTabHost: () => tabHost, setTabHost: value => { tabHost = value; },
     });
-    function openSettings(options = null) {
-        const fold = typeof options?.fold === 'string' ? options.fold : null;
-        overlay = openSettingsWindow({
-            // The status strip's switch is there only while some screen asks for the strip (a pack's, a module's `hud` mount); its stored
-            // choice stays, and the strip works as before.
-            registry, settings, doc, sdk, features: withHiddenFeatures(runtime.features ?? null, feature => (feature.id === CORE_FEATURE.hud && !hudAsked()) || feature.id === GEAR_FEATURE), fold, diagnostics,
-            promptParts, tabs: tabsControl, theme, blockTemplates, blocks: blockWidgets,
-            chatOpen: () => Boolean(liveCtx()?.getCurrentChatId?.() ?? liveCtx()?.chatId),
-            ...(rpg ? { extraSections: rpg.settingsSections() } : {}),
-            countTokens: countTokens(),
-            onClose: () => { overlay = null; },
-        });
-        return overlay;
-    }
+
+    let overlay = null;
+    const settingsUi = createUiSettings({
+        runtime, doc, registry, store, sdk, settings, version, widgets, liveCtx, tabsControl, blockTemplates, blockWidgets,
+        getRpg: () => rpg, getHudAsked: () => hudAsked(), getCardLog: () => cardLog,
+        getOverlay: () => overlay, setOverlay: value => { overlay = value; },
+    });
+    const { theme } = settingsUi;
+    function openSettings(options = null) { return settingsUi.openSettings(options); }
 
     // ---- the bar above the message box ------------------------------------------------------
     const bar = el(doc, 'div', 'story-suite-bar');
@@ -965,83 +379,11 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
             if (overlay?.isOpen?.()) { const page = overlay.section(); openSettings(); overlay.select(page); }
         }).catch(error => { rpgLoading = false; console.warn('[Story Suite] the RPG screens could not load', error?.message ?? error); });
     }
-    const offs = [...replyOffs, ...offs0];
-    // Story Suite's console errors, kept for Diagnostics (once per page; the console still prints them).
-    offs.push(captureConsole());
-    // The blocks' screens come from `dataModules.presentation`, a query that settles the timeline and reads the story. It depends only on
-    // which block definitions are pinned, so it is asked again only when that stamp moved (a pin, unpin, edit or migration changes a
-    // block's hash; a swipe, delete, Re-read, rewind, restore or chat switch changes which blocks the head holds). One reply sends many
-    // `head` and `committed` events: each looks at the stamp at once (the listeners after this one read the screens in the same event, so
-    // the screens are not left for later), and only the first to see a new stamp asks. The last state always wins: every event checks it.
-    let dataPresentation = '', dataStamp = null;
-    const presentationStamp = () => {
-        try {
-            if (!registry.query?.('dataModules.presentation')) return null;
-            const modules = store.head()?.domains?.dataModules;
-            return JSON.stringify(Object.entries(modules?.active ?? {}).map(([id, entry]) => [id, entry?.hash, Boolean(modules.pins?.[entry?.hash])]));
-        } catch { return null; }   // (not known: asked every time, as before)
-    };
-    for (const name of ['head', 'committed']) offs.push(events.on(name, () => {
-        const stamp = presentationStamp();
-        if (stamp === null || stamp !== dataStamp) {
-            dataStamp = stamp;
-            let next = '', pinned = null;
-            // (A query that throws leaves no stamp behind, so the next event asks again, as before the stamp.)
-            try { pinned = blockPresentation() ?? []; if (pinned.length) next = JSON.stringify(pinned); } catch { dataStamp = null; /* older host */ }
-            if (next !== dataPresentation) { dataPresentation = next; syncScreens(pinned); }
-        }
-        mounts.tab.register(); if (!panel.hidden) tabHost?.refresh();
-    }));
-    // A feature turned on or off: its screens, tabs, widgets and cards come and go; nothing else changes.
-    for (const name of ['head', 'committed', 'turn']) offs.push(events.on(name, () => overlay?.refreshSize?.()));
-    // A chat change closes the dialogs (their drafts were for the chat they were opened in), the game view's More sheet and the
-    // Story panel's More sheet.
-    const chatTypes = ctx.eventTypes ?? ctx.event_types ?? {};
-    const onChatChanged = () => {
-        blockWidgets.reset();
-        mounts.dialog?.closeAll();
-        mounts.screen?.closeMore?.();
-        tabHost?.bar?.closeMore?.({ focus: false });
-        // The new chat's card is read for its offer (a read of the chat before is dropped).
-        cardOffer?.refresh().catch(error => console.warn('[Story Suite] the card offer could not be read', error));
-    };
-    if (typeof ctx.eventSource?.on === 'function' && chatTypes.CHAT_CHANGED) {
-        ctx.eventSource.on(chatTypes.CHAT_CHANGED, onChatChanged);
-        offs.push(() => (ctx.eventSource.removeListener ?? ctx.eventSource.off)?.call(ctx.eventSource, chatTypes.CHAT_CHANGED, onChatChanged));
-    }
-    // A pack turned on or off, installed or removed: the screens it gives come and go with it (the installed store says so).
-    offs.push(runtime.packs?.packs?.subscribe?.(() => {
-        syncScreens();
-        mounts.dialog?.closeWhere?.(screenId => !screens.resolve(screenId));
-        refresh();
-        mounts.card?.refreshAll?.({ force: true });
-    }) ?? (() => {}));
-    offs.push(events.on('feature', () => {
-        syncLeanRpg();
-        // The overlay draws the switch and the fields of that feature again, and the prompt size.
-        overlay?.refresh?.();
-        syncScreens();
-        // A dialog open on a screen that is gone now closes: its controls belong to a part turned off.
-        mounts.dialog?.closeWhere?.(screenId => !screens.resolve(screenId));
-        refresh();
-        mounts.card?.refreshAll?.({ force: true });
-    }));
-    // The notice goes once the module that held the story back no longer does (the character was made).
-    offs.push(events.on('committed', async () => {
-        if (!blockedBy || typeof runtime.turn?.blockers !== 'function') return;
-        const was = blockedBy;
-        let still = true;
-        try { still = (await runtime.turn.blockers()).some(entry => entry.moduleId === was); } catch { still = true; }
-        if (!still && blockedBy === was) clearBlocked();
-    }));
-    offs.push(events.on('turn', done => {
-        clearBlocked();
-        // The "Installed …" notice stays for one reply.
-        cardOffer?.clearDone();
-        if (!panel.hidden) tabHost?.refresh();
-        // The card under that reply now knows its refused lines.
-        if (Number.isInteger(done?.index)) mounts.card?.refresh?.(done.index, { force: true });
-    }));
+    const offs = installUiEvents({
+        replyOffs, offs0, registry, store, events, ctx, runtime, mounts, screens, blockWidgets, cardOffer,
+        blockPresentation, syncScreens, syncLeanRpg, refresh, clearBlocked, getPanel: () => panel,
+        getTabHost: () => tabHost, getOverlay: () => overlay, getBlockedBy: () => blockedBy,
+    });
 
     syncScreens();
     syncLeanRpg();

@@ -1,6 +1,6 @@
 // Story Suite v2: the store's pure hashing helpers (moved out of createStore unchanged): the hash of a reply's text and whether a
 // record holds guarded blocks. Each is a function of its input alone; the cache is keyed by the message and checked against its text.
-// The hashes that chain over records (chainHash, windowHash, bodyDigest and the spine digests) keep per-store caches and stay in createStore.
+// The hashes that chain over records keep their per-store caches in chains.js.
 
 import { payloadText } from '../persist.js';
 import { hashJson, isMetaSpan } from '../replay.js';

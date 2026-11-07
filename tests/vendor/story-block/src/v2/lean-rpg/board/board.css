@@ -31,9 +31,9 @@
 .rpg-board-error { color: var(--ss-warn); }
 .rpg-board-skill-flags { display: grid; gap: 4px; border: 1px solid var(--ss-border); border-radius: 8px; }
 .rpg-board-skill-flag { display: flex; align-items: center; gap: 8px; min-height: 44px; }
-/* A finished panel can scroll its final control past the floating bar at any viewport width. */
-.story-suite-sheet-body:has(.rpg-board-active.rpg-board-finished)::after { display: block; height: var(--ss-bottom-bar-space, var(--ss-bottom-bar-height, 0px)); }
 @media (max-width: 759.98px) {
+    /* Finished panels and game views can scroll their final controls past the floating bar. */
+    .story-suite-sheet-body:has(.rpg-board-active.rpg-board-finished)::after { display: block; height: var(--ss-bottom-bar-space, var(--ss-bottom-bar-height, 0px)); }
     .ss-gameview-body:has(.rpg-board-active.rpg-board-finished)::after { display: block; height: var(--ss-bottom-bar-space, var(--ss-bottom-bar-height, 0px)); }
     .rpg-board-active:not(.rpg-board-finished) { height: calc(100dvh - 170px); min-height: 350px; }
     /* The panel and game view float their bars over the body. Give the board the actual remaining

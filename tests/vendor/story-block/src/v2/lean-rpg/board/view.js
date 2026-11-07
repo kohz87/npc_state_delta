@@ -303,17 +303,25 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
             }
             if (followLog) log.scrollTop = log.scrollHeight;
         };
+        const phone = doc.defaultView?.matchMedia?.('(max-width: 759.98px)');
         const Observer = doc.defaultView?.ResizeObserver;
         if (Observer) {
             const observer = new Observer(measure);
-            for (const node of [...cardRows, ...choiceRows, log, logContent]) observer.observe(node);
-            handles.push({ destroy: () => observer.disconnect() });
+            for (const node of [...cardRows, ...choiceRows, log]) observer.observe(node);
+            // The wrapper has a measurable box on phones and display: contents at wider widths.
+            const onWidth = event => {
+                if (event.matches) observer.observe(logContent); else observer.unobserve(logContent);
+                measure();
+            };
+            if (phone?.matches) observer.observe(logContent);
+            phone?.addEventListener?.('change', onWidth);
+            handles.push({ destroy: () => { phone?.removeEventListener?.('change', onWidth); observer.disconnect(); } });
         }
         measure();
         log.scrollTop = log.scrollHeight;
         // A short sheet may need to move after choices or targeting change height. Move only its
         // own scroller, and keep the controls clear of the floating bar on phones.
-        if (!ended && doc.defaultView?.matchMedia?.('(max-width: 759.98px)').matches) {
+        if (!ended && phone?.matches) {
             const body = root.closest?.('.story-suite-sheet-body, .ss-gameview-body');
             const frame = body?.closest?.('.story-suite-sheet, .ss-gameview');
             const bar = frame?.querySelector?.('.story-suite-sheet-bar, .ss-gameview-nav');

@@ -1,4 +1,4 @@
-# AI-README: NPC State Delta 1.10.2
+# AI-README: NPC State Delta 1.11.0
 
 For AI assistants that read this repository. Plain facts, no marketing. For people, read [README.md](README.md). For the rules
 every change must keep, read [AGENTS.md](AGENTS.md) and [docs/core-contract.md](docs/core-contract.md). Depth lives in `docs/`;
@@ -16,7 +16,7 @@ roleplay model about the NPCs who are present. With Story Block it also keeps me
 |---|---|---|---|
 | kohz87/Story_block | `story-block` | 2.22.0 | The host: store, replay, command bus, `<Changes>` capture, prompt assembly, module registry, settings window, Game view, packs and portraits, save points. |
 | kohz87/Story_director | `story-director` | 2.9.1 | Story clock and calendar, quests, map, World, key people, the living cast (who has been met, where everyone is). Needs Story Block. |
-| kohz87/npc_state_delta (this) | `npc-state-delta` | 1.10.2 | NPC dossiers, meters, stages, hidden notes ("secrets"), the Dossiers screen, cast dossiers and cast portraits, social-check modifiers. |
+| kohz87/npc_state_delta (this) | `npc-state-delta` | 1.11.0 | NPC dossiers, meters, stages, hidden notes ("secrets"), the Dossiers screen, cast dossiers and cast portraits, social-check modifiers. |
 | kohz87/Story_studio | (not an extension) | 0.6.0 | A separate page that writes and checks packs. |
 
 Data flows one way: Studio writes a pack; Story Block validates and stores it; Story Director reads what Story Block holds; Delta
@@ -32,7 +32,7 @@ packs. Nothing flows back to Studio.
 - `manifest.json`: `loading_order` 110, `js: bootstrap.js`, `css: style.css`, `minimum_client_version` 1.18.0, `requires: []`.
 - Alone (no host, or a Story Block 1): dossiers, scans, portraits, calendar and birthdays, relationships, backup, diagnostics. Its
   own prompt and storage are unchanged by the suite.
-- Hosted (Story Block 2.12.0 or later, `requires: { storyBlock: '>=2.12.0' }` on its module definition): adds meters, stages,
+- Hosted (Story Block 2.23.0 or later, `requires: { storyBlock: '>=2.23.0' }` on its module definition): adds meters, stages,
   hidden notes, `~ npc` change lines, the reply card, the Dossiers screen and tab, social checks, Key people, the cast. The
   cast needs Story Block 2.15.0 and Story Director 2.8.0; Key people need Story Director 2.7.0.
 - Story Block 2.16.1 heals a chat that an earlier Delta left stuck (see CHANGELOG 1.7.1). Update Story Block before Delta.
@@ -294,7 +294,7 @@ Detail: [docs/dev/storysuite-adapter.md](docs/dev/storysuite-adapter.md), [docs/
 
 ## Version
 
-NPC State Delta 1.10.2. The version lives in `manifest.json`, `package.json`, `runtime-modules.json`, `core.js`
+NPC State Delta 1.11.0. The version lives in `manifest.json`, `package.json`, `runtime-modules.json`, `core.js`
 (`NPC_STATE_VERSION`) and the `bootstrap.js` banner; `scripts/validate.mjs` checks they agree with README and CHANGELOG.
 Built for Story Block 2.22.0 and Story Director 2.9.1 in Story Suite with Story Studio 0.6.0. Persisted schema versions are
 separate from the application version.

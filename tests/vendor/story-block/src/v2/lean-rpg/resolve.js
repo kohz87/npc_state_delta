@@ -39,7 +39,7 @@
 // the prefix holds; when an earlier reply is deleted or swiped and they changed, the roll is planned again with the same
 // dice on the new numbers. Claim `rpg:resolve:<key>` (the reader's message) keeps it to one roll per message.
 //
-// The Standard formula (rules.formula 'standard') rolls in standard.js, which documents its own additions to this record: typed lines, the
+// The Standard formula (rules.formula 'standard') rolls in standard/roll.js (re-exported by standard.js). Its record adds typed lines, the
 // turn order, the opening action, the bars and the blocks the told rolls took or gave (`hurts`, written to the bars below).
 //
 // ---- The record for the battle log (agent B) ----------------------------------------------------------------------
