@@ -15,6 +15,7 @@ import {
     selectMapNpcs,
 } from '../relationship-map-core.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 const npc = (id, extra = {}) => ({ id, name: id.charAt(0).toUpperCase() + id.slice(1), bucket: 'active', relationship: {}, keyRelationships: [], ...extra });
 
@@ -143,7 +144,7 @@ test('the map is a read-only adapter wired through the existing owners', () => {
     const core = read('relationship-map-core.js');
     assert.doesNotMatch(`${adapter}\n${core}`, /getDossierState|getState\(|setPortrait|update[A-Z]\w*\(|flush\(|generateRaw/, 'no state reads or writes');
     assert.match(adapter, /ui\.select\(node\)/, 'map selection goes through the dossier panel');
-    assert.match(read('dossier-ui.js'), /\n    select\(npcId\) \{/);
+    assert.match(dossierUiSource(), /\n    select\(npcId\) \{/);
     assert.match(runtimeSource(), /settingsSlot\('relationship-map'\)/);
     assert.match(read('bootstrap.js'), /await import\('\.\/dossier-experience\.js'\);[\s\S]*await import\('\.\/relationship-map\.js'\);/);
     assert.match(adapter, /readMapSettings\(\)\.enabled/, 'turning the map off removes its switch, pane and link');

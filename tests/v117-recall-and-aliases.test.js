@@ -5,6 +5,7 @@ import { EDITOR_LOCKABLE_FIELDS, LOCKED_FIELD_KEYS } from '../src/fields/registr
 import { buildInjection, createNpcRecord, isRoleDescriptionLabel, mergeScanResult, normalizeNpcRecord, npcNamedInText } from '../core.js';
 import { dossierDetailProjection } from '../dossier-ui.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 const hask = { id: 'h', name: 'Capt. Orrin Hask' };
 const roster = [hask, { id: 'm', name: 'Maelis Varn' }, { id: 'a', name: 'Adaine Varn' }, { id: 'w', name: 'Will Turner' },
@@ -68,6 +69,6 @@ test('hand-edited aliases are kept from scanner additions and shown on the dossi
     assert.match(index, /id="npc_state_delta_edit_aliases"/);
     assert.match(index, /aliases: editorList\('aliases', 8\)/);
     assert.ok(EDITOR_LOCKABLE_FIELDS.includes('aliases'), 'hand-edited aliases can be locked');
-    assert.match(fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8'), /currentCard\('Also known as'/);
+    assert.match(dossierUiSource(), /currentCard\('Also known as'/);
     assert.deepEqual(LOCKED_FIELD_KEYS.aliases, ['aliases'], 'the lock map bundle import and branch restore share');
 });
