@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **Settings → Storage can clean up old dossier files.** It shows how many dossier files exist and their size. **Clean up** removes, after a confirmation, only files that no chat SillyTavern lists uses, that no branch index names, and that are older than 30 days. **Find older files** finds files from before this version; it uses SillyTavern's Data Maid listing only when pressed, and replaces any Data Maid report you have open. Removal is off, with the reason, whenever a listed chat or a branch index can't be read. Chats of deleted characters are not checked.
+
 - **The large root-level runtime files are split into small parts (no behaviour change).** 24 files over 450 lines (among them `branch.js`, `dossier-ui.js`, `social.js` and `index.js`) are now small parts with header comments, named with the original file as a prefix; each original keeps its exports, so every import still works. All parts are in the runtime module list and the codemap. `runtime-scan.js` and `runtime-targeted.js` are still over 450 lines and are split next.
 
 ## 1.11.0
