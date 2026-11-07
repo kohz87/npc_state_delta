@@ -225,4 +225,3 @@ export function shouldPromoteCandidate(candidate, incoming, admissionMode = 'con
     if (mode === 'manual_only') return false;
     return Boolean(incoming.sameIndividual) && Number(candidate?.seenCount || 0) >= 2;
 }
-

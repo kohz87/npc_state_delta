@@ -119,4 +119,3 @@ export function stripRecordCitations(raw) {
     }
     return out;
 }
-
