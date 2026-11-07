@@ -11,7 +11,8 @@
 // quest's state on its own. The first open quest's progress bar is drawn when the board says it has a
 // target (`meter`).
 //
-// First, while a module holds the story back (its canGenerate, MODULES §F12: a module needs a setup step), "Before you start" (the host's `story-block.ready-hint` widget): its reason and a
+// First, while the timeline holds a permanent dossier failure, the rebuild banner (`story-block.rebuild-banner`: screens/rebuild-banner.js); nothing while it retries.
+// Then, while a module holds the story back (its canGenerate, MODULES §F12: a module needs a setup step), "Before you start" (the host's `story-block.ready-hint` widget): its reason and a
 // button that runs its onBlocked hook. Without such a module
 // it draws nothing.
 //
@@ -28,6 +29,8 @@ import { SHOW_MORE_WIDGET } from './show-more.js';
 const SAVEPOINTS_WIDGET = 'story-block.savepoints';
 // "Before you start" while a module holds the story back (screens/ready-hint.js), also a host widget.
 const READY_HINT_WIDGET = 'story-block.ready-hint';
+// "This branch's dossiers can't be restored" while the timeline holds a permanent dossier failure (screens/rebuild-banner.js).
+const REBUILD_BANNER = 'story-block.rebuild-banner';
 // The RPG's "Your character" card while the story has no character (lean-rpg/view/start.js): a host widget that draws nothing unless the RPG is on.
 export const RPG_START_WIDGET = 'story-block.rpg-start';
 
@@ -44,6 +47,7 @@ const mountEdit = (withCarry, when) => `<ss-widget ${when} name="ss.editable" da
 const TEMPLATE = `
 <div class="home">
   <ss-widget name="${RPG_START_WIDGET}" class="rpg-start-slot"></ss-widget>
+  <ss-widget name="${REBUILD_BANNER}" class="rebuild-slot"></ss-widget>
   <ss-widget name="${READY_HINT_WIDGET}" class="ready-slot"></ss-widget>
 
   <section class="panel scene" data-if="settings._heroShown != true">
@@ -153,7 +157,14 @@ const CSS = `${BASE_CSS}
 .mount-pace { white-space: nowrap; font-weight: 700; background: color-mix(in srgb, var(--sb-accent) 28%, transparent); }
 .mount-note { font-size: 0.85em; margin: 8px 0 0; }
 .blocks-slot:empty { display: none; }
-.ready-slot, .rpg-start-slot { grid-column: 1 / -1; }
+.ready-slot, .rpg-start-slot, .rebuild-slot { grid-column: 1 / -1; }
+.rebuild-slot:empty { display: none; }
+.rebuild-banner { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--sb-accent); border-radius: 10px; }
+.rebuild-banner > p { margin: 0; }
+.rebuild-note { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--sb-border); }
+.rebuild-dialog { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--sb-border); border-radius: 10px; }
+.rebuild-dialog h4, .rebuild-dialog p { margin: 0; }
+.rebuild-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .rpg-start-slot:empty, .rpg-start-slot[hidden] { display: none; }
 .ready-slot:empty { display: none; }
 .ready-hint { display: grid; gap: 6px; border-color: color-mix(in srgb, var(--sb-accent) 55%, var(--sb-border)); }

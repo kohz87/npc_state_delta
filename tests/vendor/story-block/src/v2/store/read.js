@@ -11,7 +11,7 @@ import { hasMeta, payloadHashOf } from './digest.js';
 import { markerProblem } from '../timeline/boundary.js';
 
 export function createRead(s, deps) {
-    const { api, blockParts, blocksBefore, carriedTo, chainHash, current, faultsNow, forgetMemos, idsOf, keptNow, list, listProofs, markSeen, memoAt, prefixWitnessUncached, preservedAt, rawKind, readOnlyMessage, reservedSid, saver, sidFor, sourceFor, spansFor, witnessGeneration, witnessKeyOf, write } = deps;
+    const { api, blockParts, blocksBefore, carriedTo, chainHash, current, faultsNow, forgetMemos, idsOf, keptNow, list, listProofs, markSeen, memoAt, prefixWitnessUncached, preservedAt, rawKind, readOnlyMessage, reservedSid, saver, sidFor, sourceFor, spansFor, spineRun, witnessGeneration, witnessKeyOf, write } = deps;
 
     return {
         head() {
@@ -323,7 +323,12 @@ export function createRead(s, deps) {
         witnessScope(read) {
             if (s.witnessScoped || s.applying || s.staged) return read();
             s.witnessScoped = { gen: null, epoch: s.epoch };
-            try { witnessGeneration(list()); return read(); } finally { s.witnessScoped = null; }
+            try {
+                const arr = list();
+                witnessGeneration(arr);
+                s.scopeSpines = { arr, epoch: s.epoch, run: spineRun(arr) };      // once per scope; the epoch check drops it after a write
+                return read();
+            } finally { s.witnessScoped = null; s.scopeSpines = null; }
         },
 
         /** The timeline witnesses kept for the chat as it is now (tests). */
@@ -333,7 +338,7 @@ export function createRead(s, deps) {
 
         /** `prefixWitness` worked out afresh, never from the memo (tests compare the two). */
         witnessFresh(cursor) {
-            return prefixWitnessUncached(list(), cursor);
+            return prefixWitnessUncached(list(), cursor, { fresh: true });
         },
     };
 }

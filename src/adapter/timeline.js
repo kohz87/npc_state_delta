@@ -174,6 +174,8 @@ export function createTimelinePart(session, deps) {
             enabled: () => enabled() && Boolean(runtime()?.replay),
             live: () => runtime()?.replay,
             changed: () => notifyChange(),
+            // Story Block calls `restored` while its barrier is still up; the dossiers are read as of each reply only once it is down.
+            settled: () => headSettled(),
             warn: text => warn(text),
         },
         vault,

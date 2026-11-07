@@ -395,7 +395,11 @@ export function createCatchUp(port) {
                 queued = null;
                 info = { active: true, done: 0, total: Math.min(job.ids.length, job.cap), older: Math.max(0, job.ids.length - job.cap), from: job.from, reason: job.reason, outcome: null, message: '' };
                 changed();
-                try { await runOnce(job); } catch (error) { info = { ...info, outcome: 'failed', message: error?.message ?? String(error) }; }
+                try {
+                    // Story Block asks Story Block's queries only once its barrier is down; a barrier that stays up ends this try (nothing is read as null).
+                    if (typeof port.settled === 'function' && await port.settled() === false) { info = { ...info, outcome: 'stale', message: 'The host was still busy.' }; continue; }
+                    await runOnce(job);
+                } catch (error) { info = { ...info, outcome: 'failed', message: error?.message ?? String(error) }; }
             }
         } finally {
             held = false;

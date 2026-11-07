@@ -4,6 +4,14 @@
 // the module's). Each callback is the module's own, called with the contract's input, and answers `{ ok: true, ...fields }`
 // or the common failure; whatever else it does (throws, answers nothing, answers the wrong shape) is a FAILED, never a
 // success. A callback may be synchronous or return a promise.
+// `verify({ checkpoint, hash })` is optional and read-only (see selection-fallback.js): the head-selection fallback asks it before
+// it prepares an earlier checkpoint. It answers { ok: true } or the common failure, and changes nothing.
+// `restored({ from, to, reason: 'fallback' })` is optional: told once a head selection fell back to an earlier checkpoint `to` (instead of the wanted `from`)
+// and that selection is durable, so the participant reads the replies it missed (its normal catch-up) before new play. Best effort.
+// Three more optional callbacks serve the catch-up banner (screens/rebuild-banner.js). `rebuild({ return, read, replies })` starts the participant's dossiers again from
+// the chat (`replies`: 40 by default, null for all) and may answer at once while it reads on. `progress()` is a SYNCHRONOUS read
+// of `{ active, done, total, older, from, reason, outcome?, message? }` (never awaited: the banner asks it often; a promise, a throw or another shape is "nothing").
+// `skip()` stops a running catch-up and keeps what is installed; it does not wait behind the participant's other callbacks, so it can answer while a rebuild runs.
 
 import { isHash } from '../replay.js';
 import { CODES, crashing, fail, isObject } from './util.js';
@@ -68,9 +76,14 @@ export function createParticipants({ timeoutMs = PARTICIPANT_TIMEOUT_MS, chat = 
             }
             if (spec.applyEvent !== undefined && typeof spec.applyEvent !== 'function') return fail('INVALID', `The participant ${spec.module} has an applyEvent that is not a function.`);
             if (spec.current !== undefined && typeof spec.current !== 'function') return fail('INVALID', `The participant ${spec.module} has a current that is not a function.`);
+            if (spec.verify !== undefined && typeof spec.verify !== 'function') return fail('INVALID', `The participant ${spec.module} has a verify that is not a function.`);
+            if (spec.restored !== undefined && typeof spec.restored !== 'function') return fail('INVALID', `The participant ${spec.module} has a restored that is not a function.`);
+            for (const name of ['rebuild', 'progress', 'skip']) {
+                if (spec[name] !== undefined && typeof spec[name] !== 'function') return fail('INVALID', `The participant ${spec.module} has a ${name} that is not a function.`);
+            }
             if (table.has(spec.module)) return fail('CONFLICT', `The participant ${spec.module} is registered already.`);
             const entry = { module: spec.module, schema: spec.schema };
-            for (const name of [...CALLBACKS, 'applyEvent', 'current']) if (typeof spec[name] === 'function') entry[name] = spec[name];
+            for (const name of [...CALLBACKS, 'applyEvent', 'current', 'verify', 'restored', 'rebuild', 'progress', 'skip']) if (typeof spec[name] === 'function') entry[name] = spec[name];
             table.set(spec.module, Object.freeze(entry));
             return { ok: true, module: spec.module };
         },
@@ -80,6 +93,38 @@ export function createParticipants({ timeoutMs = PARTICIPANT_TIMEOUT_MS, chat = 
         get: module => table.get(module) ?? null,
         /** The registered participants' modules, sorted. */
         modules: () => [...table.keys()].sort(),
+        /**
+         * The participant's catch-up progress, read at once: { module, active, done, total, older, from, reason, outcome, message } or null (no `progress`,
+         * it threw, answered a promise, or answered something that is not that shape). `outcome` is null while nothing has ended.
+         */
+        progress(module) {
+            const entry = table.get(module);
+            if (typeof entry?.progress !== 'function') return null;
+            let answer;
+            try { answer = entry.progress(); } catch (error) { if (crashing(error)) throw error; return null; }
+            if (!isObject(answer) || typeof answer.then === 'function' || typeof answer.active !== 'boolean') return null;
+            const count = value => (Number.isInteger(value) && value >= 0 ? value : 0);
+            return {
+                module, active: answer.active, done: count(answer.done), total: count(answer.total), older: count(answer.older),
+                from: Number.isInteger(answer.from) && answer.from >= 0 ? answer.from : null,
+                reason: typeof answer.reason === 'string' ? answer.reason : '',
+                outcome: typeof answer.outcome === 'string' && answer.outcome ? answer.outcome : null,
+                message: typeof answer.message === 'string' ? answer.message : '',
+            };
+        },
+        /** Asks the participant to skip its running catch-up. It is not queued behind its other callbacks (a rebuild may be running). → { ok: true } | a failure envelope. */
+        async skip(module) {
+            const entry = table.get(module);
+            if (typeof entry?.skip !== 'function') return fail('UNSUPPORTED', `The participant ${module} cannot skip a catch-up.`);
+            let answer;
+            try { answer = await boundedParticipant(() => entry.skip(), timeoutMs); }
+            catch (error) {
+                if (crashing(error)) throw error;
+                return fail('FAILED', `The participant ${module} failed at skip: ${error?.message ?? error}`);
+            }
+            if (isObject(answer) && answer.ok === false) return fail(CODES.includes(answer.code) ? answer.code : 'FAILED', typeof answer.message === 'string' && answer.message ? answer.message : `The participant ${module} could not skip.`);
+            return { ok: true };
+        },
         /**
          * The optional synchronous probe `current({ checkpoint, hash, schema })` → `{ ok: true, current: boolean }`: is its native state still the one it handed over? Asked
          * in the section that commits a save point, where nothing may be awaited. → { current: true } (it says so, or has no probe: today's

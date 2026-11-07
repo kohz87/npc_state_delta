@@ -51,6 +51,11 @@ export function headReply(store) {
     }
 }
 
+/** The reply at carrier `index` (`ctx.reply` for a read as of that reply), or null when the store cannot say. */
+export function replyAt(store, index) {
+    try { return typeof store?.carrierSid === 'function' ? replyOf(index, store.carrierSid(index)) : null; } catch { return null; }
+}
+
 /** `<prefix>_<8 base36>` from crypto (SPEC §2.1), for receipt IDs when no `id` option is given. */
 export function newId(prefix, cryptoApi = globalThis.crypto) {
     if (typeof cryptoApi?.getRandomValues !== 'function') throw new Error('This browser has no crypto random source for IDs.');

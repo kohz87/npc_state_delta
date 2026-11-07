@@ -9,6 +9,7 @@
 //   abort({ return, prepared })                 -> { aborted: true }               before the commit only
 //   status({ return })                          -> { checkpoint, hash, status }
 //   applyEvent({ event, nativeKey, kind })      -> { event, checkpoint, hash, ack }  a confirmed death, once per event
+//   rebuild({ replies }) / progress() / skip()   the catch-up (history-replay.js): start from the chat, the banner's read, stop
 //   attach(handle)                              the host's handle { head(), nativeMutation(input) }
 // and the query `npc.identity({ id } | { name })`. Every answer is `{ ok: true, ... }` or `{ ok: false, code, message }`; the callbacks run
 // one at a time. Nothing here reads the chat or prompts: Delta's prompt text is not touched.
@@ -292,12 +293,20 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     // The history replay (history-replay.js): Story Block's `restored` (a fallback installed an earlier checkpoint), the resume on chat open, the
     // rebuild and Skip. The one publication after an install is the ordinary one (a change announced, then published at once).
     const catchUp = createCatchUp({
-        chatKey: keyNow, enabled: () => port.enabled?.() !== false && typeof port.live === 'function', live: () => port.live(), changed: () => port.changed?.(), warn,
+        chatKey: keyNow, enabled: () => port.enabled?.() !== false && typeof port.live === 'function', live: () => port.live(), changed: () => port.changed?.(), warn, settled: () => port.settled?.(),
         publish: async () => { announced += 1; if (handle && started()) { schedulePublish(0); await flush(); } },
     });
     const api = {
         module,
-        participant: Object.freeze({ ...participant, restored: () => catchUp.restored(), rebuild: options => catchUp.rebuild(options) }),
+        participant: Object.freeze({
+            ...participant,
+            restored: () => catchUp.restored(),
+            // "Start from the chat": answers at once ({ ok, started }) while the replies are read; Story Block follows progress() and asks skip().
+            rebuild: options => catchUp.rebuild(options),
+            // The catch-up banner's synchronous read: { active, done, total, older, from, reason, outcome, message }.
+            progress: () => catchUp.status(),
+            skip: async () => ({ ok: true, ...(await catchUp.skip()) }),
+        }),
         catchUp,
         /**
          * The query the host resolves a death's npc with and Story Director a check's target with. It reads the chat's state, where the ids

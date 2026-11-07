@@ -1,10 +1,14 @@
 // The timeline's part of the core module (domains/index.js merges it like the others): the two save-point commands, the
-// list query and the host's replayGuard.
+// list and referenced-checkpoint queries, and the host's replayGuard.
 // * `savepoint.make` is a public name whose work is asynchronous (participants' checkpoints): sdk.command routes it to the
 //   timeline (sdk.js). Straight at the command bus it is REFUSED, as is `savepoint.restore`, which is internal and runs only
 //   as a block the coordinator stores after a prepared restore (never a command handler: it writes every module's domain).
 // * `savepoint.list({})` → the eligible save points in target order.
+// * `timeline.referenced({})` → `referencedCheckpoints()`: the checkpoint ids every chat still names, or an incomplete
+//   answer that keeps them all. NPC State Delta's clean-up row asks it before offering to remove any file.
 // * `hooks.replayGuard` answers for the host's own blocks (coordinator-native.js guard).
+
+import { referencedCheckpoints } from './referenced.js';
 
 const refuse = what => ctx => ctx.fail('REFUSED', what);
 
@@ -21,6 +25,7 @@ export function createTimelinePart({ timeline = () => null } = {}) {
         queries: {
             'savepoint.contract': () => current()?.contract() ?? { api: 2, snapshots: false, retainedChatRestore: false, participantsReady: false },
             'savepoint.list': state => current()?.points(state) ?? Object.values(state?.domains?.savepoints?.points ?? {}),
+            'timeline.referenced': () => referencedCheckpoints(),
         },
         hooks: {
             // `hostOwned`: it answers from the story alone, so it is not one of the owners whose readiness the store's checkpoints

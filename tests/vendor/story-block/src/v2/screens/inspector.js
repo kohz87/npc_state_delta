@@ -16,6 +16,7 @@ import { CORE_FEATURE } from '../features.js';
 import { LIMITS, matchPaths, pointer, preview } from '../inspect.js';
 import { cutAt } from '../../text.js';
 import { BASE_CSS } from './style.js';
+import { rebuildTarget } from './rebuild-banner.js';
 
 const S = STRINGS.inspector;
 
@@ -218,8 +219,10 @@ function opLine(doc, op) {
  * `source.memory`, so a redraw of the screen keeps the reply picked, the search and what is open.
  * It redraws itself on the host's `head`, `committed` and `turn` events (api.on). `enabled()`: the
  * feature's switch; while it is off the widget draws nothing (B-rxui-11), wherever it is named.
+ * `rebuild`: `{ widget, blocked, nameOf? }` (screens/rebuild-banner.js): while `blocked()` is a permanent dossier failure, the Problem row of that
+ * cause gets the "Start this branch's dossiers from the chat" button, which opens the same confirmation Home's banner does.
  */
-export function createInspectorWidget(source, { enabled = () => true } = {}) {
+export function createInspectorWidget(source, { enabled = () => true, rebuild = null } = {}) {
     return Object.freeze({
         props: {},
         primary: null,
@@ -340,19 +343,40 @@ export function createInspectorWidget(source, { enabled = () => true } = {}) {
 
                 // Problems.
                 const problems = section(doc, 'sb-insp-problems-box', `${S.problems} (${view.problems.length})`);
-                if (!view.problems.length) problems.appendChild(el(doc, 'p', 'muted sb-insp-empty', S.noProblems));
+                let target = null;
+                try { target = rebuild ? rebuildTarget(rebuild.blocked()) : null; } catch { target = null; }
+                // The "start from the chat" button and the place its confirmation opens, on a Problem row.
+                const rebuildButton = row => {
+                    const slot = el(doc, 'div', 'sb-insp-rebuild-slot');
+                    const go = el(doc, 'button', 'ss-btn ss-btn-primary sb-insp-rebuild', STRINGS.rebuild.start);
+                    go.type = 'button';
+                    go.addEventListener('click', () => {
+                        go.hidden = true;
+                        const widget = rebuild.widget.render(slot, { inline: true, open: true, onCancel: () => { widget.destroy(); go.hidden = false; } }, {});
+                    });
+                    row.append(go, slot);
+                };
+                if (!view.problems.length && !target) problems.appendChild(el(doc, 'p', 'muted sb-insp-empty', S.noProblems));
                 else {
                     const list = el(doc, 'ul', 'ss-listcard-rows sb-insp-problems');
-                    for (const problem of view.problems) {
+                    const rowOf = (message, code) => {
                         const row = el(doc, 'li', 'ss-listcard-row');
                         const item = el(doc, 'div', 'ss-listcard-item');
                         const main = el(doc, 'span', 'ss-listcard-main');
-                        main.appendChild(el(doc, 'span', 'ss-listcard-title', problem.message));
-                        if (problem.code) main.appendChild(el(doc, 'span', 'ss-listcard-sub', problem.code));
+                        main.appendChild(el(doc, 'span', 'ss-listcard-title', message));
+                        if (code) main.appendChild(el(doc, 'span', 'ss-listcard-sub', code));
                         item.appendChild(main);
                         row.appendChild(item);
                         list.appendChild(row);
+                        return row;
+                    };
+                    for (const problem of view.problems) {
+                        const row = rowOf(problem.message, problem.code);
+                        // One button for the block, on the first row of its cause.
+                        if (target && problem.code === target.code) { rebuildButton(row); target = null; }
                     }
+                    // The block is the timeline's, not a reply's: when no reply row carries it, it has its own row.
+                    if (target) rebuildButton(rowOf(STRINGS.rebuild.rowTitle, `${target.code} · ${rebuild.nameOf?.(target.module) ?? target.module}`));
                     problems.appendChild(list);
                 }
                 body.appendChild(problems);
@@ -396,7 +420,7 @@ export function createInspectorWidget(source, { enabled = () => true } = {}) {
 
             const offs = [];
             if (typeof api?.on === 'function') {
-                for (const name of ['head', 'committed', 'turn']) {
+                for (const name of ['head', 'committed', 'turn', 'modules']) {
                     try {
                         const off = api.on(name, () => redraw());
                         if (typeof off === 'function') offs.push(off);

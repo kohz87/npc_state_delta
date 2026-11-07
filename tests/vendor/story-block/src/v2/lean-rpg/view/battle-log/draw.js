@@ -1,7 +1,9 @@
 // Draws the battle log panel and the no-rolls note with createElement and textContent only: header, turn order,
-// checks, ambush, opening and rounds, breakdown on tap, status bars, foes and the no-rolls wording.
+// checks, ambush, opening and rounds, breakdown on tap, status bars, foes the why-it-ended line, the Receipt row and the no-rolls wording.
 
 import { RPG_STRINGS, fill } from '../../strings.js';
+import { stopLine, stopHint } from './stop.js';
+import { buildReceipt } from './receipt.js';
 import { B, FOE_WORDS, DECISIVE_WORDS, BATTLE_ROOT, BATTLE_ID, IDLE } from './constants.js';
 
 const el = (doc, tag, className = '', text) => {
@@ -129,7 +131,12 @@ export function buildPanel(doc, model, { folded = false, onFold = () => {}, vari
         body.appendChild(box);
     }
     for (const item of model.refused) body.appendChild(el(doc, 'p', 'rpg-bl-note', fill(B.refused, { why: item.why })));
-    if (model.ended) body.appendChild(el(doc, 'p', 'rpg-bl-ended', fill(B.ended, { how: model.ended })));
+    const stop = stopLine(model);
+    if (stop) {
+        const line = el(doc, 'p', 'rpg-bl-stop', stop), hint = stopHint(model);
+        if (hint) line.appendChild(el(doc, 'small', '', hint));
+        body.appendChild(line);
+    }
     if (model.rounds.length && model.status.length) {
         const status = el(doc, 'div', 'rpg-bl-status');
         status.appendChild(el(doc, 'p', 'rpg-bl-status-title', B.status));
@@ -157,6 +164,8 @@ export function buildPanel(doc, model, { folded = false, onFold = () => {}, vari
         }
         body.appendChild(status);
     }
+    const receipt = buildReceipt(doc, model);
+    if (receipt) body.appendChild(receipt);
     return root;
 }
 

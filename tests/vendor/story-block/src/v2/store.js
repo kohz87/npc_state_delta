@@ -51,6 +51,7 @@ import { createWalk } from './store/walk.js';
 import { createReplayBlocks } from './store/replay-blocks.js';
 import { createMemo } from './store/memo.js';
 import { createRead } from './store/read.js';
+import { createPrefixMemo } from './store/prefix-memo.js';
 import { createWrite } from './store/write.js';
 export { CHECKPOINT_EVERY, CHECKPOINT_BYTES, CHECKPOINT_MIN_GAP, NO_LONGER_DONE, deepFreeze } from './store/constants.js';
 
@@ -109,7 +110,9 @@ export function createStore({
         lineMemo: null,  // { epoch, key, receipts?, untold? }
         atMemo: new Map(),  // index → { arr, epoch, from, refs: [message, record, swipe, mes][], state }
         witnessGen: null,  // the generation of timeline witnesses kept now (see witnessGeneration)
-        counts: { replays: 0, recordsRead: 0, lineScans: 0, witnessMisses: 0 },
+        prefixes: new Map(),  // states after prefixes, keyed by spine hash + replay environment (store/prefix-memo.js)
+        scopeSpines: null,  // { arr, epoch, run }: the spine run of the witnessScope now open
+        counts: { replays: 0, recordsRead: 0, lineScans: 0, witnessMisses: 0, prefixHits: 0, prefixSteps: 0, prefixReplays: 0 },
         guardCheck: null,
         guardMark: null,
         guardSeen: false,  // a guarded block was replayed or written: the mark is looked at on each read
@@ -318,15 +321,16 @@ export function createStore({
     // The memo and read parts (store/memo.js, store/read.js). The parts wired before them call the memo functions through wrappers
     // that look them up when they run (`current`, `forgetMemos`, `asOps`, `blockParts`, `receiptsOf`, `lineOf`), because createMemo needs their
     // results and is wired after them, where `sameKey` exists. `api` is only used for `api.sourceAt(...)`, which is looked up when it runs.
+    const { spineRun, stateAfterPrefix } = createPrefixMemo(s, { chain, chatId, markNow, marked, replay, replayEnv, replayRecord, spineStep });
     const { current, retain, carrierAt, memoAt, frozenReceipts, forgetMemos, witnessKeyOf, markSeen, witnessGeneration, lineOf, baseFor, stateBefore, take, sidFor, carriedTo, spansOf, spansFor, blockParts, receiptsOf, asOps, prefixWitnessUncached } = createMemo(s, {
         KEPT_ASIDE, WHY, api: { sourceAt: (...args) => api.sourceAt(...args) }, appliedOf, archive, blocksBefore, chain, chainHash, chatId, checkpointBytes,
         checkpointEvery, checkpointState, headKey, list, markNow, marked, metadata, packOwners, packProblems, preservedAt, proofBefore, proofsBefore,
-        rawKind, rawSidAt, recordId, replay, replayEnv, replayRecord, sameKey, settleBehind, sourceFor, spineBefore, stillHolds, windowHash,
+        rawKind, rawSidAt, recordId, replay, replayEnv, replayRecord, sameKey, settleBehind, sourceFor, spineBefore, stateAfterPrefix, stillHolds, windowHash,
     });
     const { head, at, headIndex, opsAt, changesAt, problems, readOnly, startOver, keepEarliest, ensureInitial, proofs, blockAt, replansFrom, boundaryProblems, payloadHashAt, boundary, timelineMarkers, prefixWitness, witnessScope, witnessMemoSize, witnessFresh } = createRead(s, {
         api: { sourceAt: (...args) => api.sourceAt(...args) }, blockParts, blocksBefore, carriedTo, chainHash, current, faultsNow, forgetMemos, idsOf, keptNow,
         list, listProofs, markSeen, memoAt, prefixWitnessUncached, preservedAt, rawKind, readOnlyMessage, reservedSid, saver, sidFor, sourceFor, spansFor,
-        witnessGeneration, witnessKeyOf, write,
+        spineRun, witnessGeneration, witnessKeyOf, write,
     });
     // The write part (store/write.js): the methods of `api` that change the chat's records. Wired last, after every part and function it
     // calls; nothing here is looked up before it runs.

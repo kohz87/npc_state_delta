@@ -12,7 +12,7 @@ import { hashJson } from '../replay.js';
 import { payloadHashOf } from './digest.js';
 
 export function createMemo(s, deps) {
-    const { KEPT_ASIDE, WHY, api, appliedOf, archive, blocksBefore, chain, chainHash, chatId, checkpointBytes, checkpointEvery, checkpointState, headKey, list, markNow, marked, metadata, packOwners, packProblems, preservedAt, proofBefore, proofsBefore, rawKind, rawSidAt, recordId, replay, replayEnv, replayRecord, sameKey, settleBehind, sourceFor, spineBefore, stillHolds, windowHash } = deps;
+    const { KEPT_ASIDE, WHY, api, appliedOf, archive, blocksBefore, chain, chainHash, chatId, checkpointBytes, checkpointEvery, checkpointState, headKey, list, markNow, marked, metadata, packOwners, packProblems, preservedAt, proofBefore, proofsBefore, rawKind, rawSidAt, recordId, replay, replayEnv, replayRecord, sameKey, settleBehind, sourceFor, spineBefore, stateAfterPrefix, stillHolds, windowHash } = deps;
 
     // Memos of what a reply reads over the whole chat (docs/v2/PERFORMANCE.md, "Long chats"): the stored
     // receipts and the untold ones, each kept until a record is written or the store rebuilds (`epoch`) or
@@ -36,6 +36,9 @@ export function createMemo(s, deps) {
             s.known = carrierIndexes(arr).map(i => arr[i]);
         }
         if (!s.cache || !sameKey(s.cache.key, key)) {
+            // A head replay resets the earliest replan point. Replaying an earlier prefix can discover one too,
+            // so do not let a cached prefix suppress that discovery after the reset.
+            s.prefixes.clear();
             s.replanFrom = Infinity;
             const { state, problems, applied = [], from = -1 } = key.index < 0 ? { state: null, problems: [] } : replay(arr, key.index);
             const kept = !state && s.fallback ? preservedAt(arr, true) : null;
@@ -100,6 +103,7 @@ export function createMemo(s, deps) {
         s.lineMemo = null;
         s.atMemo = new Map();
         s.witnessGen = null;
+        s.prefixes.clear();      // a rebuild that is not a plain append (an append writes and never comes here)
     }
 
     // The timeline asks for the witness of every archived boundary on every read (sdk.query → settle → selectionPlan), and each
@@ -168,16 +172,22 @@ export function createMemo(s, deps) {
     // The state carrier `index`'s own ops start from: the state after the carrier before it, replayed through the
     // chain (a checkpoint that does not hold is never used), or, when nothing is before it, its own checkpoint if
     // the chain trusts it. Re-read, reconcile and rewind start here (not from whatever the record says it starts from).
-    function baseFor(arr, index) {
-        const before = stateBefore(arr, index);
+    function baseFor(arr, index, options) {
+        const before = stateBefore(arr, index, options);
         if (before) return before;
         const record = readRecord(arr[index]);
         return record?.checkpoint && chain(arr, index).from === index ? checkpointState(record.checkpoint) : null;
     }
 
-    function stateBefore(arr, index) {
+    function stateBefore(arr, index, { fresh = false } = {}) {
         const prev = lastCarrier(arr, index);
-        return prev < 0 ? null : replay(arr, prev).state;
+        if (prev < 0) return null;
+        // A detached branch can contain copies of replies: reply-bound guards test membership in the live chat.
+        if (fresh || arr !== list() || s.applying || s.staged) return replay(arr, prev).state;
+        // The prefix memo (store/prefix-memo.js) keeps the state after each carrier; inside a witness scope the spine run is shared.
+        const scope = s.scopeSpines;
+        const spines = scope && scope.arr === arr && scope.epoch === s.epoch ? scope.run : null;
+        return stateAfterPrefix(arr, prev, spines);
     }
 
     // Does a new record on carrier `index` need a checkpoint? Counts the carriers and the op JSON since
@@ -311,7 +321,7 @@ export function createMemo(s, deps) {
         return structuredClone(ops);
     }
 
-    function prefixWitnessUncached(arr, cursor) {
+    function prefixWitnessUncached(arr, cursor, options) {
         const matches = carrierIndexes(arr).filter(index => {
             const source = api.sourceAt(index);
             return source?.sid === cursor.sid && source?.swipeKey === cursor.swipeKey;
@@ -329,7 +339,7 @@ export function createMemo(s, deps) {
             earlier.push(part);
         }
         if (count !== cursor.op) return null;
-        const base = baseFor(arr, index);
+        const base = baseFor(arr, index, options);
         if (!base) return null;
         const ops = earlier.flatMap(part => part.ops);
         const revs = new Set(ops.filter(op => op.path === '/meta/rev').map(op => op.value));
