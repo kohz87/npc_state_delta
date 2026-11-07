@@ -59,3 +59,12 @@ Generated 2026-11-07.
 - `dossier-ui-relationship.js`: Relationship meter steps, latest change and history markup split from `dossier-ui.js`.
 - `dossier-ui-render.js`: Cast rail, filters and selected-dossier rendering split from `dossier-ui.js`.
 - `dossier-ui-styles.js`: The dossier panel's scoped stylesheet split from `dossier-ui.js`.
+- `social-primitives.js`: Shared social-graph limits plus text normalization and similarity helpers split from `social.js`.
+- `social-relations.js`: Relation families, inverse/sanitization rules and shared relation parsing split from `social.js`.
+- `social-bonds.js`: Important-bond parsing, compaction and display formatting split from `social.js`.
+- `social-graph.js`: Social graph shapes, normalization, edge merging and reference resolution split from `social.js`.
+- `social-scan.js`: Scanner social edges and canonical relationship alignment split from `social.js`.
+- `social-facts.js`: Explicit unnamed social facts and unresolved graph slots split from `social.js`.
+- `social-inference.js`: Shared-parent sibling inference and its suppression rules split from `social.js`.
+- `social-projection.js`: Projection of the social graph into Important Bonds and id remapping split from `social.js`.
+- `social-manual.js`: Manual Important Bond edits, mirrored updates and repair split from `social.js`.
