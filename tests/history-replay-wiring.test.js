@@ -101,8 +101,8 @@ async function helpers(mockState, eventSource, sleep, replayUrl) {
     };
     let published = 0;
     let changes = 0;
-    const controller = () => createCatchUp({
-        chatKey: () => runtime.chatKey(), enabled: () => true, live: () => runtime.replay, changed: () => { changes += 1; }, publish: async () => { published += 1; }, warn() {},
+    const controller = (extra = {}) => createCatchUp({
+        chatKey: () => runtime.chatKey(), enabled: () => true, live: () => runtime.replay, changed: () => { changes += 1; }, publish: async () => { published += 1; }, warn() {}, ...extra,
     });
     const stable = state => {
         const copy = JSON.parse(JSON.stringify(state));
@@ -258,6 +258,33 @@ test('Skip: stops after the current reply, keeps the dossiers, marks the replies
         h.check(state.catchUp === undefined, 'no field is left');
         h.check(catchUp.canGenerate() === true, 'sending is back');
         h.equal(h.published(), 0, 'nothing published');
+    });
+});
+
+test('Skip pressed before the engine starts (Story Block\'s barrier still up): nothing is read, the replies are marked read, sending is back', () => {
+    runScenario('skip-early', async h => {
+        h.addReplies(4);
+        const before = JSON.stringify(h.runtime.getState().npcs);
+        let lower;
+        const catchUp = h.controller({ settled: () => (lower ? true : new Promise(resolve => { lower = () => resolve(true); })) });
+        catchUp.restored();
+        h.check(catchUp.canGenerate().ok === false, 'held while waiting for the barrier');
+        await catchUp.skip();
+        lower();
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'skipped', 'skipped');
+        h.equal(h.mockState.fakeCalls.length, 0, 'no model call was made');
+        h.equal(JSON.stringify(h.runtime.getState().npcs), before, 'the dossiers stay as installed');
+        const state = h.runtime.getState();
+        h.equal(state.lastScannedMessageId, h.mockState.context.chat.length - 1, 'the replies are marked read');
+        h.check(state.catchUp === undefined, 'no field is left');
+        h.check(catchUp.canGenerate() === true, 'sending is back');
+        h.equal(h.published(), 0, 'nothing published');
+        // A later catch-up is not born skipped.
+        h.addReplies(2);
+        catchUp.restored();
+        await catchUp.idle();
+        h.check(catchUp.status().outcome !== 'skipped', 'the next catch-up runs');
     });
 });
 

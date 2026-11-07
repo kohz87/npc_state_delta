@@ -136,6 +136,14 @@ export function createHistoryReplay(deps = {}) {
         });
     }
 
+    // Skip pressed: the field stays, marked skipped (nothing is installed), and the run ends.
+    async function endSkipped(plan) {
+        lastCatchUp = fieldOf({ from: plan.from, to: plan.to, reason, attempt, skipped: true });
+        try { await deps.persistCatchUp(fieldCopy(lastCatchUp)); }
+        catch (error) { return failure('PERSIST_FAILED', error); }
+        return finish('skipped', { ok: true, code: 'SKIPPED', skipped: true, installed: false, published: false });
+    }
+
     function planFor(base, replies, requestedReason) {
         const previous = persistedOf(base) ?? lastCatchUp;
         const runReason = requestedReason === undefined || requestedReason === null
@@ -238,11 +246,7 @@ export function createHistoryReplay(deps = {}) {
         catch (error) { return failure('PROGRESS_FAILED', error); }
 
         if (skipRequested) {
-            const field = fieldOf({ from: plan.from, to: plan.to, reason, attempt, skipped: true });
-            lastCatchUp = field;
-            try { await deps.persistCatchUp(fieldCopy(field)); }
-            catch (error) { return failure('PERSIST_FAILED', error); }
-            return finish('skipped', { ok: true, code: 'SKIPPED', skipped: true, installed: false, published: false });
+            return endSkipped(plan);
         }
 
         let copy;
@@ -270,11 +274,7 @@ export function createHistoryReplay(deps = {}) {
         }
 
         if (skipRequested) {
-            const field = fieldOf({ from: plan.from, to: plan.to, reason, attempt, skipped: true });
-            lastCatchUp = field;
-            try { await deps.persistCatchUp(fieldCopy(field)); }
-            catch (error) { return failure('PERSIST_FAILED', error); }
-            return finish('skipped', { ok: true, code: 'SKIPPED', skipped: true, installed: false, published: false });
+            return endSkipped(plan);
         }
 
         let valid = false;
@@ -289,11 +289,7 @@ export function createHistoryReplay(deps = {}) {
         }
 
         if (skipRequested) {
-            const field = fieldOf({ from: plan.from, to: plan.to, reason, attempt, skipped: true });
-            lastCatchUp = field;
-            try { await deps.persistCatchUp(fieldCopy(field)); }
-            catch (error) { return failure('PERSIST_FAILED', error); }
-            return finish('skipped', { ok: true, code: 'SKIPPED', skipped: true, installed: false, published: false });
+            return endSkipped(plan);
         }
 
         try {
@@ -343,6 +339,7 @@ export function createCatchUp(port) {
     let queued = null;
     let engine = null;
     let held = false;
+    let skipAsked = false;   // Skip pressed for the job in hand, also before the engine exists (while Story Block's barrier is still up)
     let info = { active: false, done: 0, total: 0, older: 0, from: null, reason: '', outcome: null, message: '' };
     const live = () => port.live();
     const changed = () => { try { port.changed?.(); } catch { /* the banner is best effort */ } };
@@ -392,12 +389,13 @@ export function createCatchUp(port) {
         try {
             while (queued) {
                 const job = queued;
-                queued = null;
+                queued = null; engine = null; skipAsked = false;
                 info = { active: true, done: 0, total: Math.min(job.ids.length, job.cap), older: Math.max(0, job.ids.length - job.cap), from: job.from, reason: job.reason, outcome: null, message: '' };
                 changed();
                 try {
                     // Story Block asks Story Block's queries only once its barrier is down; a barrier that stays up ends this try (nothing is read as null).
                     if (typeof port.settled === 'function' && await port.settled() === false) { info = { ...info, outcome: 'stale', message: 'The host was still busy.' }; continue; }
+                    if (skipAsked) { await live().markReadLive(job.ids[job.ids.length - 1]); info = { ...info, outcome: 'skipped' }; continue; }
                     await runOnce(job);
                 } catch (error) { info = { ...info, outcome: 'failed', message: error?.message ?? String(error) }; }
             }
@@ -432,7 +430,7 @@ export function createCatchUp(port) {
         status,
         /** Skip: stop after the current reply, keep the installed dossiers, mark the replies read. */
         async skip() {
-            if (task) { engine?.skip(); return status(); }
+            if (task) { skipAsked = true; engine?.skip(); return status(); }
             const field = live().state().catchUp;
             if (isRecord(field) && Array.isArray(field.ids) && field.ids.length) {
                 await live().markReadLive(field.ids[field.ids.length - 1]);
