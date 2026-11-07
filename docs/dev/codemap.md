@@ -38,3 +38,12 @@ Generated 2026-11-07.
 - `src/storysuite-participant/participant/publication.js`: Native-change pairing, publication, retry and flush.
 - `src/storysuite-participant/participant/session-ops.js`: Session hydration, checkpoints, identity lines and commit-probe comparisons.
 - `src/storysuite-participant/participant/support.js`: Shared participant envelopes, prepared ids and index normalization.
+- `social-primitives.js`: Shared social-graph limits plus text normalization and similarity helpers split from `social.js`.
+- `social-relations.js`: Relation families, inverse/sanitization rules and shared relation parsing split from `social.js`.
+- `social-bonds.js`: Important-bond parsing, compaction and display formatting split from `social.js`.
+- `social-graph.js`: Social graph shapes, normalization, edge merging and reference resolution split from `social.js`.
+- `social-scan.js`: Scanner social edges and canonical relationship alignment split from `social.js`.
+- `social-facts.js`: Explicit unnamed social facts and unresolved graph slots split from `social.js`.
+- `social-inference.js`: Shared-parent sibling inference and its suppression rules split from `social.js`.
+- `social-projection.js`: Projection of the social graph into Important Bonds and id remapping split from `social.js`.
+- `social-manual.js`: Manual Important Bond edits, mirrored updates and repair split from `social.js`.
