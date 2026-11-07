@@ -1,14 +1,12 @@
 // What the RPG settings page reads from the story, as plain data (no DOM): the chat's Combat rules block, the text it is reset
-// to, the definition a changed text is saved as, the odds for the reader's own character under some numbers, and the roll
-// planner's full prompt as it is built for this chat. The page (settings.js) draws them.
+// to, the definition a changed text is saved as, and the odds for the reader's own character under some numbers. The page (settings.js) draws them.
 
 import { oneLine } from '../../../text.js';
 import { CLASS_NAMES, RANK_NAMES } from '../names.js';
-import { DIFFICULTIES, hasLevels, PRESETS, STANDARD_PRESETS, STANDARD_SETTING, formulaOf, isStandard, normalizeRules, normalizeStandard, oddsSubject, presetOf, rulesFromSettings, subjectOdds, CUSTOM_SETTING, DIFFICULTY_SETTING, difficultyOf } from '../rules.js';
+import { DIFFICULTIES, hasLevels, STANDARD_PRESETS, STANDARD_SETTING, normalizeStandard, oddsSubject, presetOf, rulesFromSettings, subjectOdds, difficultyOf } from '../rules.js';
 import { applyGear } from '../gear.js';
 import { fold, readSheet } from '../read.js';
-import { precallPrompt } from '../precall.js';
-import { COMBAT_PROMPT, COMBAT_PROMPT_STANDARD, templatesFor } from '../templates.js';
+import { COMBAT_PROMPT_STANDARD, STANDARD_TEMPLATES } from '../templates.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { rpgBlocks } from './party-data.js';
 import { SOUL_LABEL, soulShortOf } from '../soul.js';
@@ -18,14 +16,8 @@ const S = RPG_STRINGS.settings;
 /** The most characters the Combat rules text may have (a block's "What it is for", data-modules/schema.js DM_LIMITS.prompt). */
 export const COMBAT_MAX = 1200;
 
-/** The text a Combat rules block starts with, as a block keeps it (one line). */
-export const COMBAT_DEFAULT = oneLine(COMBAT_PROMPT);
-
-/** The same for a chat on the Standard formula (its roll types and the bars code moves). */
-export const COMBAT_DEFAULT_STANDARD = oneLine(COMBAT_PROMPT_STANDARD);
-
-/** The default text under a formula's name ('standard' | 'classic'). */
-export const combatDefault = formula => (formula === 'classic' ? COMBAT_DEFAULT : COMBAT_DEFAULT_STANDARD);
+/** The text a Combat rules block starts with, as a block keeps it (one line): its roll types and the bars code moves. */
+export const COMBAT_DEFAULT = oneLine(COMBAT_PROMPT_STANDARD);
 
 /** The chat's Combat rules block (the first block with the role `rules`): { module, definition, prompt } or null. */
 export function combatBlock(state, { roleOf } = {}) {
@@ -45,20 +37,17 @@ export function withPrompt(definition, prompt) {
     return next;
 }
 
-/** A fresh Combat rules definition for the formula (the Standard templates' text explains the roll types), for the "Add the Combat rules block" button. */
-export const combatTemplate = (templates, formula = 'classic') => {
-    // (`templates` is the Classic list a caller already holds; a Standard chat is made from the Standard list.)
-    const entry = (formula === 'classic' ? templates : templatesFor(formula)).find(item => item.definition.role === 'rules');
+/** A fresh Combat rules definition (the Standard template's text explains the roll types), for the "Add the Combat rules block" button. */
+export const combatTemplate = () => {
+    const entry = STANDARD_TEMPLATES.find(item => item.definition.role === 'rules');
     return entry ? structuredClone(entry.definition) : null;
 };
 
 /**
  * The Custom numbers as stored (each held to its range), else the numbers of the difficulty now (so a switch to Custom starts where the reader is).
- * Each formula keeps its own: Classic's six in `rpgCustom`, Standard's in `rpgStandard`.
+ * They live in `rpgStandard`.
  */
-export const customOf = (values, pack = null) => (formulaOf(values, pack) === 'standard'
-    ? normalizeStandard(values?.[STANDARD_SETTING] ?? (difficultyOf(values) === 'custom' ? null : inForce(rulesFromSettings(values, pack))))
-    : normalizeRules(values?.[CUSTOM_SETTING] ?? (difficultyOf(values) === 'custom' ? null : inForce(rulesFromSettings({ ...values, rpgFormula: 'classic' }, pack)))));
+export const customOf = (values, pack = null) => normalizeStandard(values?.[STANDARD_SETTING] ?? (difficultyOf(values) === 'custom' ? null : inForce(rulesFromSettings(values, pack))));
 // (The level divisor, 3 to 8, is in the Custom numbers only when the reader typed one: a switch to Custom starts from the numbers of the difficulty.)
 const inForce = ({ levelDivisor: _divisor, ...rest }) => rest;
 
@@ -70,12 +59,11 @@ const inForce = ({ levelDivisor: _divisor, ...rest }) => rest;
 export function oddsView(state, own, rules, gear = null) {
     // (With gear in fights on, the odds are for the stats the character rolls with: gear.js.)
     const sheet = applyGear(readSheet(state), gear);
-    const standard = isStandard(rules);
-    const subject = oddsSubject(sheet, own, { rankNames: RANK_NAMES, soulNames: CLASS_NAMES, fold, standard });
+    const subject = oddsSubject(sheet, own, { rankNames: RANK_NAMES, soulNames: CLASS_NAMES, fold, standard: true });
     if (!subject) return null;
     const words = { who: subject.who, stat: subject.stat.toUpperCase(), value: subject.statValue, dex: subject.stats?.dex ?? '?', soul: subject.soulName, rank: subject.rankName, label: soulLabelOfSheet(sheet, own), short: soulShortOf(soulLabelOfSheet(sheet, own), 'Class') };
-    const chosen = presetOf(rules), presets = standard ? STANDARD_PRESETS : PRESETS;
-    const text = standard ? (subject.skill ? S.oddsForStandard : S.oddsForStandardUntrained) : (subject.skill ? S.oddsFor : S.oddsForUntrained);
+    const chosen = presetOf(rules), presets = STANDARD_PRESETS;
+    const text = subject.skill ? S.oddsForStandard : S.oddsForStandardUntrained;
     return {
         label: fill(text, words),
         now: pick(subjectOdds(rules, subject)),
@@ -94,8 +82,3 @@ const soulLabelOfSheet = (sheet, own) => {
 };
 
 const pick = ({ success, cost, fail }) => ({ success, cost, fail });
-
-/** The roll planner's prompt as it is built for this chat now: the fixed part, the reader's words, the party and foes, and a stand-in for the next message. */
-export function plannerPrompt(state, note, { standard = false } = {}) {
-    return precallPrompt({ sheet: readSheet(state), message: S.plannerMessage, note, standard });
-}

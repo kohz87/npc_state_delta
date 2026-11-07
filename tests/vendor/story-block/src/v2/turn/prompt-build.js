@@ -70,21 +70,6 @@ export function createPromptBuild(s, deps) {
                 problem({ module: moduleId, code: 'TIMEOUT', message: `beforeGenerate did not answer within ${limit / 1000} s; the reply went on without its notes.` });
                 continue;
             }
-            if (out?.fightStart?.opening && out.fightStart.original) {
-                const chat = ctx?.chat ?? [], last = chat.at(-1);
-                if (!last?.is_user || readRecord(chat.at(-2))?.sid !== out.fightStart.anchor
-                    || hashText(String(last.mes ?? '').trim()) !== out.fightStart.message) {
-                    return { blocked: { moduleId, reason: 'The chat changed while the fight was being prepared.' } };
-                }
-                const result = bus.run(RPG_RESOLVE, out.fightStart.opening, { cause: 'system' });
-                if (result?.ok && result.receipt?.data?.v2?.result?.opened?.length) {
-                    const pending = holdStart(metadata(), ctx?.chat, { mode: 'new', original: out.fightStart.original,
-                        opening: { payload: out.fightStart.opening, seed: result.receipt.seed }, result: result.receipt.data.v2.result });
-                    if (pending) return { blocked: { moduleId, reason: 'Choose how to play the waiting fight.', fightStart: true } };
-                }
-                // If the opening cannot be prepared, the ordinary planner remains available.
-                out = { ...out, commands: [...(out.commands ?? []), { type: RPG_RESOLVE, payload: out.fightStart.original }] };
-            }
             // A merged hook (domains/index.js mergeParts) keeps the answers of the parts that did answer and reports the others.
             for (const entry of Array.isArray(out?.problems) ? out.problems : []) problem({ module: moduleId, code: entry.code, message: entry.message });
             const lines = Array.isArray(out) ? out : Array.isArray(out?.lines) ? out.lines : [];

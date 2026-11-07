@@ -20,7 +20,14 @@ const shape = board => isObject(board) && isObject(board.setup) && Array.isArray
     && board.groups.every(slot => Number.isInteger(slot) && slot >= 1 && slot <= 64)
     && (board.setup.witness === undefined ? board.exchanges.length === 0
         : isObject(board.setup.witness) && board.setup.witness.offset === board.setup.offset && /^[0-9a-f]{64}$/u.test(board.setup.witness.hash));
-const witness = state => ({ dataModules: state?.domains?.dataModules ?? null });
+// The guard's input witness. Records made before this hashed the whole dataModules domain, other replies' `perReply` scratch included,
+// so deleting an earlier reply could drop a later fight. New records hash the domain with `perReply` emptied (the key stays, so a domain
+// with no scratch hashes exactly as before and nothing stored changes). A guard verifies against either form: an old record keeps its old
+// witness and replays unchanged, a new one ignores other replies' scratch.
+const domainOf = state => state?.domains?.dataModules ?? null;
+const witnessOld = state => ({ dataModules: domainOf(state) });
+const witnessNew = state => { const domain = domainOf(state); return { dataModules: domain && typeof domain === 'object' && 'perReply' in domain ? { ...domain, perReply: {} } : domain }; };
+const witness = witnessNew;
 const startState = ctx => ({ domains: { dataModules: ctx.read('dataModules'), inventory: ctx.read('inventory'), scene: ctx.read('scene') } });
 
 /** Check a pending segment before generation, using the same rules as the resolver. */
@@ -74,6 +81,6 @@ export function boardGuard({ state, hash }, { guard, source, recorded }) {
             || recorded.practice !== predicate.practice || practiceOf(recorded.practice) === null) return bad('The saved fight is damaged.');
         if (board.setup.gear && (!gearValid(board.setup.gear) || !gearMatches(state, board.setup.gear, hash))) return bad('The gear before the fight changed.');
         if (board.setup.witness && board.setup.witness.hash !== boardWitness(state, board.setup)) return bad('The sheet or gear before the fight changed.');
-        return hash({ source, predicate, witness: witness(state) }) === guard.inputHash ? { ok: true } : bad('The sheet before the fight changed.');
+        return [witnessNew, witnessOld].some(make => hash({ source, predicate, witness: make(state) }) === guard.inputHash) ? { ok: true } : bad('The sheet before the fight changed.');
     } catch { return bad('The saved fight is damaged.'); }
 }

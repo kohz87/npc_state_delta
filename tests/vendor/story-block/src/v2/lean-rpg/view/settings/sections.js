@@ -3,28 +3,25 @@
 
 import { h } from '../../../view/widgets/dom.js';
 import { boardSetting } from '../../board/settings.js';
-import { LEVEL, LEVEL_CAP_SETTING, levelCapOf, JOIN_SETTING, PLANNER_LIMIT, PLANNER_LIMIT_SETTING, PRACTICE, PRACTICE_SETTING, plannerSecondsFrom, practiceOf } from '../../names.js';
+import { AUTO_CAP_SETTING, LEVEL, LEVEL_CAP_SETTING, autoCapFrom, levelCapOf, JOIN_SETTING, PRACTICE, PRACTICE_SETTING, practiceOf } from '../../names.js';
 import { joinMode } from '../../join.js';
-import { FORMULA_SETTING, formulaOf, isStandard, rulesFromSettings } from '../../rules.js';
-import { CREATION } from '../../names.js';
+import { rulesFromSettings } from '../../rules.js';
 import { XP_RATE, XP_RATE_SETTING, xpRateOf } from '../../levels.js';
 import { fill } from '../../strings.js';
 import { S, ROLLS_KEY, rollsOf } from './constants.js';
 
 export function createBasicSections({ doc, card, chips, field, numberRow, packNote, values, settings, put, pack, boardFeature, gear, onChange }) {
-    // ---- The stat formula: which one, how its rolls are made, and its four main numbers
+    // ---- The stat formula: how its rolls are made, and its four main numbers (Standard is the only formula)
     function drawFormula() {
-        const now = formulaOf(values(), pack());
         const rules = rulesFromSettings(values(), pack());
         const box = card('formula', S.formula);
-        chips(box, S.formula, [['standard', S.formulaStandard], ['classic', S.formulaClassic]], now, value => put(FORMULA_SETTING, value));
         const fromPack = packNote('formula', 'numbers');
         if (fromPack) box.appendChild(fromPack);
-        box.appendChild(h(doc, 'p', 'rpg-set-help', now === 'standard' ? S.formulaStandardHelp : S.formulaClassicHelp));
+        box.appendChild(h(doc, 'p', 'rpg-set-help', S.formulaStandardHelp));
         const table = h(doc, 'table', 'rpg-formula-table');
-        table.setAttribute('data-formula', now);
+        table.setAttribute('data-formula', 'standard');
         const body = h(doc, 'tbody');
-        for (const row of now === 'standard' ? S.formulaRows : S.formulaClassicRows) {
+        for (const row of S.formulaRows) {
             const tr = h(doc, 'tr');
             tr.append(h(doc, 'th', '', row.type), h(doc, 'td', '', row.what));
             body.appendChild(tr);
@@ -33,10 +30,7 @@ export function createBasicSections({ doc, card, chips, field, numberRow, packNo
         const scroll = h(doc, 'div', 'rpg-formula-scroll');
         scroll.appendChild(table);
         box.appendChild(scroll);
-        const standard = isStandard(rules);
-        const tiles = standard
-            ? [[rules.startStat, S.formulaNums.start], [rules.createPoints, S.formulaNums.points], [fill(S.formulaPoints, { n: LEVEL.pointEvery }), S.formulaNums.perSoul], [fill(S.formulaFoe, { base: rules.foeBase, divisor: rules.levelDivisor ?? LEVEL.divisor }), S.formulaNums.foe]]
-            : [[CREATION.start, S.formulaNums.start], [CREATION.budget, S.formulaNums.points], [fill(S.formulaPoints, { n: LEVEL.pointEvery }), S.formulaNums.perSoul], [fill(S.formulaFoeClassic, { base: rules.foeBase, divisor: rules.levelDivisor ?? LEVEL.divisor }), S.formulaNums.foe]];
+        const tiles = [[rules.startStat, S.formulaNums.start], [rules.createPoints, S.formulaNums.points], [fill(S.formulaPoints, { n: LEVEL.pointEvery }), S.formulaNums.perSoul], [fill(S.formulaFoe, { base: rules.foeBase, divisor: rules.levelDivisor ?? LEVEL.divisor }), S.formulaNums.foe]];
         const nums = h(doc, 'div', 'rpg-formula-nums');
         for (const [value, label] of tiles) {
             const tile = h(doc, 'div', 'rpg-formula-num');
@@ -44,7 +38,7 @@ export function createBasicSections({ doc, card, chips, field, numberRow, packNo
             nums.appendChild(tile);
         }
         box.appendChild(nums);
-        box.appendChild(h(doc, 'p', 'rpg-set-help', standard ? S.formulaFootStandard : S.formulaFootClassic));
+        box.appendChild(h(doc, 'p', 'rpg-set-help', S.formulaFootStandard));
         box.appendChild(h(doc, 'p', 'rpg-set-help', S.formulaNote));
     }
 
@@ -53,12 +47,7 @@ export function createBasicSections({ doc, card, chips, field, numberRow, packNo
         const box = card('rolls', S.rolls);
         chips(box, S.rolls, [['automatic', S.automatic], ['off', S.off]], rollsOf(settings), value => put(ROLLS_KEY, value));
         box.appendChild(h(doc, 'p', 'rpg-set-help', S.rollsHelp));
-        // The planner's time limit: read when a reply asks the planner, so a change moves only the replies after it. Only the planner's call uses it.
-        const grid = h(doc, 'div', 'rpg-set-nums rpg-set-nums-one');
-        numberRow(grid, { label: S.plannerLimit, help: S.plannerLimitHelp, setting: PLANNER_LIMIT_SETTING, min: PLANNER_LIMIT.min, max: PLANNER_LIMIT.max, step: PLANNER_LIMIT.step, unit: S.plannerLimitUnit, current: () => plannerSecondsFrom(values()),
-            clean: typed => Math.min(PLANNER_LIMIT.max, Math.max(PLANNER_LIMIT.min, PLANNER_LIMIT.min + Math.round((typed - PLANNER_LIMIT.min) / PLANNER_LIMIT.step) * PLANNER_LIMIT.step)) });
-        box.appendChild(grid);
-        if (boardFeature) box.appendChild(boardSetting(doc, boardFeature, onChange));
+        if (boardFeature) box.appendChild(boardSetting(doc, boardFeature, onChange, { value: autoCapFrom(values()), set: v => put(AUTO_CAP_SETTING, v) }));
     }
 
     // ---- Levels and practice: the level cap, the practice a skill use gives, the XP rate

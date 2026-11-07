@@ -22,7 +22,7 @@ const int = (label, min, max, value, extra = {}) => ({ type: 'int', min, max, de
 const range = (min, max) => ({ type: 'int', min, max });
 const get = field => ['get', [field]];
 
-export const COMBAT_PROMPT = [
+const COMBAT_PROMPT = [
     '[COMBAT SYSTEM]',
     'No Plot Armor: combat follows physical reality and the lore. Size, skill, numbers, reach, armor, terrain, preparation and Level all matter. Against a stronger foe, {{user}} loses unless a believable edge exists: ambush, terrain, numbers, poison, preparation.',
     'Exchanges: a fight is told exchange by exchange, each with clear cause, cost and consequence, in the order things happen. Most fights are short; one exchange may be the whole fight. Never skip the moment that decides it.',
@@ -113,12 +113,12 @@ const skills = {
         then: [{ op: 'add', path: [`rank${n}`], value: 1, bounds: 'clamp' }, { op: 'set', path: [`practice${n}`], value: 0 }] })),
 };
 
-// The Standard formula's Skills: Classic's block with one more guard (Classic's definition, and so its hash, never changes). A filled slot is never
+// The Skills block with one more guard (the base definition below, and so its hash, never changes). A filled slot is never
 // overwritten: the host sends a `learn-N` line to the slot already holding that name (updating it) or to a free one (data-modules/part.js
 // skillRoute), so what reaches this condition is a free slot.
 const standardSkills = {
     ...skills,
-    // (Shorter text than Classic's, whose definition and hash stay as they were; a chat that already pinned the Standard Skills block keeps the text it was made with.)
+    // (Shorter text than the base block's, whose definition and hash stay as they were; a chat that already pinned the Standard Skills block keeps the text it was made with.)
     prompt: 'Five skills for one character (a sixth at Lv 20, a seventh at 40, an eighth at 60): what it does, its stat, what it uses (stamina or mana), a rank (Novice, Adept, Expert, Master) and practice 0 to 100. The narrator names a skill with a learn line and adds practice; 100 practice raises the rank.',
     kinds: Object.fromEntries(Object.entries(skills.kinds).map(([name, kind]) => [name, /^learn-/u.test(name)
         ? { ...kind, when: ['eq', get(`skill${name.slice(6)}`), ''], refusal: 'That slot holds a skill; use a free slot.' } : kind])),
@@ -134,32 +134,9 @@ const frozenSkills = (from, prompt) => ({
     kinds: Object.fromEntries(Object.entries(from.kinds).filter(([name]) => FIVE.includes(Number(name.slice(name.lastIndexOf('-') + 1))))),
     rules: from.rules.filter(rule => FIVE.includes(Number(rule.id.slice(rule.id.lastIndexOf('-') + 1)))),
 });
-const skillsV1 = frozenSkills(skills, 'Up to five skills for one character. Each has a description, the stat it rolls with, what it uses (stamina or mana), a rank (Novice, Adept, Expert, Master) and practice from 0 to 100. The narrator names a skill with a learn line (name, what it does, stat, uses) and adds practice. At 100 practice the rank rises by one and practice starts again at 0; a Master stays at 100.');
 const standardSkillsV1 = frozenSkills(standardSkills, 'Up to five skills for one character: what it does, its stat, what it uses (stamina or mana), a rank (Novice, Adept, Expert, Master) and practice 0 to 100. The narrator names a skill with a learn line and adds practice; 100 practice raises the rank.');
-/** The Skills template of the formula as 2.21 had it (a join made before the extra slots, read again). */
-export const skillsV1For = formula => structuredClone(formula === 'classic' ? skillsV1 : standardSkillsV1);
-
-const foes = {
-    slug: 'foes', name: 'Foes', role: 'foes', schema: 1, stateVersion: 1, scope: 'chat',
-    prompt: 'Up to four foe groups in the current fight. A group is one slot: its name, how many it has (count 0 means the slot is empty), its level from 1 to 99 and its health. The narrator sets a slot when a group arrives, hurts it as the fight goes and clears it when the group is down, gone, fled, captured or has yielded.',
-    show: { tab: true, card: false, tabName: 'Foes', icon: 'ph-skull' },
-    state: Object.fromEntries(SLOTS.flatMap(n => [
-        [`foe${n}`, text(`Foe ${n}`)],
-        [`count${n}`, int(`Count ${n}`, 0, 99, 0)],
-        [`level${n}`, int(`Level ${n}`, 1, 99, 1)],
-        [`hurt${n}`, int(`Health ${n}`, 0, 5, 5, { names: HEALTH })],
-    ])),
-    kinds: Object.fromEntries(SLOTS.flatMap(n => [
-        [`set-slot-${n}`, { op: '+', labels: { name: { type: 'text', max: 40 }, count: range(1, 99), level: range(1, 99) },
-            when: ['eq', get(`count${n}`), 0], refusal: 'That slot is taken; clear it first.',
-            effects: [{ op: 'set', path: [`foe${n}`], value: ['arg', 'name'] }, { op: 'set', path: [`count${n}`], value: ['arg', 'count'] },
-                { op: 'set', path: [`level${n}`], value: ['arg', 'level'] }, { op: 'set', path: [`hurt${n}`], value: 5 }] }],
-        [`hurt-${n}`, { op: '~', labels: { to: range(0, 5) }, when: ['gt', get(`count${n}`), 0], refusal: 'That slot is empty.',
-            effects: [{ op: 'set', path: [`hurt${n}`], value: ['arg', 'to'] }] }],
-        [`clear-${n}`, { op: '-', labels: { why: { type: 'enum', values: ['down', 'fled', 'yielded', 'captured', 'gone'] } },
-            effects: [{ op: 'set', path: [`count${n}`], value: 0 }, { op: 'set', path: [`foe${n}`], value: '' }, { op: 'set', path: [`hurt${n}`], value: 5 }] }],
-    ])),
-};
+/** The Skills template as 2.21 had it (a join made before the extra slots, read again). */
+export const skillsV1For = () => structuredClone(standardSkillsV1);
 
 const combat = {
     slug: 'combat-rules', name: 'Combat rules', role: 'rules', schema: 1, stateVersion: 1, scope: 'chat',
@@ -167,14 +144,6 @@ const combat = {
     state: {},
     kinds: {},
 };
-
-/** Classic's four templates (the formula as it was). Their definitions, and so their hashes, never change: see STANDARD_TEMPLATES for the Standard formula's. */
-export const LEAN_RPG_TEMPLATES = Object.freeze([
-    { name: 'Character', definition: character },
-    { name: 'Skills', definition: skills },
-    { name: 'Foes', definition: foes },
-    { name: 'Combat rules', definition: combat },
-]);
 
 // ---- The Standard formula's blocks (stat formula, 1 Nov) ---------------------------------------------------------------------------------
 // A bar is a row of blocks. The stored value counts the blocks left (Health 0..8, Stamina 0..7, Mana 0..7; a foe group's Health 0..8); the
@@ -245,7 +214,7 @@ const standardCharacter = {
 const standardFoes = {
     slug: 'foes', name: 'Foes', role: 'foes', schema: 1, stateVersion: 2, scope: 'chat',
     prompt: 'Up to four foe groups in the fight, one slot each: name, count (0 = empty slot), its level from 1 to 99 and health (words). The narrator sets a slot when a group arrives, hurts it as the fight goes and clears it when the group is down, gone, fled, captured or yielded.',
-    show: foes.show,
+    show: { tab: true, card: false, tabName: 'Foes', icon: 'ph-skull' },
     state: Object.fromEntries(SLOTS.flatMap(n => [
         [`foe${n}`, text(`Foe ${n}`)],
         [`count${n}`, int(`Count ${n}`, 0, 99, 0)],
@@ -265,7 +234,7 @@ const standardFoes = {
 };
 
 /**
- * Standard's Combat rules text: Classic's, a little shorter (the block's prompt holds at most 1200 characters), with the roll types and the
+ * The Combat rules text: the base one, a little shorter (the block's prompt holds at most 1200 characters), with the roll types and the
  * blocks in words. No numbers: the roll table, the odds and the foe's numbers are the rules' (Settings → RPG); the narrator follows the told result.
  */
 export const COMBAT_PROMPT_STANDARD = [
@@ -280,7 +249,7 @@ export const COMBAT_PROMPT_STANDARD = [
 
 const standardCombat = { ...combat, stateVersion: 2, prompt: COMBAT_PROMPT_STANDARD };
 
-/** The Standard formula's four templates, in the chooser's order. Skills are Classic's block with the learn guard. */
+/** The Standard formula's four templates, in the chooser's order. Skills are the base block with the learn guard. */
 export const STANDARD_TEMPLATES = Object.freeze([
     { name: 'Character', definition: standardCharacter },
     { name: 'Skills', definition: standardSkills },
@@ -303,9 +272,6 @@ export function grownSkills(definition) {
     for (const rule of base.rules) if (!rules.some(other => other.id === rule.id)) { rules.push(structuredClone(rule)); changed = true; }
     return changed ? { ...definition, state, kinds, rules } : null;
 }
-
-/** The templates a chat's formula makes blocks from: 'classic' the originals, anything else Standard's. */
-export const templatesFor = formula => (formula === 'classic' ? LEAN_RPG_TEMPLATES : STANDARD_TEMPLATES);
 
 const skill = (name, stat, about, uses = 'stamina') => ({ name, about, stat, uses });
 

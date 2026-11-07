@@ -104,7 +104,7 @@ const shownFields = (fields, hidden) => (hidden.size ? Object.fromEntries(Object
 
 // `own`: the block's name, which stands in for a hidden Who (as the tail does). `definition`: the block's own, which says whether its bars are
 // the Standard formula's blocks (blocks.js): then the record also has `size` (how many blocks each bar has now), and health, mana and stamina
-// are the blocks left. A Classic block's record is exactly what it was.
+// are the blocks left. A block of an older definition (stage fields) is read exactly as it was.
 function character(id, fields, own = '', hidden = new Set(), definition = null) {
     const levelled = isObject(definition?.state) && isObject(definition.state.level);
     const schema = isObject(definition?.state) ? (levelled ? definition.state.level : definition.state.soul) : null;
@@ -151,7 +151,7 @@ function skillsOf(fields, hidden = new Set()) {
 function foesOf(id, fields, offset = 0, hidden = new Set(), state = null) {
     const out = [];
     for (let n = 1; n <= FOE_SLOTS; n += 1) {
-        // A Standard group's Health is blocks left, out of foeHealthBlocks(class): `size` says how many (a Classic slot has none).
+        // A Standard group's Health is blocks left, out of foeHealthBlocks(class): `size` says how many (a stage-field slot has none).
         const size = barOf(state?.[`hurt${n}`]) ? sizeOf(state[`hurt${n}`], fields, `hurt${n}`) : null;
         const name = hidden.has(`foe${n}`) ? (text(fields[`foe${n}`]) ? `Foe ${offset + n}` : '') : text(fields[`foe${n}`]);
         const count = int(fields[`count${n}`]) ?? 0;

@@ -9,13 +9,12 @@
 // This file holds the shared interfaces the pieces build against and the part itself. The names live in
 // names.js, the plan in plan.js, the sheet reader in read.js, the pre-call in precall.js, the roll in resolve.js
 // (its header documents the `data.v2.result` record the battle log draws from) and the cue text in cue.js.
-import { stCallModel, stChat, stChatId } from '../assist/st-adapter.js';
-import { BOARD_SKILL, FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PLANNER_LIMIT, PLANNER_LIMIT_SETTING, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING, plannerLimitMs } from './names.js';
+import { stChat } from '../assist/st-adapter.js';
+import { AUTO_CAP, AUTO_CAP_SETTING, BOARD_SKILL, FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING } from './names.js';
 import { noRoll } from './noroll.js';
 import { fightHook, fightXp } from './fight.js';
 import { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, rankQuery } from './levels.js';
 import { practiceHook, practiceStep } from './practice.js';
-import { createPlanHold } from './plan.js';
 import { JOIN_NO, joinCard, joinOffers, partyOf } from './join.js';
 import { createPrecall } from './precall.js';
 import { leanRpgGuard, resolve, rollsOf } from './resolve.js';
@@ -24,10 +23,10 @@ import { rosterQueries } from './roster.js';
 import { createBoardPart } from './board/overrides.js';
 
 export * from './names.js';
-export { CUSTOM_SETTING, DIFFICULTIES, DIFFICULTY_SETTING, EARLIER_RULES, FORMULA_SETTING, NOTE_MAX, NOTE_SETTING, PRESETS, RULE_KEYS, RULE_RANGES, STANDARD, STANDARD_FORMULA, STANDARD_PRESETS, STANDARD_RANGES, STANDARD_RULE_KEYS, STANDARD_SETTING, STAT_ABOVE, difficultyOf, formulaOf, isStandard, normalizeRules, packInForce, packRulesOf, normalizeStandard, oddsFor, oddsSubject, plannerNoteOf, presetOf, rulesFromSettings, sameRules, statShare, subjectOdds } from './rules.js';
+export { DIFFICULTIES, DIFFICULTY_SETTING, EARLIER_RULES, STANDARD, STANDARD_FORMULA, STANDARD_PRESETS, STANDARD_RANGES, STANDARD_RULE_KEYS, STANDARD_SETTING, difficultyOf, isStandard, normalizeRules, packInForce, packRulesOf, normalizeStandard, oddsFor, oddsSubject, presetOf, rulesFromSettings, sameRules, subjectOdds } from './rules.js';
 export { classTerm, divisorOf, hasLevels, levelCapFor } from './rules.js';
 export { classOfLevel, levelBonus, levelOfClass } from './formula.js';
-export { createPlanHold, parsePlanAnswer, planIsEmpty, validatePlan } from './plan.js';
+export { planIsEmpty, validatePlan } from './plan.js';
 export { characterOf, fold, matchCharacter, matchFoe, matchName, matchSkill, readSheet } from './read.js';
 export { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, bandsOf, clampLevel, levelLabel, packLevelsOf, playerRankValue, rankNamed, rankOf, scaleXp, xpRateFrom, xpRateOf } from './levels.js';
 export { FIGHT_XP_HELD, fightOf, memberXp, standingSlots } from './fight.js';
@@ -40,20 +39,15 @@ export { RPG_EXTRAS, extraDefinitions, extraName, extrasPlan } from './view/wiza
 export { RPG_STRINGS } from './strings.js';
 export { grownSkills } from './templates.js';
 export { setStartNotes, skipOf, startNotes } from './start.js';
-export { PRECALL_HEAD, claimed, createPrecall, precallPrompt, sheetText } from './precall.js';
+export { claimed, createPrecall } from './precall.js';
 export { boardInputError } from './board/commit.js';
 export { dropOf } from './ambush.js';
 export { narratedFoeGrammar } from './board/narrated-grammar.js';
 export { boardGrammar, boardReplyGrammar, boardXpGuide } from './board/prompt.js';
 export { DICE_VERSION, FLOW_VERSION, RESULT_VERSION, claimKey, leanRpgGuard, outcomeOf, positionalDice, prepare, resolve, rollPrepared, rollsOf } from './resolve.js';
 
-// How much longer the hook may take than the planner's call, for the work around it.
-const HOOK_MARGIN_MS = 2000;
-
 /** The part's setting (Story Block's own bucket): when the pre-call plans the rolls. */
-export const DEFAULT_SETTINGS = Object.freeze({ [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [PLANNER_LIMIT_SETTING]: PLANNER_LIMIT.default });
-
-const safeValues = read => { try { const values = read(); return values && typeof values === 'object' ? values : {}; } catch { return {}; } };
+export const DEFAULT_SETTINGS = Object.freeze({ [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [AUTO_CAP_SETTING]: AUTO_CAP.default });
 
 /** The offers a reply's `+ party` lines made under Ask (the card under the reply reads them): `rpg.joins { index? }` → [{ name, about, soul, best }] on the head reply (or the reply `index`). */
 export const JOINS_QUERY = 'rpg.joins';
@@ -63,19 +57,16 @@ export const ROLLS_QUERY = 'rpg.rolls';
 
 /**
  * The part merged into Story Block's core module (domains/index.js). `deps` (all optional):
- *   callModel(prompt, { maxTokens, profile, helper }) → text   (default: Assist's st-adapter; the runtime passes its queued call)
- *   chat() → SillyTavern's chat array, chatId() → its id        (default: st-adapter)
- *   metadata() → the chat's metadata object, for the held plan   (default: held in memory)
- *   problem(entry)                                              (the turn's Problems list; default: none)
- *   moduleId = 'story-block' (whose settings it reads), timeoutMs (the planner's limit; none: the setting), timer
- *   plannerValues() → the settings of `moduleId` now, for the hook's time limit (default: the defaults)
+ *   chat() → SillyTavern's chat array                           (default: st-adapter)
+ *   metadata() → the chat's metadata object, for the board's session and start notes   (default: none)
+ *   moduleId = 'story-block' (whose settings it reads)
  *   rosterOn() → whether the RPG and Gear in fights are both on (the roster is answered only then, or when asked for `recorded`)
  *   persona() → the reader's name, for `party.pc` (default: none, the first block)
  * → { commands, queries, hooks, settings: { defaults }, guard }; `guard` is the replay guard for `rpg.resolve` blocks
  * (domains/index.js routes the guards of that predicate to it).
  */
-export function createLeanRpgPart({ callModel = stCallModel, chat = stChat, chatId = stChatId, metadata = () => null, problem = null, moduleId = 'story-block', timeoutMs, timer, persona = () => '', rosterOn, plannerValues = () => ({}), onPlanning = () => {} } = {}) {
-    const precall = createPrecall({ callModel, chat, chatId, metadata, hold: createPlanHold({ metadata }), problem, moduleId, timeoutMs, timer, onPlanning, skip: skipOf(metadata) });
+export function createLeanRpgPart({ chat = stChat, metadata = () => null, moduleId = 'story-block', persona = () => '', rosterOn } = {}) {
+    const precall = createPrecall({ chat, metadata, moduleId, skip: skipOf(metadata) });
     const board = createBoardPart();
     return {
         // A prelude: previewed before the reply and stored on it before its story lines (turn.js). Not tied to the
@@ -106,18 +97,16 @@ export function createLeanRpgPart({ callModel = stCallModel, chat = stChat, chat
             [ROLLS_QUERY]: Object.assign((_state, args, tools) => rollsOf(tools?.receipts?.() ?? [], Number.isInteger(args?.index) ? args.index : tools?.reply?.index), { feature: LEAN_RPG_FEATURE }),
             // The party's members and the reader's own Character, from the Character blocks (roster.js; fallbacks: a module that answers them itself is asked instead).
             ...rosterQueries({ persona, on: rosterOn }) },
-        // The planner's model call has its own limit (the setting Planner time limit, 45 s by default, read at each call; `timeoutMs` fixes it); the hook is
-        // given a little longer, so its own skip path (quiet ROLLS_SKIPPED, the no-rolls cue and note) runs on a slow answer and the turn's generic limit never cuts in.
         hooks: {
             canGenerate: Object.assign((view, info) => precall.canGenerate(view, info), { feature: LEAN_RPG_FEATURE }),
-            beforeGenerate: Object.defineProperty((view, info) => precall.beforeGenerate(view, info), 'timeoutMs', { enumerable: true, get: () => plannerLimitMs(safeValues(plannerValues), timeoutMs) + HOOK_MARGIN_MS }),
+            beforeGenerate: (view, info) => precall.beforeGenerate(view, info),
             afterCapture: (view, info) => {
                 precall.afterCapture(view);
                 // The fight's XP, then the rolled skills' practice: two steps after the reply's lines.
                 const commands = [fightHook(view, info), practiceHook(view, info)].flatMap(out => out?.commands ?? []);
                 return commands.length ? { commands } : undefined;
             },
-            // Every reply, whatever else answers afterCapture and with or without change lines: the plan it used is let go.
+            // Every reply, whatever else answers afterCapture and with or without change lines: the one-time "send without the RPG" flag goes.
             afterReceive: (view, info) => { precall.afterCapture(view); precall.afterReceive(info, view.state, (name, args) => view.query(name, { ...args, recorded: true })); },
         },
         settings: { defaults: { ...DEFAULT_SETTINGS }, schema: SETTINGS_SCHEMA },

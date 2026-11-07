@@ -13,9 +13,9 @@ import { oneLine } from '../../text.js';
 import { CLASS_NAMES, CREATION, JOINS, JOIN_SETTING, PARTY_MAX, STATS } from './names.js';
 import { fold } from './read.js';
 import { RPG_STRINGS, fill } from './strings.js';
-import { buildDefinitions, creationOf, hasRoom, newDraft, newSoul, readDraft } from './view/wizard-data.js';
+import { buildDefinitions, creationOf, hasRoom, newSoul, readDraft } from './view/wizard-data.js';
 import { classOfLevel, companionStats, levelOfClass } from './formula.js';
-import { isStandard } from './rules.js';
+import { STANDARD_FORMULA, isStandard } from './rules.js';
 import { soulReading } from './soul.js';
 
 const J = RPG_STRINGS.join;
@@ -124,17 +124,12 @@ export function checkJoin(state, request) {
 export function joinDraft({ name = '', about = '', soul = 1, best = '', skills = [] } = {}, rules = null) {
     // (a cast member's signature skills, as the pack wrote them: they fill the slots in order, at the rank written, marked `sig` so the story never renames or replaces them)
     const signed = (Array.isArray(skills) ? skills : []).map(skill => ({ name: skill.name, about: skill.about, stat: skill.stat, uses: skill.uses, start: 0, rank: skill.rank, sig: true }));
-    if (isStandard(rules)) {
-        // Standard: every stat 5 and the best 9, then a point for every third level the class stands for (formula.js companionStats); the draft's budget is
-        // exactly what they cost, so "Edit first" can move points around but is not handed more.
-        const stats = companionStats(best, levelOfClass(soul), rules), creation = creationOf(rules);
-        const spent = STATS.reduce((sum, stat) => sum + stats[stat] - creation.start, 0);
-        return readDraft({ name, about, soul, stats, kind: 'companion', skills: signed, set: '', creation: { ...creation, budget: spent, max: creation.statMax } });
-    }
-    const draft = newDraft({ hasYou: true });
-    const stats = { ...draft.stats };
-    if (STATS.includes(best)) stats[best] = 14;
-    return readDraft({ ...draft, name, about, soul, stats, kind: 'companion', skills: signed });
+    // Every stat 5 and the best 9, then a point for every third level the class stands for (formula.js companionStats); the draft's budget is
+    // exactly what they cost, so "Edit first" can move points around but is not handed more. (Without rules: the Standard preset's.)
+    const standard = isStandard(rules) ? rules : STANDARD_FORMULA;
+    const stats = companionStats(best, levelOfClass(soul), standard), creation = creationOf(standard);
+    const spent = STATS.reduce((sum, stat) => sum + stats[stat] - creation.start, 0);
+    return readDraft({ name, about, soul, stats, kind: 'companion', skills: signed, set: '', creation: { ...creation, budget: spent, max: creation.statMax } });
 }
 
 /**

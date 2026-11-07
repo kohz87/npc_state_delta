@@ -11,7 +11,7 @@ import { ROLES_WITHOUT_TAB } from '../../lean-rpg/names.js';
 import { renderBlockEditor } from '../blocks-editor.js';
 import { S, P, plural, showValue, metaOf } from './shared.js';
 
-export function createBlocksPage({ shared, tell, templates, rpgState, loadRpg, open, leanRpgOn, rpgFormula, directorOn, tabs, renderPreview, addFromTemplate, button, rowsOf, confirm, listeners }) {
+export function createBlocksPage({ shared, tell, templates, rpgState, loadRpg, open, leanRpgOn, directorOn, tabs, renderPreview, addFromTemplate, button, rowsOf, confirm, listeners }) {
     // ---- Settings → Blocks: the page's content. `api` is the sdk (query, command); `chatOpen()` says whether a story is open.
     // → { refresh(), filter(text), destroy() }. The state (list, template chooser, editor and its draft) is shared with the cards' "Edit fields".
     function page({ doc, parent, api, chatOpen = () => true }) {
@@ -113,7 +113,7 @@ export function createBlocksPage({ shared, tell, templates, rpgState, loadRpg, o
             if (leanRpgOn()) {
                 loadRpg();
                 const loaded = rpgState.templates ?? [];
-                rpg = Array.isArray(loaded) ? loaded : (loaded[rpgFormula() === 'classic' ? 'classic' : 'standard'] ?? loaded.classic ?? []);
+                rpg = Array.isArray(loaded) ? loaded : (loaded.standard ?? []);
             }
             if (rpg.length) {
                 chooser.appendChild(h(doc, 'h4', 'ss-block-chooser-heading', S.leanRpg));

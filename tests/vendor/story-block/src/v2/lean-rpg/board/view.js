@@ -17,6 +17,8 @@ import { boardSession, discardBoard, openBoard, reconcileBoard, stageExchange } 
 import { equipmentForBoard, playBoard } from './engine.js';
 import { barMovement, settledNote } from './note.js';
 import { dropOf } from '../ambush.js';
+import { AUTO_CAP, autoExchanges } from '../names.js';
+import { autoNote, runAuto } from './auto-run.js';
 
 // Send acts on the press itself: the board may redraw between press and release (a save, a head event), which would
 // lose the click on a replaced button and make the reader press twice. Fires once; a keyboard click still works.
@@ -63,8 +65,16 @@ function drawMemberCard(doc, parent, member, realFoes, handles) {
     if (member?.pack && !down) node.appendChild(h(doc, 'p', 'rpg-pack-line', memberPackLine(member)));
 }
 
-export function createBoardView({ doc, headState, meta, save, store, rules, query, readerName, roleOf, levels, on = () => false, start = null } = {}) {
-    let notice = '', chosen = [], targeting = null, confirm = false, busy = false, generation = 0, activeId = null, keyRoot = null, listening = false, lockedChoices = [];
+// The note for a fight that starts from the last fight's exact bars.
+const resumedLine = (members, carried) => {
+    const packed = members.some(member => member?.pack);
+    const total = Object.values(carried?.counts ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0) || members.length;
+    const standing = members.filter(member => member?.standing !== false && Number(member?.value ?? member?.hurt) > 0).length;
+    return `↺ These foes are as you left them${packed ? '' : `: ${standing} of ${total} standing`}, with their bars from the last fight.`;
+};
+
+export function createBoardView({ doc, headState, meta, save, store, rules, query, readerName, roleOf, levels, on = () => false, start = null, cap = () => AUTO_CAP.default } = {}) {
+    let notice = '', autoLine = '', chosen = [], targeting = null, confirm = false, busy = false, generation = 0, activeId = null, keyRoot = null, listening = false, lockedChoices = [];
     const releaseAfterResult = () => {
         const wait = () => setTimeout(() => {
             busy = false;
@@ -76,7 +86,7 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
     };
     const persist = () => { try { save?.(); } catch { /* staging still works in this page */ } };
     const current = () => boardSession(meta());
-    const reset = () => { chosen = []; targeting = null; confirm = false; notice = ''; };
+    const reset = () => { chosen = []; targeting = null; confirm = false; notice = ''; autoLine = ''; };
     const equipment = state => {
         const sheet = readSheet(state), gear = planGear(sheet, (name, args) => query?.(name, args), readerName());
         const weapons = {};
@@ -117,7 +127,7 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
     const open = ({ state = headState(), opening = null, result: approach = null } = {}) => {
         if (!on() || !isStandard(rules())) return false;
         const sid = store?.carrierSid?.(store.headIndex?.()), { gear, weapons } = equipment(state);
-        const result = openBoard(meta(), state, { sid, rules: rules(), gear, weapons });
+        const result = openBoard(meta(), state, { sid, rules: rules(), gear, weapons, records: store?.receipts?.() ?? [] });
         if (result.error) return false;
         if (opening) {
             result.session.setup.opening = structuredClone(opening);
@@ -125,6 +135,17 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
             result.session.setup.drop = dropOf(approach);
         }
         persist(); reset();
+        activeId = result.session.id;   // (the first draw must not reset what Auto says)
+        return true;
+    };
+    // Auto plays up to the cap's exchanges on the staged fight; every one is an ordinary staged exchange, and the reader may pick by hand after.
+    const auto = () => {
+        if (busy || !current()) return false;
+        const ran = runAuto({ meta: meta(), state: headState(), rules: rules(), cap: autoExchanges(cap()) });
+        if (ran.error && !ran.done) { notice = ran.error; return false; }
+        chosen = []; targeting = null; confirm = false; notice = ran.error ?? '';
+        autoLine = autoNote({ ...ran, waiting: Boolean(start?.waiting?.()) });
+        persist();
         return true;
     };
     const offer = (root, redraw) => {
@@ -136,6 +157,10 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
         box.appendChild(button(doc, 'Fight on the board', 'ss-button ss-button-primary rpg-board-open', () => {
             if (!open()) { box.appendChild(h(doc, 'p', 'rpg-board-error', 'The fight could not be opened.')); return; }
             redraw();
+        }));
+        box.appendChild(button(doc, 'Auto-fight', 'ss-button rpg-board-open-auto', () => {
+            if (!open()) { box.appendChild(h(doc, 'p', 'rpg-board-error', 'The fight could not be opened.')); return; }
+            auto(); redraw();
         }));
         root.appendChild(box);
     };
@@ -184,6 +209,7 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
             cards.appendChild(card);
         }
         status.appendChild(cards);
+        if (session.resumed && members) status.appendChild(h(doc, 'p', 'rpg-board-resumed', resumedLine(members, session.setup.carriedMembers)));
         if (played.result.order.length) {
             const line = members ? memberOrderLine(played.result.order, members, foes) : `Order: ${played.result.order.map(item => item.name).join(' · ')}`;
             if (line) status.appendChild(h(doc, 'p', 'rpg-board-order', line));
@@ -210,6 +236,7 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
         const standing = members ? standingMembers(members) : data.foes;
         if (confirm) confirmDiscard(panel);
         else if (ended) {
+            if (autoLine) panel.appendChild(h(doc, 'p', 'rpg-board-auto-note', autoLine));
             panel.appendChild(h(doc, 'h4', 'rpg-board-end', `Fight ${played.result.stop}`));
             panel.appendChild(h(doc, 'p', 'rpg-board-end-description', start?.waiting?.() ? 'Your waiting message carries the approach and this fight in one reply.' : 'Your next message carries this fight; the narrator tells it first.'));
             const awards = pendingAwards(state, session, played.result, settings);
@@ -222,6 +249,7 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
                 start.send(); redraw();
             }));
         } else {
+            if (autoLine) panel.appendChild(h(doc, 'p', 'rpg-board-auto-note', autoLine));
             panel.appendChild(h(doc, 'p', 'rpg-board-prompt', targeting ? (targeting.groupMode ? 'Choose a group' : 'Choose a target') : `${data.actor?.who ?? 'Party'}: choose an action`));
             if (!targeting) panel.appendChild(h(doc, 'p', 'rpg-board-defence', `Defence: ${data.defence ?? 'plain defence'}, automatic`));
             const list = h(doc, 'div', 'rpg-board-choices');
@@ -256,6 +284,9 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
                 redraw();
                 if (rolled) releaseAfterResult();
             };
+            // Auto sits right under the choices, beside Flee (outside the list, so the list keeps its own scroll rows).
+            const autoNode = targeting ? null : pressButton(doc, autoLine ? 'Auto again' : 'Auto', 'ss-button ss-button-primary rpg-board-auto', () => { if (!busy && auto()) redraw(); });
+            if (autoNode) autoNode.disabled = busy;
             options.forEach((item, at) => {
                 const text = item.literal ? item.label : `${at + 1}  ${item.label}${item.reason ? ` — ${item.reason}` : ''}`;
                 const line = button(doc, text, 'rpg-board-choice', () => take(item));
@@ -264,6 +295,9 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
                 line.setAttribute('data-choice', String(at + 1)); list.appendChild(line);
             });
             panel.appendChild(list);
+            if (autoNode) panel.appendChild(autoNode);
+            if (!targeting && autoLine && session.exchanges.length && start?.waiting?.() && !start.sending?.())
+                panel.appendChild(pressButton(doc, 'Send with this fight', 'ss-button ss-button-primary rpg-board-send', () => { start.send(); redraw(); }));
             if (targeting) panel.appendChild(button(doc, 'Back', 'ss-button rpg-board-back', () => { targeting = null; redraw(); }));
         }
         if (ended) panel.classList.add('rpg-board-ended');
@@ -337,5 +371,5 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
         if (event.key === 'Escape' && targeting) { event.preventDefault?.(); event.stopImmediatePropagation?.(); event.stopPropagation?.(); keyRoot.querySelector('.rpg-board-back')?.click(); return; }
         if (/^[1-9]$/u.test(event.key)) { const node = keyRoot.querySelector(`[data-choice="${event.key}"]`); if (node && !node.disabled) { event.preventDefault?.(); node.click(); } }
     };
-    return { open, snapshot, offer, render, clear() { keyRoot = null; generation += 1; }, destroy() { keyRoot = null; doc.removeEventListener?.('keydown', keydown, true); listening = false; } };
+    return { open, auto, snapshot, offer, render, clear() { keyRoot = null; generation += 1; }, destroy() { keyRoot = null; doc.removeEventListener?.('keydown', keydown, true); listening = false; } };
 }

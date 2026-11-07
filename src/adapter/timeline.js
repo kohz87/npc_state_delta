@@ -197,9 +197,9 @@ export function createTimelinePart(session, deps) {
         id: MODULE_ID,
         name: MODULE_NAME,
         version: String(version),
-        // Story Block 2.24.0 or later: its feature `presets` key, the folds and the one "This reply" card this
+        // Story Block 2.25.0 or later: its feature `presets` key, the folds and the one "This reply" card this
         // release is built for. An older Story Block 2 refuses the hosted module and Delta keeps working on its own.
-        requires: Object.freeze({ storyBlock: '>=2.24.0' }),
+        requires: Object.freeze({ storyBlock: '>=2.25.0' }),
         // The optional mechanics (MODULES §F100); a host without the Features API warns and ignores.
         features: part.features,
         domains: part.domains,

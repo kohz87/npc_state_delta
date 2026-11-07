@@ -52,10 +52,11 @@ export function createFightOffers({ ctx, doc, store, meta, on, view, open, save,
         view.render(message.querySelector('.mes_block') ?? message, { ...data, sid: offer.sid });
         return offer;
     };
-    const choose = (data, fight) => {
+    // `how` is 'board' (Fight on the board) or 'auto' (open it, then Auto plays the cap's exchanges).
+    const choose = (data, how) => {
         const offer = find();
         if (!offer || offer.sid !== data?.sid) return;
-        if (fight && open?.() === false) return;
+        if (open?.({ auto: how === 'auto' }) === false) return;
         hideFightOffer(meta(), offer.sid);
         try { save?.(); } catch { /* saved with the next chat write */ }
         update();

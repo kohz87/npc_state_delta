@@ -218,7 +218,8 @@ export function checkRpg(value, packId, add) {
     const levels = checkLevelRanks(value, packId, add);
     if (formula === undefined && numbers === undefined) return levels ? [...sets, levels] : sets;
     let ok = true;
-    if (formula !== undefined && !RPG_FORMULAS.includes(formula)) { ok = false; add('BAD_CONTENT', 'content.rpg.formula', `content.rpg.formula must be one of ${RPG_FORMULAS.join(', ')}.`); }
+    if (formula === 'classic') { ok = false; add('BAD_CONTENT', 'content.rpg.formula', 'content.rpg.formula "classic" is no longer supported: Classic rules were removed. Use "standard" or leave the formula out.'); }
+    else if (formula !== undefined && !RPG_FORMULAS.includes(formula)) { ok = false; add('BAD_CONTENT', 'content.rpg.formula', `content.rpg.formula must be one of ${RPG_FORMULAS.join(', ')}.`); }
     const given = {};
     if (numbers !== undefined) {
         if (!isObject(numbers)) { ok = false; add('BAD_CONTENT', 'content.rpg.numbers', 'content.rpg.numbers must be an object of whole numbers, like { "foeBase": 5 }.'); } else {

@@ -5,7 +5,7 @@
 //   * a Skills block is one line per skill, empty slots left out ("Short blade (Novice, agi, stamina): what it does");
 //   * a Foes block lists only the groups in the fight, one clause each; with none, and for a Rules block with no fields, there is no line;
 //   * a Standard block's bars (a field with `blocks`, blocks.js) go by the same words, spread over the bar's size: still words, never block counts, and
-//     a full bar is left out like a full Classic one;
+//     a full bar is left out like a full stage bar;
 //   * the field keys are not written for a skill or a foe (`skill3`, `about3`), and practice is not either: the story adds it by a line and the
 //     rules raise the rank, so only the rank (by its name) is something it tells.
 // Pure: no DOM, no state. `summaryOf` (data-modules/part.js) calls it for a block with a role and cuts the result to the block's room.

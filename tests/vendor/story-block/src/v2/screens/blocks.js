@@ -21,12 +21,11 @@ const fullyNamed = scalar => {
 
 
 // (`loadRpgTemplates` reads the list the first time the chooser needs it; a test hands in its own)
-// (`rpgFormula()` is the stat formula the chat plays on, 'standard' or 'classic': a Standard chat is offered the Standard templates. A loader may
-// hand back one list, or `{ classic, standard }`.)
+// (The RPG templates offered are the Standard ones. A loader may hand back one list, or `{ standard }`.)
 // `tabs()`: the tabs this chat has, [{ id, title }], for Show in tab (empty until the host can merge a block into a tab). `renderPreview(parent, { definition,
 // values, layout })`: the host's drawing of a block in the new layouts, used by the editor's preview (a plain sketch without it).
-export function createBlockWidgets({ templates, directorOn = () => true, leanRpgOn = () => false, navigate = () => {}, rpgFormula = () => 'standard', tabs = () => [], renderPreview = null,
-    loadRpgTemplates = () => import('../lean-rpg/templates.js').then(loaded => ({ classic: loaded.LEAN_RPG_TEMPLATES, standard: loaded.STANDARD_TEMPLATES })) } = {}) {
+export function createBlockWidgets({ templates, directorOn = () => true, leanRpgOn = () => false, navigate = () => {}, tabs = () => [], renderPreview = null,
+    loadRpgTemplates = () => import('../lean-rpg/templates.js').then(loaded => loaded.STANDARD_TEMPLATES) } = {}) {
     const shared = { mode: 'list', draft: null, module: null, note: '', meta: {}, starters: false };
     // The RPG templates are read (a dynamic import) only when the feature is on and the chooser is open.
     const rpg = { templates: null, loading: false };
@@ -241,7 +240,7 @@ export function createBlockWidgets({ templates, directorOn = () => true, leanRpg
 
 
     const page = createBlocksPage({
-        shared, tell, templates, rpgState: rpg, loadRpg, open, leanRpgOn, rpgFormula, directorOn, tabs, renderPreview,
+        shared, tell, templates, rpgState: rpg, loadRpg, open, leanRpgOn, directorOn, tabs, renderPreview,
         addFromTemplate, button, rowsOf, confirm, listeners,
     });
 

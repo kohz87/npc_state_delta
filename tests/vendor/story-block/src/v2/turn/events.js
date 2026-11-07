@@ -280,7 +280,7 @@ export function createEvents(s, deps) {
         rebuild({ publish: false });
         const meta = metadata();
         const removedBoard = pruneMissingBoard(meta, ctx?.chat);
-        const removedStart = Boolean(meta?.rpgFightStart && (!pendingStart(meta, ctx.chat) || meta.rpgFightStart.mode === 'working'));
+        const removedStart = Boolean(meta?.rpgFightStart && (!pendingStart(meta, ctx.chat)));
         if (removedStart) clearStart(meta);
         if (removedBoard || removedStart) {
             try { (ctx.saveMetadata ?? ctx.saveMetadataDebounced)?.call(ctx); } catch { /* saved on the next chat write */ }

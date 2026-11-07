@@ -1,5 +1,5 @@
 // Draws Settings → RPG and keeps it live: the page shell, card order, search, focus, the Combat save lifecycle and
-// the in-place Formula, odds and planner updates. Section drawing lives in the sibling part files; this file keeps
+// the in-place Formula and odds updates. Section drawing lives in the sibling part files; this file keeps
 // the shared render closure and the order in which the cards are made.
 
 import { h } from '../../../view/widgets/dom.js';
@@ -9,7 +9,6 @@ import { createControls } from './controls.js';
 import { createBasicSections } from './sections.js';
 import { createDifficultySection } from './difficulty.js';
 import { createCombatSection } from './combat.js';
-import { createPlannerSection } from './planner.js';
 
 /**
  * Draws the page into `parent`. Options: `settings` (the store: `settings(id)`, `settings.set(id, key, value)`), `doc`,
@@ -38,7 +37,6 @@ export function renderRpgSettings(parent, { settings, doc = parent.ownerDocument
     const difficulty = createDifficultySection({ doc, card, chips, field, packNote, values, settings, put, live, pack, headState, readerName, gearOf,
         getOddsParts: () => oddsParts, setOddsParts: parts => { oddsParts = parts; } });
     const combat = createCombatSection({ doc, root, card, values, pack, roleOf, command, headState, onChange, redraw, isAlive: () => alive, state: combatState });
-    const planner = createPlannerSection({ doc, card, values, put, headState, pack });
 
     // ---- drawing
     function draw() {
@@ -50,7 +48,6 @@ export function renderRpgSettings(parent, { settings, doc = parent.ownerDocument
         basic.drawRolls();
         difficulty.drawDifficulty();
         combat.drawCombat();
-        planner.drawPlanner();
         basic.drawJoin();
         live();
         place();
@@ -61,7 +58,6 @@ export function renderRpgSettings(parent, { settings, doc = parent.ownerDocument
         const old = cards.formula;
         if (old && !old.hidden) { basic.drawFormula(); root.insertBefore(cards.formula, old); old.remove(); }
         difficulty.drawOdds();
-        planner.drawPreview();
     }
     // Rebuilds the page, then puts the focus back on what was pressed.
     function redraw(focus = null) {

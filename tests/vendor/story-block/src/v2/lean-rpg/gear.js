@@ -155,7 +155,7 @@ export function applyGear(sheet, gear) {
     };
 }
 
-/** The stats a Line rolled with (Classic's one, Standard's pair). */
+/** The stats a Line rolled with (one stat, or the pair). */
 const statsOfLine = line => [line.pc?.stat, line.pc?.second].filter((stat, at, all) => typeof stat === 'string' && all.indexOf(stat) === at);
 
 /**
@@ -180,7 +180,7 @@ export function noteGear(lines, gear) {
     }
 }
 
-/** Whether a told Line was decisive: Standard's lines say so; a Classic line is a natural 1 or 20 on either die or a margin either way (resolve.js `rolled`). */
+/** Whether a told Line was decisive: Standard's lines say so; an older line is a natural 1 or 20 on either die or a margin either way. */
 export function isDecisive(line, rules) {
     if (typeof line?.decisive === 'boolean') return line.decisive;
     if (!line?.foe || !Number.isFinite(line.pc?.die) || !Number.isFinite(line.foe.die)) return false;

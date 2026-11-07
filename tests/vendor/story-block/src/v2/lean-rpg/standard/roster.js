@@ -11,7 +11,7 @@ const hurtField = slot => `hurt${((slot - 1) % FOE_SLOTS) + 1}`;
 // ---- the sheet, as bars -----------------------------------------------------------------------------------------------
 
 // Every character and foe group as a bar: { id, kind, name, module, field, value, size }. A bar that cannot be read (no number) counts as full.
-// `maxOf(module, field)`: the most the block's own field holds (a Classic block under the Standard formula holds at most 5).
+// `maxOf(module, field)`: the most the block's own field holds (a block of an older definition holds at most 5).
 export function rosterOf(sheet, maxOf) {
     const characters = sheet.characters.map((character, at) => {
         const size = Math.max(1, Math.min(blocksFor(character.base ?? character.stats).health, maxOf(character.module, 'health')));
