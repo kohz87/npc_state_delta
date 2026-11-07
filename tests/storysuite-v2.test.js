@@ -280,7 +280,7 @@ test('registers module npc-state-delta once, with the npc domain, its queries an
     assert.equal(def.name, 'NPC State Delta');
     assert.equal(def.version, '1.11.0');
     assert.deepEqual(Object.keys(def.domains), ['npc'], 'one small domain: the NPC meters (F81, F90)');
-    assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.castMade', 'npc.dossier', 'npc.identity', 'npc.keyAway', 'npc.known', 'npc.meters', 'npc.next', 'npc.portrait', 'npc.present', 'npc.socialModifier']);
+    assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.castMade', 'npc.catchUp', 'npc.dossier', 'npc.identity', 'npc.keyAway', 'npc.known', 'npc.meters', 'npc.next', 'npc.portrait', 'npc.present', 'npc.socialModifier']);
     assert.deepEqual([...QUERY_NAMES].sort(), Object.keys(def.queries).sort());
     assert.deepEqual(Object.keys(def.commands).sort(), ['npc.adjust', 'npc.milestone', 'npc.open', 'npc.refresh', 'npc.set', 'npc.tick']);
     assert.deepEqual(Object.keys(def.capture.kinds), ['npc', 'milestone']);

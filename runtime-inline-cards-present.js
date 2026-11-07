@@ -3,7 +3,7 @@
    function bodies; the original factory closure is passed in explicitly and the original path keeps
    the public exports. */
 
-import { getContext } from '../../../extensions.js';
+import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { currentPresentationText, formPortraitFor } from './core.js';
 import { portraitSrc } from './src/portrait-file.js';
 import { areaOwner } from './suite-handshake.js';

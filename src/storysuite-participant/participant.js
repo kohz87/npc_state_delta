@@ -22,7 +22,9 @@
 //   busy()               whether a scan or dossier pass is in flight for the open chat (optional)
 //   idle(ms)             resolves true when none is, false after `ms` (optional)
 //   headSource()         the Source of the reply at the head, for a host whose head() carries no `source` (optional; the host's head().source is used first)
-//   restored()           told after a restore installed a state (optional)
+//   enabled()            whether Delta is on (a catch-up runs only then)
+//   live()               the runtime's history-replay boundaries (runtime-entry-public-write.js); without them no catch-up runs
+//   changed()            the catch-up banner redraws (optional)
 //   warn(text)           where problems are told (optional)
 //   ready()              whether Delta has loaded the open chat's state (optional; without it the state is taken as loaded)
 //   load()               loads the open chat's state when it is not loaded yet (asynchronous, optional)
@@ -35,6 +37,7 @@
 import { resolveIdentity } from './identity.js';
 import { timelineOf } from './timeline.js';
 import { manualLifeStateRecord } from '../../terminal-lifecycle.js';
+import { createCatchUp } from './history-replay.js';
 import { createParticipantHandlers } from './participant/handlers.js';
 import { createPublication } from './participant/publication.js';
 import { createSessionOps } from './participant/session-ops.js';
@@ -286,14 +289,23 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         schedulePublish: publication.schedulePublish, setHandle: value => { handle = value; }, stands, standsOnBytes, verified, verifyOnly, vault,
     });
     const { nativeChange, schedulePublish, flush, getLast } = publication;
-    return {
+    // The history replay (history-replay.js): Story Block's `restored` (a fallback installed an earlier checkpoint), the resume on chat open, the
+    // rebuild and Skip. The one publication after an install is the ordinary one (a change announced, then published at once).
+    const catchUp = createCatchUp({
+        chatKey: keyNow, enabled: () => port.enabled?.() !== false && typeof port.live === 'function', live: () => port.live(), changed: () => port.changed?.(), warn,
+        publish: async () => { announced += 1; if (handle && started()) { schedulePublish(0); await flush(); } },
+    });
+    const api = {
         module,
-        participant,
+        participant: Object.freeze({ ...participant, restored: () => catchUp.restored(), rebuild: options => catchUp.rebuild(options) }),
+        catchUp,
         /**
          * The query the host resolves a death's npc with and Story Director a check's target with. It reads the chat's state, where the ids
          * are, so it answers at once after a reload; a dossier with no np_ yet (a scan, an import) is hydrated behind it, never inside it.
          */
         queries: {
+            /** The catch-up banner: { active, done, total, older, from, reason } (+ outcome and message once it ended). */
+            'npc.catchUp': () => catchUp.status(),
             'npc.identity': (_state, args) => {
                 const key = keyNow();
                 if (!usable(key)) return null;
@@ -335,4 +347,5 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         timeline: () => timelineOf(port.readState()),
         index: () => (session ? plain(session.index) : null),
     };
+    return api;
 }

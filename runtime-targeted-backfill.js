@@ -1,7 +1,7 @@
 /* NPC State Delta targeted backfill (role: targeted-backfill). The history backfill for one NPC and the queue
    of pending backfills. Split from runtime-targeted.js; bodies are moved without change. */
 
-import { getContext } from '../../../extensions.js';
+import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { isScannerRoutingError } from './scanner-routing.js';
 import { automaticBackfillStillRelevant, backfillNeedsRequest } from './scan-context.js';
 import { recentTranscript, recentUserDevelopmentContext, currentExchangeTranscript, refreshMessageGate } from './src/transcript.js';

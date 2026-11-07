@@ -2,7 +2,7 @@
    reply, the removal of current-scene fields from earlier-only windows, and the first-scan window rule. Split from
    runtime-scan.js with the factory holding the same getChatKey closure reference. */
 
-import { getContext } from '../../../extensions.js';
+import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { chatLineage, lineageCheckpointKey } from './branch.js';
 
 export function createScanReplyPart(deps) {

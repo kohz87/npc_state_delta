@@ -10,6 +10,40 @@ import { normalizeName } from './core.js';
 import { chatLineage, firstLineageDivergence, lineageCheckpointKey, clearUserDismissedGroupsFor } from './branch.js';
 import { getSettings } from './runtime-settings.js';
 
+// ---- history replay scope ----
+// While a history replay reads one missed reply, `replay` is the scope of that reply (one at a time: the scan operation of the replay holds the chat
+// busy, and sending is held): { key, chat (the messages up to the reply), state (the engine's private copy), sink, now(), receipts, captures,
+// catchUp }. Everything the live scan path reads of "now" goes through chatContext()/clockNow()/replayScope(), and every outward write through
+// notify()/the scope's sink; with no scope (live) they are the real getContext, Date.now and toastr, byte for byte.
+let replay = null;
+export const replayScope = () => replay;
+export function chatContext() {
+    const real = getContext();
+    return replay ? Object.create(real, { chat: { value: replay.chat } }) : real;
+}
+export const clockNow = () => (replay ? replay.now() : Date.now());
+export async function inReplay(scope, fn) {
+    replay = scope;
+    try { return await fn(); } finally { replay = null; }
+}
+// Story Block as a replay sees it: reads answer from the state after reply `index` (sdk.query { asOf }, adapter.at), writes are not sent.
+const HOSTED_WRITES = new Set(['adjust', 'setMeters', 'refresh', 'applyEditor', 'openByEvent', 'tick', 'pinKeyPerson']);
+export function scopedAdapter(adapter, index, sink) {
+    return new Proxy(adapter, {
+        get(target, name) {
+            const value = target[name];
+            if (typeof value !== 'function') return value;
+            if (HOSTED_WRITES.has(name)) return (...args) => { sink.hostedWrite(name, args); return Promise.resolve(null); };
+            return (...args) => (typeof target.at === 'function' ? target.at(index, () => value(...args)) : value(...args));
+        },
+    });
+}
+/** A toast: shown live, recorded in the sink during a replay. */
+export function notify(kind, text) {
+    if (replay) replay.sink.toast(kind, text);
+    else globalThis.toastr?.[kind]?.(text);
+}
+
 export function setNpcDossierScanIndicator(npcId, busy) {
     const id = String(npcId || '');
     document.querySelectorAll?.(`.npc-state-delta-scan-dossier[data-npc-id="${globalThis.CSS?.escape ? globalThis.CSS.escape(id) : id.replace(/"/g, '\\"')}"]`)?.forEach?.(button => {
@@ -49,6 +83,7 @@ export function lineageMoved(previous, current, messageId) {
 }
 
 export function setScanIndicator(busy) {
+    if (replay) return;
     const button = $('#npc_state_delta_scan_now');
     if (!button.length) return;
     button.toggleClass('npc-state-delta-busy', busy);
@@ -63,7 +98,7 @@ export function relationshipNumber(value) {
 // The chat message index of the latest assistant reply (the greeting is 0), or -1: the number Story
 // Block shows as "reply #N" and the dossiers show for changes recorded since 1.2.3.
 export function latestReplyIndex() {
-    const chat = getContext().chat || [];
+    const chat = chatContext().chat || [];
     for (let i = chat.length - 1; i >= 0; i -= 1) {
         if (chat[i] && !chat[i].is_system && !chat[i].is_user) return i;
     }
@@ -71,7 +106,7 @@ export function latestReplyIndex() {
 }
 
 export function latestMessageId(preferAssistant = false) {
-    const chat = getContext().chat || [];
+    const chat = chatContext().chat || [];
     if (preferAssistant) {
         for (let i = chat.length - 1; i >= 0; i -= 1) {
             if (chat[i] && !chat[i].is_system && !chat[i].is_user) return i;
@@ -85,7 +120,7 @@ export function latestMessageId(preferAssistant = false) {
 
 
 export function currentLineageKeyForMessage(messageId) {
-    const lineage = chatLineage(getContext().chat || []);
+    const lineage = chatLineage(chatContext().chat || []);
     return lineageCheckpointKey(lineage, messageId);
 }
 

@@ -3,7 +3,7 @@
    keeps a chat shorter than its adopted dossier from rolling that dossier back. Built by index.js once per module instance with the shared runtime
    state. Bodies are moved from index.js without change. */
 
-import { getContext } from '../../../extensions.js';
+import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { BRANCH_LINEAGE_VERSION, bestAncestorState, chatLineage, firstLineageDivergence, recordBranchCheckpoint, setBranchProvenanceHint } from './branch.js';
 import { currentWriterId } from './storage.js';
 import { buildQualifiedChatKey, parseQualifiedChatKey } from './identity.js';

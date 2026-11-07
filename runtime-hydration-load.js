@@ -3,6 +3,7 @@
    checks a write must pass. Split from runtime-hydration.js without change; the factory keeps the
    public exports. */
 
+import { replayScope } from './runtime-scan-helpers.js';
 import { NPC_STATE_VERSION } from './core.js';
 import { cancelPendingNpcStateWrite, makeNpcStateDataFileName, preserveUndurableNpcStateSnapshot, readNpcStateDataFile, undurableNpcStateSnapshot } from './storage.js';
 import { persistSettings, getSettings } from './runtime-settings.js';
@@ -82,6 +83,7 @@ export function installHydrationLoad(api, rt, deps) {
     // when this session already found no sidecar for the chat (sidecarMissTrusted).
     async function ensureChatStateLoaded(key = getChatKey(), { probeMissing = false } = {}) {
         if (!key || key === 'no-chat' || !isCanonicalChatKey(key)) return freshChatState();
+        if (replayScope()?.key === key) return replayScope().state;
         if (retiredInSessionChats.has(key)) {
             hydrationErrors.set(key, retiredInSessionChats.get(key));
             throw retiredInSessionChats.get(key);
