@@ -27,6 +27,7 @@
     { "path": "runtime-narration.js", "role": "narration-capture", "required": true },
     { "path": "runtime-scan-ops.js", "role": "scan-operations", "required": true },
     { "path": "runtime-targeted.js", "role": "targeted-passes", "required": true },
+    { "path": "runtime-catchup.js", "role": "capture-catchup", "required": true },
     { "path": "runtime-scan.js", "role": "reply-scan", "required": true },
     { "path": "runtime-settings.js", "role": "runtime-settings", "required": true },
     { "path": "runtime-suite.js", "role": "story-suite-connect", "required": true },

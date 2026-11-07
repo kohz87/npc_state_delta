@@ -122,7 +122,7 @@ const twoReplies = async ({ reply }) => {
 
 test('hosted one-pass: an ordinary reply makes no extra model call (no relationship pass, no backfill)', () => {
     const hosted = runCalls('hosted-two-replies', true, twoReplies);
-    assert.deepEqual(hosted.first, { scanner: 0, relationship: 0, backfill: 0, refresh: 0 }, 'a new NPC in the block: no backfill, no evaluator');
+    assert.deepEqual(hosted.first, { scanner: 0, relationship: 0, backfill: 1, refresh: 0 }, 'a new NPC in the block: its one backfill (own cadence, batch D), no evaluator');
     assert.deepEqual(hosted.second, { scanner: 0, relationship: 0, backfill: 0, refresh: 0 }, 'an open relationship in the block: no evaluator (the story\'s ~ npc lines move the meters)');
 });
 
@@ -152,11 +152,11 @@ test('b6-soak-2: a crowd block admits at most 4 new people and runs at most 2 ba
     assert.equal(plain.queued, 0);
     const hosted = runCalls('hosted-crowd', true, crowd);
     assert.equal(hosted.admitted, 4);
-    assert.deepEqual([hosted.first.backfill, hosted.second.backfill], [0, 0], 'hosted one-pass: no backfill per reply');
-    assert.equal(hosted.queued, 4, 'they wait for the catch-up or the reader');
+    assert.deepEqual([hosted.first.backfill, hosted.second.backfill], [1, 1], 'hosted one-pass: one backfill per reply (batch D)');
+    assert.equal(hosted.queued, 2, 'the rest wait their turn');
 });
 
-test('hosted one-pass: the backfill queue runs with the one-pass catch-up', () => {
+test('hosted one-pass: the backfill runs on the reply, the catch-up Refresh on its own schedule', () => {
     const result = runCalls('hosted-catch-up', true, async ({ reply, settings }) => {
         settings.narrationCaptureCatchUp = 2;
         const first = await reply('Yunyun waves from the gate.',
@@ -164,8 +164,8 @@ test('hosted one-pass: the backfill queue runs with the one-pass catch-up', () =
         const second = await reply('Yunyun smiles at Kazuma.', { npcs: [{ name: 'Yunyun', present: true, relationshipImpact: 'none', relationshipDelta: ZERO }] });
         return { first: first.all, second: second.all, queued: globalThis.NPCStateDelta.getState().pendingBackfills.length };
     });
-    assert.equal(result.first.backfill, 0, 'not on the reply');
+    assert.equal(result.first.backfill, 1, 'the new person is backfilled on the reply');
     assert.equal(result.second.refresh, 1, 'the catch-up Refresh of the second captured reply');
-    assert.equal(result.second.backfill, 1, 'and the queued backfill with it');
+    assert.equal(result.second.backfill, 0, 'nothing left to backfill');
     assert.equal(result.queued, 0);
 });
