@@ -158,6 +158,8 @@ export function createTimelinePart(session, deps) {
             installState: state => runtime().installState(state),
             writeTimeline: block => runtime().writeTimeline(block),
             busy: () => runtime()?.scanActive?.() === true,
+            // A rebuild reads the chat through Delta's normal scanner (index.js rebuildScan); none on an older runtime (the rebuild answers UNSUPPORTED).
+            rebuildScan: input => runtime().rebuildScan(input),
             idle: ms => (typeof runtime()?.scanIdle === 'function' ? runtime().scanIdle(ms) : Promise.resolve(true)),
             warn: text => warn(text),
         },

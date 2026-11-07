@@ -6,7 +6,7 @@
 
 import { getContext } from '../../../extensions.js';
 import { isEmptyScannerAnswer } from './scanner-routing.js';
-import { refreshMessageGate, messageGateSettled } from './src/transcript.js';
+import { refreshMessageGate, messageGateSettled, activeReplyIds } from './src/transcript.js';
 import { chatLineage, fingerprintMessage, lineageCheckpointKey } from './branch.js';
 import { getSettings } from './runtime-settings.js';
 import { setNpcDossierScanIndicator, setNpcChatRefreshIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
@@ -302,5 +302,25 @@ export function createScanOpsPart(rt, deps) {
         });
     }
 
-    return { recordScanDiagnostics, beginScanOperation, scanOperationCurrent, scanCanonicalBaseCurrent, endScanOperation, cancelScanOperation, withScanIntent, deferUntilSettled, replyGuard, scanWorkPending, scanIdle, generationReady, queuePendingAutoScan, drainPendingAutoScanInner, noteScanFailure, BACKFILLS_PER_REPLY, scheduleReplyBackfills };
+    // (timeline participant, rebuild) Delta's normal scan over the chosen replies, oldest first: one scanNow per reply, the same call a reply's
+    // automatic scan makes (so the window, the gate, the canonical-base check and the scan intent all apply). `replies` = how many of the latest
+    // replies the story stands on to read; null = all of them. Stops at the first scan that does not complete. No second engine.
+    async function rebuildScan({ replies = null } = {}) {
+        if (replies !== null && (!Number.isSafeInteger(replies) || replies < 1)) return { ok: false, code: 'INVALID', message: '`replies` is a positive whole number or null.' };
+        const key = getChatKey();
+        await refreshMessageGate();
+        const all = activeReplyIds();
+        const ids = replies === null ? all : all.slice(-replies);
+        const done = [];
+        for (const messageId of ids) {
+            if (getChatKey() !== key) return { ok: false, code: 'STALE', message: 'Another chat was opened during the rebuild read.' };
+            if (await scanNow({ manual: false, messageId }) === false) {
+                return { ok: false, code: 'FAILED', message: `NPC State Delta could not read reply #${messageId}; the rebuild stopped there.` };
+            }
+            done.push(messageId);
+        }
+        return { ok: true, scanned: done };
+    }
+
+    return { recordScanDiagnostics, beginScanOperation, scanOperationCurrent, scanCanonicalBaseCurrent, endScanOperation, cancelScanOperation, withScanIntent, deferUntilSettled, replyGuard, scanWorkPending, scanIdle, generationReady, queuePendingAutoScan, drainPendingAutoScanInner, noteScanFailure, BACKFILLS_PER_REPLY, scheduleReplyBackfills, rebuildScan };
 }
