@@ -7,104 +7,12 @@
 // is given: no SillyTavern import.
 
 import { resolveDossierTarget } from '../../suite-handshake.js';
-import { storyMinuteText } from '../../calendar.js';
-import { CAST_QUERY, FEATURE_SOCIAL, KEY_PEOPLE_QUERY, SOCIAL_QUERY, createNpcPart, normalizeSecrets } from '../npc-meters.js';
+import { FEATURE_SOCIAL, SOCIAL_QUERY, createNpcPart, normalizeSecrets } from '../npc-meters.js';
 import { normalizeLimits, presetCatalog } from '../npc-meters-presets.js';
-import { DOSSIER_FIELDS } from '../fields/registry.js';
-import { normalizeKeyPeople } from '../key-people.js';
-import { normalizeCast } from '../cast-dossier.js';
-import { portraitFileSrc } from '../portrait-file.js';
+import { RELATIONSHIP_KEYS, dossierFields, portraitUrl } from './queries-dossier.js';
+import { createDirectorQueriesPart } from './queries-director.js';
 
-// Story Block's query for a pack portrait's image URL (read only): packs.portrait({ pack, file }) → a safe URL or null.
-const PORTRAIT_QUERY = 'packs.portrait';
-// Story Block 2.18.0's query for a pack cast member's signature gear line (read only): packs.castGear({ name }) → { name, line: "Gear: A, B", items } or null.
-const CAST_GEAR_QUERY = 'packs.castGear';
-const KEY_PEOPLE_FEATURE = 'story-director.key-people';
-const RELATIONSHIP_KEYS = ['trust', 'affection', 'desire', 'tension'];
-
-// A JSON round trip: plain objects, arrays, strings, finite numbers, booleans and null only.
-function plainCopy(value) {
-    if (value === undefined) return undefined;
-    try {
-        return JSON.parse(JSON.stringify(value));
-    } catch {
-        return undefined;
-    }
-}
-
-/** One NPC record's dossier fields (DOSSIER_FIELDS) as a fresh plain copy. Missing fields are left out. */
-export function dossierFields(npc, { customFieldNames } = {}) {
-    if (!npc || typeof npc !== 'object') return null;
-    const out = {};
-    for (const field of DOSSIER_FIELDS) {
-        if (field === 'customFields' && Array.isArray(customFieldNames)) {
-            // (cleanup step 7) Only the configured custom fields, as the dossier and the injection show.
-            const configured = customFieldNames.map(name => String(name ?? '').trim().toLowerCase()).filter(Boolean);
-            const kept = Object.entries(npc.customFields && typeof npc.customFields === 'object' ? npc.customFields : {})
-                .filter(([name]) => configured.includes(String(name).trim().toLowerCase()));
-            if (kept.length) out.customFields = Object.fromEntries(kept.map(([name, value]) => [name, String(value ?? '')]));
-            continue;
-        }
-        if (field === 'relationship') {
-            const rel = npc.relationship && typeof npc.relationship === 'object' ? npc.relationship : null;
-            if (rel) out.relationship = Object.fromEntries(RELATIONSHIP_KEYS.map(key => [key, Number.isFinite(Number(rel[key])) ? Number(rel[key]) : 0]));
-            continue;
-        }
-        const value = plainCopy(npc[field]);
-        if (value !== undefined) out[field] = value;
-    }
-    return out;
-}
-
-// ---- portraits (MODULES §F11: a companion or NPC's portrait comes from Delta) ----
-
-// The raster image types Delta accepts for a portrait (index.js setNpcPortrait); compressed
-// portraits are stored as data:image/webp.
-const DATA_IMAGE = /^data:image\/(?:png|jpeg|jpg|webp|gif|avif|bmp);base64,[a-z0-9+/=]+$/i;
-const URL_BASE = 'https://npc-state-delta.invalid/';
-
-/**
- * `value` when it is safe to hand to another module as an image URL, else null: a data: URL of a
- * raster image, an https: URL, or a same-origin relative URL (a path, never `//host`). Anything
- * else (javascript:, http:, blob:, svg data, control characters) is null.
- */
-export function safeImageUrl(value) {
-    if (typeof value !== 'string') return null;
-    const url = value.trim();
-    if (!url || /[\u0000-\u001f\u007f\\]/.test(url)) return null;
-    if (/^data:/i.test(url)) return DATA_IMAGE.test(url) ? url : null;
-    let parsed;
-    try {
-        parsed = new URL(url, URL_BASE);
-    } catch {
-        return null;
-    }
-    if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return /^https:\/\//i.test(url) && parsed.protocol === 'https:' && parsed.hostname ? url : null;
-    // A path on the page's own server (SillyTavern's /user/images/…), never `//host` or a bare ?query or #hash.
-    return !/^[?#]/.test(url) && parsed.origin === new URL(URL_BASE).origin ? url : null;
-}
-
-/**
- * The portrait Delta shows for one NPC record, as its dossier and present cast do: the current
- * appearance form's own image when that form has one, else the main portrait. `formPortraits` is
- * Delta's { [form name]: { dataUrl } }. A safe URL (safeImageUrl) or null.
- */
-export function portraitUrl(npc, formPortraits = {}) {
-    if (!npc || typeof npc !== 'object') return null;
-    const candidates = [];
-    const form = typeof npc.currentForm === 'string' ? npc.currentForm.trim().toLocaleLowerCase() : '';
-    if (form && formPortraits && typeof formPortraits === 'object') {
-        const image = Object.entries(formPortraits).find(([name]) => String(name).trim().toLocaleLowerCase() === form)?.[1];
-        if (image && typeof image === 'object') candidates.push(image.dataUrl);
-    }
-    const main = npc.portrait && typeof npc.portrait === 'object' ? npc.portrait : {};
-    candidates.push(main.dataUrl, portraitFileSrc(main), main.url, main.src);
-    for (const candidate of candidates) {
-        const url = safeImageUrl(candidate);
-        if (url) return url;
-    }
-    return null;
-}
+export { dossierFields, safeImageUrl, portraitUrl } from './queries-dossier.js';
 
 export function createQueriesPart(session, deps) {
     const {
@@ -349,113 +257,7 @@ export function createQueriesPart(session, deps) {
         }, { feature: FEATURE_SOCIAL }),
     });
 
-    // Whether Story Director's World screen shows the present cast (its feature on); a host without the
-    // Features API: whether Story Director is registered.
-    function worldShown() {
-        if (!session.hosted) return false;
-        const on = hostFeature(WORLD_FEATURE);
-        if (on !== undefined) return on === true;
-        try { return (session.sdkRef?.modules?.() ?? []).some(module => module?.id === 'story-director'); } catch { return false; }
-    }
-
-    // Story Director's key people (`director.keyPeople`, read only) as it answers, or null: not hosted, no Story Director,
-    // or one without the query. Null means "no key people anywhere", never an error.
-    function keyPeopleAnswer() {
-        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
-        try {
-            const answer = session.sdkRef.query(KEY_PEOPLE_QUERY, {});
-            return Array.isArray(answer) ? answer : null;
-        } catch {
-            return null;
-        }
-    }
-    // The memory of key people's last absences (npc.keyAway; the slice's `keyAway`), {} when there is none or no host.
-    function keyAwayMemory() {
-        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return {};
-        try {
-            const memory = session.sdkRef.query('npc.keyAway', {});
-            return memory && typeof memory === 'object' && !Array.isArray(memory) ? memory : {};
-        } catch {
-            return {};
-        }
-    }
-    // The living cast (Story Director's `director.cast`, read only): the cleaned answer with its dates written on Story Director's
-    // calendar, or null (not hosted, no Story Director, or one without the query). Null means "no cast anywhere".
-    function castAnswer() {
-        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
-        try {
-            const answer = session.sdkRef.query(CAST_QUERY, {});
-            return Array.isArray(answer) ? answer : null;
-        } catch {
-            return null;
-        }
-    }
-    function castPeople() {
-        const answer = castAnswer();
-        if (!answer) return null;
-        const calendar = directorCalendar();
-        return normalizeCast(answer, minutes => storyMinuteText(minutes, calendar));
-    }
-    // The slice's record of the cast dossiers made (npc.castMade), {} when there is none or no host.
-    function castMade() {
-        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return {};
-        try {
-            const made = session.sdkRef.query('npc.castMade', {});
-            return made && typeof made === 'object' && !Array.isArray(made) ? made : {};
-        } catch {
-            return {};
-        }
-    }
-    // Packs' names by id (`packs.list`), for the badge; {} when the host cannot say.
-    function packNames() {
-        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return {};
-        try {
-            const list = session.sdkRef.query('packs.list', {});
-            return Object.fromEntries((Array.isArray(list) ? list : []).filter(pack => pack && typeof pack.id === 'string')
-                .map(pack => [pack.id, String(pack.name ?? pack.title ?? '').trim()]).filter(([, name]) => name));
-        } catch {
-            return {};
-        }
-    }
-    // A pack portrait's image URL (`packs.portrait`) as a safe URL (safeImageUrl), or null.
-    function packPortraitUrl(pack, file) {
-        if (!session.hosted || typeof session.sdkRef?.query !== 'function' || !pack || !file) return null;
-        try { return safeImageUrl(session.sdkRef.query(PORTRAIT_QUERY, { pack, file })); } catch { return null; }
-    }
-    // A pack cast member's one "Gear: A, B" line (`packs.castGear`), or '' (no host, an older Story Block without the query, or it answers null).
-    function castGearLine(name) {
-        if (!session.hosted || typeof session.sdkRef?.query !== 'function' || !name) return '';
-        try {
-            const line = session.sdkRef.query(CAST_GEAR_QUERY, { name })?.line;
-            return typeof line === 'string' ? line.replace(/\s+/g, ' ').trim() : '';
-        } catch { return ''; }
-    }
-    // Whether Story Director offers the reader's pin (`keypeople.pin`, registered by a ready module, its feature not switched off).
-    // Delta only ever asks; Story Director's own command writes its own state.
-    function keyPinOffered() {
-        if (!session.hosted || typeof session.sdkRef?.modules !== 'function') return false;
-        try {
-            const offered = (session.sdkRef.modules() ?? []).some(module => module?.status === 'ready' && Array.isArray(module.commands) && module.commands.includes(KEY_PIN_COMMAND));
-            return offered && hostFeature(KEY_PEOPLE_FEATURE) !== false;
-        } catch {
-            return false;
-        }
-    }
-    // Story Director's calendar (`director.calendar`: { era, months, leapYears }), or null when it has none to give; Story Director's
-    // key people carry their dates as story minutes, which index.js writes on it (calendar.js storyMinuteText).
-    function directorCalendar() {
-        try {
-            const config = session.hosted && typeof session.sdkRef?.query === 'function' ? session.sdkRef.query('director.calendar', {}) : null;
-            return config && typeof config === 'object' && Array.isArray(config.months) ? config : null;
-        } catch {
-            return null;
-        }
-    }
-    // The key people, cleaned (src/key-people.js normalizeKeyPeople); the dates are left to the caller (they are not needed for names).
-    function keyPeople() {
-        const answer = keyPeopleAnswer();
-        return answer ? normalizeKeyPeople(answer) : null;
-    }
+    const director = createDirectorQueriesPart(session, deps, { hostFeature });
 
     // ---- what index.js asks while hosted (each a no-op answer without a host) ----
 
@@ -505,7 +307,6 @@ export function createQueriesPart(session, deps) {
 
     return {
         warn, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
-        entryFor, queries, worldShown, keyPeopleAnswer, keyAwayMemory, castAnswer, castPeople, castMade, packNames,
-        packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView,
+        entryFor, queries, ...director, send, sliceView,
     };
 }

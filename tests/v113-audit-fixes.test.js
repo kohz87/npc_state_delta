@@ -47,8 +47,8 @@ test('2: no top-level constant in a shipped module goes unused', () => {
 
 test('3: every extension class in style.css is used by a shipped module', () => {
     const classes = [...new Set([...read('style.css').matchAll(/\.(npc-state-delta-[A-Za-z0-9_-]+)/g)].map(match => match[1]))];
-    // src/ ships too (the Story Suite v2 adapter and its parts, imported by index.js at runtime).
-    const shipped = [all, ...['src/', 'src/adapter/'].flatMap(dir => fs.readdirSync(new URL(`../${dir}`, import.meta.url)).filter(name => name.endsWith('.js')).map(name => read(`${dir}${name}`)))].join('\n');
+    // Every src/ module ships too, including the nested parts of the adapter.
+    const shipped = [all, ...fs.readdirSync(new URL('../src/', import.meta.url), { recursive: true }).filter(name => name.endsWith('.js')).map(name => read(`src/${name}`))].join('\n');
     assert.deepEqual(classes.filter(name => !shipped.includes(name)), []);
 });
 
