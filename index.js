@@ -371,7 +371,7 @@ function activatePresentCardFromEvent(event) {
 
 const { editorIsMounted, openNpcEditorSafely, activateNpcEditorFromEvent, renderDossier, closeNpcEditor, saveNpcEditor } = createEditorPart(rt, { chatHydrationStatus, commitBranchCheckpoint, currentNpcById, ensureFreshMutationBoundary, eventTargetClosest, getChatKey, getChatState, hostedMeterView, latestMessageId, latestReplyIndex, persistCriticalDurable, queueInlineRender, relationshipNumber, requireReadyChatMutation, stampManualEdit, startInlineWatchdog, storySuiteV2Meters, updateInjection, workingCopyAdoption });
 
-const { recordScanDiagnostics, beginScanOperation, scanOperationCurrent, scanCanonicalBaseCurrent, endScanOperation, cancelScanOperation, withScanIntent, deferUntilSettled, replyGuard, scanWorkPending, scanIdle, generationReady, queuePendingAutoScan, drainPendingAutoScanInner, noteScanFailure, BACKFILLS_PER_REPLY, scheduleReplyBackfills, rebuildScan } = createScanOpsPart(rt, { chatHeadMark, diagnosticStore, drainPendingAutoScan, ensureHydratedStateFresh, getChatKey, hostedOnePass, hydratedRevision, isHostSwipeActive, isScanBusy, localWorkingStateDirty, processPendingBackfills, recordFreshnessEvent, SCAN_OPERATION_TIMEOUT_MS, scanNow, scanOperations, updateInjection });
+const { recordScanDiagnostics, beginScanOperation, scanOperationCurrent, scanCanonicalBaseCurrent, endScanOperation, cancelScanOperation, withScanIntent, deferUntilSettled, replyGuard, scanWorkPending, scanIdle, generationReady, queuePendingAutoScan, drainPendingAutoScanInner, noteScanFailure, BACKFILLS_PER_REPLY, scheduleReplyBackfills } = createScanOpsPart(rt, { chatHeadMark, diagnosticStore, drainPendingAutoScan, ensureHydratedStateFresh, getChatKey, hostedOnePass, hydratedRevision, isHostSwipeActive, isScanBusy, localWorkingStateDirty, processPendingBackfills, recordFreshnessEvent, SCAN_OPERATION_TIMEOUT_MS, scanNow, scanOperations, updateInjection });
 
 const { queueSettledSwipeReconcile, branchHistoryDiagnostic, reconcileCurrentBranch, queueBranchReconcile } = createReconcilePart(rt, { cancelScanOperation, deferUntilSettled, drainPendingAutoScan, ensureChatStateLoaded, getChatKey, getChatState, handleAssistantMessageReceived, isHostSwipeActive, isScanBusy, persist, queuePendingAutoScan, renderDossier, scanNow, seedBranchTracking, setChatState, staleHostPrefix, updateInjection });
 
@@ -952,8 +952,6 @@ window.NPCStateDelta = Object.freeze({
     stateLoading: () => chatHydrationStatus() === 'loading',
     scanActive: () => scanWorkPending(),
     scanIdle: ms => scanIdle(ms),
-    // (timeline participant) A rebuild's read: the normal scanner over the last `replies` replies (null: all).
-    rebuildScan: input => rebuildScan(input),
     // Which messages the story stands on (the Story Suite adapter's gate): scans do not read what Story Block faded.
     useMessageGate: gate => useMessageGate(gate),
     // (v2 meters) Delta's base relationship values: where a new NPC's slice meters start.
