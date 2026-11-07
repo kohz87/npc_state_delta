@@ -56,6 +56,8 @@ Generated 2026-11-07.
 - `src/storysuite-participant/participant/publication.js`: Native-change pairing, publication, retry and flush.
 - `src/storysuite-participant/participant/session-ops.js`: Session hydration, checkpoints, identity lines and commit-probe comparisons.
 - `src/storysuite-participant/participant/support.js`: Shared participant envelopes, prepared ids and index normalization.
+- `src/storysuite-participant/storage-row.js`: Settings Storage row: old dossier files, Check again, Find older files (Data Maid on press only), Clean up with confirmation; check and removal in one exclusive step; off with the reason when any listed chat or index can't be read.
+- `src/storysuite-participant/vault-sweep.js`: Plans and removes old checkpoint files that no listed chat and no lineage index names, older than 30 days.
 - `branch-constants.js`: Branch lineage, snapshot and rollback-journal limits split from `branch.js`.
 - `branch-lineage.js`: Message fingerprints, lineage keys and hidden-message key repair split from `branch.js`.
 - `branch-util.js`: Byte-size, JSON-equality and NPC-list cloning helpers split from `branch.js`.

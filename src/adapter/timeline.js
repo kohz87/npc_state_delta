@@ -10,6 +10,7 @@ import { FEATURE_STAGES, MILESTONE_KIND, NPC_KIND } from '../npc-meters.js';
 import { metersCardScreen } from '../npc-meters-screen.js';
 import { createPublicPathsDefinition } from '../public-paths.js';
 import { createParticipant, fileVault } from '../storysuite-participant/index.js';
+import { createStorageRow, REFERENCED_QUERY } from '../storysuite-participant/storage-row.js';
 
 const EVENTS = Object.freeze({
     settingsMounted: 'npc-state-delta:settings-mounted',
@@ -138,6 +139,16 @@ export function createTimelinePart(session, deps) {
     };
     const messageGate = Object.freeze({ refresh: activeMessages, settled: headSettled });
     let offNativeChange = null;
+    const vault = participantVault ?? fileVault({ headers: () => runtime()?.requestHeaders?.() ?? {} });
+    // The Storage row of the settings panel (clean-up of old dossier files; report and confirmed removal only). Hosted only: Story Block answers
+    // which checkpoint files every chat uses.
+    const storageRow = createStorageRow({
+        doc, vault, warn,
+        // The participant's own exclusive queue (checkpoint writes run in it); `timeline` is made just below, before any click can happen.
+        exclusive: fn => timeline.exclusive(fn),
+        ask: async () => session.sdkRef.query(REFERENCED_QUERY, {}),
+        live: () => { try { return runtime()?.getState?.() ?? null; } catch { return null; } },
+    });
     const timeline = createParticipant({
         port: {
             chatKey: () => String(runtime()?.chatKey?.() ?? ''),
@@ -161,7 +172,7 @@ export function createTimelinePart(session, deps) {
             idle: ms => (typeof runtime()?.scanIdle === 'function' ? runtime().scanIdle(ms) : Promise.resolve(true)),
             warn: text => warn(text),
         },
-        vault: participantVault ?? fileVault({ headers: () => runtime()?.requestHeaders?.() ?? {} }),
+        vault,
         ...participantOptions,
     });
     function startTimeline() {
@@ -174,6 +185,7 @@ export function createTimelinePart(session, deps) {
         try { offNativeChange?.(); } catch { /* gone */ }
         offNativeChange = null;
         try { runtime()?.useMessageGate?.(null); } catch { /* gone */ }
+        storageRow.unmount();
     }
     const definition = Object.freeze({
         id: MODULE_ID,
@@ -273,6 +285,7 @@ export function createTimelinePart(session, deps) {
         listening = true;
         doc.addEventListener(EVENTS.settingsMounted, () => {
             if (!session.hosted) return;
+            if (typeof session.sdkRef?.query === 'function') storageRow.mount();
             if (session.pendingSection?.isConnected) mountSection(session.pendingSection);
             else syncDrawer();
         });
