@@ -38,3 +38,6 @@ Generated 2026-11-07.
 - `src/storysuite-participant/participant/publication.js`: Native-change pairing, publication, retry and flush.
 - `src/storysuite-participant/participant/session-ops.js`: Session hydration, checkpoints, identity lines and commit-probe comparisons.
 - `src/storysuite-participant/participant/support.js`: Shared participant envelopes, prepared ids and index normalization.
+- `runtime-targeted-scope.js`: Target-row admission and single-target profile/social channel scoping split from `runtime-targeted.js`.
+- `runtime-targeted-refresh.js`: Editor-field sync and the targeted Refresh pass split from `runtime-targeted.js`.
+- `runtime-targeted-backfill.js`: History backfill and the pending-backfill queue split from `runtime-targeted.js`.

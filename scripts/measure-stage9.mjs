@@ -9,7 +9,7 @@ const root = path.resolve(process.argv[2] || fileURLToPath(new URL('..', import.
 const core = await import(pathToFileURL(path.join(root, 'core.js')));
 const routing = await import(pathToFileURL(path.join(root, 'scanner-routing.js')));
 // The request owners live in index.js and the parts split out of it (targeted passes, then the reply scan, in the order they stood in index.js).
-const source = ['index.js', 'runtime-targeted.js', 'runtime-scan.js'].filter(file => fs.existsSync(path.join(root, file))).map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
+const source = ['index.js', 'runtime-targeted-scope.js', 'runtime-targeted.js', 'runtime-targeted-refresh.js', 'runtime-targeted-backfill.js', 'runtime-scan.js'].filter(file => fs.existsSync(path.join(root, file))).map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
 // The scanner request (response lengths, JSON retry) lives in src/scanner-request.js.
 const request = await import(pathToFileURL(path.join(root, 'src', 'scanner-request.js')));
 const lengths = Object.fromEntries(Object.entries(request).filter(([name]) => /RESPONSE_LENGTH$/.test(name)));
