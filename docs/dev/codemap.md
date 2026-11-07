@@ -38,3 +38,9 @@ Generated 2026-11-07.
 - `src/storysuite-participant/participant/publication.js`: Native-change pairing, publication, retry and flush.
 - `src/storysuite-participant/participant/session-ops.js`: Session hydration, checkpoints, identity lines and commit-probe comparisons.
 - `src/storysuite-participant/participant/support.js`: Shared participant envelopes, prepared ids and index normalization.
+- `bundle-codec.js`: Bundle framing, portrait binary encoding and bundle decoding split from `bundle.js`.
+- `bundle-import-helpers.js`: Import identity matching, id/slot reconciliation and manual-lock helpers split from `bundle.js`.
+- `portrait-tools-targets.js`: Form-aware portrait resolution and target selection UI split from `portrait-tools.js`.
+- `portrait-tools-actions.js`: Upload completion, generated portrait previews/seeds and removal split from `portrait-tools.js`.
+- `dossier-experience-state.js`: Life-state projection, current selection and DOM write guards split from `dossier-experience.js`.
+- `dossier-experience-styles.js`: Extension-wide dossier, editor and settings CSS split from `dossier-experience.js`.

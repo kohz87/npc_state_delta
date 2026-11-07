@@ -44,7 +44,7 @@ test('the player card states when no change or only progress was recorded', () =
 
 test('the dossier layout keeps portrait emphasis, section jumps and compact dead cards', () => {
     const ui = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
-    const experience = fs.readFileSync(new URL('../dossier-experience.js', import.meta.url), 'utf8');
+    const experience = fs.readFileSync(new URL('../dossier-experience-styles.js', import.meta.url), 'utf8');
     assert.match(ui, /delta-portrait-expand/);
     assert.match(ui, /openLightbox\(\)/);
     assert.match(ui, /data-delta-section="player"/);
