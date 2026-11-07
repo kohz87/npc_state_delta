@@ -38,3 +38,9 @@ Generated 2026-11-07.
 - `src/storysuite-participant/participant/publication.js`: Native-change pairing, publication, retry and flush.
 - `src/storysuite-participant/participant/session-ops.js`: Session hydration, checkpoints, identity lines and commit-probe comparisons.
 - `src/storysuite-participant/participant/support.js`: Shared participant envelopes, prepared ids and index normalization.
+- `runtime-entry-events.js`: SillyTavern generation, reply, branch, chat lifecycle and deletion listeners split from `index.js`.
+- `runtime-entry-ui-events.js`: Present-card activation, closest-target lookup and launcher-dossier event bridge split from `index.js`.
+- `runtime-entry-card-settings.js`: Character-card settings definition and panel-equivalent saves split from `index.js`.
+- `runtime-entry-startup.js`: Idempotent runtime initialization functions split from `index.js`.
+- `runtime-entry-public-read.js`: Public scan, portrait, status and diagnostics API split from `index.js`.
+- `runtime-entry-public-write.js`: Public state, host-integration and manual-mutation API split from `index.js`.

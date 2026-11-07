@@ -5,6 +5,12 @@
   "modules": [
     { "path": "bootstrap.js", "role": "bootstrap", "required": true },
     { "path": "index.js", "role": "runtime-controller", "required": true },
+    { "path": "runtime-entry-events.js", "role": "runtime-event-registration", "required": true },
+    { "path": "runtime-entry-ui-events.js", "role": "present-card-event-helpers", "required": true },
+    { "path": "runtime-entry-card-settings.js", "role": "character-card-settings-bridge", "required": true },
+    { "path": "runtime-entry-startup.js", "role": "runtime-startup", "required": true },
+    { "path": "runtime-entry-public-read.js", "role": "public-scan-status-api", "required": true },
+    { "path": "runtime-entry-public-write.js", "role": "public-state-mutation-api", "required": true },
     { "path": "runtime-state.js", "role": "runtime-state-holder", "required": true },
     { "path": "runtime-chat-keys.js", "role": "chat-keys", "required": true },
     { "path": "runtime-hydration.js", "role": "chat-state-hydration", "required": true },

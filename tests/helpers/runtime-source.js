@@ -19,7 +19,8 @@ export const RUNTIME_SOURCE_PARTS = [
     { file: 'runtime-lifecycle.js', before: 'const { retryCurrentChatHydration,' },
     { file: 'runtime-targeted.js', before: 'const { prepareCanonicalScanBase,' },
     { file: 'runtime-scan.js', before: 'const { scanNowInner,' },
-    { file: 'runtime-settings-html.js', before: 'function eventTargetClosest(' },
+    { file: 'runtime-settings-html.js', before: 'const { eventTargetClosest' },
+    { file: 'runtime-entry-ui-events.js', before: 'const { eventTargetClosest' },
     { file: 'runtime-hosted.js', before: 'const { storyBlockV2Hosted' },
     { file: 'runtime-injection.js', before: 'const { liveInjectionText,' },
     { file: 'runtime-narration.js', before: 'const { narrationCaptureStats,' },
@@ -31,6 +32,11 @@ export const RUNTIME_SOURCE_PARTS = [
     { file: 'runtime-suite.js', before: 'const { SUITE_API' },
     { file: 'runtime-portrait-settings.js', before: 'const { savePortraitSettingsDraft' },
     { file: 'runtime-settings-bind.js', before: 'const { bindUi,' },
+    { file: 'runtime-entry-events.js', before: 'const registerEvents =' },
+    { file: 'runtime-entry-card-settings.js', before: 'const nsdCardSettings =' },
+    { file: 'runtime-entry-startup.js', before: '$(safeInit);' },
+    { file: 'runtime-entry-public-read.js', before: 'window.NPCStateDelta = Object.freeze({ ...publicReadApi' },
+    { file: 'runtime-entry-public-write.js', before: 'window.NPCStateDelta = Object.freeze({ ...publicReadApi' },
 ];
 
 const read = file => fs.readFileSync(new URL(file, root), 'utf8');
