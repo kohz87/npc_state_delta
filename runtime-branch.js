@@ -10,7 +10,7 @@ import { buildQualifiedChatKey, parseQualifiedChatKey } from './identity.js';
 import { getSettings } from './runtime-settings.js';
 
 export function createBranchPart(rt, deps) {
-    const { ensureChatStateLoaded, evictDormantChatStates, freshChatState, getChatKey, getChatState, isCanonicalChatKey, queueStateFileWrite, setChatState } = deps;
+    const { ensureChatStateLoaded, evictDormantChatStates, freshChatState, getChatKey, getChatState, isCanonicalChatKey, queueStateFileWrite, requestHeaders, setChatState } = deps;
     const { chatStateCache, missingSidecarChats, branchInheritanceChecked, staleHostChats, openingHostChats } = rt;
 
     function commitBranchCheckpoint(state, messageId, reason = 'state') {
@@ -42,12 +42,52 @@ export function createBranchPart(rt, deps) {
         return hostSwipeState() !== 'none';
     }
 
+    // A nonempty array can still be the first chunk of a loading chat. Only the host's complete file can prove an automatic
+    // destructive reconcile or a branch inheritance has the whole chat; an unavailable or changing file fails closed.
+    async function hostChatComplete(key) {
+        const place = parseQualifiedChatKey(key);
+        if (!place || getChatKey() !== key) return false;
+        const context = getContext();
+        const sequence = rt.chatOpenSequence || 0;
+        const lineage = chatLineage(context.chat || []);
+        const parent = String((context.chatMetadata || context.chat_metadata || {}).main_chat || '').replace(/\.jsonl$/i, '').trim();
+        const character = context.characters?.[context.characterId];
+        const body = place.kind === 'group' ? { id: place.chatId } : { ch_name: String(character?.name || ''), file_name: place.chatId, avatar_url: place.ownerId };
+        const controller = new AbortController();
+        let timer;
+        try {
+            const read = (async () => {
+                const response = await globalThis.fetch(place.kind === 'group' ? '/api/chats/group/get' : '/api/chats/get', {
+                    method: 'POST', headers: requestHeaders(), cache: 'no-cache', body: JSON.stringify(body), signal: controller.signal,
+                });
+                if (!response?.ok) return false;
+                const data = await response.json();
+                if (!Array.isArray(data) || !data[0] || typeof data[0] !== 'object' || !Object.hasOwn(data[0], 'chat_metadata')
+                    || !data[0].chat_metadata || typeof data[0].chat_metadata !== 'object' || Array.isArray(data[0].chat_metadata)) return false;
+                if (data.slice(1).some(message => !message || typeof message !== 'object' || Array.isArray(message))) return false;
+                const diskParent = String(data[0].chat_metadata?.main_chat || '').replace(/\.jsonl$/i, '').trim();
+                const now = getContext();
+                const nowParent = String((now.chatMetadata || now.chat_metadata || {}).main_chat || '').replace(/\.jsonl$/i, '').trim();
+                return getChatKey() === key && (rt.chatOpenSequence || 0) === sequence && parent === nowParent && parent === diskParent
+                    && firstLineageDivergence(lineage, chatLineage(now.chat || [])) === -1
+                    && firstLineageDivergence(lineage, chatLineage(data.slice(1))) === -1;
+            })();
+            const timeout = new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve(false); }, 2000); });
+            return await Promise.race([read, timeout]);
+        } catch {
+            return false;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
     async function maybeInheritKnownBranch() {
         const key = getChatKey();
+        const sequence = rt.chatOpenSequence || 0;
         if (key === 'no-chat' || !isCanonicalChatKey(key)) return false;
         try {
             await ensureChatStateLoaded(key);
-            if (getChatKey() !== key) return false;
+            if (getChatKey() !== key || (rt.chatOpenSequence || 0) !== sequence) return false;
             const current = getChatState(key);
             const chat = getContext().chat || [];
             const lineageAtStart = chatLineage(chat);
@@ -56,6 +96,12 @@ export function createBranchPart(rt, deps) {
             const unsaved = !getSettings().dataFiles?.[key]?.path;
             const isEmptyState = !current.npcs.length && !current.candidates.length && !current.dismissed.length && !current.checkpoints.length && (!current.lineage.length || unsaved);
             if (!isEmptyState) { branchInheritanceChecked.add(key); return false; }
+            const stillEmpty = () => getChatState(key) === current && !current.npcs.length && !current.candidates.length && !current.dismissed.length
+                && !current.checkpoints.length && (!current.lineage.length || !getSettings().dataFiles?.[key]?.path);
+
+            // Even the parent metadata may still be loading. Do not decide inheritance, or let the participant mint a line, until the host file agrees.
+            if (!await hostChatComplete(key)) return false;
+            if (getChatKey() !== key || (rt.chatOpenSequence || 0) !== sequence || !stillEmpty() || firstLineageDivergence(lineageAtStart, chatLineage(getContext().chat || [])) !== -1) return false;
 
             const metadata = getContext().chatMetadata || getContext().chat_metadata || {};
             const mainChat = String(metadata?.main_chat || '').replace(/\.jsonl$/i, '').trim();
@@ -65,8 +111,11 @@ export function createBranchPart(rt, deps) {
             if (!hasExplicitParent) branchInheritanceChecked.add(key);
             if (!hasExplicitParent) return false;
 
-            await ensureChatStateLoaded(explicitParentKey).catch(error => console.debug(`[NPC State Delta] explicit branch parent ${explicitParentKey} could not be hydrated.`, error));
-            if (getChatKey() !== key || firstLineageDivergence(lineageAtStart, chatLineage(getContext().chat || [])) !== -1) return false;
+            try { await ensureChatStateLoaded(explicitParentKey); }
+            catch (error) { console.debug(`[NPC State Delta] explicit branch parent ${explicitParentKey} could not be hydrated.`, error); return false; }
+            const currentMetadata = getContext().chatMetadata || getContext().chat_metadata || {};
+            if (getChatKey() !== key || (rt.chatOpenSequence || 0) !== sequence || !stillEmpty() || String(currentMetadata.main_chat || '').replace(/\.jsonl$/i, '').trim() !== mainChat
+                || firstLineageDivergence(lineageAtStart, chatLineage(getContext().chat || [])) !== -1) return false;
             const parentState = chatStateCache.get(explicitParentKey);
             // The branch's own provenance: the hint was installed for the chat open at startup only, so a branch opened later (a save point's
             // "Return here") was matched against the wrong main chat and inherited nothing.
@@ -84,14 +133,13 @@ export function createBranchPart(rt, deps) {
     }
 
     /**
-     * (timeline participant) Whether the open chat is a branch still waiting for its parent's dossiers: no dossier file of its own, its metadata
-     * names a main chat, and branch inheritance has not run for it in this session. The participant mints no story line for such a chat.
+     * (timeline participant) An unverified chat without a dossier file may be a branch whose metadata is still loading. The participant waits
+     * until inheritance has been decided, so it cannot mint a line before the parent's dossiers are carried over.
      */
     function branchInheritancePending(key = getChatKey()) {
         if (!isCanonicalChatKey(key) || branchInheritanceChecked.has(key)) return false;
         if (!missingSidecarChats.has(key) || getSettings().dataFiles?.[key]?.path) return false;
-        const metadata = getContext().chatMetadata || getContext().chat_metadata || {};
-        return Boolean(String(metadata?.main_chat || '').replace(/\.jsonl$/i, '').trim());
+        return true;
     }
 
 
@@ -123,5 +171,5 @@ export function createBranchPart(rt, deps) {
         return staleHostActive(key);
     }
 
-    return { commitBranchCheckpoint, seedBranchTracking, hostSwipeState, isHostSwipeActive, maybeInheritKnownBranch, branchInheritancePending, noteAdoptedDossier, staleHostActive, staleHostPrefix };
+    return { commitBranchCheckpoint, seedBranchTracking, hostSwipeState, isHostSwipeActive, hostChatComplete, maybeInheritKnownBranch, branchInheritancePending, noteAdoptedDossier, staleHostActive, staleHostPrefix };
 }

@@ -14,7 +14,7 @@ export function createEventRegistration(rt, deps) {
         endTargetedRewriteTolerance, stripSwipedNarrationBlock, queueSettledSwipeReconcile,
         flushPendingSettingsSave, castPortraitMisses, cancelScanOperation, closePortraitGenerator,
         closeNpcEditor, staleHostChats, retiredInSessionChats, openingHostChats, isCanonicalChatKey,
-        maybeInheritKnownBranch, seedBranchTracking, persist, isScanBusy, renderDossier,
+        maybeInheritKnownBranch, branchInheritancePending, seedBranchTracking, persist, isScanBusy, renderDossier,
         ensureInlineObserver, drainPendingAutoScan, castPortraitDue, castSync, evictDormantChatStates,
         runBoundedLifecycleEvent, removeDeletedChatState, moveRenamedChatState, chatStateCache,
     } = deps;
@@ -125,11 +125,13 @@ export function createEventRegistration(rt, deps) {
         if (events.MORE_MESSAGES_LOADED) source.on(events.MORE_MESSAGES_LOADED, () => queueInlineRender(30));
         if (events.CHAT_LOADED) source.on(events.CHAT_LOADED, async () => {
             const key = getChatKey();
+            const sequence = rt.chatOpenSequence || 0;
             if (key === 'no-chat') return;
             try {
                 await ensureChatStateLoaded(key);
-                if (getChatKey() !== key) return;
+                if (getChatKey() !== key || (rt.chatOpenSequence || 0) !== sequence) return;
                 renderDossier(); ensureInlineObserver(); queueInlineRender(0);
+                if (branchInheritancePending(key) || getChatState(key)?.lineage?.length) queueBranchReconcile({ chatKey: key, rescan: false, reason: 'chat-loaded' }, 0);
             } catch (error) {
                 if (getChatKey() === key) { renderDossier(); updateInjection(); }
                 console.error('[NPC State Delta] post-load hydration/render failed; durable data was not overwritten.', error);
@@ -186,6 +188,7 @@ export function createEventRegistration(rt, deps) {
 
         if (events.CHAT_CHANGED) {
             source.on(events.CHAT_CHANGED, async () => {
+                const sequence = rt.chatOpenSequence = (rt.chatOpenSequence || 0) + 1;
                 flushPendingSettingsSave();
                 rt.replacingReply = null;
                 castPortraitMisses.clear();
@@ -208,9 +211,9 @@ export function createEventRegistration(rt, deps) {
                 openingHostChats.add(key);
                 try {
                     if (isCanonicalChatKey(key)) await ensureChatStateLoaded(key);
-                    if (getChatKey() !== key) return;
+                    if (getChatKey() !== key || rt.chatOpenSequence !== sequence) return;
                     const inherited = isCanonicalChatKey(key) ? await maybeInheritKnownBranch() : false;
-                    if (getChatKey() !== key) return;
+                    if (getChatKey() !== key || rt.chatOpenSequence !== sequence) return;
                     const state = key === 'no-chat' ? null : getChatState(key);
                     if (state) seedBranchTracking(state);
                     if (inherited) persist();
@@ -219,7 +222,7 @@ export function createEventRegistration(rt, deps) {
                     ensureInlineObserver();
                     queueInlineRender(30);
                     updateInjection();
-                    if (!inherited && state?.lineage?.length) queueBranchReconcile({ chatKey: key, rescan: false, reason: 'chat-changed' }, 80);
+                    if (!inherited && (state?.lineage?.length || branchInheritancePending(key))) queueBranchReconcile({ chatKey: key, rescan: false, reason: 'chat-changed' }, 80);
                     if (key !== 'no-chat') void drainPendingAutoScan(key);
                     // A cast dossier made while its picture was missing gets it now if Story Block has it (no new chat needed).
                     if (key !== 'no-chat' && castPortraitDue()) castSync().catch(error => console.debug('[NPC State Delta] cast portraits were not filled', error));
@@ -228,7 +231,7 @@ export function createEventRegistration(rt, deps) {
                     if (getChatKey() === key) { renderDossier(); updateInjection(); }
                     console.error('[NPC State Delta] chat change hydration failed; durable state was preserved.', error);
                 } finally {
-                    openingHostChats.delete(key);
+                    if (rt.chatOpenSequence === sequence || getChatKey() !== key) openingHostChats.delete(key);
                 }
             });
         }

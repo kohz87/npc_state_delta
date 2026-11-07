@@ -9,7 +9,7 @@ import { BRANCH_SNAPSHOT_BUDGET_BYTES, BRANCH_SNAPSHOT_MAX_BYTES, ROLLBACK_JOURN
 import { getSettings } from './runtime-settings.js';
 
 export function createReconcilePart(rt, deps) {
-    const { cancelScanOperation, deferUntilSettled, drainPendingAutoScan, ensureChatStateLoaded, getChatKey, getChatState, handleAssistantMessageReceived, isHostSwipeActive, isScanBusy, persist, queuePendingAutoScan, renderDossier, scanNow, seedBranchTracking, setChatState, staleHostPrefix, updateInjection } = deps;
+    const { branchInheritancePending, cancelScanOperation, deferUntilSettled, drainPendingAutoScan, ensureChatStateLoaded, getChatKey, getChatState, handleAssistantMessageReceived, hostChatComplete, isHostSwipeActive, isScanBusy, maybeInheritKnownBranch, persist, queuePendingAutoScan, renderDossier, scanNow, seedBranchTracking, setChatState, staleHostPrefix, updateInjection } = deps;
     const { branchReconciliationEvents, assistantReceipts } = rt;
 
     const BRANCH_RECONCILIATION_EVENT_LIMIT = 16;
@@ -41,13 +41,14 @@ export function createReconcilePart(rt, deps) {
             ? incomingOperation
             : baseOperation;
         next.rescan = Boolean(base.rescan || incoming.rescan);
+        next.explicit = Boolean(base.explicit || incoming.explicit);
         return next;
     }
 
     function queueSettledSwipeReconcile(options = {}) {
         const originKey = options.chatKey || getChatKey();
         if (originKey === 'no-chat') return;
-        let next = { reason: 'message-swiped', rescan: true, ...options, operation: 'swipe', chatKey: originKey };
+        let next = { reason: 'message-swiped', rescan: true, ...options, operation: options.operation || 'auto', chatKey: originKey };
 
         // A normal branch timer must never be allowed to fire inside SillyTavern's swipe window.
         // Fold it into the swipe settlement instead.
@@ -94,6 +95,7 @@ export function createReconcilePart(rt, deps) {
 
             try {
                 const reconciliation = await reconcileCurrentBranch({ ...pending, rescan: false, reason: `${pending.reason || 'message-swiped'}-settled` });
+                if (!reconciliation) return; // A deferred load is not permission to scan the incomplete chat.
                 if (reconciliation?.requiresRescan === false) return;
                 const chat = getContext().chat || [];
                 const received = Number.isInteger(receivedMessageId) ? chat[receivedMessageId] : null;
@@ -192,18 +194,42 @@ export function createReconcilePart(rt, deps) {
         }
     }
 
-    // An automatic reconcile (not a delete/edit/swipe event, not an explicit call) that meets an EMPTY host chat while a lineage is stored means the
-    // host has not loaded the chat yet (page reload), not that every message was deleted: nothing is rolled back; it is retried a bounded number of times.
+    // Loading may expose no messages or only a prefix. Keep one bounded retry per chat opening; a later host load or explicit event can try again.
     const EMPTY_CHAT_RETRY_MS = 400;
     const EMPTY_CHAT_RETRY_LIMIT = 25;
-    const emptyChatRetries = new Map();
-    function chatNotLoadedYet(key, before, ctx, { operation, explicit, explicitDivergence }) {
-        if (explicit === true || String(operation || 'auto') !== 'auto' || Number.isInteger(explicitDivergence)) return false;
-        return (ctx.chat || []).length === 0 && Array.isArray(before.lineage) && before.lineage.length > 0;
+    let loadingRetry = null;
+    function deferLoadingChat(key, options, before, lineage) {
+        const sequence = rt.chatOpenSequence || 0;
+        if (!loadingRetry || loadingRetry.key !== key || loadingRetry.sequence !== sequence) {
+            if (loadingRetry?.timer) clearTimeout(loadingRetry.timer);
+            loadingRetry = { key, sequence, attempts: 0, timer: null, options: null };
+        }
+        const retry = loadingRetry;
+        retry.options = retry.options ? mergeBranchOptions(retry.options, { ...options, chatKey: key }) : { ...options, chatKey: key };
+        recordBranchReconciliationEvent({
+            key, reason: options.reason, operation: options.operation,
+            result: { recoveryOperation: options.operation, lineageRelation: 'unknown', recoveryAction: 'deferred-chat-not-loaded', invalidated: false },
+            beforeNpcCount: before?.npcs?.length || 0, previousLength: before?.lineage?.length || 0, currentLength: lineage.length,
+        });
+        if (!retry.timer && retry.attempts < EMPTY_CHAT_RETRY_LIMIT) {
+            retry.attempts += 1;
+            retry.timer = setTimeout(() => {
+                retry.timer = null;
+                const pending = retry.options;
+                retry.options = null;
+                if (getChatKey() === key && (rt.chatOpenSequence || 0) === sequence) queueBranchReconcile(pending, 0);
+            }, EMPTY_CHAT_RETRY_MS);
+        }
+    }
+    function clearLoadingRetry(key) {
+        if (loadingRetry?.key !== key) return;
+        if (loadingRetry.timer) clearTimeout(loadingRetry.timer);
+        loadingRetry = null;
     }
 
     async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto', explicit = false } = {}) {
         const key = chatKey || getChatKey();
+        const sequence = rt.chatOpenSequence || 0;
         if (key === 'no-chat' || getChatKey() !== key) return null;
         // (timeline) A head that moved is followed by the host first (Delta installs the checkpoint of the selected head); this reads Delta's state after.
         if (!await messageGateSettled()) {
@@ -211,26 +237,34 @@ export function createReconcilePart(rt, deps) {
             return deferUntilSettled(key, { label: 'reconcile', what: 'a rollback after a deleted or swiped message', options: { explicitDivergence, rescan, reason, chatKey, operation, explicit }, merge: mergeBranchOptions, retry: options => reconcileCurrentBranch(options) }, null, null);
         }
         if (getChatKey() !== key) return null;
-        const ctx = getContext();
+        if ((rt.chatOpenSequence || 0) !== sequence) return null;
         await ensureChatStateLoaded(key);
-        if (getChatKey() !== key) return null;
+        if (getChatKey() !== key || (rt.chatOpenSequence || 0) !== sequence) return null;
+        if (branchInheritancePending(key)) {
+            const inherited = await maybeInheritKnownBranch();
+            if (getChatKey() !== key || (rt.chatOpenSequence || 0) !== sequence) return null;
+            if (branchInheritancePending(key)) {
+                deferLoadingChat(key, { explicitDivergence, rescan, reason, operation, explicit }, getChatState(key), chatLineage(getContext().chat || []));
+                return null;
+            }
+            if (inherited) { renderDossier(); updateInjection(); }
+        }
+        const ctx = getContext();
         const before = getChatState(key);
-        seedBranchTracking(before);
         const beforeNpcCount = Array.isArray(before.npcs) ? before.npcs.length : 0;
         const previousLength = Array.isArray(before.lineage) ? before.lineage.length : 0;
         const lineageBefore = chatLineage(ctx.chat || []);
-        if (chatNotLoadedYet(key, before, ctx, { operation, explicit, explicitDivergence })) {
-            const tries = (emptyChatRetries.get(key) || 0) + 1;
-            emptyChatRetries.set(key, tries);
-            recordBranchReconciliationEvent({
-                key, reason, operation,
-                result: { recoveryOperation: operation, lineageRelation: 'tail-truncation', recoveryAction: 'deferred-chat-not-loaded', invalidated: false, divergence: 0 },
-                beforeNpcCount, previousLength, currentLength: 0,
-            });
-            if (tries <= EMPTY_CHAT_RETRY_LIMIT) setTimeout(() => { if (getChatKey() === key) queueBranchReconcile({ chatKey: key, rescan, reason }, 0); }, EMPTY_CHAT_RETRY_MS);
-            return null;
+        const divergence = firstLineageDivergence(before.lineage || [], lineageBefore);
+        if (!explicit && String(operation || 'auto').toLowerCase() === 'auto'
+            && divergence >= 0 && divergence < previousLength) {
+            if (!await hostChatComplete(key)) {
+                if (getChatKey() === key && (rt.chatOpenSequence || 0) === sequence) deferLoadingChat(key, { explicitDivergence, rescan, reason, operation, explicit }, before, lineageBefore);
+                return null;
+            }
+            if (getChatKey() !== key || (rt.chatOpenSequence || 0) !== sequence || getChatState(key) !== before || firstLineageDivergence(lineageBefore, chatLineage(getContext().chat || [])) !== -1) return null;
         }
-        emptyChatRetries.delete(key);
+        clearLoadingRetry(key);
+        seedBranchTracking(before);
         // The dossier can be newer than this browser's chat: another session wrote it after messages
         // this chat has not loaded yet. Until the host reloads the chat, a local chat that is only a
         // shorter prefix of that dossier is stale, not a deletion, so it must not roll the dossier back.
@@ -297,6 +331,12 @@ export function createReconcilePart(rt, deps) {
         const originKey = options.chatKey || getChatKey();
         if (originKey === 'no-chat') return;
         options = { ...options, chatKey: originKey };
+        if (loadingRetry?.key === originKey && loadingRetry.sequence === (rt.chatOpenSequence || 0) && loadingRetry.options) {
+            options = mergeBranchOptions(loadingRetry.options, options);
+            if (loadingRetry.timer) clearTimeout(loadingRetry.timer);
+            loadingRetry.timer = null;
+            loadingRetry.options = null;
+        }
         if (isHostSwipeActive()) {
             queueSettledSwipeReconcile(options);
             return;
