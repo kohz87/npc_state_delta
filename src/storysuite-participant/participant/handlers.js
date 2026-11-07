@@ -10,7 +10,7 @@ import { fail, isRecord, plain, preparedId } from './support.js';
 
 export function createParticipantHandlers({
     abort, bounded, boundedCheckpoint, busy, confirmedDeath, getAnnounced, getHandle, getLast, hand, hostExclusive,
-    hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, vault,
+    hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, verifyOnly, vault,
 }) {
     return {
         participant: {
@@ -64,8 +64,12 @@ export function createParticipantHandlers({
              */
             current: input => ({ ok: true, current: isRecord(input) && stands(input.checkpoint, input.hash) && !busy() }),
 
+            /** Whether `prepare` would accept this checkpoint (file, hash, line), changing nothing: the host's fallback asks it of each candidate. */
+            verify: bounded((input, until) => verifyOnly(input, until)),
+
             prepare: bounded(async (input, until) => {
-                const s = await hydrate(until);
+                const named = isRecord(input) && typeof input.checkpoint === 'string' && typeof input.hash === 'string';
+                const s = await hydrate(until, null, named ? { checkpoint: input.checkpoint, hash: input.hash } : null);
                 if (!s) return fail('FAILED', 'There is no open chat.');
                 const idx = s.index;
                 if (!isRecord(input) || typeof input.checkpoint !== 'string' || typeof input.return !== 'string' || typeof input.hash !== 'string') return fail('INVALID', 'prepare takes { return, checkpoint, hash }.');

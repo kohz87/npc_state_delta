@@ -213,3 +213,41 @@ test('a rebuild deletes no checkpoint or lineage-index file', async () => {
     assert.equal(vault.indexes.has(OLD_LINEAGE), true);
     assert.deepEqual(JSON.parse(vault.indexes.get(OLD_LINEAGE)), index);
 });
+
+// ---- registered on the real participant: the whole route, with a deadline so a queue deadlock fails instead of hanging ----
+import { createParticipant } from '../src/storysuite-participant/index.js';
+
+test('participant.rebuild runs end to end: fresh line, one scan, a normal native mutation, and the host\'s activate installs it', { timeout: 10000 }, async () => {
+    const vault = memoryVault();
+    const live = { state: oldState() };
+    let scans = 0;
+    const port = {
+        chatKey: () => 'chat:one',
+        normalize: raw => emptyState(raw),
+        readState: () => clone(live.state),
+        installState: async next => { live.state = clone(next); },
+        writeTimeline: async block => { live.state = { ...live.state, timeline: clone(block) }; },
+        rebuildScan: async () => { scans += 1; live.state.npcs = [npc('npc_ash', 'Ash')]; return true; },
+    };
+    const delta = createParticipant({ port, vault, random: seededRandom(3) });
+    const mutations = [];
+    delta.participant.attach({
+        head: async () => ({ ok: true, headHash: 'a'.repeat(64), cursor: { sid: 'r1' }, source: { sid: 'r1', swipeKey: 's0' } }),
+        nativeMutation: async input => {
+            const prepared = await input.prepare();
+            const active = await delta.participant.activate({ return: 'rt_host00001', prepared: prepared.prepared });
+            mutations.push({ prepared, active });
+            return active.ok ? { ok: true, checkpoint: prepared.after.checkpoint, hash: prepared.after.hash } : active;
+        },
+    });
+    await delta.hydrate();
+    const first = await delta.participant.rebuild({ return: 'rt_rebuild002' });
+    assert.equal(first.ok, true, first.message);
+    assert.equal(scans, 1);
+    assert.equal(mutations.length, 1);
+    assert.notEqual(first.lineage, OLD_LINEAGE);
+    assert.equal(timelineOf(live.state).lineage, first.lineage);
+    assert.deepEqual(live.state.npcs.map(person => person.name), ['Ash']);
+    assert.equal(delta.index().selected, first.checkpoint);
+    assert.equal(vault.docs.size >= 2, true, 'the old checkpoints are still there');
+});
