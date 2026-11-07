@@ -1,33 +1,40 @@
-import { dataUrlOfBytes, isPortraitFileRecord, markPortraitFileMissing, markPortraitFilePresent, parseImageDataUrl, portraitFileRecordFor } from './src/portrait-file.js';
+/* NPC State Delta persistence facade: sidecar identity, payload codec, file transport and inspection
+   live in focused parts; this file owns writer locking, the durability queue, sidecar writes and the
+   recovery/retire/read/delete operations. Every public name previously exported here remains exported. */
+import { createStorageIdentity } from './storage-identity.js';
+import { bytesToBase64, decodeStateFilePayload, encodeRetiredStateFilePayload as encodeRetiredStateFilePayloadFile, encodeStateFilePayload as encodeStateFilePayloadFile, NPC_STATE_FILE_FORMAT, NPC_STATE_FILE_FORMAT_VERSION, pruneFormPortraitAssetsForState, prunePortraitAssetsForState, prunePortraitAssetsInPlace, retainedPortraitAssetIds } from './storage-payload.js';
+import { dataFileExists, uploadPayload } from './storage-files.js';
+import { createStorageInspection } from './storage-inspection.js';
 
-export const NPC_STATE_FILE_FORMAT = 'npc_state_delta_chat_data';
-export const NPC_STATE_FILE_FORMAT_VERSION = 1;
+export { dataFileExists, dataFilesExist, deleteNpcStateDataFile, readPortraitFileDataUrl, savePortraitFile, verifyPortraitFiles } from './storage-files.js';
+
+const identity = createStorageIdentity();
+const { fnv1a } = identity;
+const inspection = createStorageInspection({ dataFileExists, decodeStateFilePayload, makeNpcStateDataFileName: identity.makeNpcStateDataFileName });
+const { adoptNpcStateDataFileMetadata, inspectNpcStateDataFile, probeNpcStateDataFilePointer, remoteRevision } = inspection;
+
 export const NPC_STATE_WRITE_RETRY_DELAYS_MS = Object.freeze([0, 1000, 2000, 5000, 15000, 30000]);
 export const NPC_STATE_DURABILITY_RETRY_CAP_MS = 30000;
 
 const durabilityQueue = new Map();
 const undurableSnapshots = new Map();
 const writerLocks = new Map();
-const READ_CONCURRENCY_LIMIT = 4;
 const CROSS_TAB_LOCK_LEASE_MS = 15_000;
 const CROSS_TAB_LOCK_ACQUIRE_MS = 5_000;
-let activeReads = 0;
-const readWaiters = [];
-let recoveryGeneration = Date.now() * 1024;
+const writerId = identity.currentWriterId();
 
-function nextRecoveryGeneration() {
-    recoveryGeneration = Math.max(recoveryGeneration + 1, Date.now() * 1024);
-    return recoveryGeneration;
+export const currentWriterId = identity.currentWriterId;
+export const makeNpcStateDataFileName = identity.makeNpcStateDataFileName;
+export const makeNpcStateRecoveryFileName = identity.makeNpcStateRecoveryFileName;
+export { NPC_STATE_FILE_FORMAT, NPC_STATE_FILE_FORMAT_VERSION, bytesToBase64, decodeStateFilePayload, pruneFormPortraitAssetsForState, prunePortraitAssetsForState, prunePortraitAssetsInPlace, retainedPortraitAssetIds };
+export { adoptNpcStateDataFileMetadata, inspectNpcStateDataFile, probeNpcStateDataFilePointer };
+
+export function encodeStateFilePayload(chatKey, state, appVersion = '', metadata = {}) {
+    return encodeStateFilePayloadFile(chatKey, state, appVersion, metadata, writerId);
 }
 
-async function withReadSlot(task) {
-    if (activeReads >= READ_CONCURRENCY_LIMIT) await new Promise(resolve => readWaiters.push(resolve));
-    activeReads += 1;
-    try { return await task(); }
-    finally {
-        activeReads = Math.max(0, activeReads - 1);
-        readWaiters.shift()?.();
-    }
+export function encodeRetiredStateFilePayload(chatKey, reason = 'retired', appVersion = '', metadata = {}) {
+    return encodeRetiredStateFilePayloadFile(chatKey, reason, appVersion, metadata, writerId);
 }
 
 async function withInProcessWriterLock(chatKey, task) {
@@ -44,11 +51,6 @@ async function withInProcessWriterLock(chatKey, task) {
         if (writerLocks.get(key) === queued) writerLocks.delete(key);
     }
 }
-
-const writerId = (() => {
-    try { return globalThis.crypto?.randomUUID?.() || `npc-state-delta-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; }
-    catch { return `npc-state-delta-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; }
-})();
 
 function localStorageLockRecord(storage, key) {
     try {
@@ -104,160 +106,6 @@ async function withWriterLock(chatKey, task) {
     return withLocalStorageWriterLock(chatKey, task);
 }
 
-function fnv1a(text) {
-    let hash = 0x811c9dc5;
-    const input = String(text ?? '');
-    for (let i = 0; i < input.length; i += 1) {
-        hash ^= input.charCodeAt(i);
-        hash = Math.imul(hash, 0x01000193) >>> 0;
-    }
-    return hash.toString(36);
-}
-
-// This page session's writer identity, as stamped on every sidecar it writes.
-export function currentWriterId() {
-    return writerId;
-}
-
-export function makeNpcStateDataFileName(chatKey) {
-    const key = String(chatKey || 'chat');
-    return `npc-state-delta-${fnv1a(key)}${fnv1a(`npc-state-delta\0${[...key].reverse().join('')}`)}.json`;
-}
-
-export function makeNpcStateRecoveryFileName(chatKey, generation = nextRecoveryGeneration()) {
-    const key = String(chatKey || 'chat');
-    const stamp = Math.max(0, Number(generation) || Date.now()).toString(36);
-    const writerText = String(writerId || 'writer');
-    const writerToken = `${fnv1a(writerText)}${fnv1a([...writerText].reverse().join(''))}`;
-    return `npc-state-delta-recovery-${fnv1a(key)}${fnv1a(`npc-state-delta-recovery\0${[...key].reverse().join('')}`)}-${stamp}-${writerToken}.json`;
-}
-
-// One String.fromCharCode call per 32 KB chunk (as vault.js and portrait-file.js do): building each chunk a
-// character at a time cost hundreds of milliseconds per save of a large sidecar on the main thread.
-export function bytesToBase64(bytes) {
-    const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-    const chunkSize = 0x8000;
-    const parts = [];
-    for (let i = 0; i < input.length; i += chunkSize) {
-        parts.push(String.fromCharCode.apply(null, input.subarray(i, Math.min(i + chunkSize, input.length))));
-    }
-    return globalThis.btoa(parts.join(''));
-}
-
-export function retainedPortraitAssetIds(state = {}) {
-    const retained = new Set();
-    const addNpcs = value => {
-        for (const npc of Array.isArray(value) ? value : []) {
-            const id = String(npc?.id || '').trim();
-            if (id) retained.add(id);
-        }
-    };
-    addNpcs(state.npcs);
-    for (const checkpoint of Array.isArray(state.checkpoints) ? state.checkpoints : []) addNpcs(checkpoint?.snapshot?.npcs);
-    addNpcs(state.branchRootSnapshot?.npcs);
-    // The reversible rollback journal can be the only remaining proof that an NPC
-    // existed before a deep tail deletion once byte-budgeted full checkpoints have
-    // been pruned. Keep that NPC's portrait asset reachable until the journal entry
-    // itself expires; the journal stores no portrait binary.
-    for (const entry of Array.isArray(state.rollbackJournal) ? state.rollbackJournal : []) {
-        const npcUndo = entry?.undo?.npcs;
-        addNpcs(npcUndo?.full);
-        for (const change of Array.isArray(npcUndo?.changes) ? npcUndo.changes : []) {
-            if (change?.restore && typeof change.restore === 'object') addNpcs([change.restore]);
-        }
-    }
-    const blocked = new Set((Array.isArray(state.userDismissedGroups) ? state.userDismissedGroups : [])
-        .flatMap(group => [...(Array.isArray(group?.ids) ? group.ids : []), group?.npcId])
-        .map(value => String(value || '').trim()).filter(Boolean));
-    for (const id of blocked) retained.delete(id);
-    return retained;
-}
-
-export function prunePortraitAssetsForState(state = {}) {
-    const assets = state?.portraitAssets && typeof state.portraitAssets === 'object' ? state.portraitAssets : {};
-    const retained = retainedPortraitAssetIds(state);
-    return Object.fromEntries(Object.entries(assets).filter(([id, portrait]) => retained.has(String(id)) && portrait?.dataUrl));
-}
-
-// Form portraits share the main portrait retention rule: they stay while any live, checkpointed
-// or journal-restorable record of that NPC can still show them.
-export function pruneFormPortraitAssetsForState(state = {}) {
-    const assets = state?.formPortraitAssets && typeof state.formPortraitAssets === 'object' ? state.formPortraitAssets : {};
-    const retained = retainedPortraitAssetIds(state);
-    const out = {};
-    for (const [id, forms] of Object.entries(assets)) {
-        if (!retained.has(String(id)) || !forms || typeof forms !== 'object') continue;
-        const kept = Object.entries(forms).filter(([, portrait]) => portrait?.dataUrl).slice(0, 8);
-        if (kept.length) out[id] = Object.fromEntries(kept);
-    }
-    return out;
-}
-
-export function prunePortraitAssetsInPlace(state = {}) {
-    if (!state || typeof state !== 'object') return state;
-    state.portraitAssets = prunePortraitAssetsForState(state);
-    if (state.formPortraitAssets && typeof state.formPortraitAssets === 'object') state.formPortraitAssets = pruneFormPortraitAssetsForState(state);
-    return state;
-}
-
-function compactStateForFile(state) {
-    const snapshot = structuredClone(state || {});
-    snapshot.portraitAssets = prunePortraitAssetsForState(snapshot);
-    snapshot.formPortraitAssets = pruneFormPortraitAssetsForState(snapshot);
-    for (const npc of Array.isArray(snapshot.npcs) ? snapshot.npcs : []) {
-        if (!npc?.id) continue;
-        if (npc.portrait?.dataUrl) snapshot.portraitAssets[npc.id] = structuredClone(npc.portrait);
-        if (snapshot.portraitAssets[npc.id]?.dataUrl && !(isPortraitFileRecord(npc.portrait) && !npc.portrait.dataUrl)) npc.portrait = null;
-    }
-    return snapshot;
-}
-
-export function encodeStateFilePayload(chatKey, state, appVersion = '', metadata = {}) {
-    const payload = {
-        format: NPC_STATE_FILE_FORMAT,
-        formatVersion: NPC_STATE_FILE_FORMAT_VERSION,
-        appVersion: String(appVersion || ''),
-        chatKey: String(chatKey || ''),
-        updatedAt: String(metadata?.updatedAt || new Date().toISOString()),
-        revision: Math.max(0, Math.trunc(Number(metadata?.revision) || 0)),
-        writerId: String(metadata?.writerId || writerId),
-        state: compactStateForFile(state),
-    };
-    return JSON.stringify(payload);
-}
-
-export function encodeRetiredStateFilePayload(chatKey, reason = 'retired', appVersion = '', metadata = {}) {
-    return JSON.stringify({
-        format: NPC_STATE_FILE_FORMAT,
-        formatVersion: NPC_STATE_FILE_FORMAT_VERSION,
-        appVersion: String(appVersion || ''),
-        chatKey: String(chatKey || ''),
-        updatedAt: new Date().toISOString(),
-        revision: Math.max(0, Math.trunc(Number(metadata?.revision) || 0)),
-        writerId: String(metadata?.writerId || writerId),
-        retired: true,
-        retiredAt: new Date().toISOString(),
-        retireReason: String(reason || 'retired').slice(0, 120),
-        // A Detach marker names the verified copy of the bytes it replaced, so any session that
-        // later finds the marker can register that backup instead of the empty marker.
-        ...(metadata?.recoveryPath ? { recoveryPath: String(metadata.recoveryPath), recoveryName: String(metadata.recoveryName || '') } : {}),
-        state: {},
-    }, null, 2);
-}
-
-export function decodeStateFilePayload(text) {
-    let payload;
-    try { payload = JSON.parse(String(text ?? '')); }
-    catch { throw new Error('NPC State Delta data file contains invalid JSON.'); }
-    if (!payload || payload.format !== NPC_STATE_FILE_FORMAT) throw new Error('Not an NPC State Delta chat data file.');
-    if (payload.formatVersion !== NPC_STATE_FILE_FORMAT_VERSION) throw new Error(`Unsupported NPC State Delta data file version: ${payload.formatVersion}.`);
-    if (!payload.state || typeof payload.state !== 'object' || Array.isArray(payload.state)) throw new Error('NPC State Delta data file is missing its state object.');
-    payload.retired = payload.retired === true;
-    payload.revision = Math.max(0, Math.trunc(Number(payload.revision) || 0));
-    payload.writerId = String(payload.writerId || '');
-    return payload;
-}
-
 function retryableWriteError(error) {
     if (['NPC_STATE_WRITE_CONFLICT', 'NPC_STATE_WRITE_CANCELLED'].includes(error?.code)) return false;
     if (error?.code === 'NPC_STATE_LOCK_TIMEOUT') return true;
@@ -271,252 +119,6 @@ function retryableWriteError(error) {
 
 function wait(ms, sleepFn = globalThis.setTimeout) {
     return new Promise(resolve => sleepFn(resolve, Math.max(0, Number(ms) || 0)));
-}
-
-async function uploadPayload({ name, json, fetchFn, headers }) {
-    const data = bytesToBase64(new TextEncoder().encode(json));
-    const response = await fetchFn('/api/files/upload', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ name, data }),
-    });
-    if (!response?.ok) {
-        const detail = typeof response?.text === 'function' ? await response.text() : '';
-        const error = new Error(`NPC State Delta data file write failed${detail ? `: ${detail}` : ''}.`);
-        error.status = Number(response?.status || 0);
-        throw error;
-    }
-    const result = typeof response.json === 'function' ? await response.json() : {};
-    if (!result?.path) throw new Error('NPC State Delta data-file endpoint returned no path.');
-    return result;
-}
-
-// (beta) Whether a file exists, asked without fetching it (SillyTavern's /api/files/verify): true, false,
-// or null when the server cannot say (no such route, an error, an answer of another shape); the caller
-// then reads the file as before. A new chat has no data file yet, and fetching it only to be told so
-// puts a red "404" in the browser console on every new chat.
-export async function dataFileExists(path, { fetchFn = globalThis.fetch, headers = null } = {}) {
-    if (!path || typeof fetchFn !== 'function' || !headers) return null;
-    try {
-        const response = await fetchFn('/api/files/verify', { method: 'POST', headers, body: JSON.stringify({ urls: [path] }) });
-        if (!response?.ok || typeof response.json !== 'function') return null;
-        const result = await response.json();
-        const value = result && typeof result === 'object' ? result[path] : undefined;
-        return typeof value === 'boolean' ? value : null;
-    } catch {
-        return null;
-    }
-}
-
-// (cast portraits) Several files' existence in one request: { path: boolean }, or null when the server cannot say.
-export async function dataFilesExist(paths, { fetchFn = globalThis.fetch, headers = null } = {}) {
-    const list = [...new Set((paths || []).filter(Boolean))];
-    if (!list.length || typeof fetchFn !== 'function' || !headers) return null;
-    try {
-        const response = await fetchFn('/api/files/verify', { method: 'POST', headers, body: JSON.stringify({ urls: list }) });
-        if (!response?.ok || typeof response.json !== 'function') return null;
-        const result = await response.json();
-        if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
-        return Object.fromEntries(list.filter(path => typeof result[path] === 'boolean').map(path => [path, result[path]]));
-    } catch {
-        return null;
-    }
-}
-
-/**
- * (cast portraits) Keeps a picture (a raster data URL) once, as its own user file named by its content, and returns the record
- * { path, type, hash } that names it; null when it is not a stored type, is too big, or the file could not be written (the caller then keeps
- * the picture as it always did). The file is asked about first (dataFileExists: no 404) and written only when absent; nothing is ever deleted.
- */
-export async function savePortraitFile(dataUrl, { fetchFn = globalThis.fetch, headers = null } = {}) {
-    const image = parseImageDataUrl(dataUrl);
-    if (!image || typeof fetchFn !== 'function') return null;
-    const record = portraitFileRecordFor(image.bytes, image.type);
-    if (!record) return null;
-    try {
-        if (await dataFileExists(record.path, { fetchFn, headers: headers || null }) !== true) {
-            const response = await fetchFn('/api/files/upload', {
-                method: 'POST',
-                headers: headers || {},
-                body: JSON.stringify({ name: record.path.slice(record.path.lastIndexOf('/') + 1), data: image.base64 }),
-            });
-            if (!response?.ok) return null;
-        }
-    } catch {
-        return null;
-    }
-    markPortraitFilePresent(record.path);
-    return record;
-}
-
-/** (cast portraits) Asks the server which of these records' files are there and remembers the ones that are gone; returns how many are gone. */
-export async function verifyPortraitFiles(portraits, { fetchFn = globalThis.fetch, headers = null } = {}) {
-    const paths = [...new Set((portraits || []).filter(isPortraitFileRecord).map(portrait => portrait.path))];
-    const answer = await dataFilesExist(paths, { fetchFn, headers });
-    if (!answer) return 0;
-    let gone = 0;
-    for (const [path, exists] of Object.entries(answer)) {
-        if (exists) markPortraitFilePresent(path);
-        else { markPortraitFileMissing(path); gone += 1; }
-    }
-    return gone;
-}
-
-/** (cast portraits) The picture of a file-form record as a data URL (an export carries it), or null when the file is gone or is not the record's bytes. */
-export async function readPortraitFileDataUrl(portrait, { fetchFn = globalThis.fetch } = {}) {
-    if (!isPortraitFileRecord(portrait) || typeof fetchFn !== 'function') return null;
-    try {
-        const response = await fetchFn(portrait.path, { cache: 'no-store' });
-        if (response?.status === 404 || !response?.ok || typeof response.arrayBuffer !== 'function') return null;
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (!bytes.length) return null;
-        const record = portraitFileRecordFor(bytes, portrait.type);
-        return record?.hash === portrait.hash ? dataUrlOfBytes(bytes, portrait.type) : null;
-    } catch {
-        return null;
-    }
-}
-
-const MISSING_FILE = Object.freeze({ revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null });
-
-// (1.10.1) What the last read of each sidecar path found: its ETag and Last-Modified, the file's text and the
-// few fields a boundary check needs. A boundary check runs several times per turn and only needs the revision
-// and writer; when the server's revalidated answer is the same file (304, or the same validators), those come
-// from here instead of reading and parsing the whole file (portraits, checkpoints) on the main thread again.
-// The request itself is unchanged ('no-cache': every check still asks the server), so another tab's or
-// device's write is seen exactly as before. The full state is decoded only when a caller reads `payload`.
-const inspectedFiles = new Map();
-const INSPECTED_FILES_LIMIT = 4;
-
-function responseHeader(response, name) {
-    try { return String(response?.headers?.get?.(name) || ''); } catch { return ''; }
-}
-
-function rememberInspectedFile(path, entry) {
-    inspectedFiles.delete(path);
-    inspectedFiles.set(path, entry);
-    while (inspectedFiles.size > INSPECTED_FILES_LIMIT) inspectedFiles.delete(inspectedFiles.keys().next().value);
-}
-
-function fileMeta(payload) {
-    return {
-        chatKey: String(payload.chatKey || ''),
-        revision: payload.revision,
-        writerId: payload.writerId,
-        retired: Boolean(payload.retired),
-        updatedAtText: String(payload.updatedAt || ''),
-    };
-}
-
-// The inspection result. `payload` is the decoded file: given (a fresh read), or decoded from the remembered
-// text the first time a caller reads it, once per result, so no two callers ever share one decoded object.
-function inspectionResult(meta, text, payload = null) {
-    const parsedUpdatedAt = Date.parse(meta.updatedAtText);
-    const result = {
-        revision: meta.revision,
-        writerId: meta.writerId,
-        exists: true,
-        retired: meta.retired,
-        updatedAt: Number.isFinite(parsedUpdatedAt) ? parsedUpdatedAt : 0,
-    };
-    if (payload) {
-        result.payload = payload;
-        return result;
-    }
-    let decoded = null;
-    Object.defineProperty(result, 'payload', {
-        enumerable: true,
-        configurable: true,
-        get() { return decoded || (decoded = decodeStateFilePayload(text)); },
-        set(value) { decoded = value; },
-    });
-    return result;
-}
-
-// `writtenText`: the exact JSON this session just uploaded to this path. When the server returns those bytes,
-// their fields are the ones written (`writtenMeta`) and the file is not parsed again to learn them.
-async function inspectSidecar(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '', probeHeaders = null, writtenText = null, writtenMeta = null } = {}) {
-    if (!pointer?.path) return { inspected: { ...MISSING_FILE }, updatedAtText: '' };
-    if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file inspection.');
-    const path = pointer.path;
-    if (probeHeaders && await dataFileExists(path, { fetchFn, headers: probeHeaders }) === false) {
-        inspectedFiles.delete(path);
-        return { inspected: { ...MISSING_FILE }, updatedAtText: '' };
-    }
-    // Always revalidated with the server ('no-cache'), never read stale; but an unchanged sidecar
-    // comes back as "304 Not Modified" from SillyTavern's file route instead of re-downloading the
-    // whole file. A boundary check runs several times per turn, which on a slow remote/mobile link
-    // otherwise re-transfers the full dossier (portraits, checkpoints) each time.
-    const response = await withReadSlot(() => fetchFn(path, { method: 'GET', cache: 'no-cache' }));
-    if (response?.status === 404) {
-        inspectedFiles.delete(path);
-        return { inspected: { revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null }, updatedAtText: '' };
-    }
-    const known = inspectedFiles.get(path);
-    const etag = responseHeader(response, 'etag');
-    const lastModified = responseHeader(response, 'last-modified');
-    const unchanged = Boolean(known) && (response?.status === 304
-        || (Boolean(response?.ok) && Boolean(etag) && etag === known.etag && lastModified === known.lastModified));
-    let meta;
-    let text;
-    let payload = null;
-    if (unchanged) {
-        ({ meta, text } = known);
-        try { void response?.body?.cancel?.()?.catch?.(() => {}); } catch { /* the body is simply not read */ }
-        rememberInspectedFile(path, known);
-    } else {
-        if (!response?.ok) {
-            const error = new Error(`NPC State Delta data file revision check failed with HTTP ${response?.status || 'error'}.`);
-            error.status = Number(response?.status || 0);
-            throw error;
-        }
-        text = typeof response.text === 'function' ? await response.text() : '';
-        if (writtenText !== null && writtenMeta && text === writtenText) meta = { ...writtenMeta };
-        else {
-            payload = decodeStateFilePayload(text);
-            meta = fileMeta(payload);
-        }
-        if (etag) rememberInspectedFile(path, { etag, lastModified, text, meta });
-        else inspectedFiles.delete(path);
-    }
-    if (expectedChatKey && meta.chatKey !== String(expectedChatKey)) throw new Error('NPC State Delta data file belongs to a different chat.');
-    return { inspected: inspectionResult(meta, text, payload), updatedAtText: meta.updatedAtText };
-}
-
-// `probeHeaders` (request headers): ask whether the file exists first (dataFileExists) and, when
-// the server says it does not, answer "missing" without fetching it. Used where a missing file is
-// expected (a chat's first look for its file); everywhere else the file is fetched directly.
-export async function inspectNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '', probeHeaders = null } = {}) {
-    return (await inspectSidecar(pointer, { fetchFn, expectedChatKey, probeHeaders })).inspected;
-}
-
-export function adoptNpcStateDataFileMetadata(pointer, inspected) {
-    if (!pointer || typeof pointer !== 'object' || !inspected?.exists) return pointer;
-    pointer.revision = Math.max(0, Math.trunc(Number(inspected.revision) || 0));
-    pointer.writerId = String(inspected.writerId || pointer.writerId || '');
-    pointer.updatedAt = Math.max(0, Number(inspected.updatedAt) || Number(pointer.updatedAt) || Date.now());
-    pointer.retired = Boolean(inspected.retired);
-    return pointer;
-}
-
-async function remoteRevision(pointer, chatKey, fetchFn, probeHeaders = null, written = null) {
-    const { inspected, updatedAtText } = await inspectSidecar(pointer, { fetchFn, expectedChatKey: chatKey, probeHeaders, writtenText: written?.text ?? null, writtenMeta: written?.meta ?? null });
-    return {
-        revision: inspected.revision,
-        writerId: inspected.writerId,
-        exists: inspected.exists,
-        retired: inspected.retired,
-        updatedAtText,
-    };
-}
-
-// A pointer is only a cached route to the deterministic sidecar. A session that hydrated before
-// another session created the file has no pointer, so it must still probe the deterministic path
-// instead of treating "no pointer" as "no canonical file".
-export function probeNpcStateDataFilePointer(chatKey, pointer = null) {
-    if (pointer?.path) return pointer;
-    const name = pointer?.name || makeNpcStateDataFileName(chatKey);
-    return { name, path: `/user/files/${name}` };
 }
 
 async function guardedWriteOnce(job) {
@@ -834,20 +436,4 @@ export async function readNpcStateDataFile(pointer, { fetchFn = globalThis.fetch
     // token before deciding whether a dirty working copy conflicts with the server.
     adoptNpcStateDataFileMetadata(pointer, inspected);
     return inspected.payload;
-}
-
-export async function deleteNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, headers = {} } = {}) {
-    if (!pointer?.path) return false;
-    if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file persistence.');
-    const response = await fetchFn('/api/files/delete', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ path: pointer.path }),
-    });
-    if (response?.status === 404) return false;
-    if (!response?.ok) {
-        const detail = typeof response?.text === 'function' ? await response.text() : '';
-        throw new Error(`NPC State Delta data file delete failed${detail ? `: ${detail}` : ''}.`);
-    }
-    return true;
 }

@@ -19,6 +19,14 @@ Generated 2026-11-07.
 - `src/adapter/timeline.js`: Story Block module definition, restore participant, story-clock link, own prompt keys, diagnostics and host events.
 
 ## Split files
+- `core-relationship-model.js`: Relationship defaults, milestone thresholds and the baseline/caps/impact/delta/progress/milestone normalizers split from `core-relationship.js`.
+- `core-relationship-apply.js`: Relationship inertia, axis selection and the milestone-gated `applyRelationshipDelta` scorer split from `core-relationship.js`.
+- `core-relationship-events.js`: Relationship evidence grounding, event history, duplicate checks and summary calibration split from `core-relationship.js`.
+- `core-relationship-text.js`: Durable concept tokens, grounding coverage, semantic similarity and compact-text helpers split from `core-relationship.js`.
+- `storage-identity.js`: Per-storage-instance writer identity, sidecar path tokens and deterministic data/recovery file names split from `storage.js`.
+- `storage-payload.js`: Sidecar format markers, base64 encoding, portrait-asset pruning and JSON payload encode/decode split from `storage.js`.
+- `storage-files.js`: Sidecar upload/delete/existence calls and cast-portrait user-file helpers split from `storage.js`.
+- `storage-inspection.js`: Sidecar read slots, validator cache, revision inspection and pointer adoption split from `storage.js`.
 - `src/npc-meters-commands.js`: Story-line capture, milestone intake and the hosted npc command handlers split from `src/npc-meters.js`.
 - `src/npc-meters-queries.js`: Read-only npc meter/cast/next/social queries and their screen views split from `src/npc-meters.js`.
 - `src/npc-meters-prompt.js`: The NPC meter prompt line, reminder tail and locked-note redaction split from `src/npc-meters.js`.
