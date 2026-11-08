@@ -1,12 +1,14 @@
 /* NPC State Delta capture catch-up (role: capture-catchup). The quiet Refresh that a one-pass chat gives its most-seen NPCs every
    `narrationCaptureCatchUp` captured replies. It runs on its own schedule and no longer runs the backfill queue (that is started once
-   per reply by scheduleReplyBackfills). One model call per NPC per reply: a person admitted by this reply's capture block is left to
-   the backfill, and an NPC the catch-up takes is skipped by that reply's backfill. Built by runtime-scan.js; nothing here is saved. */
+   per reply by scheduleReplyBackfills). One model call per established NPC per reply: an NPC the catch-up takes is skipped by that
+   reply's backfill. A newly met NPC (a new admission whose backfill has not tried) is the exception: the catch-up's targeted Refresh
+   writes its structured appearance, so it gets the Refresh AND its backfill (never skipped, its queue entry kept). Built by runtime-scan.js; nothing here is saved. */
 
 import { getSettings } from './runtime-settings.js';
+import { latestMessageId } from './runtime-scan-helpers.js';
 
 export function createCatchUpPart(rt, deps) {
-    const { getChatKey, getChatState, isHostSwipeActive, isScanBusy, persist, refreshNpcFromChat } = deps;
+    const { getChatKey, getChatState, isHostSwipeActive, isScanBusy, persist, processPendingBackfills, refreshNpcFromChat } = deps;
     const captureCatchUp = rt.captureCatchUp;
     // chat key -> ids the catch-up has in hand for the current reply (memory only); scheduleReplyBackfills skips them.
     const taken = rt.catchUpTaken ?? (rt.catchUpTaken = new Map());
@@ -20,8 +22,8 @@ export function createCatchUpPart(rt, deps) {
     const CATCH_UP_RETRIES = 20;
 
     const queueEntry = (chatKey, id) => (getChatState(chatKey).pendingBackfills || []).find(item => item?.npcId === id);
-    // A new admission whose backfill has not tried yet is the backfill's; once it has tried and failed, the Refresh may cover the person.
-    const leftToBackfill = (chatKey, id) => { const entry = queueEntry(chatKey, id); return entry?.reason === 'new-admission' && !(Number(entry.attempts) > 0); };
+    // A newly met NPC: a new admission whose backfill has not tried yet. It gets both the Refresh and the backfill.
+    const newlyMet = (chatKey, id) => { const entry = queueEntry(chatKey, id); return entry?.reason === 'new-admission' && !(Number(entry.attempts) > 0); };
 
     /** Counts one captured reply and the NPCs in it; the NPC ids due a catch-up now, or []. */
     function noteCaptureCatchUp(chatKey, npcIds = []) {
@@ -33,9 +35,10 @@ export function createCatchUpPart(rt, deps) {
         captureCatchUp.set(chatKey, entry);
         if (entry.count < every) return [];
         captureCatchUp.delete(chatKey);
-        const due = [...entry.seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, CATCH_UP_TARGETS).map(([id]) => id)
-            .filter(id => !leftToBackfill(chatKey, id));
-        if (due.length) taken.set(chatKey, new Set(due));
+        const due = [...entry.seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, CATCH_UP_TARGETS).map(([id]) => id);
+        // Newly met NPCs are not "taken": their backfill still runs on this reply.
+        const takenIds = due.filter(id => !newlyMet(chatKey, id));
+        if (takenIds.length) taken.set(chatKey, new Set(takenIds));
         return due;
     }
 
@@ -46,14 +49,16 @@ export function createCatchUpPart(rt, deps) {
             else taken.delete(chatKey);
             return;
         }
+        let meetsBackfill = false;
         try {
             for (const id of ids) {
                 if (getChatKey() !== chatKey) return;
                 if (!getChatState(chatKey).npcs.some(npc => npc.id === id && !npc.archived)) continue;
-                if (leftToBackfill(chatKey, id)) continue;
+                const fresh = newlyMet(chatKey, id);
+                if (fresh) meetsBackfill = true;
                 const refreshed = await refreshNpcFromChat(id, { automatic: true });
-                // A Refresh that worked has covered this person; the queued repair would only repeat it.
-                if (refreshed && getChatKey() === chatKey) {
+                // A Refresh that worked has covered an established person; the queued repair would only repeat it. A newly met one keeps its backfill.
+                if (refreshed && !fresh && getChatKey() === chatKey) {
                     const latest = getChatState(chatKey);
                     if ((latest.pendingBackfills || []).some(item => item?.npcId === id)) {
                         latest.pendingBackfills = latest.pendingBackfills.filter(item => item?.npcId !== id);
@@ -62,6 +67,8 @@ export function createCatchUpPart(rt, deps) {
                 }
             }
         } finally { taken.delete(chatKey); }
+        // The reply's own backfill start finds the chat busy while the Refresh runs; a newly met NPC's backfill runs now (one call).
+        if (meetsBackfill && getChatKey() === chatKey) await processPendingBackfills(latestMessageId(true), { limit: 1 });
     }
 
     return { noteCaptureCatchUp, runCaptureCatchUp };

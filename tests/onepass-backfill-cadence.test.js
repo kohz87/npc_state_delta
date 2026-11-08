@@ -128,7 +128,7 @@ test('hosted, catch-up 0: backfills still run, no Refresh', () => {
     assert.equal(r.first.refresh + r.second.refresh, 0);
 });
 
-test('hosted, catch-up 1, new admissions: one model call per NPC; limit 1 per reply; backlog drains, none lost', () => {
+test('hosted, catch-up 1, new admissions: each new NPC gets the Refresh and a backfill; limit 1 backfill per reply; backlog drains, none lost', () => {
     const r = runCalls('cadence-1', true, async ({ reply, settings }) => {
         settings.narrationCaptureCatchUp = 1;
         const mk = n => ({ name: n, present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO });
@@ -138,9 +138,10 @@ test('hosted, catch-up 1, new admissions: one model call per NPC; limit 1 per re
         const three = await reply('The hall is quiet.', { npcs: [] });
         return { one: one.all, two: two.all, three: three.all, queuedAfterTwo, queued: globalThis.NPCStateDelta.getState().pendingBackfills.length };
     });
-    assert.deepEqual(r.one, { scanner: 0, relationship: 0, backfill: 1, refresh: 0 }, 'the new person: the backfill only, no Refresh on top');
+    // Changed (new-NPC rule): a newly met NPC gets the catch-up's targeted Refresh (it writes the structured appearance) AND its backfill.
+    assert.deepEqual(r.one, { scanner: 0, relationship: 0, backfill: 1, refresh: 1 }, 'the new person: the Refresh and the backfill');
     assert.equal(r.two.backfill, 1, 'two new people: one backfill this reply');
-    assert.equal(r.two.refresh, 0, 'both people in the reply are new admissions: left to the backfill, no Refresh');
+    assert.equal(r.two.refresh, 2, 'both people in the reply are new admissions: each gets the Refresh');
     assert.equal(r.queuedAfterTwo, 1, 'the other waits, not lost');
     assert.equal(r.three.backfill, 1, 'the next reply takes it');
     assert.equal(r.queued, 0);
@@ -160,6 +161,31 @@ test('hosted: an NPC the catch-up Refreshes is not also backfilled in that reply
     });
     assert.equal(r.queued, 0, 'the entry is gone');
     assert.equal(r.next.refresh + r.next.backfill, 1, `one call for her, got ${JSON.stringify(r.next)}`);
+});
+
+test('hosted: a newly met NPC gets a targeted Refresh on its first reply and its backfill; the queue entry is kept for the backfill', () => {
+    const r = runCalls('cadence-new', true, async ({ reply, settings }) => {
+        settings.narrationCaptureCatchUp = 1;
+        const first = await reply('Yunyun waves.', { npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] });
+        return { first: first.all, queued: globalThis.NPCStateDelta.getState().pendingBackfills.length };
+    });
+    assert.equal(r.first.refresh, 1, 'the targeted Refresh ran on the first reply ' + JSON.stringify(r));
+    assert.equal(r.first.backfill, 1, 'and so did the backfill ' + JSON.stringify(r));
+    assert.equal(r.queued, 0);
+});
+
+test('hosted: an established NPC still gets one call per reply (Refresh or backfill, never both)', () => {
+    const r = runCalls('cadence-established', true, async ({ reply, settings }) => {
+        settings.narrationCaptureCatchUp = 1;
+        const mk = n => ({ name: n, present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO });
+        await reply('Yunyun waves.', { npcs: [mk('Yunyun')] });
+        const st = globalThis.NPCStateDelta.getState();
+        const yun = st.npcs.find(n => n.name === 'Yunyun');
+        st.pendingBackfills.push({ queueVersion: st.pendingBackfills.queueVersion ?? 1, reason: 'missed-participant', npcId: yun.id, label: 'Yunyun', requestedMessageId: 1, preserveLiveState: true, silent: true, requestedAt: Date.now(), attempts: 0, lastAttemptAt: 0 });
+        const next = await reply('Yunyun nods.', { npcs: [{ name: 'Yunyun', present: true, relationshipImpact: 'none', relationshipDelta: ZERO }] });
+        return { next: next.all };
+    });
+    assert.equal(r.next.refresh + r.next.backfill, 1, `one call, got ${JSON.stringify(r.next)}`);
 });
 
 test('non-hosted: the calls are unchanged (limit 2 per reply, no Refresh)', () => {
