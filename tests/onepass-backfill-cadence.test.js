@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // (batch D) The backfill queue and the capture catch-up Refresh run on separate cadences. Hosted one-pass, the queue runs after every
 // reply (limit 1), whatever `narrationCaptureCatchUp` says, and never makes a second long call on a person the same reply's Refresh
@@ -128,7 +130,7 @@ test('hosted, catch-up 0: backfills still run, no Refresh', () => {
     assert.equal(r.first.refresh + r.second.refresh, 0);
 });
 
-test('hosted, catch-up 1, new admissions: one model call per NPC; limit 1 per reply; backlog drains, none lost', () => {
+test('hosted, catch-up 1, new admissions: each new NPC gets the Refresh and a backfill; limit 1 backfill per reply; backlog drains, none lost', () => {
     const r = runCalls('cadence-1', true, async ({ reply, settings }) => {
         settings.narrationCaptureCatchUp = 1;
         const mk = n => ({ name: n, present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO });
@@ -138,9 +140,10 @@ test('hosted, catch-up 1, new admissions: one model call per NPC; limit 1 per re
         const three = await reply('The hall is quiet.', { npcs: [] });
         return { one: one.all, two: two.all, three: three.all, queuedAfterTwo, queued: globalThis.NPCStateDelta.getState().pendingBackfills.length };
     });
-    assert.deepEqual(r.one, { scanner: 0, relationship: 0, backfill: 1, refresh: 0 }, 'the new person: the backfill only, no Refresh on top');
+    // Changed (new-NPC rule): a newly met NPC gets the catch-up's targeted Refresh (it writes the structured appearance) AND its backfill.
+    assert.deepEqual(r.one, { scanner: 0, relationship: 0, backfill: 1, refresh: 1 }, 'the new person: the Refresh and the backfill');
     assert.equal(r.two.backfill, 1, 'two new people: one backfill this reply');
-    assert.equal(r.two.refresh, 0, 'both people in the reply are new admissions: left to the backfill, no Refresh');
+    assert.equal(r.two.refresh, 2, 'both people in the reply are new admissions: each gets the Refresh');
     assert.equal(r.queuedAfterTwo, 1, 'the other waits, not lost');
     assert.equal(r.three.backfill, 1, 'the next reply takes it');
     assert.equal(r.queued, 0);
@@ -162,6 +165,31 @@ test('hosted: an NPC the catch-up Refreshes is not also backfilled in that reply
     assert.equal(r.next.refresh + r.next.backfill, 1, `one call for her, got ${JSON.stringify(r.next)}`);
 });
 
+test('hosted: a newly met NPC gets a targeted Refresh on its first reply and its backfill; the queue entry is kept for the backfill', () => {
+    const r = runCalls('cadence-new', true, async ({ reply, settings }) => {
+        settings.narrationCaptureCatchUp = 1;
+        const first = await reply('Yunyun waves.', { npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] });
+        return { first: first.all, queued: globalThis.NPCStateDelta.getState().pendingBackfills.length };
+    });
+    assert.equal(r.first.refresh, 1, 'the targeted Refresh ran on the first reply ' + JSON.stringify(r));
+    assert.equal(r.first.backfill, 1, 'and so did the backfill ' + JSON.stringify(r));
+    assert.equal(r.queued, 0);
+});
+
+test('hosted: an established NPC still gets one call per reply (Refresh or backfill, never both)', () => {
+    const r = runCalls('cadence-established', true, async ({ reply, settings }) => {
+        settings.narrationCaptureCatchUp = 1;
+        const mk = n => ({ name: n, present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO });
+        await reply('Yunyun waves.', { npcs: [mk('Yunyun')] });
+        const st = globalThis.NPCStateDelta.getState();
+        const yun = st.npcs.find(n => n.name === 'Yunyun');
+        st.pendingBackfills.push({ queueVersion: st.pendingBackfills.queueVersion ?? 1, reason: 'missed-participant', npcId: yun.id, label: 'Yunyun', requestedMessageId: 1, preserveLiveState: true, silent: true, requestedAt: Date.now(), attempts: 0, lastAttemptAt: 0 });
+        const next = await reply('Yunyun nods.', { npcs: [{ name: 'Yunyun', present: true, relationshipImpact: 'none', relationshipDelta: ZERO }] });
+        return { next: next.all };
+    });
+    assert.equal(r.next.refresh + r.next.backfill, 1, `one call, got ${JSON.stringify(r.next)}`);
+});
+
 test('non-hosted: the calls are unchanged (limit 2 per reply, no Refresh)', () => {
     const r = runCalls('cadence-plain', false, async ({ reply }) => {
         const npcs = Array.from({ length: 4 }, (_, i) => ({ name: `Dockhand ${String.fromCharCode(65 + i)}`, present: true, role: 'dockhand', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }));
@@ -181,4 +209,40 @@ test('an old saved state with pendingBackfills drains one per reply, the 100 cap
         return { sizes };
     });
     assert.deepEqual(r.sizes, [2, 1, 0, 0]);
+});
+
+test('catch-up: every due NPC is held from the reply backfill; a newly met NPC keeps its queue entry and gets its backfill after the Refresh (established ones skipped)', async () => {
+    // The real module in a temp tree whose two imports are small stubs (the real ones need the host).
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nsd-catchup-'));
+    try {
+        fs.copyFileSync(fileURLToPath(new URL('../runtime-catchup.js', import.meta.url)), path.join(dir, 'runtime-catchup.js'));
+        fs.writeFileSync(path.join(dir, 'runtime-settings.js'), 'export const getSettings = () => ({ narrationCaptureCatchUp: 1 });\n');
+        fs.writeFileSync(path.join(dir, 'runtime-scan-helpers.js'), 'export const latestMessageId = () => 5;\n');
+        var { createCatchUpPart } = await import(pathToFileURL(path.join(dir, 'runtime-catchup.js')).href);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    const key = 'chat-x';
+    const state = {
+        npcs: [{ id: 'new1', archived: false }, { id: 'old1', archived: false }],
+        pendingBackfills: [
+            { npcId: 'new1', reason: 'new-admission', attempts: 0 },
+            { npcId: 'old1', reason: 'missed-participant', attempts: 0 },
+        ],
+    };
+    const calls = { refresh: [], backfill: [] };
+    const rt = { captureCatchUp: new Map(), settings: {} };
+    const part = createCatchUpPart(rt, {
+        getChatKey: () => key, getChatState: () => state, isHostSwipeActive: () => false, isScanBusy: () => false, persist() {},
+        refreshNpcFromChat: async id => { calls.refresh.push(id); return true; },
+        processPendingBackfills: async (mid, opts) => { calls.backfill.push(opts); return 0; },
+    });
+    const due = part.noteCaptureCatchUp(key, ['new1', 'old1']);
+    assert.deepEqual([...due].sort(), ['new1', 'old1']);
+    assert.deepEqual([...rt.catchUpTaken.get(key)].sort(), ['new1', 'old1'], 'the reply backfill start skips both');
+    await part.runCaptureCatchUp(key, due);
+    assert.deepEqual(calls.refresh.sort(), ['new1', 'old1'], 'one Refresh each');
+    assert.deepEqual(state.pendingBackfills.map(i => i.npcId), ['new1'], 'the established entry is covered by its Refresh; the new one is kept');
+    assert.equal(calls.backfill.length, 1, 'one backfill start after the Refreshes');
+    assert.equal(calls.backfill[0].limit, 1);
+    assert.deepEqual(calls.backfill[0].skipNpcIds, ['old1'], 'established NPCs are not backfilled again');
+    assert.equal(rt.catchUpTaken.has(key), false, 'the hold is released');
 });
