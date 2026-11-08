@@ -37,7 +37,8 @@ export function createInjectionPart(rt, deps) {
     function namedByPlayerNpcIds(state) {
         const message = pendingPlayerMessage(state);
         if (!message) return [];
-        return (state?.npcs || [])
+        // Hosted, "called in" is judged against the scene's presence, not the stored copy (which can be a scan behind).
+        return (scenePresenceView(state?.npcs || []))
             .filter(npc => npc && !npc.present && !npc.archived && !isTerminalNpcDeath(npc) && npcNamedInText(npc, message, state.npcs))
             .map(npc => npc.id);
     }

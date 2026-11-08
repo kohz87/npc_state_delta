@@ -75,7 +75,7 @@ export function createPublicApiStatePart(deps) {
         branchInheritancePending, maybeInheritKnownBranch, chatHydrationStatus, loadingReconcilePending, scanWorkPending, scanIdle,
         useMessageGate, normalizeRelationshipBaseline, normalizeRelationshipCaps, getSettings, storyBlockCastHtml,
         castEmptyReason, addNpcManually, fillPresentSceneText, stateVersions, latestReplyIndex, viewNpcCopies,
-        hostedMeterView, dossierHostViews, hydrationErrors, portraitFilesVersion, persistedVersions,
+        hostedMeterView, scenePresenceView, dossierHostViews, hydrationErrors, portraitFilesVersion, persistedVersions,
         stateWritePromises, stateWriteTimers, hydratedRevision, hydratedStateMeta, undurableNpcStateSnapshot,
         runFreshMutation, updateNpcAppearance, updateNpcLifeState, setNpcPortrait, setNpcPortraitSeed,
         removeNpcPortrait, flushStateFile, setNpcArchiveStateById, deleteNpcById, storySuiteV2Meters,
@@ -183,7 +183,7 @@ export function createPublicApiStatePart(deps) {
             formPortraits[npcId] = Object.fromEntries(Object.values(forms || {}).filter(portrait => portrait?.dataUrl)
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: viewNpcCopies(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], ...dossierHostViews(state) };
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: viewNpcCopies(scenePresenceView(hostedMeterView(state.npcs))), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], ...dossierHostViews(state) };
     },
     /** (perf) What the dossier panel needs before it draws: the chat and its load state (uiStatus also builds branch diagnostics). */
     dossierViewStatus: () => {
@@ -200,9 +200,9 @@ export function createPublicApiStatePart(deps) {
         const hydration = chatHydrationStatus(key);
         if (key === 'no-chat' || hydration !== 'ready') return JSON.stringify([key, hydration, hydrationErrors.get(key)?.message || null]);
         const state = getChatState(key);
-        const npcs = hostedMeterView(state.npcs);
+        const npcs = scenePresenceView(hostedMeterView(state.npcs));   // hosted: the scene's presence moves the panel too
         return JSON.stringify([key, hydration, Number(stateVersions.get(key) || 0), latestReplyIndex(), getSettings().customFieldNames, portraitFilesVersion(),
-            npcs === state.npcs ? null : npcs.map(npc => npc?.relationship ?? null), dossierHostViews(state)]);
+            npcs === state.npcs ? null : npcs.map(npc => [npc?.relationship ?? null, Boolean(npc?.present)]), dossierHostViews(state)]);
     },
     persistenceStatus: () => {
         const key = getChatKey();
