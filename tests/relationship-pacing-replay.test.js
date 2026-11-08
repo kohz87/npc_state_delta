@@ -35,7 +35,7 @@ test('middle delete: a later reply keeps the numbers and the day count it record
     assert.equal(s.day('oren').meaningful, 1);
 });
 
-test('middle delete of the first event of a new day keeps the surviving event on that day', { todo: 'later ops omit the unchanged day and day-reset counts' }, async () => {
+test('middle delete of the first event of a new day keeps the surviving event on that day', async () => {
     const s = await suite();
     try {
         await s.setDay(1);

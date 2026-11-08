@@ -81,7 +81,7 @@ export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
 // Story Director's reader-only pin for key people (its feature switch is `story-director.key-people`).
 const KEY_PIN_COMMAND = 'keypeople.pin';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.pace', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity', 'npc.catchUp']);
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity', 'npc.catchUp']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.open', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
@@ -201,7 +201,7 @@ export function createStorySuiteV2Adapter({
     const editorPart = createEditorPart(session, deps);
     Object.assign(deps, editorPart);
     const { watchers, pinKeyPerson, pageApi, offerPage } = castUiPart;
-    const { dossierOf, part, sliceEntries, entryFor, keyPeopleAnswer, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView } = queriesPart;
+    const { dossierOf, part, sliceEntries, entryFor, keyPeopleAnswer, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView, sliceNumbers } = queriesPart;
     const { ownPrompt, storyClock, calendarLink, definition, scenePresentNames } = timelinePart;
     const { poll, unhost, check } = connectPart;
     const { editorHtml, readEditor, dossierMeters, eventWatch } = editorPart;
@@ -214,11 +214,6 @@ export function createStorySuiteV2Adapter({
         pageApi,
         /** While hosted: Delta's scanner changes for one NPC → `npc.adjust` (a promise of the result, or null). */
         adjust: ({ name, meters, start, reply, impact } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(typeof impact === 'string' ? { impact } : {}) }, { own: true, background: true }),
-        /** While hosted: what an event of `tier` for `name` at `reply` would count as under the slice's allowance ({ used, skipped }), read only; null when unknown. */
-        paceTier: ({ name, reply, tier } = {}) => {
-            if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
-            try { return session.sdkRef.query('npc.pace', { name, reply, tier }) ?? null; } catch { return null; }
-        },
         /** While hosted: the reader's own values from the dossier editor → `npc.set` (the host's latest reply; headReply). */
         setMeters: ({ name, meters } = {}) => send('npc.set', { name, meters }),
         /** While hosted: stages and notes again for one NPC (after its notes were edited) → `npc.refresh`. */
@@ -230,6 +225,8 @@ export function createStorySuiteV2Adapter({
             return entries ? entryFor(entries, npc) : null;
         },
         sliceView,
+        /** While hosted: what the slice holds for one of Delta's records, { relationship, progress }, or null (no value yet). */
+        sliceNumbers,
         /** Runs the synchronous reads of `fn` against Story Block's state after reply `index` (query { asOf }); nothing is written or moved. */
         at: (index, fn) => {
             const real = session.sdkRef;

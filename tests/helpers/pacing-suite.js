@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHost } from '../vendor/story-block/testkit/index.js';
 import { MODULE_ID, createStorySuiteV2Adapter } from '../../src/storysuite-v2.js';
 import { DEFAULT_RELATIONSHIP_CAPS } from '../../core.js';
-import { normalizeAllowance } from '../../src/relationship-pacing.js';
+import { fromFlatDay, normalizeAllowance } from '../../src/relationship-pacing.js';
 
 export const DAY = 1440;
 
@@ -59,7 +59,8 @@ export async function suite({ records = dossiers(), clock = true, allowance, cal
     const npc = name => host.sdk.query('npc.meters', { name });
     const lastSummary = () => host.store.receipts().map(item => item.receipt).filter(item => item.type === 'npc.line' || /^npc\./.test(item.type ?? '')).at(-1)?.summary
         ?? host.store.receipts().map(item => item.receipt).at(-1)?.summary;
-    const day = name => host.head().domains.npc.npcs[name]?.impactDay;
+    // The stored record is flat (day in every key); the tests read it as { day, reply, counts }.
+    const day = name => fromFlatDay(host.head().domains.npc.npcs[name]?.impactDay) ?? undefined;
     return { host, adapter, delta, say, swipe, setDay, npc, lastSummary, day };
 }
 

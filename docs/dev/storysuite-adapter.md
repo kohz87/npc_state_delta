@@ -12,7 +12,7 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   While hosted it checks every `HOST_ALIVE_MS` (5 s) that the host is still there, and restores the drawer copy
   when it is not. The v1 handshake (`suite-handshake.js`) offers nothing to a v2 host (`storyBlockIsV2`).
 - Registers module `npc-state-delta`: queries `QUERY_NAMES` (`npc.present`, `npc.dossier`, `npc.known`,
-  `npc.portrait`, `npc.meters`, `npc.pace`, `npc.cast`, `npc.next`, `npc.keyAway`, `npc.castMade`, `npc.socialModifier`), commands `COMMAND_NAMES` (`npc.adjust`, `npc.set`,
+  `npc.portrait`, `npc.meters`, `npc.cast`, `npc.next`, `npc.keyAway`, `npc.castMade`, `npc.socialModifier`), commands `COMMAND_NAMES` (`npc.adjust`, `npc.set`,
   `npc.refresh`, `npc.milestone`, `npc.open`, `npc.tick`), the Cast / Dossiers tab and screen (`CAST_SCREEN_ID`,
   widget `CAST_WIDGET`), its settings section, and hooks `diagnostics`, `ownPrompt` and `redactSent`.
 - **`npc` domain** (only numbers, stage and milestone names, ids of unlocked notes; prose stays in NSD's

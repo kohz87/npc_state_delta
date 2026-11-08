@@ -2,11 +2,10 @@
 // npc-meters.js re-exports every public name it exported before. Never imports npc-meters.js.
 import { NPC_DOMAIN, MAX_STAGES_PER_METER, SECRET_TITLE_MAX, NAME_MAX, isObject, isInt, isReplyId, sameReply, clean, own, bandWord, needMet, thresholdReached, stageAt, clamp, intOr } from './npc-meters-config.js';
 import { initialNpcSlice, findNpcKey, meterValue, rungMet, conflictOn } from './npc-meters-slice.js';
-import { spendEvent, pacedTier } from './relationship-pacing.js';
 import { FEATURE_SOCIAL, SOCIAL_QUERY, socialModifier, socialSettings, socialSkill } from './social-check.js';
 
 export function createNpcQueries({
-    call, hooks, resolve, presentNames, featureOn, storedSettings, defsFrom, setupFor, rungsFor, limitsFor, identify, rulesFor, tierAllowance, clockDay,
+    call, hooks, resolve, presentNames, featureOn, storedSettings, defsFrom, setupFor, rungsFor, limitsFor, identify, rulesFor,
 }) {
     // ---- queries ----
 
@@ -21,6 +20,7 @@ export function createNpcQueries({
         ...(record.disposition ? { disposition: record.disposition } : {}),
         // The window's reply by its index (as before record IDs): `at` beside a record ID.
         ...(isInt(record.turn?.at) ? { reply: record.turn.at } : isInt(record.turn?.reply) ? { reply: record.turn.reply } : {}),
+        ...(isObject(record.progress) && Object.keys(record.progress).length ? { progress: { ...record.progress } } : {}),
         ...(isObject(record.milestones) && Object.keys(record.milestones).length ? { milestones: { ...record.milestones } } : {}),
         ...(rungs.find(step => step.key === record.rank) ? { rank: rungs.find(step => step.key === record.rank).name } : {}),
     });
@@ -126,21 +126,6 @@ export function createNpcQueries({
     const presentKeys = npcs => new Set(presentNames().map(name => findNpcKey(npcs, [name, ...(resolve(name)?.aliases ?? [])])).filter(Boolean));
 
     const queries = {
-        /**
-         * npc.pace({ name, reply, tier }) → { used, skipped } | null: what an event of `tier` for that person at that reply
-         * would count as under today's allowance (relationship-pacing.js spendEvent), read only: nothing is counted. Delta's
-         * own pass asks it so its stored numbers use the tier the slice will use. Null: not paced (no tier, no person yet is
-         * still answered from a zero count).
-         */
-        'npc.pace'(state, args = {}) {
-            const tier = pacedTier(args?.tier);
-            if (!tier || !isInt(args?.reply)) return null;
-            const { npcs } = sliceOf(state);
-            const who = typeof args.name === 'string' ? identify(npcs, args.name) : null;
-            const record = who && Object.hasOwn(npcs, who.key) ? npcs[who.key] : null;
-            const spent = spendEvent(record?.impactDay, { tier, reply: args.reply, clockDay: clockDay(args.reply), allowance: tierAllowance() });
-            return { used: spent.used, skipped: spent.skipped };
-        },
         /**
          * npc.meters({ name }) → { key, name, meters, stages, unlocked, disposition?, reply?,
          * milestones?, rank? } | null; without a name, every entry (in key order). Meters are filled

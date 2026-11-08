@@ -5,7 +5,7 @@ import { clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KE
 import { isKey, memoryKey, RECENT_REPLIES } from './key-people.js';
 import { CAST_KEY, metWithEntry } from './cast-dossier.js';
 import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
-import { impactDayProblems } from './relationship-pacing.js';
+import { flatDayProblems } from './relationship-pacing.js';
 
 /** The slice of a chat with no NPC meters yet. */
 export function initialNpcSlice() {
@@ -146,7 +146,7 @@ export function validateNpcSlice(slice) {
                 errors.push(`${where} has an unusable record of part-points.`);
             }
         }
-        if (record.impactDay !== undefined) for (const problem of impactDayProblems(record.impactDay)) errors.push(`${where}'s record of the day's events ${problem}.`);
+        if (record.impactDay !== undefined) for (const problem of flatDayProblems(record.impactDay)) errors.push(`${where}'s record of the day's events ${problem}.`);
         if (record.held !== undefined) {
             if (!Array.isArray(record.held) || record.held.length > MAX_UNLOCKED || record.held.some(id => typeof id !== 'string' || !id || id.length > 40)
                 || new Set(record.held).size !== record.held.length) errors.push(`${where} has an unusable list of shut notes.`);

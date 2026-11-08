@@ -3,11 +3,11 @@
 // no randomness. The story day is given in; the count lives on the record (`impactDay`), written in the same
 // change as the move it paces, so a replay, a rebuild, a swipe and a Re-read give the live values.
 //
-//   impactDay = { day, reply, ordinary, meaningful, major, extreme }
+//   impactDay = { day, reply, ordinary, meaningful, major, extreme }   (flat on the slice: see toFlatDay)
 //   day    the story day the counts are for: the clock before `reply` (its own time lines cannot refresh it)
 //   reply  the reply that fixed `day` (its record ID or index, as `turn.reply`); later events of it reuse `day`
 //
-// Used by: src/npc-meters.js (a story line and a forwarded scanner change, counted on the slice record) and
+// Used by: src/npc-meters.js (spendFlatEvent: a story line and a forwarded scanner change, counted on the slice record) and
 // src/relationship-pass.js (Delta alone, counted on Delta's own record). Never imports either of them. The hosted-only
 // words and cut of a held event are in src/npc-meters-pacing.js.
 import { DEFAULT_RELATIONSHIP_CAPS, LEGACY_RELATIONSHIP_CAPS, normalizeRelationshipCaps } from '../core-relationship-model.js';
@@ -52,6 +52,39 @@ export function impactDayProblems(value) {
     return errors;
 }
 
+// On the hosted slice the same record is stored FLAT, with the day in every key: { reply, 'd12:ordinary': 1, 'd12:meaningful': 0, ... }.
+// Story Block replays stored ops, and an op holds only the fields that changed (Story_block src/v2/ops/diff.js), so a `day` field
+// that did not change would be missing from a later event's op and a surviving event could be counted on the day before. A key that
+// names its day carries it in whatever op wrote it; the day in force is the newest one named, and an old day's keys are dropped.
+const FLAT_KEY = /^d(-?\d{1,9}):(ordinary|meaningful|major|extreme)$/;
+
+/** The flat record of a spendEvent `next` ({ day, reply, counts }): every tier's count for that day, and the reply. */
+export function toFlatDay(next) {
+    return { reply: next.reply, ...Object.fromEntries(PACING_TIERS.map(tier => [`d${next.day}:${tier}`, next[tier]])) };
+}
+
+/** A stored flat record as spendEvent reads it ({ day, reply, counts }), or null (none, unusable, or no day named). */
+export function fromFlatDay(value) {
+    if (!value || typeof value !== 'object' || flatDayProblems(value).length) return null;
+    const days = Object.keys(value).map(key => FLAT_KEY.exec(key)).filter(Boolean).map(match => Number(match[1]));
+    if (!days.length) return null;
+    const day = Math.max(...days);
+    return { day, reply: value.reply, ...Object.fromEntries(PACING_TIERS.map(tier => [tier, value[`d${day}:${tier}`] ?? 0])) };
+}
+
+/** Problems with a stored flat record ([] when fine). */
+export function flatDayProblems(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return ['is not a record'];
+    const errors = [];
+    if (value.reply !== undefined && !(typeof value.reply === 'string' ? value.reply.length > 0 && value.reply.length <= 120 : isInt(value.reply) && value.reply >= 0)) errors.push('has no reply');
+    for (const [key, count] of Object.entries(value)) {
+        if (key === 'reply') continue;
+        if (!FLAT_KEY.test(key)) errors.push(`has an unknown field "${key}"`);
+        else if (!isInt(count) || count < 0 || count > 1000) errors.push(`has an unusable count in "${key}"`);
+    }
+    return errors;
+}
+
 /**
  * One event of `tier` for the NPC whose record holds `prior` (its stored impactDay, if any).
  *   reply     the reply the event belongs to (null: nothing is paced)
@@ -78,6 +111,12 @@ export function spendEvent(prior, { tier, reply, clockDay, allowance }) {
     // Unlimited tiers can be used indefinitely; keep their persisted count valid and still above every finite allowance.
     if (used) counts[used] = Math.min(1000, counts[used] + 1);
     return { used, next: { day, reply, ...counts }, skipped };
+}
+
+/** spendEvent for the slice's flat record: `prior` is the stored flat record, `next` the flat record to store. */
+export function spendFlatEvent(prior, args) {
+    const spent = spendEvent(fromFlatDay(prior), args);
+    return spent.next ? { ...spent, next: toFlatDay(spent.next) } : spent;
 }
 
 // 1.14 moved the default points per event from 1 / 2 / 5 / 10 to 1 / 2 / 3 / 6, and the default impact-tier criteria with them. A

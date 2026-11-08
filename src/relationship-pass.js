@@ -20,6 +20,9 @@ import {
     relationshipChangeReasonGrounded,
     relationshipEventMessage,
     relationshipHistoryLooksDuplicate,
+    normalizeRelationshipBaseline,
+    normalizeRelationshipMilestones,
+    normalizeRelationshipProgress,
     relationshipSummaryConsistent,
     stampChangedFields,
 } from '../core.js';
@@ -217,7 +220,7 @@ export function stampNpcChanges(npc, before, { turn, message = null, storyDay = 
 }
 
 // `pace`: { allowance, day } while Delta works alone (src/relationship-pacing.js: the events each person can have per story day,
-// counted on the dossier's own `impactDay`); { used(npc, tier, reply) → { used, skipped } | null } while hosted (the slice counts; the pass applies its tier, read only); null with no story day.
+// counted on the dossier's own `impactDay`); null while hosted (the slice counts, and adoptSliceRelationship sets Delta's numbers from it) or with no story day.
 export function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessageId, report = null, pace = null) {
     if (!decisions?.size) return state;
     for (const [id, decision] of decisions) {
@@ -234,12 +237,7 @@ export function applyFocusedRelationshipDecisions(state, decisions, caps, source
         });
         const validReason = !requestedHasDelta || (relationshipChangeReasonGrounded(decision.relationshipChangeReason, '') && !duplicateAward);
         let impact = validReason ? decision.relationshipImpact : 'none';
-        if (pace?.used && validReason && requestedHasDelta) {
-            // Hosted: the slice counts the event when it is forwarded; read its tier now (read only) and apply this pass with it.
-            const tier = String(impact ?? '').trim().toLowerCase();
-            const spent = Number.isInteger(sourceMessageId) ? pace.used(npc, tier, sourceMessageId) : null;
-            if (spent?.skipped?.length) impact = spent.used ?? 'none';
-        } else if (pace && validReason && requestedHasDelta) {
+        if (pace && validReason && requestedHasDelta) {
             const spent = spendEvent(npc.impactDay, { tier: String(impact ?? '').trim().toLowerCase(), reply: Number.isInteger(sourceMessageId) ? sourceMessageId : null, clockDay: pace.day, allowance: pace.allowance });
             if (spent.next) npc.impactDay = spent.next;
             if (spent.skipped.length) impact = spent.used ?? 'none';
@@ -308,4 +306,20 @@ export function applyFocusedRelationshipDecisions(state, decisions, caps, source
         stampNpcChanges(npc, before, { turn: state.turn, message: Number.isInteger(sourceMessageId) ? sourceMessageId : null });
     }
     return state;
+}
+
+// While hosted the slice is the one truth for a person's relationship numbers. After a scan's changes were forwarded, the record
+// takes the slice's four numbers and part-points (`slice`: { relationship, progress } from the adapter's sliceNumbers); the milestones
+// that still hold at those numbers are kept as they were written and the rest follow the numbers. The event history, the last change
+// and the summary keep what the scanner said. → true when the record changed.
+export function adoptSliceRelationship(npc, slice) {
+    if (!npc || !slice?.relationship) return false;
+    const relationship = normalizeRelationshipBaseline(slice.relationship);
+    const progress = normalizeRelationshipProgress(slice.progress);
+    const holds = entry => entry.inferred !== true && Math.sign(relationship[entry.axis]) === entry.polarity && Math.abs(relationship[entry.axis]) > entry.threshold;
+    const milestones = normalizeRelationshipMilestones(normalizeRelationshipMilestones(npc.relationshipMilestones, DEFAULT_RELATIONSHIP, { inferFromRelationship: false }).filter(holds), relationship);
+    const next = { relationship, relationshipProgress: progress, relationshipMilestones: milestones };
+    if (Object.keys(next).every(key => JSON.stringify(npc[key]) === JSON.stringify(next[key]))) return false;
+    Object.assign(npc, next);
+    return true;
 }

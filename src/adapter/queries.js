@@ -242,8 +242,6 @@ export function createQueriesPart(session, deps) {
         },
         /** npc.meters({ name }) → { key, name, meters, stages, unlocked, … } | null; no name: every entry. */
         'npc.meters': (state, args) => part.queries['npc.meters'](state, args ?? {}),
-        /** npc.pace({ name, reply, tier }) → { used, skipped } | null: what an event of that tier would count as under the allowance, read only. */
-        'npc.pace': (state, args) => part.queries['npc.pace'](state, args ?? {}),
         /** npc.cast() → the slice's NPCs with their bars, ladder line and locked-note teasers, present first (the NPC card). */
         'npc.cast': (state, args) => castFor(state, args),
         /** npc.next({ name }) → the NPC's ladder from here: { rank, next, risk, text } ("what's missing"), or null. */
@@ -317,8 +315,19 @@ export function createQueriesPart(session, deps) {
         return changed ? out : npcs;
     }
 
+    /**
+     * What the slice holds for one of Delta's records, { relationship, progress } (the four numbers and the part-points), or
+     * null (not hosted, no entry for that person yet): the one truth the sidecar is set from after a scan.
+     */
+    function sliceNumbers(npc) {
+        if (!session.hosted || !npc || typeof npc !== 'object') return null;
+        const entries = sliceEntries();
+        const entry = entries?.length ? entryFor(entries, npc) : null;
+        return entry ? { relationship: relationshipOf(entry, npc.relationship), progress: { ...(entry.progress ?? {}) } } : null;
+    }
+
     return {
         warn, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
-        entryFor, queries, ...director, send, sliceView,
+        entryFor, queries, ...director, send, sliceView, sliceNumbers,
     };
 }

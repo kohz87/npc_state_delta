@@ -32,4 +32,3 @@ export function cutToTier(changes, used, caps, value) {
         return { ...change, value: step };
     });
 }
-

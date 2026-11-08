@@ -72,7 +72,7 @@ import { SETTINGS_DEFAULTS, SETTINGS_SCHEMA } from './npc-meters-schema.js';
 import { createNpcCommands } from './npc-meters-commands.js';
 import { createNpcQueries } from './npc-meters-queries.js';
 import { createNpcPrompt } from './npc-meters-prompt.js';
-import { normalizeAllowance, pacedTier, spendEvent } from './relationship-pacing.js';
+import { normalizeAllowance, pacedTier, spendFlatEvent } from './relationship-pacing.js';
 import { cutToTier, pacingNote } from './npc-meters-pacing.js';
 export { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, BUILT_IN_RANGE, CUSTOM_RANGE, MAX_CUSTOM_METERS, MAX_NPCS, MAX_METERS_PER_NPC, MAX_STAGES_PER_METER, MAX_SECRETS, MAX_GENERATED_SECRETS, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, MAX_TRACKS, MAX_BANDS, MAX_NEEDS, DEFAULT_CHANGE_CAP, MAX_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, SECRET_WHEN_MAX, NOTE_SOURCES, MILESTONE_MAX, DESCRIBE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURES, replyKey, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, parseBands, bandWord, parseNeeds, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
 export { normalizeSecrets, secretId, normalizeGeneratedSecrets, secretsToLines, secretsFromLines, limitsToLines, limitsFromLines } from './npc-meters-secrets.js';
@@ -336,7 +336,7 @@ export function createNpcPart(hooks = {}) {
         // Pacing (relationship-pacing.js): one event per line or scanner change, counted once whatever number of meters it names.
         // A story line (`impact`) and a forwarded scanner change (`scanTier`) share the record's count; a change with neither is not paced.
         const asked = impact?.tier ?? pacedTier(scanTier);
-        const spent = asked && mine.length && limit ? spendEvent(record.impactDay, { tier: asked, reply: replyKey(reply, reply), clockDay: clockDay(at), allowance: tierAllowance() }) : null;
+        const spent = asked && mine.length && limit ? spendFlatEvent(record.impactDay, { tier: asked, reply: replyKey(reply, reply), clockDay: clockDay(at), allowance: tierAllowance() }) : null;
         if (spent?.next) record.impactDay = spent.next;
         const pace = spent ? pacingNote(asked, spent.used, spent.skipped) : '';
         let stepped = mine;

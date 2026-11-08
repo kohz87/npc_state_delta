@@ -6,7 +6,7 @@ import { validateNpcSlice } from '../src/npc-meters.js';
 import { DEFAULT_RELATIONSHIP_CAPS, normalizeNpcRecord } from '../core.js';
 import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
-import { DEFAULT_ALLOWANCE, impactDayProblems, normalizeAllowance, pacingDefaults, spendEvent } from '../src/relationship-pacing.js';
+import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent } from '../src/relationship-pacing.js';
 import { cutToTier, pacingNote } from '../src/npc-meters-pacing.js';
 import { DAY, dossiers, suite, major } from './helpers/pacing-suite.js';
 
@@ -78,6 +78,13 @@ test('a downgraded move is cut to the used tier\'s points and stops on a gate th
     assert.deepEqual(cut.map(change => change.value), [1, 2, -2], 'trust 49 stops on the gate at 50 (it needs a major); the others are held to 2');
     assert.deepEqual(cutToTier([{ meter: 'trust', value: 3 }], 'major', caps, () => 49).map(change => change.value), [3], 'a major may cross 50');
     assert.deepEqual(cutToTier([{ meter: 'loyalty', value: 3 }], 'meaningful', caps, () => 49).map(change => change.value), [2], 'custom meters have the tier cap, not relationship gates');
+    const flat = toFlatDay({ day: 3, reply: 'a', ordinary: 1, meaningful: 0, major: 0, extreme: 0 });
+    assert.deepEqual(flat, { reply: 'a', 'd3:ordinary': 1, 'd3:meaningful': 0, 'd3:major': 0, 'd3:extreme': 0 });
+    assert.deepEqual(fromFlatDay(flat), { day: 3, reply: 'a', ordinary: 1, meaningful: 0, major: 0, extreme: 0 });
+    assert.deepEqual(fromFlatDay({ reply: 'b', 'd2:ordinary': 3, 'd4:meaningful': 1 }), { day: 4, reply: 'b', ordinary: 0, meaningful: 1, major: 0, extreme: 0 }, 'the newest day named is in force; a missing key is zero');
+    assert.deepEqual(flatDayProblems(flat), []);
+    assert.ok(flatDayProblems({ reply: 'a', 'd3:major': -1, day: 3 }).length >= 2);
+    assert.equal(fromFlatDay({ reply: 'a' }), null);
     assert.deepEqual(impactDayProblems({ day: 3, reply: 'a', ordinary: 1, meaningful: 0, major: 0, extreme: 0 }), []);
     assert.ok(impactDayProblems({ day: 3, reply: 'a', ordinary: -1, meaningful: 0, major: 0, extreme: 0, sneaky: 1 }).length >= 2);
 });
@@ -370,7 +377,7 @@ for (const seed of [3, 11, 29]) {
             assert.equal(JSON.stringify(s.host.head()), head, `${label}: replay equals rebuild`);
             for (const record of Object.values(s.host.head().domains.npc.npcs)) {
                 if (!record.impactDay) continue;
-                const { ordinary, meaningful, major, extreme } = record.impactDay;
+                const { ordinary, meaningful, major, extreme } = fromFlatDay(record.impactDay);
                 assert.ok(major <= 1 && meaningful <= 1 && extreme <= 1 && ordinary <= 3, `${label}: counts stay within the allowance: ${JSON.stringify(record.impactDay)}`);
             }
         }
