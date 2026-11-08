@@ -132,6 +132,8 @@ export function createPublicApiStatePart(deps) {
     stateFailed: () => chatHydrationStatus() === 'error',
     stateLoading: () => chatHydrationStatus() === 'loading',
     scanActive: () => scanWorkPending(),
+    // Story Director's "still reading the newest reply": scanActive, plus a reply held while the chat loads (its receipt has no scan intent yet).
+    pageBusy: () => scanWorkPending() || loadingReconcilePending(),
     scanIdle: ms => scanIdle(ms),
     // History replay (src/storysuite-participant/history-replay.js reads these): the boundaries between the engine and the live scan path.
     replay: createReplayBoundaries(deps),
