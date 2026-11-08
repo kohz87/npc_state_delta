@@ -21,8 +21,35 @@ export function createPageApi(session, deps, renderCast, watchers) {
         }
         return cells.length;
     }
+    // busy(): Delta still has work for the open chat's newest reply (a scan running, due, queued or deferred, or the reply held while the chat
+    // loads; the runtime's pageBusy, no state copied). There is no gap in Delta after MESSAGE_RECEIVED: the listener takes its scan intent
+    // synchronously; only the host's time before that event is invisible to it. While it reads true, one cheap check every BUSY_POLL_MS tells the
+    // onChange listeners once when it turns false: a scan that changed no card dispatches no cast event, and the listeners must still redraw.
+    const BUSY_POLL_MS = 250;
+    let busyPoll = null;
+    function busyNow() {
+        if (!session.hosted || !enabled()) return false;
+        try { return runtime()?.pageBusy?.() === true; } catch { return false; }
+    }
+    function watchBusy() {
+        if (busyPoll !== null) return;
+        busyPoll = setTimeout(() => {
+            busyPoll = null;
+            if (busyNow()) return watchBusy();
+            for (const fn of [...watchers]) {
+                try { fn(); } catch (error) { warn('Story Suite v2 cast listener failed', error); }
+            }
+        }, BUSY_POLL_MS);
+        busyPoll?.unref?.();
+    }
     const pageApi = Object.freeze({
-        version: 1,
+        version: 2,
+        /** True while Delta has not finished reading the newest reply of the open chat; false when hydrated and idle, off or not hosted. */
+        busy() {
+            const on = busyNow();
+            if (on) watchBusy();
+            return on;
+        },
         /** True while Delta is hosted, loaded and on: its cards can be drawn. */
         available: () => session.hosted && Boolean(runtime()) && enabled(),
         /** Draws the present cast's cards and meters into `el`; → how many present cards it drew (0: none, or not available). */

@@ -16,6 +16,7 @@ import {
 import { dossierRowNodes } from '../story-block-tabs.js';
 import { dossierIndexProjection, filterDossierIndex } from '../dossier-ui.js';
 import { fakeRoot } from './helpers/fake-dom.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // ---- a small DOM: elements keep their children, classes, attributes and text. A root's innerHTML is the markup it was
 // given plus its children serialised, so a test reads what a reader sees; the present cells it was given are found by
@@ -120,6 +121,7 @@ const NPCS = [
 ];
 function fakeDelta() {
     const opened = [];
+    const work = { received: false, queued: false, running: false, deferred: false };
     let present = ['npc_mira'];
     let revision = 1;
     const api = {
@@ -131,8 +133,10 @@ function fakeDelta() {
         dossierRevision: () => `chat|${revision}`,
         getDossierState: () => ({ npcs: NPCS.map(npc => ({ ...npc })), portraitAssets: {} }),
         getNpc: id => NPCS.find(npc => npc.id === id) ?? null,
+        // the runtime's pageBusy: scan work (running / due / queued / deferred) or a reply held while the chat loads
+        pageBusy: () => work.running || work.queued || work.deferred || work.received,
     };
-    return { api, opened, setPresent: ids => { present = ids; revision += 1; } };
+    return { api, opened, work, setPresent: ids => { present = ids; revision += 1; } };
 }
 function fakeSdk({ world = false } = {}) {
     return {
@@ -234,7 +238,7 @@ test('the page API: on the page while the adapter runs; draws the present cards 
     const { doc, page, adapter } = await setup({ world: true });
     const api = page[PAGE_API];
     assert.equal(api, adapter.pageApi);
-    assert.equal(api.version, 1);
+    assert.equal(api.version, 2);
     assert.equal(api.available(), true);
     const el = element(doc);
     const asked = [];
@@ -303,4 +307,51 @@ test('a present card: the stage is set on its name line, the NPC\'s meters are i
     assert.ok(bars, 'the meters sit in the card');
     assert.match(bars.serialize(), /role="meter"[^>]*aria-valuenow="40"/);
     assert.doesNotMatch(bars.serialize(), /<b>|<i>/, 'no markup from the rank or the name');
+});
+
+const later = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('page API busy(): false idle; true for a held reply, a queued scan, a running scan and deferred work; false when done; version 2', async () => {
+    const { page, delta, adapter } = await setup({ world: true });
+    const api = page[PAGE_API];
+    assert.equal(api.version, 2);
+    assert.equal(api.busy(), false, 'idle');
+    for (const kind of ['received', 'queued', 'running', 'deferred']) {
+        delta.work[kind] = true;
+        assert.equal(api.busy(), true, kind);
+        delta.work[kind] = false;
+        assert.equal(api.busy(), false, `${kind} done`);
+    }
+    delta.api.pageBusy = () => { throw new Error('boom'); };
+    assert.equal(api.busy(), false, 'a failing runtime reads as not busy');
+    delete delta.api.pageBusy;
+    assert.equal(api.busy(), false, 'an older Delta without pageBusy');
+    adapter.stop();
+});
+
+test('page API busy(): not hosted or off reads false; onChange fires once when it turns false, with no card changed', async () => {
+    const off = await setup({ hostValue: null });
+    off.delta.work.running = true;
+    assert.equal(off.page[PAGE_API].busy(), false, 'not hosted');
+    off.adapter.stop();
+
+    const { page, delta, adapter } = await setup({ world: true });
+    const api = page[PAGE_API];
+    let calls = 0;
+    api.onChange(() => { calls += 1; });
+    delta.work.running = true;
+    assert.equal(api.busy(), true);
+    assert.equal(api.busy(), true, 'asked again: still one check pending');
+    await later(300);
+    assert.equal(calls, 0, 'still busy: nobody told');
+    delta.work.running = false;
+    await later(300);
+    assert.equal(calls, 1, 'done: told once, though no cast event came');
+    await later(300);
+    assert.equal(calls, 1, 'and no more');
+    adapter.stop();
+});
+
+test('the runtime\'s pageBusy is the scan-work condition plus the reply held while the chat loads', () => {
+    assert.match(runtimeSource(), /pageBusy: \(\) => scanWorkPending\(\) \|\| loadingReconcilePending\(\)/);
 });
