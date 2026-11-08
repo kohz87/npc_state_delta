@@ -4,8 +4,7 @@
 // change as the move it paces, so a replay, a rebuild, a swipe and a Re-read give the live values.
 //
 //   impactDay = { day, reply, ordinary, meaningful, major, extreme }
-//   day    the story day the counts are for: the clock at the START of the first event of `reply` (a time line
-//          later in the same reply cannot refresh the allowance it is using)
+//   day    the story day the counts are for: the clock before `reply` (its own time lines cannot refresh it)
 //   reply  the reply that fixed `day` (its record ID or index, as `turn.reply`); later events of it reuse `day`
 //
 // Used by: src/npc-meters.js (a story line and a forwarded scanner change, counted on the slice record) and
@@ -76,7 +75,8 @@ export function spendEvent(prior, { tier, reply, clockDay, allowance }) {
         if (room === null || room === undefined || counts[name] < room) { used = name; break; }
         skipped.unshift(name);
     }
-    if (used) counts[used] += 1;
+    // Unlimited tiers can be used indefinitely; keep their persisted count valid and still above every finite allowance.
+    if (used) counts[used] = Math.min(1000, counts[used] + 1);
     return { used, next: { day, reply, ...counts }, skipped };
 }
 

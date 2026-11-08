@@ -90,6 +90,7 @@ export { FEATURE_SOCIAL, SOCIAL_QUERY };
  *   caps()            → Delta's impact-tier caps { ordinary, meaningful, major, extreme } (a story line's step is held to its tier's)
  *   allowance()       → the reader's events per story day { ordinary, meaningful, major, extreme } (null: no limit; relationship-pacing.js)
  *   calendarOwn()     → true while the reader keeps the calendar in Delta (then there is no story day to count on)
+ *   startTime(index)  → story-clock minutes before that reply (null when unavailable)
  *   secretRules(name) → that dossier's notes as [{ id, meter?, at?, when?, title? }] (never their text)
  *   secretTexts(name, ids) → [{ id, text }] for those notes (the tail and screens only)
  *   setup(name, labels) → that dossier's meter setup { track, limits } (the editor's)
@@ -119,18 +120,15 @@ export function createNpcPart(hooks = {}) {
         const value = call(hooks.caps, null);
         return isObject(value) ? normalizeRelationshipCaps(value) : null;
     };
-    // The events-per-day allowance (null when the host gives none: no limit) and the story day at this point of the
-    // reply (Story Director's clock, as npc.tick reads it; null: no clock, or the reader keeps the calendar in Delta).
+    // The events-per-day allowance and the story day before the reply (null: no clock, or Delta owns the calendar).
     const tierAllowance = () => {
         const value = call(hooks.allowance, null);
         return isObject(value) ? normalizeAllowance(value) : null;
     };
-    const clockDay = ctx => {
-        if (call(hooks.calendarOwn, false) === true || typeof ctx?.time !== 'function') return null;
-        try {
-            const minutes = ctx.time();
-            return isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
-        } catch { return null; }
+    const clockDay = at => {
+        if (call(hooks.calendarOwn, false) === true) return null;
+        const minutes = call(hooks.startTime, null, at);
+        return isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
     };
     const rulesFor = (name, aliases = []) => {
         const value = call(hooks.secretRules, [], name, aliases);
@@ -338,7 +336,7 @@ export function createNpcPart(hooks = {}) {
         // Pacing (relationship-pacing.js): one event per line or scanner change, counted once whatever number of meters it names.
         // A story line (`impact`) and a forwarded scanner change (`scanTier`) share the record's count; a change with neither is not paced.
         const asked = impact?.tier ?? pacedTier(scanTier);
-        const spent = asked && mine.length && limit ? spendEvent(record.impactDay, { tier: asked, reply: replyKey(reply, reply), clockDay: clockDay(ctx), allowance: tierAllowance() }) : null;
+        const spent = asked && mine.length && limit ? spendEvent(record.impactDay, { tier: asked, reply: replyKey(reply, reply), clockDay: clockDay(at), allowance: tierAllowance() }) : null;
         if (spent?.next) record.impactDay = spent.next;
         const pace = spent ? pacingNote(asked, spent.used, spent.skipped) : '';
         let stepped = mine;

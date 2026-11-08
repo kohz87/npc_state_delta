@@ -13,6 +13,8 @@ import {
     suppressPrimaryRelationshipForFocusedDecisions,
 } from '../src/relationship-pass.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { createHost } from './vendor/story-block/testkit/index.js';
+import { createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
 
 // Cleanup step 10: the focused relationship pass moved from index.js to src/relationship-pass.js unchanged.
 
@@ -64,9 +66,52 @@ test('a decided NPC\'s primary relationship output is zeroed; matching by name r
     assert.equal(unmatched.npcs[0].relationshipImpact, 'meaningful', 'no dossiers, no name match');
 });
 
+test('a scanner decision can accumulate fractional progress without a visible meter change', () => {
+    const npc = normalizeNpcRecord({ id: 'npc_mira', name: 'Mira', relationship: { trust: 60 } });
+    const state = { turn: 4, npcs: [npc] };
+    const decision = { relationshipImpact: 'ordinary', relationshipDelta: { trust: 1 },
+        relationshipEvidence: { trust: 'Ari offered Mira shelter.' }, relationshipChangeReason: 'Ari offered Mira shelter.' };
+    applyFocusedRelationshipDecisions(state, new Map([['npc_mira', decision]]), undefined, 7);
+    assert.equal(state.npcs[0].relationship.trust, 60);
+    assert.equal(state.npcs[0].relationshipProgress.trust, 0.5);
+    assert.equal(state.npcs[0].lastRelationshipChange.impact, 'ordinary');
+});
+
 test('index.js imports the pass and keeps no copy', () => {
     const index = runtimeSource();
     assert.match(index, /\} from '\.\/src\/relationship-pass\.js';/);
     assert.doesNotMatch(runtimeSource(), /function (?:runFocusedRelationshipPass|applyFocusedRelationshipDecisions|suppressPrimaryRelationshipForFocusedDecisions|stampNpcChanges|currentExchangeRelationshipRelevant)\(/);
     assert.match(index, /suppressPrimaryRelationshipForFocusedDecisions\(fullWindowRelationship\.mergeSafe, relationshipPass\.decisions, \(\) => getChatState\(\)\.npcs\)/);
+});
+
+test('a hosted held scanner decision does not leave a conflicting stored relationship', { todo: 'the hosted projection does not reconcile the sidecar' }, async () => {
+    const clock = { id: 'clock', name: 'Clock', domains: { director: { initial: () => ({ time: { minutes: 0 } }) } },
+        queries: { 'director.time': state => state?.domains?.director?.time } };
+    const host = await createHost({ modules: [clock] });
+    const state = { turn: 1, npcs: [mira()] };
+    const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
+    const adapter = createStorySuiteV2Adapter({
+        suiteApi: { npcs: () => state.npcs },
+        delta: () => ({ isEnabled: () => true, getNpc: () => state.npcs[0],
+            relationshipBaseline: () => ({ trust: 0, affection: 0, desire: 0, tension: 0 }),
+            relationshipCaps: () => ({ ordinary: 1, meaningful: 2, major: 3, extreme: 6 }),
+            relationshipAllowance: () => ({ ordinary: 0, meaningful: 0, major: 0, extreme: 0 }) }),
+        host: () => box, headReply: () => host.store.headIndex(),
+        doc: { documentElement: { dataset: {} }, getElementById: () => null, addEventListener() {}, dispatchEvent() {} },
+        timers: { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} }, logger: { warn() {} },
+    });
+    try {
+        adapter.start(); assert.equal(await adapter.settled(), true);
+        await host.send('Continue', 'The story continues.'); await adapter.ticked();
+        const before = structuredClone(state.npcs[0].relationship);
+        const decision = { relationshipImpact: 'major', relationshipDelta: { trust: 3 },
+            relationshipEvidence: { trust: 'Ari rescued Mira from the fire.' }, relationshipChangeReason: 'Ari rescued Mira from the fire.' };
+        applyFocusedRelationshipDecisions(state, new Map([['npc_mira', decision]]), undefined, host.store.headIndex());
+        assert.equal(state.npcs[0].relationship.trust, 13, 'the scanner accepted the major on the sidecar');
+        await adapter.adjust({ name: 'Mira', meters: { trust: state.npcs[0].relationship.trust - before.trust }, start: before,
+            reply: host.store.headIndex(), impact: 'major' });
+        assert.equal(host.sdk.query('npc.meters', { name: 'Mira' }).meters.trust, 10, 'the slice held the event');
+        assert.equal(adapter.sliceView(state.npcs)[0].relationship.trust, state.npcs[0].relationship.trust,
+            'the held event must not leave the sidecar at its unheld value');
+    } finally { host.close(); }
 });

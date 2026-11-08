@@ -102,6 +102,14 @@ export function createQueriesPart(session, deps) {
         caps: () => runtime()?.relationshipCaps?.() ?? null,
         allowance: () => runtime()?.relationshipAllowance?.() ?? null,
         calendarOwn: () => { try { return calendarOwn?.() === true; } catch { return false; } },
+        // The day belongs to the state before this reply, even if its own time line ran first.
+        startTime: index => {
+            if (!Number.isInteger(index) || index < 1) return null;
+            try {
+                const time = session.sdkRef?.query?.('director.time', { asOf: index - 1 });
+                return Number.isInteger(time) ? time : time?.minutes ?? null;
+            } catch { return null; }
+        },
         // Only the rules (and the titles screens show while locked) leave the dossier for the
         // handlers and screens; the texts go to the tail and to an unlocked note's screen line alone.
         secretRules: (name, labels = []) => {

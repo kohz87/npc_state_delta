@@ -16,6 +16,8 @@ export function buildRelationshipPassPrompt({
 }) {
     const userName = flatPromptName(rawUserName, 'User');
     const caps = normalizeRelationshipCaps(relationshipCaps);
+    const exampleMajor = Math.min(5, caps.major);
+    const exampleMinor = Math.min(2, caps.major);
     const compactTargets = (Array.isArray(targets) ? targets : []).slice(0, 4).map(npc => ({
         id: cleanText(npc?.id, 100),
         name: cleanText(npc?.name, 120),
@@ -44,11 +46,11 @@ Rules:
 2. currentRelationship is read-only. Output signed DELTAS, never absolute scores.
 3. relationshipDelta is REQUIRED with ALL FOUR numeric keys: trust, affection, desire, tension. relationshipEvidence is REQUIRED with ALL FOUR string keys; every non-zero axis needs its own short CURRENT-exchange evidence, while zero axes use an empty string.
 4. Count actions and consequences, not just dialogue, but score NEW relationship evidence only. Routine continuation, expected friendliness/care, ordinary companionship, or ongoing aftermath of recentRelationshipEvents are normally ZERO. Do not reward the same rescue, confession, bargain, intimacy, argument, or favor again just because later messages continue it.
-5. Use relationshipImpact none|ordinary|meaningful|major|extreme. none requires four zeros. Raw maxima are ordinary 1 / meaningful 2 / major 5 / extreme 10 per supported axis. Most events move 0-1 axes; meaningful max2, major max3, extreme max4, each with distinct evidence. These are evidence weights before score resistance, not guaranteed visible points.
+5. Use relationshipImpact none|ordinary|meaningful|major|extreme. none requires four zeros. Raw maxima are ordinary ${caps.ordinary} / meaningful ${caps.meaningful} / major ${caps.major} / extreme ${caps.extreme} per supported axis. Most events move 0-1 axes; meaningful max2, major max3, extreme max4, each with distinct evidence. These are evidence weights before score resistance, not guaranteed visible points.
 6. IDENTITY FIRST: personality/behaviorProfile/speech/mannerisms/goal/other bonds remain the person; the player is not their only motive or relationship. Trust is not obedience; Affection is not devotion; Desire is not implied by affection; Tension is not automatically jealousy/embarrassment. High scores are secondary and need not surface every scene.
 7. relationshipSummary is REQUIRED: durable prose Relationship field toward ${userName}, not event log/personality replacement. If still accurate, COPY IT EXACTLY; otherwise rewrite concisely. Keep intensity proportional to current scores/evidence; avoid absolute devotion/dependence language unless truly established. major/extreme turning point MUST rewrite an old summary.
 8. Keep deltas within cap. Every non-zero axis needs grounded relationshipEvidence from CURRENT exchange and the overall event needs one short relationshipChangeReason. Desire requires explicit attraction/romantic/intimate/physical evidence; rescue, gratitude, affection, trust, or proximity alone never supports Desire. If evidence is insufficient, zero that axis; if all axes zero use impact none and empty reason.
-9. JSON only, no markdown: {"npcs":[{"id":"...","relationshipImpact":"major","relationshipDelta":{"trust":-5,"affection":-2,"desire":0,"tension":5},"relationshipEvidence":{"trust":"the player exposed her private confidence","affection":"the betrayal hurt her attachment","desire":"","tension":"the confrontation created unresolved strain"},"relationshipSummary":"She feels betrayed and guarded toward the player, while former warmth leaves the conflict emotionally complicated.","relationshipChangeReason":"The player publicly exposed her private confidence."}]}
+9. JSON only, no markdown: {"npcs":[{"id":"...","relationshipImpact":"${exampleMajor ? 'major' : 'none'}","relationshipDelta":{"trust":${-exampleMajor},"affection":${-exampleMinor},"desire":0,"tension":${exampleMajor}},"relationshipEvidence":{"trust":"${exampleMajor ? 'the player exposed her private confidence' : ''}","affection":"${exampleMinor ? 'the betrayal hurt her attachment' : ''}","desire":"","tension":"${exampleMajor ? 'the confrontation created unresolved strain' : ''}"},"relationshipSummary":"She feels betrayed and guarded toward the player, while former warmth leaves the conflict emotionally complicated.","relationshipChangeReason":"${exampleMajor ? 'The player publicly exposed her private confidence.' : ''}"}]}
 
 Relationship rubric: ${relationshipRubric || '(none)'}
 Impact rubric: ${impactRubric || '(none)'}

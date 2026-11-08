@@ -1,6 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildProfileRefreshPrompt, buildScannerPrompt } from '../core.js';
+import { buildNarrationCaptureParts, buildProfileRefreshPrompt, buildRelationshipPassPrompt, buildScannerPrompt } from '../core.js';
+
+test('scanner and capture maxima follow configured caps, including custom values and zero', () => {
+    for (const caps of [
+        { ordinary: 1, meaningful: 2, major: 3, extreme: 6 },
+        { ordinary: 0, meaningful: 4, major: 7, extreme: 12 },
+        { ordinary: 0, meaningful: 0, major: 0, extreme: 0 },
+    ]) {
+        const options = { transcript: 'A brief exchange.', relationshipCaps: caps };
+        const maxima = `${caps.ordinary}/${caps.meaningful}/${caps.major}/${caps.extreme}`;
+        const scanner = buildScannerPrompt(options);
+        assert.ok(scanner.includes(`Raw max ${maxima};`));
+        assert.ok(scanner.includes(`Delta caps: ordinary ${caps.ordinary}; meaningful ${caps.meaningful}; major ${caps.major}; extreme ${caps.extreme}.`));
+        const focused = buildRelationshipPassPrompt(options);
+        assert.ok(focused.includes(`Raw maxima are ordinary ${caps.ordinary} / meaningful ${caps.meaningful} / major ${caps.major} / extreme ${caps.extreme}`));
+        assert.ok(focused.includes(`Caps: ordinary ${caps.ordinary}; meaningful ${caps.meaningful}; major ${caps.major}; extreme ${caps.extreme}.`));
+        const example = JSON.parse(focused.split('9. JSON only, no markdown: ')[1].split('\n')[0]).npcs[0];
+        for (const [axis, amount] of Object.entries(example.relationshipDelta)) {
+            assert.ok(Math.abs(amount) <= caps.major, `example ${axis} obeys the major cap`);
+            if (!amount) assert.equal(example.relationshipEvidence[axis], '');
+        }
+        if (!caps.major) assert.equal(example.relationshipImpact, 'none');
+        for (const compactCapture of [false, true]) {
+            const first = buildNarrationCaptureParts({ ...options, compactCapture });
+            const second = buildNarrationCaptureParts({ ...options, compactCapture, transcript: 'A different exchange.' });
+            assert.equal(first.rules, second.rules, 'the static capture rules remain identical between replies');
+            assert.ok(first.rules.includes(`${compactCapture ? 'raw' : 'Raw'} max ${maxima}`));
+        }
+    }
+});
 
 const HISTORY = [
     '[m201] Two months passed while Ryu and Sora studied under Sister Morwenna.',

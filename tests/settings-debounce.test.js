@@ -33,6 +33,7 @@ test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
 
 const load = file => import(pathToFileURL(path.join(extRoot, file)).href);
 const settingsMod = await load('runtime-settings.js');
+const { createSettingsBindPart } = await load('runtime-settings-bind.js');
 const { createPersistPart } = await load('runtime-persist.js');
 const storage = await load('storage.js');
 const { buildQualifiedChatKey } = await load('identity.js');
@@ -52,6 +53,47 @@ function freshSettings() {
     getSettings();
     host.saves = 0;
 }
+
+test('pacing settings migrate once and preserve blank, zero and chosen caps across reload', () => {
+    host.extensionSettings.npc_state_delta = {
+        relationshipCaps: { ordinary: 1, meaningful: 2, major: 5, extreme: 10 },
+        relationshipAllowance: { ordinary: null, meaningful: 0, major: 1, extreme: 1 },
+    };
+    let settings = getSettings();
+    assert.deepEqual(settings.relationshipCaps, { ordinary: 1, meaningful: 2, major: 3, extreme: 6 });
+    assert.deepEqual(settings.relationshipAllowance, { ordinary: null, meaningful: 0, major: 1, extreme: 1 });
+    settings.relationshipCaps = { ordinary: 1, meaningful: 2, major: 5, extreme: 10 };
+    host.extensionSettings.npc_state_delta = JSON.parse(JSON.stringify(settings));
+    settings = getSettings();
+    assert.deepEqual(settings.relationshipCaps, { ordinary: 1, meaningful: 2, major: 5, extreme: 10 });
+    assert.deepEqual(settings.relationshipAllowance, { ordinary: null, meaningful: 0, major: 1, extreme: 1 });
+    host.extensionSettings.npc_state_delta = { relationshipCaps: { ordinary: 1, meaningful: 2, major: 4, extreme: 10 } };
+    assert.deepEqual(getSettings().relationshipCaps, { ordinary: 1, meaningful: 2, major: 4, extreme: 10 });
+});
+
+test('relationship reset and allowance controls persist their intended values', () => {
+    const previous = { document: globalThis.document, $: globalThis.$ };
+    const handlers = [];
+    globalThis.document = { addEventListener() {} };
+    globalThis.$ = () => ({ off() {}, on(event, selector, fn) { handlers.push({ event, selector, fn }); } });
+    try {
+        const settings = getSettings();
+        settings.relationshipCaps = { ordinary: 1, meaningful: 2, major: 4, extreme: 10 };
+        settings.relationshipAllowance = { ordinary: 0, meaningful: null, major: 0, extreme: null };
+        createSettingsBindPart({}, { syncSettingsControls() {} }).bindUi();
+        handlers.find(item => item.selector === '#npc_state_delta_reset_relationship_rules').fn();
+        assert.deepEqual(settings.relationshipCaps, { ordinary: 1, meaningful: 2, major: 3, extreme: 6 });
+        assert.deepEqual(settings.relationshipAllowance, { ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
+        const change = handlers.find(item => item.selector?.includes('#npc_state_delta_allow_ordinary')).fn;
+        change.call({ id: 'npc_state_delta_allow_ordinary', value: '' });
+        change.call({ id: 'npc_state_delta_allow_major', value: '0' });
+        host.extensionSettings.npc_state_delta = JSON.parse(JSON.stringify(settings));
+        assert.deepEqual(getSettings().relationshipAllowance, { ordinary: null, meaningful: 1, major: 0, extreme: 1 });
+    } finally {
+        globalThis.document = previous.document;
+        globalThis.$ = previous.$;
+    }
+});
 
 test('a burst of lazy settings saves is one save, SETTINGS_LAZY_QUIET_MS after the last request', async () => {
     startTimers();

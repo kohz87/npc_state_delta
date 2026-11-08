@@ -1554,7 +1554,7 @@ test('focused relationship pass requires one full four-axis decision per target'
     assert.match(prompt, /ALL FOUR numeric keys/i);
     assert.match(prompt, /relationshipEvidence is REQUIRED with ALL FOUR string keys/i);
     assert.match(prompt, /actions and consequences, not just dialogue/i);
-    assert.match(prompt, /Raw maxima are ordinary 1 \/ meaningful 2 \/ major 5 \/ extreme 10/i);
+    assert.match(prompt, /Raw maxima are ordinary 4 \/ meaningful 8 \/ major 15 \/ extreme 25/i);
     assert.match(prompt, /Most events move 0-1 axes/i);
     assert.match(prompt, /relationshipSummary is REQUIRED/i);
     assert.match(prompt, /COPY IT EXACTLY/i);

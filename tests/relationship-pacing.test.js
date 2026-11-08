@@ -1,3 +1,4 @@
+// Relationship pacing against the production mechanics and a synthetic Story Suite host.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHost } from './vendor/story-block/testkit/index.js';
@@ -14,8 +15,6 @@ import { cutToTier, pacingNote } from '../src/npc-meters-pacing.js';
 // slice record (`impactDay`), so it replays. Story Director's clock is stood in for by a small module with `director.time`.
 
 const DAY = 1440;
-
-// ---- the pure rule ----
 
 test('the allowance setting: a blank field is no limit (null), a missing one is the default, 0 is none, 0..99 whole numbers', () => {
     assert.deepEqual(normalizeAllowance(undefined), { ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
@@ -59,6 +58,11 @@ test('blank is no limit, 0 is none of that tier, a new story day starts again, a
     assert.equal(spendEvent(day1.next, { tier: 'major', reply: 'b', clockDay: 2, allowance: normalizeAllowance() }).used, 'major', 'tomorrow the major is back');
     assert.deepEqual(spendEvent(day1.next, { tier: 'major', reply: 'b', clockDay: null, allowance: normalizeAllowance() }), { used: 'major', next: null, skipped: [] }, 'no clock: no limit, nothing counted');
     assert.equal(spendEvent(day1.next, { tier: 'nonsense', reply: 'b', clockDay: 1, allowance: normalizeAllowance() }).used, null);
+    const full = { day: 1, reply: 'a', ordinary: 1000, meaningful: 0, major: 0, extreme: 0 };
+    const unlimited = spendEvent(full, { tier: 'ordinary', reply: 'b', clockDay: 1, allowance: normalizeAllowance({ ordinary: null }) });
+    assert.equal(unlimited.next.ordinary, 1000, 'an unlimited tier remains valid after a thousand events');
+    assert.deepEqual(impactDayProblems(unlimited.next), []);
+    assert.equal(spendEvent(unlimited.next, { tier: 'ordinary', reply: 'c', clockDay: 1, allowance: normalizeAllowance({ ordinary: 99 }) }).used, null);
 });
 
 test('one reply keeps the day it started on: a later event of it never reads the clock again', () => {
@@ -75,6 +79,7 @@ test('a downgraded move is cut to the used tier\'s points and stops on a gate th
     const cut = cutToTier([{ meter: 'trust', value: 3 }, { meter: 'affection', value: 5 }, { meter: 'desire', value: -4 }], 'meaningful', caps, id => at[id]);
     assert.deepEqual(cut.map(change => change.value), [1, 2, -2], 'trust 49 stops on the gate at 50 (it needs a major); the others are held to 2');
     assert.deepEqual(cutToTier([{ meter: 'trust', value: 3 }], 'major', caps, () => 49).map(change => change.value), [3], 'a major may cross 50');
+    assert.deepEqual(cutToTier([{ meter: 'loyalty', value: 3 }], 'meaningful', caps, () => 49).map(change => change.value), [2], 'custom meters have the tier cap, not relationship gates');
     assert.deepEqual(impactDayProblems({ day: 3, reply: 'a', ordinary: 1, meaningful: 0, major: 0, extreme: 0 }), []);
     assert.ok(impactDayProblems({ day: 3, reply: 'a', ordinary: -1, meaningful: 0, major: 0, extreme: 0, sneaky: 1 }).length >= 2);
 });
@@ -106,6 +111,10 @@ const clockModule = {
     id: 'zz-clock', name: 'Clock',
     domains: { director: { initial: () => ({ time: { minutes: 0 } }) } },
     commands: { 'zz.clock': (ctx, { minutes }) => { ctx.draft('director').time.minutes = minutes; return { summary: 'time passes' }; } },
+    capture: {
+        kinds: { date: { grammar: '~ date MINUTES' } },
+        apply: (ctx, line) => { ctx.draft('director').time.minutes = Number(line.name); return { summary: 'time passes' }; },
+    },
     queries: { 'director.time': state => ({ minutes: state?.domains?.director?.time?.minutes ?? null }) },
 };
 
@@ -190,6 +199,29 @@ test('an event down the chain keeps the story day it started on: a time line ins
     assert.equal(s.day('oren').meaningful, 1, 'the forwarded major counted as meaningful');
 });
 
+test('time set before the first NPC line or a scanner-only event cannot refresh that reply', async () => {
+    const s = await suite();
+    await s.setDay(2);
+    await s.say([major()]);
+    const index = await s.say([`~ date ${3 * DAY}`, major(), major('Sister Temiwa')]);
+    assert.equal(s.npc('Oren').meters.trust, 5);
+    assert.equal(s.day('oren').day, 2);
+    assert.equal(s.day('sister-temiwa').day, 2);
+    assert.equal((await s.host.sdk.reread(index)).ok, true);
+    assert.equal(s.day('oren').day, 2, 'Re-read also starts before the time line');
+    assert.equal(s.npc('Oren').meters.trust, 5);
+
+    const t = await suite();
+    await t.setDay(2);
+    await t.say([major()]);
+    const scanReply = await t.say([`~ date ${3 * DAY}`]);
+    await t.adapter.adjust({ name: 'Oren', meters: { affection: 3 }, reply: scanReply, impact: 'major' });
+    assert.equal(t.npc('Oren').meters.affection, 2);
+    assert.equal(t.day('oren').day, 2);
+    await t.say([major()]);
+    assert.equal(t.day('oren').day, 3, 'the following reply uses the advanced clock');
+});
+
 test('a forwarded scanner change shares the allowance with the story line, counts one event for all its meters, and is cut to the used tier', async () => {
     const s = await suite();
     await s.setDay(7);
@@ -206,6 +238,10 @@ test('a forwarded scanner change shares the allowance with the story line, count
     const next = await s.say();
     await s.adapter.adjust({ name: 'Oren', meters: { desire: 1 }, reply: next, impact: 'ordinary' });
     assert.equal(s.npc('Oren').meters.desire, 1);
+    const y = await suite(); await y.setDay(9); const reply = await y.say([major()]);
+    await y.adapter.adjust({ name: 'Oren', meters: { trust: 3 }, reply, impact: 'major' });
+    assert.equal(y.day('oren').meaningful, 0, 'a fully yielded event spends nothing');
+    await y.adapter.adjust({ name: 'Oren', meters: { trust: 3, affection: 3 }, reply, impact: 'major' }); assert.equal(y.day('oren').meaningful, 1, 'the surviving meter spends one event');
 });
 
 test('an adjust with no tier, a reader\'s edit and an unknown tier are never held and never counted', async () => {
@@ -258,7 +294,7 @@ test('no story clock, or the calendar kept in Delta: no limit and nothing counte
 test('the prompt line gives each tier its meaning and the points, and the major allowance', async () => {
     const s = await suite();
     const line = s.host.registry.module(MODULE_ID).context.static();
-    assert.match(line, /Add \| impact: ordinary \(a kind word, most moments\) \| meaningful \(a real favour, a shared secret\) \| major \(saved from danger, a betrayal\) \| extreme \(a life-changing turning point, very rare\); the most a move can be: 1\/2\/3\/6; =N moves toward N; none given: ordinary\. Most moments are ordinary; each person can have only one major a day\./);
+    assert.match(line, /Add \| impact: ordinary \(a kind word, most moments\) \| meaningful \(a real favour, a shared secret\) \| major \(saved from danger, a betrayal\) \| extreme \(a life-changing turning point, very rare\)\. Most moments are ordinary; each person can have only one major a day\. The most a move can be: 1\/2\/3\/6; =N moves toward N; none given: ordinary\./);
 });
 
 test('swipe, regenerate and a rebuild give the same numbers and the same count; a swipe recounts instead of adding', async () => {
@@ -272,6 +308,19 @@ test('swipe, regenerate and a rebuild give the same numbers and the same count; 
     const head = JSON.stringify(s.host.head());
     s.host.store.rebuild();
     assert.equal(JSON.stringify(s.host.head()), head, 'replay equals live');
+});
+
+test('middle deletion recounts later events as a fresh history', { todo: 'stored story operations do not replan their used tiers' }, async () => {
+    const s = await suite();
+    await s.setDay(1);
+    await s.say([major()]);
+    const middle = await s.say([major()]);
+    await s.say([major()]);
+    await s.host.st.deleteMessage(middle);
+    await s.host.st.deleteMessage(middle - 1);
+    assert.equal(s.npc('Oren').meters.trust, 5, 'the remaining second major should count as meaningful');
+    assert.equal(s.day('oren').meaningful, 1);
+    assert.equal(s.day('oren').ordinary, 0);
 });
 
 test('no drift: while hosted the numbers Delta shows are the slice\'s, also after a held event', async () => {
