@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // (batch D) The backfill queue and the capture catch-up Refresh run on separate cadences. Hosted one-pass, the queue runs after every
 // reply (limit 1), whatever `narrationCaptureCatchUp` says, and never makes a second long call on a person the same reply's Refresh
@@ -207,4 +209,40 @@ test('an old saved state with pendingBackfills drains one per reply, the 100 cap
         return { sizes };
     });
     assert.deepEqual(r.sizes, [2, 1, 0, 0]);
+});
+
+test('catch-up: every due NPC is held from the reply backfill; a newly met NPC keeps its queue entry and gets its backfill after the Refresh (established ones skipped)', async () => {
+    // The real module in a temp tree whose two imports are small stubs (the real ones need the host).
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nsd-catchup-'));
+    try {
+        fs.copyFileSync(fileURLToPath(new URL('../runtime-catchup.js', import.meta.url)), path.join(dir, 'runtime-catchup.js'));
+        fs.writeFileSync(path.join(dir, 'runtime-settings.js'), 'export const getSettings = () => ({ narrationCaptureCatchUp: 1 });\n');
+        fs.writeFileSync(path.join(dir, 'runtime-scan-helpers.js'), 'export const latestMessageId = () => 5;\n');
+        var { createCatchUpPart } = await import(pathToFileURL(path.join(dir, 'runtime-catchup.js')).href);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    const key = 'chat-x';
+    const state = {
+        npcs: [{ id: 'new1', archived: false }, { id: 'old1', archived: false }],
+        pendingBackfills: [
+            { npcId: 'new1', reason: 'new-admission', attempts: 0 },
+            { npcId: 'old1', reason: 'missed-participant', attempts: 0 },
+        ],
+    };
+    const calls = { refresh: [], backfill: [] };
+    const rt = { captureCatchUp: new Map(), settings: {} };
+    const part = createCatchUpPart(rt, {
+        getChatKey: () => key, getChatState: () => state, isHostSwipeActive: () => false, isScanBusy: () => false, persist() {},
+        refreshNpcFromChat: async id => { calls.refresh.push(id); return true; },
+        processPendingBackfills: async (mid, opts) => { calls.backfill.push(opts); return 0; },
+    });
+    const due = part.noteCaptureCatchUp(key, ['new1', 'old1']);
+    assert.deepEqual([...due].sort(), ['new1', 'old1']);
+    assert.deepEqual([...rt.catchUpTaken.get(key)].sort(), ['new1', 'old1'], 'the reply backfill start skips both');
+    await part.runCaptureCatchUp(key, due);
+    assert.deepEqual(calls.refresh.sort(), ['new1', 'old1'], 'one Refresh each');
+    assert.deepEqual(state.pendingBackfills.map(i => i.npcId), ['new1'], 'the established entry is covered by its Refresh; the new one is kept');
+    assert.equal(calls.backfill.length, 1, 'one backfill start after the Refreshes');
+    assert.equal(calls.backfill[0].limit, 1);
+    assert.deepEqual(calls.backfill[0].skipNpcIds, ['old1'], 'established NPCs are not backfilled again');
+    assert.equal(rt.catchUpTaken.has(key), false, 'the hold is released');
 });

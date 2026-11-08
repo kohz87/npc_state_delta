@@ -36,9 +36,9 @@ export function createCatchUpPart(rt, deps) {
         if (entry.count < every) return [];
         captureCatchUp.delete(chatKey);
         const due = [...entry.seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, CATCH_UP_TARGETS).map(([id]) => id);
-        // Newly met NPCs are not "taken": their backfill still runs on this reply.
-        const takenIds = due.filter(id => !newlyMet(chatKey, id));
-        if (takenIds.length) taken.set(chatKey, new Set(takenIds));
+        // Every due NPC is held from the reply's own backfill start (it would race the Refresh for the chat and could win it, leaving a
+        // newly met NPC without the Refresh); a newly met NPC's backfill runs right after the Refresh instead (runCaptureCatchUp).
+        if (due.length) taken.set(chatKey, new Set(due));
         return due;
     }
 
@@ -50,12 +50,13 @@ export function createCatchUpPart(rt, deps) {
             return;
         }
         let meetsBackfill = false;
+        const established = [];
         try {
             for (const id of ids) {
                 if (getChatKey() !== chatKey) return;
                 if (!getChatState(chatKey).npcs.some(npc => npc.id === id && !npc.archived)) continue;
                 const fresh = newlyMet(chatKey, id);
-                if (fresh) meetsBackfill = true;
+                if (fresh) meetsBackfill = true; else established.push(id);
                 const refreshed = await refreshNpcFromChat(id, { automatic: true });
                 // A Refresh that worked has covered an established person; the queued repair would only repeat it. A newly met one keeps its backfill.
                 if (refreshed && !fresh && getChatKey() === chatKey) {
@@ -68,7 +69,7 @@ export function createCatchUpPart(rt, deps) {
             }
         } finally { taken.delete(chatKey); }
         // The reply's own backfill start finds the chat busy while the Refresh runs; a newly met NPC's backfill runs now (one call).
-        if (meetsBackfill && getChatKey() === chatKey) await processPendingBackfills(latestMessageId(true), { limit: 1 });
+        if (meetsBackfill && getChatKey() === chatKey) await processPendingBackfills(latestMessageId(true), { limit: 1, skipNpcIds: established });
     }
 
     return { noteCaptureCatchUp, runCaptureCatchUp };
