@@ -76,9 +76,18 @@ function fingerprint(npc) {
     }
 }
 
+// The stored state with the dossier panel's view of the people (hosted: the scene's presence, the slice's numbers); alone, the same people.
+function shownState(runtime) {
+    const raw = runtime?.getState?.();
+    try {
+        const shown = runtime?.getDossierState?.()?.npcs;
+        return raw && Array.isArray(shown) ? { ...raw, npcs: shown } : raw;
+    } catch { return raw; }
+}
+
 function snapshot() {
     try {
-        return new Map((api()?.getState?.()?.npcs || []).map(npc => [npc.id, fingerprint(npc)]));
+        return new Map((shownState(api())?.npcs || []).map(npc => [npc.id, fingerprint(npc)]));
     } catch {
         return new Map();
     }
@@ -125,7 +134,7 @@ export async function runFullCastScan(messageId = null, before = null, { manual 
     const token = ++sequence;
     if (!await waitIdle(chatKey, token)) return false;
     if (latestAssistantId() !== exchange.assistantId || api()?.uiStatus?.().chatKey !== chatKey) return false;
-    let state = npcApi.getState();
+    let state = shownState(npcApi);
     let broadScanOk = true;
     // An absent marker (null: never scanned) is not message 0.
     const marker = state.lastScannedMessageId;
@@ -136,7 +145,7 @@ export async function runFullCastScan(messageId = null, before = null, { manual 
         broadScanOk = Boolean(await npcApi.scan());
         if (!await waitIdle(chatKey, token)) return false;
         if (latestAssistantId() !== exchange.assistantId || api()?.uiStatus?.().chatKey !== chatKey) return false;
-        state = npcApi.getState();
+        state = shownState(npcApi);
     }
     const targets = fullCastTargets(state, exchange.text, before);
     let refreshed = 0;
