@@ -124,13 +124,20 @@ export function createSettingsHtmlPart(rt, deps) {
               <label>Desire <input id="npc_state_delta_base_desire" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
               <label>Tension <input id="npc_state_delta_base_tension" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
             </div>
-            <div class="npc-state-delta-tuning-group"><b>Maximum ± change per scan</b>
+            <div class="npc-state-delta-tuning-group"><b>Points per event</b>
               <label>Ordinary <input id="npc_state_delta_cap_ordinary" type="number" min="0" max="25" class="text_pole npc-state-delta-number"></label>
               <label>Meaningful <input id="npc_state_delta_cap_meaningful" type="number" min="0" max="35" class="text_pole npc-state-delta-number"></label>
               <label>Major <input id="npc_state_delta_cap_major" type="number" min="0" max="50" class="text_pole npc-state-delta-number"></label>
               <label>Extreme <input id="npc_state_delta_cap_extreme" type="number" min="0" max="100" class="text_pole npc-state-delta-number"></label>
             </div>
+            <div class="npc-state-delta-tuning-group"><b>Events per story day, for each person</b>
+              <label>Ordinary <input id="npc_state_delta_allow_ordinary" type="number" min="0" max="99" step="1" class="text_pole npc-state-delta-number" placeholder="no limit"></label>
+              <label>Meaningful <input id="npc_state_delta_allow_meaningful" type="number" min="0" max="99" step="1" class="text_pole npc-state-delta-number" placeholder="no limit"></label>
+              <label>Major <input id="npc_state_delta_allow_major" type="number" min="0" max="99" step="1" class="text_pole npc-state-delta-number" placeholder="no limit"></label>
+              <label>Extreme <input id="npc_state_delta_allow_extreme" type="number" min="0" max="99" step="1" class="text_pole npc-state-delta-number" placeholder="no limit"></label>
+            </div>
           </div>
+          <p class="npc-state-delta-muted">An event over its allowance counts as the next tier down; with no tier left, it moves nothing. Blank means no limit, 0 means none. This needs the story clock (Story Director): without it there is no daily limit.</p>
           <label class="npc-state-delta-rubric-label" for="npc_state_delta_relationship_criteria"><b>Relationship stat criteria</b><small>Sent to the private dossier scanner. Adjust the definitions and evidence rules for your RP.</small></label>
           <textarea id="npc_state_delta_relationship_criteria" class="text_pole npc-state-delta-rubric-textarea" rows="7"></textarea>
           <label class="npc-state-delta-rubric-label" for="npc_state_delta_impact_criteria"><b>Impact-tier criteria</b><small>What counts as ordinary, meaningful, major or extreme. Code caps apply even if the model proposes more.</small></label>
@@ -346,6 +353,7 @@ export function createSettingsHtmlPart(rt, deps) {
         $('#npc_state_delta_cap_meaningful').val(s.relationshipCaps.meaningful);
         $('#npc_state_delta_cap_major').val(s.relationshipCaps.major);
         $('#npc_state_delta_cap_extreme').val(s.relationshipCaps.extreme);
+        for (const tier of ['ordinary', 'meaningful', 'major', 'extreme']) $(`#npc_state_delta_allow_${tier}`).val(s.relationshipAllowance?.[tier] ?? '');
         $('#npc_state_delta_relationship_criteria').val(s.relationshipCriteria);
         $('#npc_state_delta_impact_criteria').val(s.relationshipImpactCriteria);
         $('#npc_state_delta_memory_criteria').val(s.memoryCriteria);

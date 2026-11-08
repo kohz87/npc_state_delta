@@ -134,7 +134,7 @@ test('tiers: swipe, regenerate and a rebuild give identical numbers', async () =
 
 test('tiers: the prompt line names the tiers and their caps; without caps from the host it is as before', async () => {
     const s = await suite({ caps: { ordinary: 1, meaningful: 3, major: 6, extreme: 12 } });
-    assert.match(s.def.context.static(), /Add \| impact: ordinary\|meaningful\|major\|extreme \(the most a move can be: 1\/3\/6\/12; =N moves toward N; none given: ordinary\)\./);
+    assert.match(s.def.context.static(), /Add \| impact: ordinary \(a kind word, most moments\) \| meaningful \(a real favour, a shared secret\) \| major \(saved from danger, a betrayal\) \| extreme \(a life-changing turning point, very rare\); the most a move can be: 1\/3\/6\/12; =N moves toward N; none given: ordinary\. Most moments are ordinary\.$/);
     const plain = await suite({ caps: null });
     assert.doesNotMatch(plain.def.context.static(), /impact/);
     await plain.say(['~ npc Oren | trust: +9']);

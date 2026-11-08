@@ -238,7 +238,11 @@ export function createHostedPart(rt, deps) {
             const from = prior.has(npc.id) ? normalizeRelationshipBaseline(prior.get(npc.id).relationship) : baseline;
             const to = normalizeRelationshipBaseline(npc.relationship);
             const meters = Object.fromEntries(Object.keys(to).filter(key => to[key] !== from[key]).map(key => [key, to[key] - from[key]]));
-            if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId });
+            // The tier the scanner gave this scan's event (its newest relationship change), so the slice's allowance counts it like a
+            // story line's: one event however many meters it moved. None known: sent without one, and not counted.
+            const last = npc.lastRelationshipChange;
+            const fresh = last && JSON.stringify(last) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange);
+            if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}) });
         }
         if (!changes.length) return;
         void (async () => {

@@ -4,10 +4,16 @@ import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_PRESETS, RECENT_MESSAGES, SECRET
 import { meterValue } from './npc-meters-slice.js';
 
 export function createNpcPrompt({
-    call, hooks, storedSettings, tierCaps, featureOn, defsFrom, setupFor, rungsFor, rulesFor,
+    call, hooks, storedSettings, tierCaps, tierAllowance, featureOn, defsFrom, setupFor, rungsFor, rulesFor,
 }, { sliceOf, presentKeys }) {
     // ---- the prompt (SPEC §5) ----
 
+    // "; each person can have only one major a day", from the reader's allowance (nothing when there is no limit on majors).
+    function majorPerDay() {
+        const room = tierAllowance()?.major;
+        if (room === null || room === undefined) return '';
+        return `; each person can have ${room === 1 ? 'only one major a day' : room === 0 ? 'no major' : `at most ${room} majors a day`}`;
+    }
     /**
      * One line: how to write an npc line and which meters there are, plus each meter's rule while the
      * presets feature is on. Changes only with the settings (and the presets in use).
@@ -16,7 +22,7 @@ export function createNpcPrompt({
         const settings = storedSettings();
         const caps = tierCaps();
         const custom = settings.custom.map(def => `, ${def.id} (${def.min}..${def.max})`).join('');
-        const base = `NPC meters: ${BUILT_IN_METERS.map(def => def.id).join(', ')} (-100..100)${custom}. When the scene changes how someone feels: ~ npc Name | meter: +N, -N or =N. Code clamps each meter, moves it at most ${settings.changeCap} a reply and sets the stages; never write a stage.${caps ? ` Add | impact: ordinary|meaningful|major|extreme (the most a move can be: ${IMPACT_TIERS.map(tier => caps[tier]).join('/')}; =N moves toward N; none given: ordinary).` : ''}`;
+        const base = `NPC meters: ${BUILT_IN_METERS.map(def => def.id).join(', ')} (-100..100)${custom}. When the scene changes how someone feels: ~ npc Name | meter: +N, -N or =N. Code clamps each meter, moves it at most ${settings.changeCap} a reply and sets the stages; never write a stage.${caps ? ` Add | impact: ordinary (a kind word, most moments) | meaningful (a real favour, a shared secret) | major (saved from danger, a betrayal) | extreme (a life-changing turning point, very rare); the most a move can be: ${IMPACT_TIERS.map(tier => caps[tier]).join('/')}; =N moves toward N; none given: ordinary. Most moments are ordinary${majorPerDay()}.` : ''}`;
         const rules = featureOn(FEATURE_PRESETS) ? settings.custom.filter(def => def.describe).map(def => `${def.id} ${def.describe}`) : [];
         return rules.length ? `${base} Meter rules: ${rules.join('; ')}.` : base;
     }

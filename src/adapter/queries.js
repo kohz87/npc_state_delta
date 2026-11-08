@@ -16,7 +16,7 @@ export { dossierFields, safeImageUrl, portraitUrl } from './queries-dossier.js';
 
 export function createQueriesPart(session, deps) {
     const {
-        delta, doc, headReply, host, KEY_PIN_COMMAND, logger, MODULE_ID, panelId, PRESET_KIND, suiteApi, timeline, WORLD_FEATURE,
+        calendarOwn, delta, doc, headReply, host, KEY_PIN_COMMAND, logger, MODULE_ID, panelId, PRESET_KIND, suiteApi, timeline, WORLD_FEATURE,
     } = deps;
 
     // Delta's own commands on their way to the host, by type and payload: npc.adjust takes a reader's
@@ -100,6 +100,8 @@ export function createQueriesPart(session, deps) {
         },
         baseline: () => runtime()?.relationshipBaseline?.() ?? {},
         caps: () => runtime()?.relationshipCaps?.() ?? null,
+        allowance: () => runtime()?.relationshipAllowance?.() ?? null,
+        calendarOwn: () => { try { return calendarOwn?.() === true; } catch { return false; } },
         // Only the rules (and the titles screens show while locked) leave the dossier for the
         // handlers and screens; the texts go to the tail and to an unlocked note's screen line alone.
         secretRules: (name, labels = []) => {

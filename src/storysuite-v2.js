@@ -213,7 +213,7 @@ export function createStorySuiteV2Adapter({
         /** The page API Story Director's World screen uses (PAGE_API). */
         pageApi,
         /** While hosted: Delta's scanner changes for one NPC → `npc.adjust` (a promise of the result, or null). */
-        adjust: ({ name, meters, start, reply } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true, background: true }),
+        adjust: ({ name, meters, start, reply, impact } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(typeof impact === 'string' ? { impact } : {}) }, { own: true, background: true }),
         /** While hosted: the reader's own values from the dossier editor → `npc.set` (the host's latest reply; headReply). */
         setMeters: ({ name, meters } = {}) => send('npc.set', { name, meters }),
         /** While hosted: stages and notes again for one NPC (after its notes were edited) → `npc.refresh`. */
