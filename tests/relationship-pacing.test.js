@@ -297,7 +297,7 @@ test('the pass without a host counts on the dossier: the second major of a day c
 
 // [reply, story day at the start of the reply, tier, asks] for each `~ npc Sister Temiwa` line of the owner's story.
 const TEMIWA = [
-    [3, 0, 'ordinary', { tension: 1 }], [5, 0, 'ordinary', { trust: 1 }], [7, 0, 'ordinary', { affection: 1, trust: 1 }],
+    [3, 1, 'ordinary', { tension: 1 }], [5, 1, 'ordinary', { trust: 1 }], [7, 1, 'ordinary', { affection: 1, trust: 1 }],
     [9, 1, 'meaningful', { trust: 2, affection: 2, desire: 1 }], [11, 1, 'meaningful', { trust: 1, affection: 1, desire: 1 }],
     [19, 1, 'major', { trust: 5, affection: 2, desire: 1 }], [21, 1, 'meaningful', { trust: 2, affection: 2, desire: 2 }],
     [23, 1, 'meaningful', { trust: 5, affection: 4, desire: 6 }], [25, 1, 'meaningful', { trust: 1, affection: 1, desire: 2 }],
@@ -311,7 +311,7 @@ const TEMIWA = [
     [59, 2, 'meaningful', { trust: 1, affection: 2, desire: 1 }],
 ];
 
-test('the owner\'s story replayed with the new rules: Sister Temiwa ends at 16 / 15 / 8, the SPEC numbers 15 / 13 / 6 within 2 (it was 41 / 43 / 35)', async () => {
+test('the recorded start-of-reply days pace Sister Temiwa to 13 / 12 / 5 (it was 41 / 43 / 35)', async () => {
     const s = await suite();
     let at = -1;
     for (const [, day, tier, asks] of TEMIWA) {
@@ -320,11 +320,9 @@ test('the owner\'s story replayed with the new rules: Sister Temiwa ends at 16 /
         await s.say([`~ npc Sister Temiwa | ${parts.join(' | ')} | impact: ${tier}`]);
     }
     const { trust, affection, desire } = s.npc('Sister Temiwa').meters;
-    // The rough script's 15 / 13 / 6 put the day boundaries before her 2nd and 14th lines; this fixture takes the story day at the
-    // start of each reply (before her 4th and 15th lines). The same production mechanics give 15 / 13 / 6 with the script's
-    // boundaries and 16 / 15 / 8 with these (checked outside the suite; progress carrying and rounding change nothing).
-    // Pinned as the code gives it, and within 2 of the script's numbers (it was 41 / 43 / 35).
-    assert.deepEqual([trust, affection, desire], [16, 15, 8]);
+    // The recorded clock is on the same day at the start of the first 14 lines; the 14th advances it
+    // to the next day, so the 15th is the first line to use a fresh allowance.
+    assert.deepEqual([trust, affection, desire], [13, 12, 5]);
     assert.ok(Math.abs(trust - 15) <= 2 && Math.abs(affection - 13) <= 2 && Math.abs(desire - 6) <= 2);
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });

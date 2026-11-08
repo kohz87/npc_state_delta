@@ -1,7 +1,8 @@
+// Focused relationship decisions, the hosted pacing query, and synthetic host reconciliation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { normalizeNpcRecord } from '../core.js';
+import { mergeScanResult, normalizeNpcRecord } from '../core.js';
 import {
     RELATIONSHIP_RESPONSE_LENGTH,
 } from '../src/scanner-request.js';
@@ -86,12 +87,19 @@ test('index.js imports the pass and keeps no copy', () => {
 
 // While hosted the slice holds the allowance. The pass reads its tier first (adapter.paceTier, read only) and applies the decision with
 // it, then the change is forwarded with that used tier (as runtime-hosted.js forwardRelationshipChangesToHost does), so both sides agree.
-async function hostedPair(allowance) {
+async function hostedPair(allowance, queryMode = 'normal') {
     const clock = { id: 'clock', name: 'Clock', domains: { director: { initial: () => ({ time: { minutes: 0 } }) } },
         queries: { 'director.time': state => state?.domains?.director?.time } };
     const host = await createHost({ modules: [clock] });
     const state = { turn: 1, npcs: [mira()] };
-    const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
+    const sdk = queryMode === 'normal' ? host.sdk : { ...host.sdk, query: (name, ...args) => {
+        if (name === 'npc.pace') {
+            if (queryMode === 'throws') throw new Error('query unavailable');
+            return null;
+        }
+        return host.sdk.query(name, ...args);
+    } };
+    const box = { ready: Promise.resolve(sdk), sdk };
     const adapter = createStorySuiteV2Adapter({
         suiteApi: { npcs: () => state.npcs },
         delta: () => ({ isEnabled: () => true, getNpc: () => state.npcs[0],
@@ -172,6 +180,106 @@ test('hosted: a decision with room is applied as asked and the two sides agree',
         await h.scan('Ari rescued Mira from the fire.', 'major');
         h.agree('with room');
         assert.equal(h.slice().impactDay.major, 1);
+    } finally { h.host.close(); }
+});
+
+test('hosted: repeated pace queries are read-only and the forwarded decision spends once', async () => {
+    const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
+    try {
+        const first = await h.scan('Ari rescued Mira from the fire.', 'major');
+        const before = JSON.stringify(h.host.head());
+        for (let n = 0; n < 3; n += 1) {
+            assert.deepEqual(h.adapter.paceTier({ name: 'Mira', reply: first.reply, tier: 'major' }), { used: 'meaningful', skipped: ['major'] });
+            assert.equal(JSON.stringify(h.host.head()), before, 'query must not spend or write');
+        }
+        await h.scan('Ari defended Mira from the tax collector.', 'major');
+        assert.equal(h.slice().impactDay.major, 1);
+        assert.equal(h.slice().impactDay.meaningful, 1, 'the pass and the forward did not each spend');
+    } finally { h.host.close(); }
+});
+
+for (const mode of ['missing', 'throws']) {
+    test(`hosted: a ${mode} pace query leaves the scan working without pacing`, async () => {
+        const h = await hostedPair(null, mode);
+        try {
+            assert.equal(h.adapter.paceTier({ name: 'Mira', reply: 1, tier: 'major' }), null);
+            const out = await h.scan('Ari rescued Mira from the fire.', 'major');
+            assert.equal(out.sent, true);
+            assert.equal(h.state.npcs[0].relationship.trust, 13);
+            h.agree(mode);
+        } finally { h.host.close(); }
+    });
+}
+
+test('hosted: a failed pace query does not desynchronize an active allowance', { todo: 'the pass falls back before the slice applies its allowance' }, async () => {
+    const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 }, 'throws');
+    try {
+        await h.scan('Ari rescued Mira from the fire.', 'major');
+        await h.scan('Ari defended Mira from the tax collector.', 'major');
+        assert.equal(h.state.npcs[0].relationship.trust, h.host.sdk.query('npc.meters', { name: 'Mira' }).meters.trust);
+    } finally { h.host.close(); }
+});
+
+test('hosted: a downgraded decision keeps fractional progress in the slice', { todo: 'forwarding sends whole meter changes only' }, async () => {
+    const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
+    try {
+        h.state.npcs[0].relationship.trust = 60;
+        await h.scan('Ari rescued Mira from the fire.', 'major');
+        await h.scan('Ari defended Mira from the tax collector.', 'major');
+        assert.equal(h.state.npcs[0].lastRelationshipChange.impact, 'meaningful');
+        h.agree('fractional progress after downgrade');
+    } finally { h.host.close(); }
+});
+
+test('hosted: a fraction-only scanner event spends the shared allowance', { todo: 'forwarding ignores events without a whole meter change' }, async () => {
+    const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
+    try {
+        h.state.npcs[0].relationship.trust = 60;
+        const out = await h.scan('Ari offered Mira shelter.', 'ordinary');
+        assert.equal(h.state.npcs[0].relationshipProgress.trust, 0.5);
+        assert.equal(out.sent, true, 'the event must reach the slice even when the visible delta is zero');
+        assert.equal(h.slice().impactDay.ordinary, 1);
+    } finally { h.host.close(); }
+});
+
+test('hosted: a complete primary scanner decision uses the slice allowance', { todo: 'only focused decisions ask npc.pace' }, async () => {
+    const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
+    try {
+        await h.scan('Ari rescued Mira from the fire.', 'major');
+        const text = 'Ari defended Mira from the tax collector.';
+        await h.host.send('Continue', text); await h.adapter.ticked();
+        const reply = h.host.store.headIndex();
+        const before = structuredClone(h.state.npcs[0]);
+        const primary = { id: before.id, name: before.name, relationshipImpact: 'major',
+            relationshipDelta: { trust: 9, affection: 0, desire: 0, tension: 0 },
+            relationshipEvidence: { trust: text }, relationshipChangeReason: text, relationshipSummary: 'Mira trusts Ari.' };
+        assert.equal(hasCompletePrimaryRelationshipDecision(primary, text), true);
+        const pass = await runFocusedRelationshipPass({}, { npcs: [primary] }, [before], text, settings, { requestScope: scope });
+        assert.equal(pass.used, false, 'a complete primary row does not take the focused route');
+        const merged = mergeScanResult({ ...h.state, candidates: [] }, { npcs: [primary] }, { sourceMessageId: reply, developmentContext: text });
+        const after = merged.state.npcs[0];
+        await h.adapter.adjust({ name: after.name, meters: { trust: after.relationship.trust - before.relationship.trust },
+            start: before.relationship, reply, impact: after.lastRelationshipChange.impact });
+        assert.equal(after.relationship.trust, h.host.sdk.query('npc.meters', { name: 'Mira' }).meters.trust);
+    } finally { h.host.close(); }
+});
+
+test('hosted: a scanner yields to the story before storing a matching meter event', { todo: 'the pass applies an event the host later drops' }, async () => {
+    const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
+    try {
+        await h.host.send('Continue', 'The story continues.\n\n<Changes>\n~ npc Mira | trust: +1 | impact: ordinary\n</Changes>');
+        await h.adapter.ticked();
+        h.state.npcs = h.adapter.sliceView(h.state.npcs);
+        const before = structuredClone(h.state.npcs[0]);
+        const reply = h.host.store.headIndex();
+        const text = 'Ari rescued Mira from the fire.';
+        applyFocusedRelationshipDecisions(h.state, new Map([[before.id, { relationshipImpact: 'major', relationshipDelta: { trust: 9 },
+            relationshipEvidence: { trust: text }, relationshipChangeReason: text }]]), undefined, reply, null,
+        { used: (npc, tier, at) => h.adapter.paceTier({ name: npc.name, reply: at, tier }) });
+        const after = h.state.npcs[0];
+        await h.adapter.adjust({ name: after.name, meters: { trust: after.relationship.trust - before.relationship.trust },
+            start: before.relationship, reply, impact: after.lastRelationshipChange.impact });
+        assert.equal(after.relationship.trust, h.host.sdk.query('npc.meters', { name: 'Mira' }).meters.trust);
     } finally { h.host.close(); }
 });
 

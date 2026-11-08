@@ -35,6 +35,24 @@ test('middle delete: a later reply keeps the numbers and the day count it record
     assert.equal(s.day('oren').meaningful, 1);
 });
 
+test('middle delete of the first event of a new day keeps the surviving event on that day', { todo: 'later ops omit the unchanged day and day-reset counts' }, async () => {
+    const s = await suite();
+    try {
+        await s.setDay(1);
+        await s.say(['~ npc Oren | trust: +1 | impact: ordinary']);
+        await s.setDay(2);
+        const middle = await s.say([major()]);
+        await s.say([major()]);
+        await s.host.st.deleteMessage(middle);
+        await s.host.st.deleteMessage(middle - 1);
+        const live = shape(s);
+        s.host.store.rebuild();
+        assert.equal(shape(s), live);
+        assert.equal(s.day('oren').day, 2, 'the surviving event belongs to day 2');
+        assert.deepEqual(['ordinary', 'meaningful', 'major'].map(tier => s.day('oren')[tier]), [0, 1, 0]);
+    } finally { s.host.close(); }
+});
+
 test('cold reload and rebuild equal live for impactDay, over days, swipes and a Re-read', async () => {
     const s = await suite();
     await s.setDay(1);
@@ -63,10 +81,13 @@ test('a chat with no story clock has no impactDay anywhere, and replays and relo
     assert.equal(s.npc('Oren').meters.trust, 4, 'no clock: no limit, every event is worth its tier (3, 3, -2 +... as before)');
     assert.doesNotMatch(shape(s), /impactDay/, 'nothing new was written to the record');
     const live = shape(s);
+    const chat = JSON.stringify(s.host.ctx.chat);
     s.host.store.rebuild();
     assert.equal(shape(s), live);
+    assert.equal(JSON.stringify(s.host.ctx.chat), chat, 'rebuild does not rewrite the stored chat');
     await s.host.st.loadChat(s.host.ctx.chat);
     await s.adapter.ticked();
     assert.equal(shape(s), live, 'a cold reload of an old-style chat equals live');
+    assert.equal(JSON.stringify(s.host.ctx.chat), chat, 'reload does not rewrite the stored chat');
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });
