@@ -91,3 +91,53 @@ test('a chat with no story clock has no impactDay anywhere, and replays and relo
     assert.equal(JSON.stringify(s.host.ctx.chat), chat, 'reload does not rewrite the stored chat');
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });
+
+const keys = (s, name) => Object.keys(s.host.head().domains.npc.npcs[name].impactDay).filter(key => key !== 'reply').sort();
+
+// Spending and reading use only the day in force. A clock that goes back (a rewound or edited time line) must not pick a newer day's
+// count; the day's keys are the only ones a write leaves.
+test('a clock that goes back reads that day\'s own count, not the newest day named; every write leaves only the current day\'s keys', async () => {
+    const s = await suite();
+    try {
+        await s.setDay(5);
+        await s.say([major()]);
+        assert.deepEqual(keys(s, 'oren'), ['d5:extreme', 'd5:major', 'd5:meaningful', 'd5:ordinary']);
+        await s.setDay(2);
+        await s.say([major()]);
+        assert.equal(s.npc('Oren').meters.trust, 6, 'day 2 has its own major: +3 again, not held by day 5\'s');
+        assert.deepEqual(keys(s, 'oren'), ['d2:extreme', 'd2:major', 'd2:meaningful', 'd2:ordinary'], 'day 5\'s keys went with the write');
+        const live = shape(s);
+        s.host.store.rebuild();
+        assert.equal(shape(s), live, 'rebuild equals live');
+    } finally { s.host.close(); }
+});
+
+// A few keys of an older day can be left by repeated deletes (a delete replays only the ops that survive). They are never read, they
+// are dropped by the next write, and they validate: nothing breaks while they sit there.
+test('after deleting a day\'s first event: rebuild == live == cold reload, and a leftover key of another day is harmless', async () => {
+    const s = await suite();
+    try {
+        await s.setDay(1);
+        await s.say(['~ npc Oren | trust: +1 | impact: ordinary']);
+        await s.setDay(2);
+        const first = await s.say([major()]);
+        await s.say(['~ npc Oren | trust: +1 | impact: ordinary']);
+        await s.host.st.deleteMessage(first);
+        await s.host.st.deleteMessage(first - 1);
+        assert.deepEqual(s.host.store.problems(), []);
+        assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), [], 'leftover keys (if any) validate');
+        const live = shape(s);
+        s.host.store.rebuild();
+        assert.equal(shape(s), live, 'rebuild equals live');
+        await s.host.st.loadChat(s.host.ctx.chat);
+        await s.adapter.ticked();
+        assert.equal(shape(s), live, 'a cold reload equals live');
+        const before = s.npc('Oren').meters.trust;
+        await s.say([major()]);
+        assert.equal(s.npc('Oren').meters.trust, before + 3, 'the day\'s major is free again: the deleted event\'s count is not read from anywhere');
+        assert.deepEqual(keys(s, 'oren').filter(key => !key.startsWith('d2:')), [], 'the write left only the current day\'s keys');
+        const after = shape(s);
+        s.host.store.rebuild();
+        assert.equal(shape(s), after);
+    } finally { s.host.close(); }
+});

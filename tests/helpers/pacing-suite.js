@@ -8,6 +8,14 @@ import { fromFlatDay, normalizeAllowance } from '../../src/relationship-pacing.j
 
 export const DAY = 1440;
 
+// A reader for the TESTS only: the newest day a flat impactDay names, as { day, reply, counts } (production never picks a day this
+// way: it reads the day in force only, relationship-pacing.js fromFlatDay).
+export function newestFlatDay(value) {
+    const days = Object.keys(value ?? {}).map(key => /^d(-?\d+):/.exec(key)).filter(Boolean).map(match => Number(match[1]));
+    return days.length ? fromFlatDay(value, Math.max(...days)) : null;
+}
+
+
 export function dossiers() {
     const blank = { trust: 0, affection: 0, desire: 0, tension: 0 };
     return {
@@ -60,7 +68,7 @@ export async function suite({ records = dossiers(), clock = true, allowance, cal
     const lastSummary = () => host.store.receipts().map(item => item.receipt).filter(item => item.type === 'npc.line' || /^npc\./.test(item.type ?? '')).at(-1)?.summary
         ?? host.store.receipts().map(item => item.receipt).at(-1)?.summary;
     // The stored record is flat (day in every key); the tests read it as { day, reply, counts }.
-    const day = name => fromFlatDay(host.head().domains.npc.npcs[name]?.impactDay) ?? undefined;
+    const day = name => newestFlatDay(host.head().domains.npc.npcs[name]?.impactDay) ?? undefined;
     return { host, adapter, delta, say, swipe, setDay, npc, lastSummary, day };
 }
 

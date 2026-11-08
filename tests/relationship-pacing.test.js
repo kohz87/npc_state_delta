@@ -6,9 +6,9 @@ import { validateNpcSlice } from '../src/npc-meters.js';
 import { DEFAULT_RELATIONSHIP_CAPS, normalizeNpcRecord } from '../core.js';
 import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
-import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent } from '../src/relationship-pacing.js';
+import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent, spendFlatEvent } from '../src/relationship-pacing.js';
 import { cutToTier, pacingNote } from '../src/npc-meters-pacing.js';
-import { DAY, dossiers, suite, major } from './helpers/pacing-suite.js';
+import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-suite.js';
 
 // Relationship pacing: points per event 1 / 2 / 3 / 6 and events per story day for each person
 // (3 ordinary, 1 meaningful, 1 major, 1 extreme). An event over its allowance counts as the next tier down; the count is on the
@@ -80,11 +80,19 @@ test('a downgraded move is cut to the used tier\'s points and stops on a gate th
     assert.deepEqual(cutToTier([{ meter: 'loyalty', value: 3 }], 'meaningful', caps, () => 49).map(change => change.value), [2], 'custom meters have the tier cap, not relationship gates');
     const flat = toFlatDay({ day: 3, reply: 'a', ordinary: 1, meaningful: 0, major: 0, extreme: 0 });
     assert.deepEqual(flat, { reply: 'a', 'd3:ordinary': 1, 'd3:meaningful': 0, 'd3:major': 0, 'd3:extreme': 0 });
-    assert.deepEqual(fromFlatDay(flat), { day: 3, reply: 'a', ordinary: 1, meaningful: 0, major: 0, extreme: 0 });
-    assert.deepEqual(fromFlatDay({ reply: 'b', 'd2:ordinary': 3, 'd4:meaningful': 1 }), { day: 4, reply: 'b', ordinary: 0, meaningful: 1, major: 0, extreme: 0 }, 'the newest day named is in force; a missing key is zero');
+    assert.deepEqual(fromFlatDay(flat, 3), { day: 3, reply: 'a', ordinary: 1, meaningful: 0, major: 0, extreme: 0 });
+    const leftovers = { reply: 'b', 'd2:ordinary': 3, 'd4:meaningful': 1 };
+    assert.deepEqual(fromFlatDay(leftovers, 4), { day: 4, reply: 'b', ordinary: 0, meaningful: 1, major: 0, extreme: 0 }, 'only the day asked for is read; a missing key is zero');
+    assert.deepEqual(fromFlatDay(leftovers, 2), { day: 2, reply: 'b', ordinary: 3, meaningful: 0, major: 0, extreme: 0 }, 'an older day is read when the clock is on it: never "the newest day"');
+    assert.equal(fromFlatDay(leftovers, 9).ordinary + fromFlatDay(leftovers, 9).meaningful, 0, 'a day with no keys counts nothing, whatever other days hold');
+    assert.equal(fromFlatDay(leftovers, null), null);
     assert.deepEqual(flatDayProblems(flat), []);
     assert.ok(flatDayProblems({ reply: 'a', 'd3:major': -1, day: 3 }).length >= 2);
-    assert.equal(fromFlatDay({ reply: 'a' }), null);
+    assert.deepEqual(fromFlatDay({ reply: 'a' }, 3), { day: 3, reply: 'a', ordinary: 0, meaningful: 0, major: 0, extreme: 0 });
+    // A write stores the current day's four keys only: every other day's key the record held is dropped with it.
+    const written = spendFlatEvent({ reply: 'a', 'd9:major': 1, 'd2:ordinary': 2 }, { tier: 'major', reply: 'b', clockDay: 5, allowance: normalizeAllowance() });
+    assert.deepEqual(written.next, { reply: 'b', 'd5:ordinary': 0, 'd5:meaningful': 0, 'd5:major': 1, 'd5:extreme': 0 });
+    assert.equal(written.used, 'major', 'day 9\'s major (a clock that went back, or a leftover) does not count on day 5');
     assert.deepEqual(impactDayProblems({ day: 3, reply: 'a', ordinary: 1, meaningful: 0, major: 0, extreme: 0 }), []);
     assert.ok(impactDayProblems({ day: 3, reply: 'a', ordinary: -1, meaningful: 0, major: 0, extreme: 0, sneaky: 1 }).length >= 2);
 });
@@ -377,7 +385,7 @@ for (const seed of [3, 11, 29]) {
             assert.equal(JSON.stringify(s.host.head()), head, `${label}: replay equals rebuild`);
             for (const record of Object.values(s.host.head().domains.npc.npcs)) {
                 if (!record.impactDay) continue;
-                const { ordinary, meaningful, major, extreme } = fromFlatDay(record.impactDay);
+                const { ordinary, meaningful, major, extreme } = newestFlatDay(record.impactDay);
                 assert.ok(major <= 1 && meaningful <= 1 && extreme <= 1 && ordinary <= 3, `${label}: counts stay within the allowance: ${JSON.stringify(record.impactDay)}`);
             }
         }

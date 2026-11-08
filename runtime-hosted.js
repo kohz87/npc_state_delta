@@ -8,12 +8,11 @@ import { replyScanned } from './scan-context.js';
 import { normalizeRelationshipBaseline, isTerminalNpcDeath, npcMatchesLabel, storyMinuteText } from './core.js';
 import { defersArea, resolveDossierTarget } from './suite-handshake.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
-import { adoptSliceRelationship } from './src/relationship-pass.js';
 import { castView, findCastPerson, normalizeCast } from './src/cast-dossier.js';
 import { getSettings } from './runtime-settings.js';
 
 export function createHostedPart(rt, deps) {
-    const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex, persist } = deps;
+    const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex } = deps;
 
     // Set by src/storysuite-v2.js while Delta is registered with a Story Block v2 host.
     function storyBlockV2Hosted() {
@@ -42,7 +41,7 @@ export function createHostedPart(rt, deps) {
         if (!adapter) return null;
         try { return adapter.storyClock?.() ?? null; } catch { return null; }
     }
-    // Delta's records with their relationship numbers read from the slice (views and the injection).
+    // Delta's records with their relationship numbers, part-points and earned milestones read from the slice (views, the injection and a scan's copy).
     function hostedMeterView(npcs) {
         const adapter = storySuiteV2Meters();
         if (!adapter) return npcs;
@@ -218,20 +217,6 @@ export function createHostedPart(rt, deps) {
         const now = chatHeadMark();
         return now.length === mark.length && now.message === mark.message && now.swipe === mark.swipe;
     }
-    // While hosted the slice is the one truth for relationship numbers: Delta's records (the ones a scan just committed) take the
-    // slice's numbers, part-points and milestones for each person it has a value for (src/relationship-pass.js adoptSliceRelationship).
-    // A person the slice has no value for yet is left as it is. → true when a record changed.
-    function adoptSliceNumbers(npcs) {
-        const adapter = storySuiteV2Meters();
-        if (!adapter || !Array.isArray(npcs)) return false;
-        let changed = false;
-        for (const npc of npcs) {
-            if (!npc?.id || npc.archived) continue;
-            try { changed = adoptSliceRelationship(npc, adapter.sliceNumbers?.(npc)) || changed; } catch { /* the slice cannot answer: the record stays */ }
-        }
-        return changed;
-    }
-
     // A committed scan's relationship changes go to the slice as npc.adjust (same clamps as a story
     // line), in dossier order; the sidecar keeps its own numbers by v1's rules. `head` (chatHeadMark,
     // taken when the scan started): when the reader swiped, or a reply was added or deleted, since
@@ -259,19 +244,12 @@ export function createHostedPart(rt, deps) {
             const fresh = last && JSON.stringify(last) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange);
             if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}) });
         }
-        const chatKey = getChatKey();
-        // Nothing to forward (no whole-point change: a fraction alone spends no allowance): the record is set from the slice now.
-        if (!changes.length) { adoptSliceNumbers(after); return; }
+        if (!changes.length) return;
         void (async () => {
-            let failed = false;
             for (const change of changes) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                const out = await adapter.adjust(change);
-                if (!out || (out.ok === false && out.code !== 'REFUSED')) failed = true;   // a refusal is the slice's answer; a failure is not
+                await adapter.adjust(change);
             }
-            // Every change reached the slice: whatever it made of them (a held tier, a yield to the story line, a cap) is the number.
-            // A failed forward leaves the record as it is.
-            if (!failed && getChatKey() === chatKey && adoptSliceNumbers(after)) persist();
         })();
     }
 

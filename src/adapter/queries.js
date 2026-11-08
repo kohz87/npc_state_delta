@@ -6,6 +6,7 @@
 // constants and the parts built before it (deps), and returns what the other parts and the adapter use. Pure apart from the DOM it
 // is given: no SillyTavern import.
 
+import { normalizeRelationshipMilestones, normalizeRelationshipProgress } from '../../core-relationship-model.js';
 import { resolveDossierTarget } from '../../suite-handshake.js';
 import { FEATURE_SOCIAL, SOCIAL_QUERY, createNpcPart, normalizeSecrets } from '../npc-meters.js';
 import { normalizeLimits, presetCatalog } from '../npc-meters-presets.js';
@@ -296,8 +297,10 @@ export function createQueriesPart(session, deps) {
     }
 
     /**
-     * `npcs` (Delta's records) with each one's `relationship` read from the v2 slice where the slice
-     * has an entry; the same array when not hosted or when nothing differs. Never changes `npcs`.
+     * `npcs` (Delta's records) with each one's relationship read from the v2 slice where the slice has an entry: the four numbers,
+     * the part-points, and the earned milestones that still hold at those numbers (the scorer infers the rest from the numbers).
+     * The same array when not hosted or when nothing differs. Read time only: `npcs` is never changed and nothing is written back,
+     * so whatever the sidecar holds for these is not read while hosted (a person with no entry yet keeps their own record).
      */
     function sliceView(npcs) {
         if (!Array.isArray(npcs) || !session.hosted) return npcs;
@@ -308,26 +311,20 @@ export function createQueriesPart(session, deps) {
             const entry = npc && typeof npc === 'object' ? entryFor(entries, npc) : null;
             if (!entry) return npc;
             const relationship = relationshipOf(entry, npc.relationship);
-            if (RELATIONSHIP_KEYS.every(key => Number(npc.relationship?.[key]) === relationship[key])) return npc;
+            const holds = item => item.inferred !== true && Math.sign(relationship[item.axis]) === item.polarity && Math.abs(relationship[item.axis]) > item.threshold;
+            const next = {
+                relationship, relationshipProgress: normalizeRelationshipProgress(entry.progress),
+                relationshipMilestones: normalizeRelationshipMilestones(npc.relationshipMilestones, relationship, { inferFromRelationship: false }).filter(holds),
+            };
+            if (Object.keys(next).every(key => JSON.stringify(npc[key]) === JSON.stringify(next[key]))) return npc;
             changed = true;
-            return { ...npc, relationship };
+            return { ...npc, ...next };
         });
         return changed ? out : npcs;
     }
 
-    /**
-     * What the slice holds for one of Delta's records, { relationship, progress } (the four numbers and the part-points), or
-     * null (not hosted, no entry for that person yet): the one truth the sidecar is set from after a scan.
-     */
-    function sliceNumbers(npc) {
-        if (!session.hosted || !npc || typeof npc !== 'object') return null;
-        const entries = sliceEntries();
-        const entry = entries?.length ? entryFor(entries, npc) : null;
-        return entry ? { relationship: relationshipOf(entry, npc.relationship), progress: { ...(entry.progress ?? {}) } } : null;
-    }
-
     return {
         warn, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
-        entryFor, queries, ...director, send, sliceView, sliceNumbers,
+        entryFor, queries, ...director, send, sliceView,
     };
 }

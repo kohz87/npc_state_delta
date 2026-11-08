@@ -1,4 +1,4 @@
-// Focused relationship decisions, the hosted pacing query, and synthetic host reconciliation.
+// Focused relationship decisions, hosted pacing (the slice counts; Delta's sidecar is never written from it), and synthetic host reconciliation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,7 +7,6 @@ import {
     RELATIONSHIP_RESPONSE_LENGTH,
 } from '../src/scanner-request.js';
 import {
-    adoptSliceRelationship,
     applyFocusedRelationshipDecisions,
     currentExchangeRelationshipRelevant,
     hasCompletePrimaryRelationshipDecision,
@@ -16,7 +15,7 @@ import {
 } from '../src/relationship-pass.js';
 import { runtimeSource } from './helpers/runtime-source.js';
 import { createHost } from './vendor/story-block/testkit/index.js';
-import { fromFlatDay } from '../src/relationship-pacing.js';
+import { newestFlatDay as fromFlatDay } from './helpers/pacing-suite.js';
 import { createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
 
 // Cleanup step 10: the focused relationship pass moved from index.js to src/relationship-pass.js unchanged.
@@ -87,9 +86,10 @@ test('index.js imports the pass and keeps no copy', () => {
     assert.match(index, /suppressPrimaryRelationshipForFocusedDecisions\(fullWindowRelationship\.mergeSafe, relationshipPass\.decisions, \(\) => getChatState\(\)\.npcs\)/);
 });
 
-// While hosted the slice holds the allowance and is the one truth: Delta's scan applies the decision as asked, the change is forwarded
-// with its tier (as runtime-hosted.js forwardRelationshipChangesToHost does), and Delta's record then takes the slice's numbers
-// (adapter.sliceNumbers → adoptSliceRelationship), so the two cannot drift.
+// While hosted the slice holds the allowance and is the one truth: Delta's scan applies the decision as asked and the change is
+// forwarded with its tier (as runtime-hosted.js forwardRelationshipChangesToHost does). Nothing writes the slice's numbers back into
+// Delta's record: the sidecar may differ (a held tier, a yield to the story), and every reader reads the slice
+// (tests/hosted-slice-readers.test.js).
 async function hostedPair(allowance) {
     const clock = { id: 'clock', name: 'Clock', domains: { director: { initial: () => ({ time: { minutes: 0 } }) } },
         queries: { 'director.time': state => state?.domains?.director?.time } };
@@ -107,7 +107,6 @@ async function hostedPair(allowance) {
         timers: { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} }, logger: { warn() {} },
     });
     adapter.start(); assert.equal(await adapter.settled(), true);
-    const adopt = () => adoptSliceRelationship(state.npcs[0], adapter.sliceNumbers(state.npcs[0]));
     const scan = async (text, impact) => {
         await host.send('Continue', 'The story continues.'); await adapter.ticked();
         const reply = host.store.headIndex();
@@ -120,54 +119,47 @@ async function hostedPair(allowance) {
         const last = after.lastRelationshipChange;
         const sent = Boolean(trust) && JSON.stringify(last) !== JSON.stringify(before.lastRelationshipChange);
         if (sent) await adapter.adjust({ name: 'Mira', meters: { trust }, start: before.relationship, reply, ...(typeof last.impact === 'string' ? { impact: last.impact } : {}) });
-        adopt();   // after every forward, and when nothing was forwarded: the slice's numbers (a person it has no value for stays as she is)
         return { sent, reply };
     };
     const slice = () => host.head().domains.npc.npcs.mira;
-    const agree = label => {
-        const stored = state.npcs[0];
-        assert.equal(adapter.sliceView(state.npcs)[0].relationship.trust, stored.relationship.trust, `${label}: shown trust is the sidecar's`);
-        const entry = host.sdk.query('npc.meters', { name: 'Mira' });
-        if (!entry) return;   // the slice has no value for her yet: the sidecar's numbers are shown as they are
-        assert.equal(entry.meters.trust, stored.relationship.trust, `${label}: slice trust is the sidecar's`);
-        assert.deepEqual(slice().progress ?? {}, Object.fromEntries(Object.entries(stored.relationshipProgress ?? {}).filter(([, v]) => v)), `${label}: progress`);
-    };
-    return { host, state, adapter, scan, slice, agree, adopt };
+    const sliceTrust = () => host.sdk.query('npc.meters', { name: 'Mira' })?.meters.trust;
+    const shownTrust = () => adapter.sliceView(state.npcs)[0].relationship.trust;
+    return { host, state, adapter, scan, slice, sliceTrust, shownTrust };
 }
 
-test('hosted: a downgraded scanner decision leaves the sidecar and the slice on the same numbers, progress, milestones and history, also after a reload', async () => {
+test('hosted: a downgraded scanner decision leaves the slice on the held number and the sidecar untouched, also after a reload', async () => {
     const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
     try {
         await h.scan('Ari rescued Mira from the fire.', 'major');
-        assert.equal(h.state.npcs[0].relationship.trust, 13);
-        h.agree('first major');
+        assert.deepEqual([h.state.npcs[0].relationship.trust, h.sliceTrust()], [13, 13]);
         const second = await h.scan('Ari stood between Mira and the tax collector.', 'major');
         assert.equal(second.sent, true);
-        assert.equal(h.state.npcs[0].relationship.trust, 15, 'the second major of the day counts as meaningful: +2');
+        assert.equal(h.state.npcs[0].relationship.trust, 16, 'the sidecar applied the second major as asked (and nothing wrote the slice back)');
+        assert.equal(h.sliceTrust(), 15, 'the slice held it to meaningful: +2');
+        assert.equal(h.shownTrust(), 15, 'what is shown is the slice\'s');
         assert.equal(h.state.npcs[0].lastRelationshipChange.impact, 'major', 'the event history keeps the tier the scanner asked');
         assert.deepEqual(h.state.npcs[0].relationshipEventHistory.map(event => event.impact), ['major', 'major']);
-        h.agree('downgraded');
         assert.equal(fromFlatDay(h.slice().impactDay).meaningful, 1, 'the slice counted the used tier once');
         h.host.store.rebuild();
-        h.agree('after a rebuild');
+        assert.equal(h.sliceTrust(), 15, 'after a rebuild');
         await h.host.st.loadChat(h.host.ctx.chat);   // a cold reload of the chat: the slice is replayed from its stored ops
         await h.adapter.ticked();
-        h.state.npcs = structuredClone(h.state.npcs);   // and Delta's own save and load hand its records back
-        h.agree('after a reload');
-        assert.deepEqual(h.state.npcs[0].relationshipMilestones, [], 'no milestone on either side');
+        assert.equal(h.sliceTrust(), 15, 'after a reload');
+        assert.equal(h.shownTrust(), 15);
+        assert.equal(h.state.npcs[0].relationship.trust, 16, 'the sidecar is only ever what Delta stored');
     } finally { h.host.close(); }
 });
 
-test('hosted: an ignored scanner decision moves nothing on the slice, and Delta\'s record ends where the slice says', async () => {
+test('hosted: an ignored scanner decision moves nothing on the slice; the sidecar keeps what it applied and is not read', async () => {
     const h = await hostedPair({ ordinary: 0, meaningful: 0, major: 0, extreme: 0 });
     try {
         const out = await h.scan('Ari rescued Mira from the fire.', 'major');
         assert.equal(out.sent, true, 'the sidecar applied it as asked, so it is forwarded');
         assert.deepEqual(['ordinary', 'meaningful', 'major', 'extreme'].map(tier => fromFlatDay(h.slice().impactDay)[tier]), [0, 0, 0, 0], 'the slice counted nothing');
         assert.equal(h.state.npcs[0].impactDay, undefined, 'the sidecar does not count while hosted');
-        const entry = h.host.sdk.query('npc.meters', { name: 'Mira' });
-        assert.equal(entry.meters.trust, h.state.npcs[0].relationship.trust, 'her number is the slice\'s, not the 13 the sidecar applied');
-        h.agree('ignored');
+        assert.equal(h.state.npcs[0].relationship.trust, 13);
+        assert.equal(h.sliceTrust(), 10, 'her number is the slice\'s');
+        assert.equal(h.shownTrust(), 10);
     } finally { h.host.close(); }
 });
 
@@ -175,31 +167,27 @@ test('hosted: a decision with room is applied as asked and the two sides agree',
     const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
     try {
         await h.scan('Ari rescued Mira from the fire.', 'major');
-        h.agree('with room');
+        assert.deepEqual([h.shownTrust(), h.sliceTrust()], [13, 13]);
         assert.equal(fromFlatDay(h.slice().impactDay).major, 1);
     } finally { h.host.close(); }
 });
 
-test('hosted: a failed or absent slice answer leaves the record as it is', () => {
-    const npc = mira();
-    const before = JSON.stringify(npc);
-    assert.equal(adoptSliceRelationship(npc, null), false);
-    assert.equal(adoptSliceRelationship(npc, {}), false);
-    assert.equal(JSON.stringify(npc), before);
-    const slice = { relationship: { trust: 4, affection: 10, desire: 0, tension: 0 }, progress: { trust: 0.5 } };
-    assert.equal(adoptSliceRelationship(npc, slice), true);
-    assert.deepEqual([npc.relationship.trust, npc.relationshipProgress.trust], [4, 0.5]);
-    assert.equal(adoptSliceRelationship(npc, slice), false, 'nothing to change the second time');
+test('hosted: nothing of the slice is written into a Delta record (no adopt function, no slice-number query)', async () => {
+    const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
+    try {
+        assert.equal(h.adapter.sliceNumbers, undefined);
+        assert.doesNotMatch(fs.readFileSync(new URL('../runtime-hosted.js', import.meta.url), 'utf8'), /adoptSlice|sliceNumbers|persist\(/);
+        assert.doesNotMatch(fs.readFileSync(new URL('../src/relationship-pass.js', import.meta.url), 'utf8'), /adoptSlice/);
+    } finally { h.host.close(); }
 });
 
-test('hosted: a downgraded decision keeps fractional progress in the slice', async () => {
+test('hosted: a downgraded decision keeps the slice and the shown number together', async () => {
     const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
     try {
         h.state.npcs[0].relationship.trust = 60;
         await h.scan('Ari rescued Mira from the fire.', 'major');
         await h.scan('Ari defended Mira from the tax collector.', 'major');
-        h.agree('fractional progress after downgrade');
-        assert.equal(h.state.npcs[0].relationship.trust, h.host.sdk.query('npc.meters', { name: 'Mira' }).meters.trust);
+        assert.equal(h.shownTrust(), h.sliceTrust());
     } finally { h.host.close(); }
 });
 
@@ -215,7 +203,7 @@ test('hosted: a fraction-only scanner event spends no allowance and is not forwa
     } finally { h.host.close(); }
 });
 
-test('hosted: a complete primary scanner decision ends on the slice\'s numbers', async () => {
+test('hosted: a complete primary scanner decision leaves the slice on the held number', async () => {
     const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
     try {
         await h.scan('Ari rescued Mira from the fire.', 'major');
@@ -235,9 +223,8 @@ test('hosted: a complete primary scanner decision ends on the slice\'s numbers',
         h.state.npcs[0] = after;
         await h.adapter.adjust({ name: after.name, meters: { trust: after.relationship.trust - before.relationship.trust },
             start: before.relationship, reply, impact: after.lastRelationshipChange.impact });
-        h.adopt();
-        assert.equal(h.state.npcs[0].relationship.trust, 15, 'the slice held the second major to meaningful: +2');
-        h.agree('primary decision');
+        assert.equal(h.sliceTrust(), 15, 'the slice held the second major to meaningful: +2');
+        assert.equal(h.shownTrust(), 15);
     } finally { h.host.close(); }
 });
 
@@ -256,13 +243,11 @@ test('hosted: a scanner yields to the story before storing a matching meter even
         assert.equal(after.relationship.trust, 14, 'the sidecar applied the event the slice will drop (11 + 3)');
         await h.adapter.adjust({ name: after.name, meters: { trust: after.relationship.trust - before.relationship.trust },
             start: before.relationship, reply, impact: after.lastRelationshipChange.impact });
-        h.adopt();
-        assert.equal(after.relationship.trust, 11, 'the story line moved her: the slice dropped the scanner\'s change');
-        assert.equal(after.relationship.trust, h.host.sdk.query('npc.meters', { name: 'Mira' }).meters.trust);
+        assert.equal(h.sliceTrust(), 11, 'the story line moved her: the slice dropped the scanner\'s change');
+        assert.equal(h.shownTrust(), 11);
     } finally { h.host.close(); }
 });
 
-test('hosted, the scan counts nothing itself: the slice counts and Delta takes its numbers', () => {
+test('hosted, the scan counts nothing itself: the slice counts', () => {
     assert.match(runtimeSource(), /const scanPace = settings => \(hostedMeters\(\) \? null : \{ allowance: normalizeAllowance\(settings\.relationshipAllowance\), day: null \}\)/);
-    assert.match(fs.readFileSync(new URL('../runtime-hosted.js', import.meta.url), 'utf8'), /if \(!failed && getChatKey\(\) === chatKey && adoptSliceNumbers\(after\)\) persist\(\)/);
 });

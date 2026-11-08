@@ -201,7 +201,7 @@ export function createStorySuiteV2Adapter({
     const editorPart = createEditorPart(session, deps);
     Object.assign(deps, editorPart);
     const { watchers, pinKeyPerson, pageApi, offerPage } = castUiPart;
-    const { dossierOf, part, sliceEntries, entryFor, keyPeopleAnswer, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView, sliceNumbers } = queriesPart;
+    const { dossierOf, part, sliceEntries, entryFor, keyPeopleAnswer, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView } = queriesPart;
     const { ownPrompt, storyClock, calendarLink, definition, scenePresentNames } = timelinePart;
     const { poll, unhost, check } = connectPart;
     const { editorHtml, readEditor, dossierMeters, eventWatch } = editorPart;
@@ -226,7 +226,6 @@ export function createStorySuiteV2Adapter({
         },
         sliceView,
         /** While hosted: what the slice holds for one of Delta's records, { relationship, progress }, or null (no value yet). */
-        sliceNumbers,
         /** Runs the synchronous reads of `fn` against Story Block's state after reply `index` (query { asOf }); nothing is written or moved. */
         at: (index, fn) => {
             const real = session.sdkRef;

@@ -55,7 +55,11 @@ export function impactDayProblems(value) {
 // On the hosted slice the same record is stored FLAT, with the day in every key: { reply, 'd12:ordinary': 1, 'd12:meaningful': 0, ... }.
 // Story Block replays stored ops, and an op holds only the fields that changed (Story_block src/v2/ops/diff.js), so a `day` field
 // that did not change would be missing from a later event's op and a surviving event could be counted on the day before. A key that
-// names its day carries it in whatever op wrote it; the day in force is the newest one named, and an old day's keys are dropped.
+// names its day carries it in whatever op wrote it. Spending and reading use ONLY the keys of the day in force (the story day before
+// the reply, which the caller gives): never "the newest day named", so a clock that went back, or a key left over from a deleted
+// event, cannot select a stale day. A write stores the current day's four keys as the whole record, so every key the writer saw is
+// dropped with it (the diff removes what it saw). Keys of another day that a replay left behind after repeated deletes are never read
+// and go at the next write: a few of them are harmless (they only take room; flatDayProblems accepts them).
 const FLAT_KEY = /^d(-?\d{1,9}):(ordinary|meaningful|major|extreme)$/;
 
 /** The flat record of a spendEvent `next` ({ day, reply, counts }): every tier's count for that day, and the reply. */
@@ -63,12 +67,9 @@ export function toFlatDay(next) {
     return { reply: next.reply, ...Object.fromEntries(PACING_TIERS.map(tier => [`d${next.day}:${tier}`, next[tier]])) };
 }
 
-/** A stored flat record as spendEvent reads it ({ day, reply, counts }), or null (none, unusable, or no day named). */
-export function fromFlatDay(value) {
-    if (!value || typeof value !== 'object' || flatDayProblems(value).length) return null;
-    const days = Object.keys(value).map(key => FLAT_KEY.exec(key)).filter(Boolean).map(match => Number(match[1]));
-    if (!days.length) return null;
-    const day = Math.max(...days);
+/** A stored flat record as spendEvent reads it ({ day, reply, counts }) for `day` only; a missing key is zero. null: none, or unusable. */
+export function fromFlatDay(value, day) {
+    if (!isInt(day) || !value || typeof value !== 'object' || flatDayProblems(value).length) return null;
     return { day, reply: value.reply, ...Object.fromEntries(PACING_TIERS.map(tier => [tier, value[`d${day}:${tier}`] ?? 0])) };
 }
 
@@ -113,9 +114,9 @@ export function spendEvent(prior, { tier, reply, clockDay, allowance }) {
     return { used, next: { day, reply, ...counts }, skipped };
 }
 
-/** spendEvent for the slice's flat record: `prior` is the stored flat record, `next` the flat record to store. */
+/** spendEvent for the slice's flat record: `prior` is the stored flat record (read for `args.clockDay` only), `next` the flat record to store. */
 export function spendFlatEvent(prior, args) {
-    const spent = spendEvent(fromFlatDay(prior), args);
+    const spent = spendEvent(fromFlatDay(prior, args.clockDay), args);
     return spent.next ? { ...spent, next: toFlatDay(spent.next) } : spent;
 }
 
