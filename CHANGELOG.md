@@ -1,3 +1,7 @@
+## Unreleased
+
+- **Newly met NPCs get their detailed appearance again.** Since 1.12.0 a newly met NPC was left to the backfill alone and missed the capture catch-up's targeted Refresh, the pass that writes the structured appearance (body, hair, eyes, marks), so new dossiers came out as one short line. A newly met NPC now gets that Refresh on the reply it is admitted and its backfill right after; NPCs already met still get one model call per reply.
+
 ## 1.13.1
 
 - **A page reload no longer rolls the dossiers back.** After a reload, an automatic branch check could run before SillyTavern had loaded the chat; it saw an empty chat, took it for a deleted one, and restored the dossiers to the chat's first saved point on disk (NPCs, roles, seen counts, `present`, archive flags lost). Automatic rollbacks, branch inheritance and new-chat setup now wait until the chat's file is loaded and matches; a missing or unreadable file never triggers a rollback. A real delete of the messages still works as before. Found by the new SillyTavern soak test.
