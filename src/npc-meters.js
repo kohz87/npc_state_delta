@@ -72,6 +72,8 @@ import { SETTINGS_DEFAULTS, SETTINGS_SCHEMA } from './npc-meters-schema.js';
 import { createNpcCommands } from './npc-meters-commands.js';
 import { createNpcQueries } from './npc-meters-queries.js';
 import { createNpcPrompt } from './npc-meters-prompt.js';
+import { normalizeAllowance, pacedTier, spendFlatEvent } from './relationship-pacing.js';
+import { cutToTier, pacingNote } from './npc-meters-pacing.js';
 export { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, BUILT_IN_RANGE, CUSTOM_RANGE, MAX_CUSTOM_METERS, MAX_NPCS, MAX_METERS_PER_NPC, MAX_STAGES_PER_METER, MAX_SECRETS, MAX_GENERATED_SECRETS, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, MAX_TRACKS, MAX_BANDS, MAX_NEEDS, DEFAULT_CHANGE_CAP, MAX_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, SECRET_WHEN_MAX, NOTE_SOURCES, MILESTONE_MAX, DESCRIBE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURES, replyKey, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, parseBands, bandWord, parseNeeds, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
 export { normalizeSecrets, secretId, normalizeGeneratedSecrets, secretsToLines, secretsFromLines, limitsToLines, limitsFromLines } from './npc-meters-secrets.js';
 export { initialNpcSlice, observeKeyAway, CAST_QUERY, CAST_MADE_MAX, observeCast, validateNpcSlice, findNpcKey, meterValue, rungMet } from './npc-meters-slice.js';
@@ -86,6 +88,9 @@ export { FEATURE_SOCIAL, SOCIAL_QUERY };
  *   resolve(name)     → Delta's dossier for that name or alias: { name, aliases, relationship } | null
  *   baseline()        → Delta's base relationship values (new NPCs start there)
  *   caps()            → Delta's impact-tier caps { ordinary, meaningful, major, extreme } (a story line's step is held to its tier's)
+ *   allowance()       → the reader's events per story day { ordinary, meaningful, major, extreme } (null: no limit; relationship-pacing.js)
+ *   calendarOwn()     → true while the reader keeps the calendar in Delta (then there is no story day to count on)
+ *   startTime(index)  → story-clock minutes before that reply (null when unavailable)
  *   secretRules(name) → that dossier's notes as [{ id, meter?, at?, when?, title? }] (never their text)
  *   secretTexts(name, ids) → [{ id, text }] for those notes (the tail and screens only)
  *   setup(name, labels) → that dossier's meter setup { track, limits } (the editor's)
@@ -114,6 +119,16 @@ export function createNpcPart(hooks = {}) {
     const tierCaps = () => {
         const value = call(hooks.caps, null);
         return isObject(value) ? normalizeRelationshipCaps(value) : null;
+    };
+    // The events-per-day allowance and the story day before the reply (null: no clock, or Delta owns the calendar).
+    const tierAllowance = () => {
+        const value = call(hooks.allowance, null);
+        return isObject(value) ? normalizeAllowance(value) : null;
+    };
+    const clockDay = at => {
+        if (call(hooks.calendarOwn, false) === true) return null;
+        const minutes = call(hooks.startTime, null, at);
+        return isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
     };
     const rulesFor = (name, aliases = []) => {
         const value = call(hooks.secretRules, [], name, aliases);
@@ -299,7 +314,7 @@ export function createNpcPart(hooks = {}) {
     }
 
     // `milestone`: { add: [{ key, name }], remove: [key] } (the reader's or a story line's).
-    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false }) {
+    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false, scanTier = null }) {
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         if (!changes.length && disposition === undefined && !allowEmpty) {
@@ -318,7 +333,16 @@ export function createNpcPart(hooks = {}) {
         // Delta's scan of a reply whose story line already moved a meter leaves that meter to the line (one move, not two).
         const left = yieldToStory && limit && record.turn && sameReply(record.turn, reply) && Array.isArray(record.turn.story) ? record.turn.story : [];
         const mine = left.length ? changes.filter(change => !left.includes(change.meter)) : changes;
-        const stepped = impact ? tiered(record, mine, defs, impact) : mine;
+        // Pacing (relationship-pacing.js): one event per line or scanner change, counted once whatever number of meters it names.
+        // A story line (`impact`) and a forwarded scanner change (`scanTier`) share the record's count; a change with neither is not paced.
+        const asked = impact?.tier ?? pacedTier(scanTier);
+        const spent = asked && mine.length && limit ? spendFlatEvent(record.impactDay, { tier: asked, reply: replyKey(reply, reply), clockDay: clockDay(at), allowance: tierAllowance() }) : null;
+        if (spent?.next) record.impactDay = spent.next;
+        const pace = spent ? pacingNote(asked, spent.used, spent.skipped) : '';
+        let stepped = mine;
+        if (spent && !spent.used) stepped = [];
+        else if (impact) stepped = tiered(record, mine, defs, { ...impact, tier: spent?.used ?? impact.tier });
+        else if (spent?.used && spent.used !== asked) stepped = cutToTier(mine, spent.used, normalizeRelationshipCaps(tierCaps() ?? {}), id => meterValue(record, defs.find(def => def.id === id)));
         const moved = moveMeters(record, stepped, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup), story });
         if (!limit) {
             // The reader's own value for a built-in meter ends the part-points the story lines had gathered on it.
@@ -355,12 +379,12 @@ export function createNpcPart(hooks = {}) {
             ctx.fail('REFUSED', 'Nothing to update.');
         }
         note(slice, ctx.rev, problems);
-        return result({ name: record.name, key: who.key, moved, settled, problems, created, disposition, milestone: marked });
+        return result({ name: record.name, key: who.key, moved, settled, problems, created, disposition, milestone: marked, pace });
     }
 
     const shared = {
         call, resolve, baseline, tierCaps, rulesFor, presentNames, featureOn, catalog, normalized,
-        storedSettings, defsFrom, readerAction, ownOrModule, headReply, commandReply, setupFor,
+        storedSettings, tierAllowance, clockDay, defsFrom, readerAction, ownOrModule, headReply, commandReply, setupFor,
         ownRungs, rungsFor, limitsFor, identify, ensure, note, changesFrom, settleRecord,
         openCloseNotes, tiered, run, hooks,
     };

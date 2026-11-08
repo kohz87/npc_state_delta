@@ -1554,7 +1554,7 @@ test('focused relationship pass requires one full four-axis decision per target'
     assert.match(prompt, /ALL FOUR numeric keys/i);
     assert.match(prompt, /relationshipEvidence is REQUIRED with ALL FOUR string keys/i);
     assert.match(prompt, /actions and consequences, not just dialogue/i);
-    assert.match(prompt, /Raw maxima are ordinary 1 \/ meaningful 2 \/ major 5 \/ extreme 10/i);
+    assert.match(prompt, /Raw maxima are ordinary 4 \/ meaningful 8 \/ major 15 \/ extreme 25/i);
     assert.match(prompt, /Most events move 0-1 axes/i);
     assert.match(prompt, /relationshipSummary is REQUIRED/i);
     assert.match(prompt, /COPY IT EXACTLY/i);
@@ -2881,7 +2881,7 @@ test('v0.2.7 malformed relationship scores and caps fall back safely instead of 
         trust: 0, affection: 0, desire: 0, tension: 0,
     });
     assert.deepEqual(normalizeRelationshipCaps({ ordinary: 'many', meaningful: NaN, major: 'huge', extreme: null }), {
-        ordinary: 1, meaningful: 2, major: 5, extreme: 10,
+        ordinary: 1, meaningful: 2, major: 3, extreme: 6,
     });
 
     const stored = normalizeNpcRecord({ name: 'Falia', relationship: { trust: 'high' }, importance: 'important', manual: true });
@@ -3133,9 +3133,11 @@ test('v0.2.8 manual relationship audit remains valid even without a generated ev
 });
 
 
-test('v0.2.10 stock relationship progression uses 1/2/5/10 raw weights and axis limits', () => {
-    assert.deepEqual(DEFAULT_RELATIONSHIP_CAPS, { ordinary: 1, meaningful: 2, major: 5, extreme: 10 });
-    assert.deepEqual(normalizeRelationshipCaps({}), { ordinary: 1, meaningful: 2, major: 5, extreme: 10 });
+// (relationship pacing: the stock points per event are 1 / 2 / 3 / 6 now; the engine tests below that need the old 5 / 10 pass them.)
+const OLD_CAPS = { ordinary: 1, meaningful: 2, major: 5, extreme: 10 };
+test('v0.2.10 stock relationship progression uses 1/2/3/6 raw weights and axis limits', () => {
+    assert.deepEqual(DEFAULT_RELATIONSHIP_CAPS, { ordinary: 1, meaningful: 2, major: 3, extreme: 6 });
+    assert.deepEqual(normalizeRelationshipCaps({}), { ordinary: 1, meaningful: 2, major: 3, extreme: 6 });
 
     const ordinary = applyRelationshipDelta(
         { trust: 0, affection: 0, desire: 0, tension: 0 },
@@ -3169,6 +3171,7 @@ test('v0.2.10 relationship weight accumulates fractionally and makes extremes pr
         { trust: 90, affection: 0, desire: 0, tension: 0 },
         { trust: 10 },
         'extreme',
+        OLD_CAPS,
     );
     assert.equal(extreme.appliedDelta.trust, 2, 'extreme +10 is raw evidence before high-score resistance');
 
@@ -3184,6 +3187,7 @@ test('v0.2.10 relationship weight accumulates fractionally and makes extremes pr
         { trust: 90, affection: 0, desire: 0, tension: 0 },
         { trust: -10 },
         'extreme',
+        OLD_CAPS,
     );
     assert.equal(catastrophic.appliedDelta.trust, -10, 'extreme contrary evidence can punch through established resilience');
 });
@@ -3292,7 +3296,7 @@ test('v0.2.11 directional relationship milestones gate deeper bands instead of a
     );
     assert.equal(mislabeledTinyExtreme.relationship.trust, 90);
     assert.equal(mislabeledTinyExtreme.milestoneCrossings.length, 0, 'an extreme label alone cannot unlock 90 with trivial raw evidence');
-    assert.ok(mislabeledTinyExtreme.milestoneBlocks.some(item => item.threshold === 90 && item.requiredRaw === 8));
+    assert.ok(mislabeledTinyExtreme.milestoneBlocks.some(item => item.threshold === 90 && item.requiredRaw === 6), 'the raw weight the 90 gate asks for is held to the extreme points (6)');
 });
 
 test('v0.2.11 milestone history is directional and legacy depth infers only thresholds already passed', () => {

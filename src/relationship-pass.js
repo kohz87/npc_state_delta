@@ -24,6 +24,7 @@ import {
     stampChangedFields,
 } from '../core.js';
 import { isScannerRoutingError } from '../scanner-routing.js';
+import { spendEvent } from './relationship-pacing.js';
 import { RELATIONSHIP_RESPONSE_LENGTH, generateParsedNpcJson } from './scanner-request.js';
 
 export function transcriptMentionsNpcRecord(transcript, npc) {
@@ -215,7 +216,9 @@ export function stampNpcChanges(npc, before, { turn, message = null, storyDay = 
     return npc;
 }
 
-export function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessageId, report = null) {
+// `pace`: { allowance, day } while Delta works alone (src/relationship-pacing.js: the events each person can have per story day,
+// counted on the dossier's own `impactDay`); null while hosted (the slice counts) or with no story day.
+export function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessageId, report = null, pace = null) {
     if (!decisions?.size) return state;
     for (const [id, decision] of decisions) {
         const npc = state.npcs.find(item => item.id === id);
@@ -230,10 +233,16 @@ export function applyFocusedRelationshipDecisions(state, decisions, caps, source
             evidence,
         });
         const validReason = !requestedHasDelta || (relationshipChangeReasonGrounded(decision.relationshipChangeReason, '') && !duplicateAward);
+        let impact = validReason ? decision.relationshipImpact : 'none';
+        if (pace && validReason && requestedHasDelta) {
+            const spent = spendEvent(npc.impactDay, { tier: String(impact ?? '').trim().toLowerCase(), reply: Number.isInteger(sourceMessageId) ? sourceMessageId : null, clockDay: pace.day, allowance: pace.allowance });
+            if (spent.next) npc.impactDay = spent.next;
+            if (spent.skipped.length) impact = spent.used ?? 'none';
+        }
         const update = applyRelationshipDelta(
             npc.relationship || DEFAULT_RELATIONSHIP,
             validReason ? decision.relationshipDelta : { trust: 0, affection: 0, desire: 0, tension: 0 },
-            validReason ? decision.relationshipImpact : 'none',
+            impact,
             caps,
             npc.relationshipProgress,
             npc.relationshipMilestones,

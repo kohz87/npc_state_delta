@@ -10,13 +10,15 @@ import { decodeStateFilePayload, encodeStateFilePayload, readNpcStateDataFile, w
 import { dossierDetailProjection } from '../dossier-ui.js';
 
 const zero = { trust: 0, affection: 0, desire: 0, tension: 0 };
+const OLD_CAPS = { ordinary: 1, meaningful: 2, major: 5, extreme: 10 };
 const user = (mes, id) => ({ mes, is_user: true, name: 'Lucien', send_date: id });
 const bot = (mes, id) => ({ mes, is_user: false, name: 'Eos', send_date: id, swipe_id: 0 });
 const oracle = JSON.parse(fs.readFileSync(new URL('./fixtures/scoring-oracle.json', import.meta.url), 'utf8'));
 
 test('Stage 5 numerical outputs match the pinned source across 41,070 boundary, signed, fractional and cap cases', () => {
     const hash = createHash('sha256'); let count = 0;
-    for (const args of scoringCases()) { hash.update(JSON.stringify(canonicalResult(core.applyRelationshipDelta(...args))) + '\n'); count++; }
+    // The pinned source scored with its own stock points 1 / 2 / 5 / 10 (the default became 1 / 2 / 3 / 6 with relationship pacing).
+    for (const args of scoringCases()) { if (args[3] === undefined) args[3] = OLD_CAPS; hash.update(JSON.stringify(canonicalResult(core.applyRelationshipDelta(...args))) + '\n'); count++; }
     assert.equal(count, oracle.cases);
     assert.equal(hash.digest('hex'), oracle.sha256, `Numerical output diverged from pinned source blob ${oracle.sourceBlob}`);
 });
@@ -30,10 +32,10 @@ test('Stage 5 directional gates, fractions and tied-axis rejection retain observ
         const meaningful = core.applyRelationshipDelta(ordinary.relationship, { ...zero, trust: sign }, 'meaningful');
         assert.equal(meaningful.relationship.trust, 26 * sign);
         assert.equal(meaningful.milestoneCrossings[0].polarity, sign);
-        const major = core.applyRelationshipDelta({ ...zero, trust: 50 * sign }, { ...zero, trust: 3 * sign }, 'major');
+        const major = core.applyRelationshipDelta({ ...zero, trust: 50 * sign }, { ...zero, trust: 3 * sign }, 'major', OLD_CAPS);
         assert.equal(major.relationship.trust, 51 * sign);
         assert.equal(major.relationshipProgress.trust, 0.5 * sign);
-        const high = core.applyRelationshipDelta({ ...zero, trust: 90 * sign }, { ...zero, trust: 8 * sign }, 'extreme');
+        const high = core.applyRelationshipDelta({ ...zero, trust: 90 * sign }, { ...zero, trust: 8 * sign }, 'extreme', OLD_CAPS);
         assert.equal(high.relationship.trust, 91 * sign);
         assert.equal(high.relationshipProgress.trust, 0.6 * sign);
     }

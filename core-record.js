@@ -12,6 +12,7 @@ import { PORTRAIT_NPC_PROMPT_LIMIT } from './core-portrait.js';
 import { emptyProfileEvidence, normalizeProfileEvidence } from './core-evidence.js';
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
 import { CAST_APPEARANCE_WIDE, castAppearanceKept, normalizeAppearanceCanon, normalizeLifeStateCertainty, normalizePortraitSeed, normalizeStoredMemories, stripRecordCitations } from './core-record-shared.js';
+import { impactDayProblems } from './src/relationship-pacing.js';
 import { normalizeCustomFields } from './core-record-custom-fields.js';
 export function setNpcArchived(npc, archived, { reason = 'manual', sourceMessageId = null, lifeState = null } = {}) {
     const next = normalizeNpcRecord(npc || {});
@@ -132,6 +133,9 @@ export function normalizeNpcRecord(rawInput = {}) {
     const relationship = raw.relationship && typeof raw.relationship === 'object' ? raw.relationship : {};
     npc.relationship = normalizeRelationshipBaseline(relationship);
     npc.relationshipProgress = normalizeRelationshipProgress(raw.relationshipProgress ?? raw.relationship_progress);
+    // The events counted for the story day (src/relationship-pacing.js); absent until a paced event, dropped when unusable.
+    if (!impactDayProblems(raw.impactDay).length) npc.impactDay = structuredClone(raw.impactDay);
+    else delete npc.impactDay;
     npc.relationshipMilestones = normalizeRelationshipMilestones(raw.relationshipMilestones ?? raw.relationship_milestones, npc.relationship);
     npc.relationshipEventHistory = normalizeRelationshipEventHistory(raw.relationshipEventHistory ?? raw.relationship_event_history);
     npc.relationshipSummary = calibrateRelationshipSummary(npc.relationshipSummary, npc.relationship);

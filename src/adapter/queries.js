@@ -6,6 +6,7 @@
 // constants and the parts built before it (deps), and returns what the other parts and the adapter use. Pure apart from the DOM it
 // is given: no SillyTavern import.
 
+import { normalizeRelationshipMilestones, normalizeRelationshipProgress } from '../../core-relationship-model.js';
 import { resolveDossierTarget } from '../../suite-handshake.js';
 import { FEATURE_SOCIAL, SOCIAL_QUERY, createNpcPart, normalizeSecrets } from '../npc-meters.js';
 import { normalizeLimits, presetCatalog } from '../npc-meters-presets.js';
@@ -16,7 +17,7 @@ export { dossierFields, safeImageUrl, portraitUrl } from './queries-dossier.js';
 
 export function createQueriesPart(session, deps) {
     const {
-        delta, doc, headReply, host, KEY_PIN_COMMAND, logger, MODULE_ID, panelId, PRESET_KIND, suiteApi, timeline, WORLD_FEATURE,
+        calendarOwn, delta, doc, headReply, host, KEY_PIN_COMMAND, logger, MODULE_ID, panelId, PRESET_KIND, suiteApi, timeline, WORLD_FEATURE,
     } = deps;
 
     // Delta's own commands on their way to the host, by type and payload: npc.adjust takes a reader's
@@ -100,6 +101,16 @@ export function createQueriesPart(session, deps) {
         },
         baseline: () => runtime()?.relationshipBaseline?.() ?? {},
         caps: () => runtime()?.relationshipCaps?.() ?? null,
+        allowance: () => runtime()?.relationshipAllowance?.() ?? null,
+        calendarOwn: () => { try { return calendarOwn?.() === true; } catch { return false; } },
+        // The day belongs to the state before this reply, even if its own time line ran first.
+        startTime: index => {
+            if (!Number.isInteger(index) || index < 1) return null;
+            try {
+                const time = session.sdkRef?.query?.('director.time', { asOf: index - 1 });
+                return Number.isInteger(time) ? time : time?.minutes ?? null;
+            } catch { return null; }
+        },
         // Only the rules (and the titles screens show while locked) leave the dossier for the
         // handlers and screens; the texts go to the tail and to an unlocked note's screen line alone.
         secretRules: (name, labels = []) => {
@@ -286,8 +297,10 @@ export function createQueriesPart(session, deps) {
     }
 
     /**
-     * `npcs` (Delta's records) with each one's `relationship` read from the v2 slice where the slice
-     * has an entry; the same array when not hosted or when nothing differs. Never changes `npcs`.
+     * `npcs` (Delta's records) with each one's relationship read from the v2 slice where the slice has an entry: the four numbers,
+     * the part-points, and the earned milestones that still hold at those numbers (the scorer infers the rest from the numbers).
+     * The same array when not hosted or when nothing differs. Read time only: `npcs` is never changed and nothing is written back,
+     * so whatever the sidecar holds for these is not read while hosted (a person with no entry yet keeps their own record).
      */
     function sliceView(npcs) {
         if (!Array.isArray(npcs) || !session.hosted) return npcs;
@@ -298,9 +311,14 @@ export function createQueriesPart(session, deps) {
             const entry = npc && typeof npc === 'object' ? entryFor(entries, npc) : null;
             if (!entry) return npc;
             const relationship = relationshipOf(entry, npc.relationship);
-            if (RELATIONSHIP_KEYS.every(key => Number(npc.relationship?.[key]) === relationship[key])) return npc;
+            const holds = item => item.inferred !== true && Math.sign(relationship[item.axis]) === item.polarity && Math.abs(relationship[item.axis]) > item.threshold;
+            const next = {
+                relationship, relationshipProgress: normalizeRelationshipProgress(entry.progress),
+                relationshipMilestones: normalizeRelationshipMilestones(npc.relationshipMilestones, relationship, { inferFromRelationship: false }).filter(holds),
+            };
+            if (Object.keys(next).every(key => JSON.stringify(npc[key]) === JSON.stringify(next[key]))) return npc;
             changed = true;
-            return { ...npc, relationship };
+            return { ...npc, ...next };
         });
         return changed ? out : npcs;
     }

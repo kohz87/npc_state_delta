@@ -5,6 +5,7 @@ import { clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KE
 import { isKey, memoryKey, RECENT_REPLIES } from './key-people.js';
 import { CAST_KEY, metWithEntry } from './cast-dossier.js';
 import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
+import { flatDayProblems } from './relationship-pacing.js';
 
 /** The slice of a chat with no NPC meters yet. */
 export function initialNpcSlice() {
@@ -145,6 +146,7 @@ export function validateNpcSlice(slice) {
                 errors.push(`${where} has an unusable record of part-points.`);
             }
         }
+        if (record.impactDay !== undefined) for (const problem of flatDayProblems(record.impactDay)) errors.push(`${where}'s record of the day's events ${problem}.`);
         if (record.held !== undefined) {
             if (!Array.isArray(record.held) || record.held.length > MAX_UNLOCKED || record.held.some(id => typeof id !== 'string' || !id || id.length > 40)
                 || new Set(record.held).size !== record.held.length) errors.push(`${where} has an unusable list of shut notes.`);
@@ -335,17 +337,18 @@ export function settle(record, { defs, stages, rules, name, rungs = [], conflict
 
 export const sentence = parts => parts.filter(Boolean).map(part => (/[.!?]$/.test(part) ? part : `${part}.`)).join(' ');
 
-function changeText(name, moved) {
-    if (!moved.length) return '';
+// `pace`: the reader's words when pacing held the event (src/relationship-pacing.js pacingNote), else ''.
+function changeText(name, moved, pace = '') {
+    if (!moved.length) return pace ? `${name}: nothing changed (${pace})` : '';
     const why = item => (item.stop ? `, at the ${item.stop}` : '');
-    return `${name}: ${moved.map(item => `${item.label.toLocaleLowerCase()} ${item.before} → ${item.after}${item.held ? ` (held at ${item.after}${why(item)}; ${signed(item.asked - item.before)} asked)` : ''}`).join(', ')}`;
+    return `${name}: ${moved.map(item => `${item.label.toLocaleLowerCase()} ${item.before} → ${item.after}${item.held && !pace ? ` (held at ${item.after}${why(item)}; ${signed(item.asked - item.before)} asked)` : ''}`).join(', ')}${pace ? ` (${pace})` : ''}`;
 }
 
 // The receipt: stage, ladder and note lines are what the next reply is told (narrate when a stage or
 // a rung moved); the numbers are for the reply's card.
-export function result({ name, key, moved, settled, problems, created, disposition, milestone = null }) {
+export function result({ name, key, moved, settled, problems, created, disposition, milestone = null, pace = '' }) {
     const notes = [...settled.stages.map(move => move.text), ...settled.ranks.map(move => move.text), ...settled.unlocked.map(note => note.text)];
-    const numbers = changeText(name, moved);
+    const numbers = changeText(name, moved, pace);
     const marked = milestone ? `${name}: milestone “${milestone.name}”` : '';
     const summary = sentence(notes.length
         ? [...notes, marked, numbers, settled.held]

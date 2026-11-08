@@ -68,12 +68,14 @@ export const FIELDS = Object.freeze({
     relationshipSummary: { kind: 'text', text: 10, tracked: 14, editorLock: 15, lock: [16, ['relationshipSummary']], terminalFrozen: 9, aliasMerge: 8, refreshChanged: 13, snapshot: [14, 'text'], v2: 20 },
     relationship: {
         kind: 'meter', tracked: 13, terminalFrozen: 4, snapshot: [32, 'shallow'], v2: 21,
-        revertGroup: [0, ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange']],
+        revertGroup: [0, ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange', 'impactDay']],
     },
     relationshipProgress: { kind: 'part', terminalFrozen: 5 },
     relationshipMilestones: { kind: 'part', terminalFrozen: 6 },
     relationshipEventHistory: { kind: 'part', terminalFrozen: 7 },
     lastRelationshipChange: { kind: 'part', terminalFrozen: 8, snapshot: [33, 'relationshipChange'] },
+    // The events counted for the story day (src/relationship-pacing.js): reverts with the relationship it paces (not frozen by a death).
+    impactDay: { kind: 'part' },
     mood: { kind: 'text', text: 11, tracked: 0, editorLock: 16, lock: [17, ['mood']], terminalFrozen: 0, aliasMerge: 9, refreshChanged: 14, snapshot: [15, 'text'], v2: 22 },
     location: { kind: 'text', text: 12, tracked: 1, editorLock: 17, lock: [18, ['location']], terminalFrozen: 1, aliasMerge: 10, refreshChanged: 15, snapshot: [16, 'text'], v2: 23 },
     goal: { kind: 'text', text: 13, tracked: 2, editorLock: 18, lock: [19, ['goal']], terminalFrozen: 2, aliasMerge: 11, refreshChanged: 16, snapshot: [17, 'text'], v2: 24 },

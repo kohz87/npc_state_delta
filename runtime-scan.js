@@ -16,8 +16,13 @@ import { capCaptureAdmissions, queueScanFollowUps } from './runtime-scan-backfil
 import { applyStaleLifecycleAfterScan } from './runtime-scan-stale.js';
 import { createScanReplyPart } from './runtime-scan-reply.js';
 import { createAssistantHandlerPart } from './runtime-scan-handler.js';
+import { normalizeAllowance } from './src/relationship-pacing.js';
 export function createScanPart(rt, deps) {
     const { attachGeneratedSecrets, beginScanOperation, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanOperationCurrent, scanScenePresent, scenePresentAt, setChatState, takeNarrationCapture, updateInjection } = deps;
+    // Events per story day while Delta works alone (the pass counts them on the dossier). The day is Story Director's clock, which
+    // there is not without a host: no day, no limit (relationship-pacing.js). Hosted, the slice counts them when the change is forwarded
+    // and Delta's numbers are set from the slice afterwards (runtime-hosted.js), so the pass does not count (null).
+    const scanPace = settings => (hostedMeters() ? null : { allowance: normalizeAllowance(settings.relationshipAllowance), day: null });
     const { narrationCaptures, stateVersions } = rt;
     const { noteCaptureCatchUp, runCaptureCatchUp } = createCatchUpPart(rt, { getChatKey, getChatState, hostedOnePass, isHostSwipeActive, isScanBusy, persist, processPendingBackfills, refreshNpcFromChat });
     const { replyParentKey, sameReplyRewritten, stripLiveSceneFields, chatNeverScanned } = createScanReplyPart({ getChatKey });
@@ -286,7 +291,7 @@ export function createScanPart(rt, deps) {
                         responseChars: combinedResponseChars,
                         retried: combinedRetried,
                     };
-                    applyFocusedRelationshipDecisions(merged.state, combinedDecisions, settings.relationshipCaps, targetMessageId, merged.report);
+                    applyFocusedRelationshipDecisions(merged.state, combinedDecisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings));
                     if (rt.lastScanMetrics) {
                         rt.lastScanMetrics.newNpcRelationshipTargets = combinedTargetCount;
                         rt.lastScanMetrics.newNpcRelationshipResponseChars = combinedResponseChars;
@@ -309,7 +314,7 @@ export function createScanPart(rt, deps) {
                 rt.lastScanMetrics.profileDevelopment = Array.isArray(merged.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [];
                 console.info('[NPC State Delta] dossier scan metrics', rt.lastScanMetrics);
             }
-            applyFocusedRelationshipDecisions(merged.state, relationshipPass.decisions, settings.relationshipCaps, targetMessageId, merged.report);
+            applyFocusedRelationshipDecisions(merged.state, relationshipPass.decisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings));
             const postCleanup = applyStaleLifecycleAfterScan(merged.state, parsedForMerge, currentTranscript || transcript, settings);
             const staleArchived = [...preCleanup.archived, ...postCleanup.archived]
                 .filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index);

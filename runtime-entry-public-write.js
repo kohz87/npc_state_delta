@@ -5,6 +5,7 @@
 import { readAheadOf } from './scan-context.js';
 import { activeReplyIds } from './src/transcript.js';
 import { chatContext, inReplay } from './runtime-scan-helpers.js';
+import { normalizeAllowance } from './src/relationship-pacing.js';
 
 const quietKeys = new Set(['timeline', 'catchUp']);
 
@@ -143,6 +144,8 @@ export function createPublicApiStatePart(deps) {
     relationshipBaseline: () => normalizeRelationshipBaseline(getSettings().relationshipBaseline),
     // (v2 meters) Delta's impact-tier caps: the most a story line's `~ npc` move can be at each tier.
     relationshipCaps: () => normalizeRelationshipCaps(getSettings().relationshipCaps),
+    // (v2 meters) The events each person can have per story day, by impact tier (null: no limit; src/relationship-pacing.js).
+    relationshipAllowance: () => normalizeAllowance(getSettings().relationshipAllowance),
     presentCastHtml: () => storyBlockCastHtml(),
     // (1.2.13) Why the present cast is empty ({ text, scan }), and Add NPC, for the Story Block tabs.
     castEmptyReason: () => castEmptyReason(),
@@ -152,9 +155,10 @@ export function createPublicApiStatePart(deps) {
     dossierRevision: () => `${getChatKey()}|${Number(stateVersions.get(getChatKey()) || 0)}`,
     /** The current chat's dossiers are loaded (before that the list is empty and a render is not news). */
     dossiersReady: () => { const key = getChatKey(); return key !== 'no-chat' && chatHydrationStatus(key) === 'ready'; },
-    getNpc: npcId => {
+    // A selected display may request the hosted meter view without cloning the whole dossier list; ordinary readers keep the stored record.
+    getNpc: (npcId, options = {}) => {
         const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
-        return npc ? structuredClone(npc) : null;
+        return npc ? structuredClone(options?.relationshipView ? hostedMeterView([npc])[0] : npc) : null;
     },
     /** What the public paths read of a dossier without copying it (no portraits, no notes): { mood, relationship } as plain values, or null. */
     publicFields: npcId => {

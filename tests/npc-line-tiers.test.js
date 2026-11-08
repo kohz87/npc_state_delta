@@ -23,7 +23,7 @@ function dossiers() {
  * A whole Story Block host with Delta's adapter registered on it. `features`: { id: bool }, the
  * reader's choices in Story Block's Features; `modules`: more module definitions.
  */
-async function suite({ settings = {}, records = dossiers(), features = null, modules = [], doc = null, wrap = false, packs = [], caps = { ordinary: 1, meaningful: 2, major: 5, extreme: 10 } } = {}) {
+async function suite({ settings = {}, records = dossiers(), features = null, modules = [], doc = null, wrap = false, packs = [], allowance = null, caps = { ordinary: 1, meaningful: 2, major: 5, extreme: 10 } } = {}) {
     // The reader's feature choices live in extension_settings.storySuite.features (Story Block's
     // Features), installed packs in extension_settings.storySuite.packs.
     const installed = packs.map(pack => ({ id: pack.id, version: pack.version, enabled: true, source: 'file', origin: `${pack.id}.json`, pack: structuredClone(pack) }));
@@ -37,6 +37,7 @@ async function suite({ settings = {}, records = dossiers(), features = null, mod
         getNpc: id => (delta.records[id] ? structuredClone(delta.records[id]) : null),
         relationshipBaseline: () => ({ trust: 0, affection: 0, desire: 0, tension: 0 }),
         ...(caps ? { relationshipCaps: () => ({ ...caps }) } : {}),
+        ...(allowance ? { relationshipAllowance: () => ({ ...allowance }) } : {}),
         presentCastHtml: () => '<section class="cast">cast</section>',
         castEmptyReason: () => ({ text: 'Nobody here.' }),
         fillPresentCast: () => {},
@@ -111,6 +112,18 @@ test('tiers: a custom meter step is held to the tier, and to its own range', asy
     assert.equal(trust(s).loyalty, 94);
 });
 
+test('a downgraded custom meter uses the new tier without relationship milestone gates', async () => {
+    const clock = { id: 'clock', name: 'Clock', domains: { director: { initial: () => ({ time: { minutes: 0 } }) } },
+        queries: { 'director.time': state => state?.domains?.director?.time } };
+    const s = await suite({ settings: { customMeters: [{ name: 'Loyalty', min: 0, max: 100, start: 49 }] },
+        modules: [clock], allowance: { ordinary: 3, meaningful: 1, major: 0, extreme: 1 },
+        caps: { ordinary: 1, meaningful: 2, major: 3, extreme: 6 } });
+    const reply = await s.say(['~ npc Oren | loyalty: +9 | impact: major']);
+    assert.equal(trust(s).loyalty, 51, 'a story line counts as meaningful');
+    await s.adapter.adjust({ name: 'Mira', meters: { loyalty: 9 }, reply, impact: 'major' });
+    assert.equal(trust(s, 'Mira').loyalty, 51, 'a tiered adjust gets the same custom-meter rule');
+});
+
 test('tiers: the per-reply cap still applies on top', async () => {
     const s = await suite({ settings: { changeCap: 3 }, caps: { ordinary: 1, meaningful: 2, major: 5, extreme: 10 } });
     await s.say(['~ npc Oren | trust: +9 | impact: extreme']);
@@ -134,7 +147,7 @@ test('tiers: swipe, regenerate and a rebuild give identical numbers', async () =
 
 test('tiers: the prompt line names the tiers and their caps; without caps from the host it is as before', async () => {
     const s = await suite({ caps: { ordinary: 1, meaningful: 3, major: 6, extreme: 12 } });
-    assert.match(s.def.context.static(), /Add \| impact: ordinary\|meaningful\|major\|extreme \(the most a move can be: 1\/3\/6\/12; =N moves toward N; none given: ordinary\)\./);
+    assert.match(s.def.context.static(), /Add \| impact: ordinary \(a kind word, most moments\) \| meaningful \(a real favour, a shared secret\) \| major \(saved from danger, a betrayal\) \| extreme \(a life-changing turning point, very rare\)\. Most moments are ordinary\. The most a move can be: 1\/3\/6\/12; =N moves toward N; none given: ordinary\.$/);
     const plain = await suite({ caps: null });
     assert.doesNotMatch(plain.def.context.static(), /impact/);
     await plain.say(['~ npc Oren | trust: +9']);

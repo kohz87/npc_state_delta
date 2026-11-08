@@ -11,10 +11,11 @@ import { createTargetedScopePart } from './runtime-targeted-scope.js';
 const { profileRowBindsToTarget, rowContradictsTarget, soleRowMayBeTarget, edgeTouchesResolvedTarget } = createTargetedScopePart();
 
 export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, targetedRowFor, refreshChangedFields }) {
-    const { editorIsMounted, ensureChatStateLoaded, flushStateFile, getChatKey, getChatState, hostedTargetNotes, isScanBusy, requireReadyChatMutation, runTargetedDossierPass, saveNpcEditor, targetNoteOptions } = deps;
+    const { editorIsMounted, ensureChatStateLoaded, flushStateFile, getChatKey, getChatState, hostedMeterView, hostedTargetNotes, isScanBusy, requireReadyChatMutation, runTargetedDossierPass, saveNpcEditor, targetNoteOptions } = deps;
 
-    function syncOpenNpcEditorFields(npc) {
-        if (!npc || !editorIsMounted()) return;
+    function syncOpenNpcEditorFields(stored) {
+        if (!stored || !editorIsMounted()) return;
+        const npc = hostedMeterView([stored])[0];   // hosted: the editor shows the slice's numbers
         const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value ?? ''; };
         set('npc_state_delta_edit_name', npc.name || '');
         set('npc_state_delta_edit_role', npc.role || '');
@@ -92,7 +93,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
         const notes = hostedTargetNotes(existing);
         const prompt = buildProfileRefreshPrompt({
             transcript,
-            targetNpc: existing,
+            targetNpc: hostedMeterView([existing])[0],   // hosted: its currentRelationship is the slice's
             userName: ctx.name1 || 'User',
             charName: ctx.name2 || 'Character',
             memoryCriteria: settings.memoryCriteria,
@@ -169,9 +170,11 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
                 const proposedSummary = String(scoped.match?.relationshipSummary ?? scoped.match?.relationship_summary ?? '').trim().slice(0, 900);
                 // The reconciled summary must pass the same canonical consistency gate as every other path;
                 // a proposal the merge rejected (for example an unsupported obligation) is not restored here.
+                // Hosted, that gate and the wording read the slice's numbers and milestones (a read-time view; the record keeps its own).
+                const shown = hostedMeterView([refreshed])[0];
                 if (proposedSummary && !(liveBefore.manualProfileFields || []).includes('relationshipSummary')
-                    && relationshipSummaryConsistent(proposedSummary, refreshed.relationship, transcript, refreshed.relationshipMilestones)) {
-                    refreshed.relationshipSummary = calibrateRelationshipSummary(proposedSummary, refreshed.relationship);
+                    && relationshipSummaryConsistent(proposedSummary, shown.relationship, transcript, shown.relationshipMilestones)) {
+                    refreshed.relationshipSummary = calibrateRelationshipSummary(proposedSummary, shown.relationship);
                 }
             },
             onDone: saved => {

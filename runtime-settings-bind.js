@@ -4,6 +4,7 @@
    index.js without change. */
 
 import { getContext } from '../../../extensions.js';
+import { DEFAULT_ALLOWANCE, normalizeAllowance } from './src/relationship-pacing.js';
 import { DEFAULT_RELATIONSHIP, DEFAULT_RELATIONSHIP_CAPS, DEFAULT_RELATIONSHIP_CRITERIA, DEFAULT_IMPACT_CRITERIA, DEFAULT_MEMORY_CRITERIA, DEFAULT_BEHAVIOR_CRITERIA, normalizeRelationshipBaseline, normalizeRelationshipCaps, normalizeNpcAdmissionMode, DEFAULT_PORTRAIT_STYLE_POSITIVE, DEFAULT_PORTRAIT_STYLE_NEGATIVE, DEFAULT_PORTRAIT_COMPOSITION, normalizeCustomFieldNames } from './core.js';
 import { chatLineage } from './branch.js';
 import { openSuiteOverlay } from './suite-handshake.js';
@@ -297,6 +298,12 @@ export function createSettingsBindPart(rt, deps) {
             settings.relationshipCaps = normalizeRelationshipCaps(settings.relationshipCaps);
             syncSettingsControls(); persistSettings();
         });
+        // Events per story day: a blank field is no limit (null), otherwise a whole number from 0 to 99.
+        $(document).on('change.npcStateDelta', '#npc_state_delta_allow_ordinary, #npc_state_delta_allow_meaningful, #npc_state_delta_allow_major, #npc_state_delta_allow_extreme', function () {
+            const settings = getSettings();
+            settings.relationshipAllowance = normalizeAllowance({ ...settings.relationshipAllowance, [this.id.replace('npc_state_delta_allow_', '')]: String(this.value).trim() === '' ? null : this.value });
+            syncSettingsControls(); persistSettings();
+        });
         bindSettingsText('#npc_state_delta_relationship_criteria', 'relationshipCriteria');
         bindSettingsText('#npc_state_delta_impact_criteria', 'relationshipImpactCriteria');
         bindSettingsText('#npc_state_delta_memory_criteria', 'memoryCriteria');
@@ -305,6 +312,7 @@ export function createSettingsBindPart(rt, deps) {
             const settings = getSettings();
             settings.relationshipBaseline = { ...DEFAULT_RELATIONSHIP };
             settings.relationshipCaps = { ...DEFAULT_RELATIONSHIP_CAPS };
+            settings.relationshipAllowance = { ...DEFAULT_ALLOWANCE };
             settings.relationshipCriteria = DEFAULT_RELATIONSHIP_CRITERIA;
             settings.relationshipImpactCriteria = DEFAULT_IMPACT_CRITERIA;
             syncSettingsControls(); persistSettings();

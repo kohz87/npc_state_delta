@@ -6,7 +6,8 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { normalizeScannerMaxOutputTokens } from './scanner-routing.js';
 import { normalizeRelationshipMapSettings } from './relationship-map-core.js';
-import { DEFAULT_RELATIONSHIP, DEFAULT_RELATIONSHIP_CAPS, DEFAULT_RELATIONSHIP_CRITERIA, DEFAULT_IMPACT_CRITERIA, DEFAULT_MEMORY_CRITERIA, DEFAULT_BEHAVIOR_CRITERIA, normalizeRelationshipBaseline, normalizeRelationshipCaps, normalizeNpcAdmissionMode, DEFAULT_PORTRAIT_STYLE_POSITIVE, DEFAULT_PORTRAIT_STYLE_NEGATIVE, DEFAULT_PORTRAIT_COMPOSITION, PORTRAIT_STYLE_PROMPT_LIMIT, PORTRAIT_COMPOSITION_PROMPT_LIMIT, normalizePortraitPromptFormat, normalizeCustomFieldNames } from './core.js';
+import { DEFAULT_ALLOWANCE, normalizeAllowance, pacingDefaults } from './src/relationship-pacing.js';
+import { DEFAULT_RELATIONSHIP, DEFAULT_RELATIONSHIP_CAPS, DEFAULT_RELATIONSHIP_CRITERIA, DEFAULT_IMPACT_CRITERIA, DEFAULT_MEMORY_CRITERIA, DEFAULT_BEHAVIOR_CRITERIA, normalizeRelationshipBaseline, normalizeNpcAdmissionMode, DEFAULT_PORTRAIT_STYLE_POSITIVE, DEFAULT_PORTRAIT_STYLE_NEGATIVE, DEFAULT_PORTRAIT_COMPOSITION, PORTRAIT_STYLE_PROMPT_LIMIT, PORTRAIT_COMPOSITION_PROMPT_LIMIT, normalizePortraitPromptFormat, normalizeCustomFieldNames } from './core.js';
 import { normalizeSourceOfTruth } from './suite-handshake.js';
 
 export const EXTENSION_NAME = 'npc_state_delta';
@@ -166,6 +167,7 @@ const DEFAULTS = Object.freeze({
     launcherWithStoryBlockV2: false,
     relationshipBaseline: { ...DEFAULT_RELATIONSHIP },
     relationshipCaps: { ...DEFAULT_RELATIONSHIP_CAPS },
+    relationshipAllowance: { ...DEFAULT_ALLOWANCE },
     relationshipCriteria: DEFAULT_RELATIONSHIP_CRITERIA,
     relationshipImpactCriteria: DEFAULT_IMPACT_CRITERIA,
     memoryCriteria: DEFAULT_MEMORY_CRITERIA,
@@ -261,11 +263,14 @@ export function getSettings() {
 
     // Current-format settings are canonicalized in place; older Delta schemas are unsupported.
     assign('relationshipBaseline', normalizeRelationshipBaseline(settings.relationshipBaseline), sameJson);
-    assign('relationshipCaps', normalizeRelationshipCaps(settings.relationshipCaps), sameJson);
+    const pacing = pacingDefaults(settings);
+    assign('relationshipImpactCriteria', pacing.impactCriteria);
+    assign('relationshipCaps', pacing.caps, sameJson);
+    assign('relationshipAllowance', normalizeAllowance(settings.relationshipAllowance), sameJson);
+    assign('relationshipPacingMigrated', true);
     assign('customFieldNames', normalizeCustomFieldNames(settings.customFieldNames), sameJson);
     assign('sourceOfTruth', normalizeSourceOfTruth(settings.sourceOfTruth), sameJson);
     assign('relationshipCriteria', typeof settings.relationshipCriteria === 'string' ? settings.relationshipCriteria : DEFAULT_RELATIONSHIP_CRITERIA);
-    assign('relationshipImpactCriteria', typeof settings.relationshipImpactCriteria === 'string' ? settings.relationshipImpactCriteria : DEFAULT_IMPACT_CRITERIA);
     assign('memoryCriteria', typeof settings.memoryCriteria === 'string' ? settings.memoryCriteria : DEFAULT_MEMORY_CRITERIA);
     assign('behaviorCriteria', typeof settings.behaviorCriteria === 'string' ? settings.behaviorCriteria : DEFAULT_BEHAVIOR_CRITERIA);
     assign('admissionMode', normalizeNpcAdmissionMode(settings.admissionMode));

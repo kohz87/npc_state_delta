@@ -20,6 +20,7 @@ export function createNpcQueries({
         ...(record.disposition ? { disposition: record.disposition } : {}),
         // The window's reply by its index (as before record IDs): `at` beside a record ID.
         ...(isInt(record.turn?.at) ? { reply: record.turn.at } : isInt(record.turn?.reply) ? { reply: record.turn.reply } : {}),
+        ...(isObject(record.progress) && Object.keys(record.progress).length ? { progress: { ...record.progress } } : {}),
         ...(isObject(record.milestones) && Object.keys(record.milestones).length ? { milestones: { ...record.milestones } } : {}),
         ...(rungs.find(step => step.key === record.rank) ? { rank: rungs.find(step => step.key === record.rank).name } : {}),
     });
