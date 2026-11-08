@@ -45,7 +45,7 @@ import { pageStorage, saveOnUnload, storeSaving } from './runtime/saving.js';
 export { initialWithStart, packsFor, withPackCurrency } from './runtime/start.js';
 export { SAVE_SEQ_KEY, MEMO_PREFIX, markUsed, saveOnUnload, storeSaving } from './runtime/saving.js';
 
-export const VERSION = '2.25.0';
+export const VERSION = '2.27.0';
 
 /**
  * createRuntime({ ctx, packs?, core = true, modules = [], createStore?, createCommandBus?, notify?,
@@ -139,7 +139,7 @@ export function createRuntime({
             timeline: () => timeline,
             dataModules: { state: () => store.head(), lifecycle: id => registry.lifecycle(id), restore: () => registry.restore(), boardOn: () => registry.featureOn(CORE_FEATURE.leanRpg) && registry.featureOn(CORE_FEATURE.fightBoard), persona: () => { try { return (live() ?? ctx)?.name1 ?? ''; } catch { return ctx?.name1 ?? ''; } } },
             // The RPG's hooks read the chat and its metadata; no model is asked for rolls.
-            leanRpg: { chat: () => ctx.chat, metadata: () => { try { return (live() ?? ctx)?.chatMetadata ?? null; } catch { return ctx?.chatMetadata ?? null; } } },
+            leanRpg: { callModel: (prompt, options = {}) => assistCall(prompt, options), chat: () => ctx.chat, metadata: () => { try { return (live() ?? ctx)?.chatMetadata ?? null; } catch { return ctx?.chatMetadata ?? null; } }, onPlanning: working => events?.emit('head', { index: store.headIndex(), reason: working ? 'fight-start' : 'fight-start-done' }) },
             packs: packPart,
             // Due events are the host's own system cues: straight to the bus (the public sdk only runs
             // the reader's 'ui' actions), with the same 'committed' event the sdk sends.
@@ -235,7 +235,7 @@ export function createRuntime({
     // The assist helpers' call (assist/index.js: (prompt, { maxTokens, profile, helper }) → text, throwing
     // with a code on failure; an empty answer is '' as before).
     assistCall = async (prompt, { maxTokens, profile = '', helper = 'pre-roll', timeoutMs } = {}) => {
-        const result = await modelCalls.callModel({ prompt, maxTokens, profile, module: `${CORE_MODULE_ID} (${helper === 'extractor' ? 'safety net' : helper === 'rolls' ? 'rolls' : 'pre-roll'})`, timeoutMs: helper === 'rolls' && Number.isFinite(timeoutMs) ? timeoutMs : ASSIST_TIMEOUT_MS }, { idle: false });
+        const result = await modelCalls.callModel({ prompt, maxTokens, profile, module: `${CORE_MODULE_ID} (${helper === 'extractor' ? 'safety net' : helper === 'precheck' ? 'fight setup' : helper === 'rolls' ? 'rolls' : 'pre-roll'})`, timeoutMs: (helper === 'rolls' || helper === 'precheck') && Number.isFinite(timeoutMs) ? timeoutMs : ASSIST_TIMEOUT_MS }, { idle: false });
         if (result.ok) return result.text;
         if (result.error === MODEL_CALL_ERRORS.EMPTY) return '';
         throw Object.assign(new Error(result.message), { code: result.error });

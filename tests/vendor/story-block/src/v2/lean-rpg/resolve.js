@@ -94,9 +94,9 @@ const isObject = value => value !== null && typeof value === 'object' && !Array.
  * rounds already cut to the stop and the cue budget. `rules` are the numbers in force (default: Standard); the most rounds is `rules.roundCap`. `earlier`: the
  * cue is fitted as it was for a roll of the earlier scheme (cue.js fitCue). Standard is the only formula: a roll with no `formula` replays as Standard.
  */
-export function rollPrepared(plan, prepared, source, rules = STANDARD, { earlier = false, carried = null, flow = 1, wearOf = null, drop = null, opened = null, fix = false, then = false } = {}) {
+export function rollPrepared(plan, prepared, source, rules = STANDARD, { earlier = false, carried = null, flow = 1, wearOf = null, drop = null, opened = null, fix = false, then = false, noXp = false } = {}) {
     // (`fix`: a roll of stage 65, FIX_VERSION; `then`: of mark 3; without it the cue is told exactly as before, because its length decides how many rounds are told)
-    return rollStandard(plan, prepared, source, rules, { carried, flow, wearOf, drop, opened, fix, then });
+    return rollStandard(plan, prepared, source, rules, { carried, flow, wearOf, drop, opened, fix, then, noXp });
 }
 
 // The turn order a Standard roll is given (resolve.js carries it forward in the payload): a short list of { id, name, total, die?, bonus?, agi,
@@ -177,6 +177,7 @@ export function resolve(ctx, payload = {}) {
     // roll (the inventory's `recorded` answers: the mark decides, not today's switch), are laid over the stats it rolls with (gear.js). The record is kept with the
     // roll, so a later change never moves it; a change before it is seen by the guard.
     const standing = readSheet({ domains: { dataModules: domain } });
+    const noXp = standing.characters.length > 0 && standing.characters.every(character => character.scale === 2);
     const mark = gearMarkOf(payload.gear);
     const gear = mark ? planGear(standing, (name, args) => ctx.query(name, ['inventory.gear', 'party.actors', 'party.pc'].includes(name) ? { ...args, recorded: true } : args), mark.lead ?? '') ?? undefined : undefined;
     const sheet = applyGear(standing, gear);
@@ -188,7 +189,7 @@ export function resolve(ctx, payload = {}) {
     // A roll that asks for the dice version draws one number from the seed, and each action's dice come from that and its place in
     // the plan; one made before has no version and draws its dice in one sequence, as it did.
     const source = positionalDice(base);
-    const dice = rollPrepared(plan, prepared, source, rules, { earlier: payload.dice !== DICE_VERSION, carried: order, drop, opened: opened ?? null, fix: fix >= 2, then: fix >= 3, flow, wearOf: gear ? (rounds, opening) => wearGear(ctx, gear, { opening, rounds, rules, condWord, stepDown }) : null });
+    const dice = rollPrepared(plan, prepared, source, rules, { earlier: payload.dice !== DICE_VERSION, carried: order, drop, opened: opened ?? null, fix: fix >= 2, then: fix >= 3, flow, noXp, wearOf: gear ? (rounds, opening) => wearGear(ctx, gear, { opening, rounds, rules, condWord, stepDown }) : null });
     // From stage 50 a payload may carry the practice per skill use (practice.js); a roll made before has none and gives none.
     const practice = practiceOf(payload.practice) ?? undefined;
     // Gear: each told line names what it rolled with, and a decisive hit taken or miss made wears a piece (gear.js); the wear is part of the roll's receipt.
@@ -201,7 +202,7 @@ export function resolve(ctx, payload = {}) {
     const predicate = { kind: RESOLVE, key, ...(start ? { start } : {}), plan: ctx.hash(plan), rules: ctx.hash(rules), ...(order ? { order: ctx.hash(order) } : {}), ...(drop ? { ambush: ctx.hash(drop) } : {}), ...(flow === FLOW_VERSION ? { flow } : {}), ...(fix ? { fix } : {}), ...(practice ? { practice } : {}), ...(lv ? { lv } : {}), ...(settled ? { levels: ctx.hash(levelsOf(settled)) } : {}), ...(gear ? { gear: ctx.hash(gear) } : {}) };
     ctx.replayGuard(guardOf(ctx, predicate, prepared.witness), { key, ...(start ? { start } : {}), plan, rules, ...(order ? { order } : {}), ...(drop ? { ambush: drop } : {}), ...(flow === FLOW_VERSION ? { flow } : {}), ...(fix ? { fix } : {}), ...(practice ? { practice } : {}), ...(lv ? { lv } : {}), ...(settled ? { levels: levelsOf(settled) } : {}), ...(gear ? { gear } : {}) });
     const result = {
-        v: RESULT_VERSION, key, pace: plan.pace, rules, ...(flow === FLOW_VERSION ? { flow } : {}), ...(fix ? { fix } : {}), ...(practice ? { practice } : {}), ...(lv ? { lv } : {}), ...(gear ? { gear } : {}), stop: dice.stop, checks: dice.checks, rounds: dice.rounds,
+        v: RESULT_VERSION, key, pace: plan.pace, rules, ...(flow === FLOW_VERSION ? { flow } : {}), ...(noXp ? { noXp: true } : {}), ...(fix ? { fix } : {}), ...(practice ? { practice } : {}), ...(lv ? { lv } : {}), ...(gear ? { gear } : {}), stop: dice.stop, checks: dice.checks, rounds: dice.rounds,
         refused: prepared.refused, summary: dice.summary, ...(dice.ambush ? { ambush: dice.ambush } : {}), ...(opening ? { opened } : {}), ...(wear.length ? { wear } : {}), ...(legend ? { legend: 1 } : {}),
         order: dice.order, quickStart: dice.quickStart, opening: dice.opening, idle: dice.idle, hurts: dice.hurts,
     };

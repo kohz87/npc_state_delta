@@ -46,7 +46,7 @@ export function createSkillsStep(ctx) {
         const rows = h(doc, 'div', 'rpg-wiz-rows');
         body.appendChild(rows);
         const head = h(doc, 'div', 'rpg-wiz-row rpg-wiz-headrow');
-        for (const label of [W.colSkill, W.colAbout, W.colStat, W.colUses, W.colStart, '']) head.appendChild(h(doc, 'span', 'rpg-wiz-colhead', label));
+        for (const label of [W.colSkill, W.colAbout, W.colStat, W.colUses, W.colType, W.colStart, '']) head.appendChild(h(doc, 'span', 'rpg-wiz-colhead', label));
         rows.appendChild(head);
         draft().skills.forEach((skill, at) => {
             const label = skill.name || W.newSkill;
@@ -62,6 +62,9 @@ export function createSkillsStep(ctx) {
             stat.setAttribute('data-field', 'stat');
             const uses = select(USES.map(key => ({ value: key, label: W[key] })), skill.uses, fill(W.skillUses, { name: label }));
             uses.setAttribute('data-field', 'uses');
+            // Combat or utility (utility: for the story only, off the fight board): the pool that is full refuses the change and the row goes back.
+            const type = select(['combat', 'utility'].map(key => ({ value: key, label: key === 'utility' ? W.typeUtility : W.typeCombat })), skill.type === 'utility' ? 'utility' : 'combat', fill(W.skillType, { name: label }));
+            type.setAttribute('data-field', 'type');
             // A rank the file gave is shown and cannot be changed; a new skill starts at Novice or (for one) Adept.
             const ranked = Number.isSafeInteger(skill.rank);
             const start = ranked ? select(RANK_NAMES.map((name, rank) => ({ value: rank, label: name, disabled: true })), skill.rank, fill(W.skillStart, { name: label }))
@@ -73,13 +76,14 @@ export function createSkillsStep(ctx) {
             about.addEventListener('input', () => patch({ about: about.value }));
             stat.addEventListener('change', () => patch({ stat: stat.value }));
             uses.addEventListener('change', () => patch({ uses: uses.value }));
+            type.addEventListener('change', () => { patch({ type: type.value }); redraw(); });
             start.addEventListener('change', () => { patch({ start: Number(start.value) }); redraw(); });
-            row.append(name, about, stat, uses, start);
+            row.append(name, about, stat, uses, type, start);
             const remove = button(row, '', 'rpg-wiz-x', () => { put(withoutSkill(draft(), at)); drawSummary(); redraw(); });
             remove.setAttribute('aria-label', fill(W.remove, { name: label }));
             // A signature skill (a pack's cast member brought it): the pencil's rules, its name and what it does may be fixed; the stat, resource and rank stay and it cannot be taken out.
             if (skill.sig === true) {
-                for (const control of [stat, uses, start, remove]) control.disabled = true;
+                for (const control of [stat, uses, type, start, remove]) control.disabled = true;
                 row.setAttribute('data-signature', 'true');
             }
             remove.appendChild(h(doc, 'span', '', '×'));

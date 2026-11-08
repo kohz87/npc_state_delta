@@ -5,5 +5,5 @@
 export function boardWin(receipts) {
     const result = (Array.isArray(receipts) ? receipts : []).findLast(receipt => receipt?.type === 'rpg.resolve' && receipt.data?.v2?.result?.board)?.data?.v2?.result;
     if (!result) return null;
-    return { won: result.stop === 'won', groups: Array.isArray(result.board.groups) ? result.board.groups : [] };
+    return { won: result.stop === 'won', groups: Array.isArray(result.board.groups) ? result.board.groups : [], bars: result.bars === 2 };
 }

@@ -16,7 +16,12 @@ export function createStartController({ doc, chat, meta, state, preview, board, 
     const begin = (auto = false) => {
         const pending = current();
         if (!pending || pending.choice) return;
-        if (!board()?.open({ state: state() })) {
+        // Foes the pre-check found are made again from the recorded opening and its seed, and must match what was recorded.
+        const opened = pending.opening ? preview?.() : null;
+        if (pending.opening && (!opened || JSON.stringify(opened.result?.opened ?? []) !== JSON.stringify(pending.result?.opened ?? []))) {
+            error = 'The sheet changed. Restore it before opening the fight, or send without a fight.'; tell(); return;
+        }
+        if (!board()?.open({ state: opened?.state ?? state(), ...(pending.opening ? { opening: pending.opening, result: opened.result } : {}) })) {
             error = 'The fight could not be opened. Check the party and foes.'; tell(); return;
         }
         error = '';
@@ -27,10 +32,10 @@ export function createStartController({ doc, chat, meta, state, preview, board, 
     };
     const send = () => {
         const pending = current();
-        if (!pending || sending) return;
-        // The staged fight goes with the send or the send does not happen: it is never replaced by a new planner roll.
+        if (!pending || sending || pending.mode === 'working') return;
+        // The staged fight goes with the send or the send does not happen: it is never replaced by a new roll.
         if (pending.choice === 'board' && !markSend(meta(), pending, boardSession(meta()))) {
-            error = 'The staged fight cannot be attached to this reply (its anchor reply or exchanges are missing). Discard it and start the fight again.';
+            error = 'The staged fight cannot be attached to this reply (its anchor reply or exchanges are missing). Discard it (Fight tab, Discard fight) and start the fight again.';
             tell(); return;
         }
         if (pending.choice === 'board') persist();
@@ -43,11 +48,23 @@ export function createStartController({ doc, chat, meta, state, preview, board, 
             Promise.resolve(running).finally(() => { sending = false; tell(); }).catch(() => {});
         } catch { sending = false; clearSend(meta()); tell(); }
     };
-    const pause = createPauseView({ doc, onBoard: () => begin(false), onAuto: () => begin(true) });
+    // "Send without a fight": the message goes out unchanged and the opening is not recorded (the narrator sets up the foes as it does without the pre-check).
+    const plain = () => {
+        const pending = current();
+        if (!pending || pending.choice || !pending.opening) return;
+        delete pending.opening; delete pending.result;
+        pending.choice = 'plain';
+        clearSend(meta());
+        persist(); tell();
+        send();
+    };
+    const pause = createPauseView({ doc, onBoard: () => begin(false), onAuto: () => begin(true), onSend: plain });
     // The reader's message is already in the chat. A second Send must not append another one while it waits.
     const stopSend = event => {
-        if (!current()) return;
+        const pending = current();
+        if (!pending) return;
         event.preventDefault?.(); event.stopImmediatePropagation?.(); event.stopPropagation?.();
+        if (pending.choice === 'plain') { send(); return; }
         tell(); show();
     };
     const click = event => { if (event.target?.closest?.('#send_but')) stopSend(event); };
@@ -59,13 +76,13 @@ export function createStartController({ doc, chat, meta, state, preview, board, 
     };
     doc.addEventListener?.('click', click, true);
     doc.addEventListener?.('keydown', key, true);
-    const sheetState = () => state();
+    const sheetState = () => (current()?.opening ? (preview?.()?.state ?? state()) : state());
     const draw = root => {
         const pending = current();
         if (!pending || pending.choice) { error = ''; pause.clear(); return false; }
         const live = state(), sheet = readSheet(live);
         const fight = { groups: sheet.foes.filter(foe => foe.filled && foe.hurt > 0).map(foe => foe.slot) };
-        const data = pauseViewData({ fight, state: live, cap: cap() });
+        const data = pauseViewData(pending.mode === 'working' ? { working: true } : pending.opening ? { opening: pending.result, cap: cap() } : { fight, state: live, cap: cap() });
         if (!data) return false;
         pause.render(root, error ? { ...data, note: error } : data);
         return true;

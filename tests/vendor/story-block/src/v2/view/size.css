@@ -40,7 +40,7 @@
         min-width: calc(44px / var(--ss-zoomed, 1)) !important;
         min-height: calc(44px / var(--ss-zoomed, 1)) !important;
     }
-    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-switch::after {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-switch::after {
         inset: auto;
         left: 50%;
         top: 50%;
@@ -50,7 +50,7 @@
     }
     /* the switch (48 x 28, glass.css) keeps room round it for that tap area, so it never reaches a neighbour (switches in a list;
        `!important` over a tile's own 2px top margin) */
-    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-switch {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-switch {
         margin: max(0px, calc((44px / var(--ss-zoomed, 1) - 28px) / 2)) max(0px, calc((44px / var(--ss-zoomed, 1) - 48px) / 2)) !important;
     }
     /* A checkbox or a radio in a label is pressed through the label: the label is the 44 x 44 target and the box draws nothing more
@@ -120,7 +120,7 @@
         vertical-align: middle;
         overflow-wrap: anywhere;
     }
-    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-search .ss-search-input {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-search .ss-search-input {
         padding-right: calc(44px / var(--ss-zoomed, 1) + 8px);
     }
     /* Compact pills: see the note above. */

@@ -18,6 +18,7 @@ const shape = board => isObject(board) && isObject(board.setup) && Array.isArray
     && typeof board.id === 'string' && board.id.length > 0 && board.id.length <= 120
     && Array.isArray(board.groups) && board.groups.length > 0 && board.groups.length <= 64
     && board.groups.every(slot => Number.isInteger(slot) && slot >= 1 && slot <= 64)
+    && (board.setup.bars === undefined || board.setup.bars === 2)
     && (board.setup.witness === undefined ? board.exchanges.length === 0
         : isObject(board.setup.witness) && board.setup.witness.offset === board.setup.offset && /^[0-9a-f]{64}$/u.test(board.setup.witness.hash));
 // The guard's input witness. Records made before this hashed the whole dataModules domain, other replies' `perReply` scratch included,
@@ -33,11 +34,11 @@ const startState = ctx => ({ domains: { dataModules: ctx.read('dataModules'), in
 /** Check a pending segment before generation, using the same rules as the resolver. */
 export function boardInputError(state, board) {
     try {
-        if (!shape(board) || hashJson(normalizeRules(board.setup.rules)) !== hashJson(board.setup.rules)) return 'The saved fight is damaged. Discard the fight to continue.';
-        if (board.setup.witness && board.setup.witness.hash !== boardWitness(state, board.setup)) return 'The sheet or gear changed after the fight was rolled. Restore it or discard the fight.';
-        if (board.setup.gear && (!gearValid(board.setup.gear) || !gearMatches(state, board.setup.gear, hashJson))) return 'The gear changed after the fight was rolled. Restore it or discard the fight.';
+        if (!shape(board) || hashJson(normalizeRules(board.setup.rules)) !== hashJson(board.setup.rules)) return 'The saved fight is damaged. Discard the fight (Fight tab, Discard fight) to continue.';
+        if (board.setup.witness && board.setup.witness.hash !== boardWitness(state, board.setup)) return 'The sheet or gear changed after the fight was rolled. Restore it or discard the fight (Fight tab, Discard fight).';
+        if (board.setup.gear && (!gearValid(board.setup.gear) || !gearMatches(state, board.setup.gear, hashJson))) return 'The gear changed after the fight was rolled. Restore it or discard the fight (Fight tab, Discard fight).';
         return playBoard(state, board.setup, board.exchanges).error ?? null;
-    } catch { return 'The saved fight is damaged. Discard the fight to continue.'; }
+    } catch { return 'The saved fight is damaged. Discard the fight (Fight tab, Discard fight) to continue.'; }
 }
 
 /** Resolve a board payload only on the system prelude path. */
@@ -48,7 +49,7 @@ export function resolveBoard(ctx, payload) {
     const rules = normalizeRules(board.setup.rules);
     if (ctx.hash(rules) !== ctx.hash(board.setup.rules)) ctx.fail('INVALID', 'The fight rules are damaged.');
     const state = startState(ctx), gear = board.setup.gear;
-    if (board.setup.witness && board.setup.witness.hash !== boardWitness(state, board.setup)) ctx.fail('NO_LONGER_DONE', 'The sheet or gear changed after the fight was rolled. Restore it or discard the fight.');
+    if (board.setup.witness && board.setup.witness.hash !== boardWitness(state, board.setup)) ctx.fail('NO_LONGER_DONE', 'The sheet or gear changed after the fight was rolled. Restore it or discard the fight (Fight tab, Discard fight).');
     if (gear && (!gearValid(gear) || !gearMatches(state, gear, ctx.hash))) ctx.fail('NO_LONGER_DONE', 'The gear changed since this fight was opened.');
     const played = playBoard(state, board.setup, board.exchanges);
     if (played.error) ctx.fail('NO_LONGER_DONE', played.error);
@@ -60,11 +61,11 @@ export function resolveBoard(ctx, payload) {
         board: { id: board.id, seed: board.setup.seed, offset: board.setup.offset, groups: board.groups } };
     if (gear) {
         const wear = wearGear(ctx, gear, { opening: result.opening, rounds: result.rounds, rules, condWord });
-        if (ctx.hash(wear) !== ctx.hash(result.wear ?? [])) ctx.fail('NO_LONGER_DONE', 'The gear wear changed. Restore the gear or discard the fight.');
+        if (ctx.hash(wear) !== ctx.hash(result.wear ?? [])) ctx.fail('NO_LONGER_DONE', 'The gear wear changed. Restore the gear or discard the fight (Fight tab, Discard fight).');
         if (wear.length) result.wear = wear;
         if (earnedLegend(result, applyGear(readSheet(state), gear), hasLevels(rules))) result.legend = 1;
     }
-    const predicate = { kind: RESOLVE, board: 1, key, setup: ctx.hash(board), rules: ctx.hash(rules), practice };
+    const predicate = { kind: RESOLVE, board: 1, key, setup: ctx.hash(board), rules: ctx.hash(rules), practice, ...(board.setup.bars === 2 ? { bars: 2 } : {}) };
     ctx.replayGuard({ owner: ctx.module, version: 2, epoch: ctx.epoch, rulesHash: null, predicate,
         inputHash: ctx.hash({ source: ctx.source, predicate, witness: witness(state) }) }, { key, board, practice });
     if (result.hurts.length) applyHurts(ctx.draft('dataModules'), result.hurts);
@@ -78,7 +79,7 @@ export function boardGuard({ state, hash }, { guard, source, recorded }) {
         const predicate = guard?.predicate, board = recorded?.board;
         if (guard?.version !== 2 || guard.rulesHash !== null || predicate?.kind !== RESOLVE || predicate?.board !== 1
             || !shape(board) || recorded.key !== predicate.key || hash(board) !== predicate.setup || hash(normalizeRules(board.setup.rules)) !== predicate.rules
-            || recorded.practice !== predicate.practice || practiceOf(recorded.practice) === null) return bad('The saved fight is damaged.');
+            || recorded.practice !== predicate.practice || (board.setup.bars === 2 ? 2 : undefined) !== predicate.bars || practiceOf(recorded.practice) === null) return bad('The saved fight is damaged.');
         if (board.setup.gear && (!gearValid(board.setup.gear) || !gearMatches(state, board.setup.gear, hash))) return bad('The gear before the fight changed.');
         if (board.setup.witness && board.setup.witness.hash !== boardWitness(state, board.setup)) return bad('The sheet or gear before the fight changed.');
         return [witnessNew, witnessOld].some(make => hash({ source, predicate, witness: make(state) }) === guard.inputHash) ? { ok: true } : bad('The sheet before the fight changed.');

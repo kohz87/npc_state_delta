@@ -13,7 +13,7 @@ import { KINDS, RARITIES } from '../domains/inventory.js';
 import { GEAR, slotWordOf } from '../domains/gear.js';
 import { formatAmount } from '../domains/money.js';
 import { CREATION, RANK_NAMES, STATS, USES } from './names.js';
-import { SKILL_SLOTS_MAX } from '../skill-slots.js';
+import { SKILL_FIELDS_MAX, SKILL_SLOTS_MAX, UTILITY_SLOTS } from '../skill-slots.js';
 import { classOfLevel, levelOfClass } from './formula.js';
 import { RPG_STRINGS, fill } from './strings.js';
 
@@ -45,7 +45,7 @@ export function buildCharacterFile({ level, soul, points, stats, skills = [], it
     const file = {
         [CHAR_FILE]: CHAR_VERSION, level: shown, soul: Number.isSafeInteger(soul) ? soul : classOfLevel(shown), points,
         stats: Object.fromEntries(STATS.map(stat => [stat, stats[stat]])),
-        skills: skills.slice(0, SKILL_SLOTS_MAX).map(skill => ({ name: skill.name, about: skill.about, ...(STATS.includes(skill.stat) ? { stat: skill.stat } : {}), uses: skill.uses, rank: skill.rank })),
+        skills: skills.slice(0, SKILL_FIELDS_MAX).map(skill => ({ name: skill.name, about: skill.about, ...(STATS.includes(skill.stat) ? { stat: skill.stat } : {}), uses: skill.uses, rank: skill.rank, ...(skill.type === 'utility' ? { type: 'utility' } : {}) })),
     };
     if (Array.isArray(items)) {
         file.items = items.map(item => ({ name: item.name, qty: item.qty, ...(item.note ? { note: item.note } : {}),
@@ -71,7 +71,7 @@ function readSkill(entry) {
     // A skill with no stat (an old Skills block had none) is read without one: both a missing key and null mean "none"; any other value is not valid.
     const hasStat = entry.stat !== undefined && entry.stat !== null;
     if (!name || (hasStat && !STATS.includes(entry.stat)) || !USES.includes(entry.uses) || !whole(entry.rank, 0, FILE_LIMITS.rank)) return null;
-    return { name, about: line(entry.about, CREATION.skillAbout), ...(hasStat ? { stat: entry.stat } : {}), uses: entry.uses, rank: entry.rank };
+    return { name, about: line(entry.about, CREATION.skillAbout), ...(hasStat ? { stat: entry.stat } : {}), uses: entry.uses, rank: entry.rank, ...(entry.type === 'utility' ? { type: 'utility' } : {}) };
 }
 
 function readItem(entry) {
@@ -113,13 +113,15 @@ export function parseCharacterFile(text) {
             stats[stat] = data.stats[stat];
         }
         const rawSkills = data.skills ?? [];
-        if (!Array.isArray(rawSkills) || rawSkills.length > SKILL_SLOTS_MAX) return bad(fill(F.skills, { max: SKILL_SLOTS_MAX }));
+        if (!Array.isArray(rawSkills) || rawSkills.length > SKILL_FIELDS_MAX) return bad(fill(F.skills, { max: SKILL_FIELDS_MAX }));
         const skills = [];
         for (const [at, entry] of rawSkills.entries()) {
             const skill = readSkill(entry);
             if (!skill) return bad(fill(F.skill, { n: at + 1 }));
             skills.push(skill);
         }
+        const utility = skills.filter(skill => skill.type === 'utility').length;
+        if (utility > UTILITY_SLOTS || skills.length - utility > SKILL_SLOTS_MAX) return bad(F.skillPools);
         const level = hasLevel ? data.level : levelOfClass(data.soul);
         const file = { level, soul: data.soul ?? classOfLevel(level), points: data.points, stats, skills };
         if (data.items !== undefined) {

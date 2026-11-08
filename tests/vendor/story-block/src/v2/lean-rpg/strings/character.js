@@ -2,7 +2,7 @@
 export const CHARACTER_STRINGS = Object.freeze({
     // The Standard formula's bars (a row of blocks) and what the Party and Fight tabs and the battle log say about them and the turn order.
     blocks: Object.freeze({
-        of: '{word} · {n} of {max}',
+        of: '{word} · {n}/{max}',
         growthHealth: 'Health {n} blocks (VIT {stat}, next at {next})',
         growthStamina: 'Stamina {n} (AGI {stat}, next at {next})',
         growthMana: 'Mana {n} (INT {stat}, next at {next})',
@@ -28,9 +28,10 @@ export const CHARACTER_STRINGS = Object.freeze({
             beaten: '{who} does not act: beaten before its turn.',
             down: '{who} does not act: down.',
             'no-target': '{who} does not act: nothing left to act on.',
+            'no-resource': '{who} does not act: the skill\'s resource is Empty.',
         }),
-        foeNote: 'Foe Health grows with class: 4 + class/3 blocks. A hit takes 1 block, a Decisive hit 2.',
-        foeNoteLevel: 'Foe Health grows with level: 4 + level/30 blocks. A hit takes 1 block, a Decisive hit 2.',
+        foeNote: 'Foe Health grows with class: 4 + class/3 blocks. A plain hit takes 1 block, a Decisive hit 2.',
+        foeNoteLevel: 'Foe Health grows with level: 4 + level/30 blocks. A plain hit takes 1 block, a Decisive hit 2.',
     }),
     party: Object.freeze({
         title: 'Party',
@@ -39,6 +40,9 @@ export const CHARACTER_STRINGS = Object.freeze({
         own: 'you',
         companion: 'companion',
         xp: 'XP',
+        shortRest: 'Short rest',
+        fullRest: 'Full rest',
+        restHint: 'Short rest: Stamina and Mana. Full rest: Health too.',
         xpText: '{xp} / 100 to Lv {next}',
         xpCap: '{xp} / 100 · level cap',
         points: '{n} points to spend',
@@ -82,6 +86,11 @@ export const CHARACTER_STRINGS = Object.freeze({
         rollsPartsStandard: '= ({stat} {value} + {second} {secondValue}/2)/2 → +{half} · {rank} +{n} · Lv {level} ÷ {divisor} +{bonus}',
         rollsNoStat: 'Rolls with the stat the story picks: {rank} +{n} · Lv {level} ÷ {divisor} +{bonus}',
         empty: 'Empty slot · filled when the story has {name} learn a new skill',
+        // (a block with types: the two lists, "3 of 5", the free-slot lines, the editor's "Used for" switch and its help)
+        combatHead: 'Combat skills', utilityHead: 'Utility skills', countOf: '{n} of {max}',
+        freeCombat: '{n} combat slots free', freeCombatOne: '1 combat slot free', freeUtility: '{n} utility slots free', freeUtilityOne: '1 utility slot free',
+        usedFor: 'Used for', typeCombat: 'Combat', typeUtility: 'Utility', poolFull: 'All slots of that kind are used.',
+        utilityHelp: 'Utility skills are for the story. They do not appear on the fight board and do not take a combat slot.',
         back: 'Back to the party',
         // (Rolls automatic: practice comes only from rolled uses; with Rolls off the story adds it, as before.)
         noteRolled: 'Practice comes from rolled skill uses: fights and checks. At 100 the rank rises by itself and shows in "Changed this reply". Rank and practice only move through play (a swipe takes them back); the pencil fixes a name or what it does.',
@@ -134,7 +143,7 @@ export const CHARACTER_STRINGS = Object.freeze({
         statsNoteStandard: 'Every stat starts at {start}. Spend {budget} points; a stat can go down to {min} to free a point and up to {max} now. Every third level gives 1 more point, and XP rises on its own.',
         statsNoteImportStandard: 'These are the saved character\'s stats. Spend the {n} points from the file as you like; a stat can go down to {min} to free a point and up to {max} (a saved stat above that stays). Every third level gives 1 more point.',
         radar: '{name}\'s stats',
-        skillsIntro: 'Start from a template, change anything, or write your own. Up to {max} skills, each with what it does, the stat it rolls with and what it uses. One may start at Adept, the rest are Novice.',
+        skillsIntro: 'Start from a template, change anything, or write your own. Up to {max} skills, each with what it does, the stat it rolls with and what it uses. Up to three can be utility skills, for the story only: they stay off the fight board and take no combat slot. One may start at Adept, the rest are Novice.',
         templates: 'Start from a template',
         used: 'Used',
         builtIn: 'Built in',
@@ -144,6 +153,10 @@ export const CHARACTER_STRINGS = Object.freeze({
         colAbout: 'What it does (the AI reads this)',
         colStat: 'Stat',
         colUses: 'Uses',
+        colType: 'Used for',
+        typeCombat: 'Combat',
+        typeUtility: 'Utility',
+        skillType: '{name} used for',
         colStart: 'Starts at',
         startsAt: 'starts at',
         skillName: 'Skill name',

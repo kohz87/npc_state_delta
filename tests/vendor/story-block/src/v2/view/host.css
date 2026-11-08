@@ -429,7 +429,8 @@ body.story-suite-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
     .story-suite-bar, .story-suite-bar *, .story-suite-sheet, .story-suite-sheet *, .story-suite-overlay,
     .story-suite-overlay *, .story-suite-reply-note, .story-suite-reply-note *, .story-suite-extras, .story-suite-extras *, .ss-card, .ss-card *, .ss-hud,
-    .ss-hud *, .ss-gameview, .ss-gameview *, .ss-dialog, .ss-dialog *, [data-ss-screen], [data-ss-screen] * {
+    .ss-hud *, .ss-gameview, .ss-gameview *, .ss-dialog, .ss-dialog *, [data-ss-screen], [data-ss-screen] *,
+    .rpg-fight-offer, .rpg-fight-offer *, .rpg-fight-pause, .rpg-fight-pause * {
         transition: none !important;
         animation: none !important;
         scroll-behavior: auto !important;

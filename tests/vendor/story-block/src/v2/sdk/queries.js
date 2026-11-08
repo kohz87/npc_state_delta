@@ -49,13 +49,15 @@ export const mountQuery = (registry, receipts = () => []) => (name, args, state)
  * (optional): another state than the head and the reply it stands for (`tools.reply`), for a Re-read's
  * afterCapture hook, which reads the reply's state after its new story lines (turn.js).
  */
-export function makeView({ store, registry, settings, chat = [], active = null, state = store.head(), reply = headReply(store), pendingProofs = null }) {
+export function makeView({ store, registry, settings, chat = [], active = null, state = store.head(), reply = headReply(store), pendingProofs = null, boardStop = null }) {
     const messages = Array.isArray(chat) ? chat : [];
     // (`active`: the timeline's reader of earlier messages, so a faded message of the reader's is not the last one a module sees)
     const seen = active ? active.messages(messages) : messages;
     const lastUser = [...seen].reverse().find(message => message?.is_user);
     return Object.freeze({
         state,
+        // How the board fight this reply carries ended (won / fled / lost / open), or null: set only while a reply's prompt is built.
+        boardStop,
         query: (name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [], reply, pendingProofs }),
         settings,
         feature: id => featureOn(registry, id),

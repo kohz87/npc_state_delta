@@ -53,7 +53,7 @@ function move(bar, blocks) {
  * start can happen). → { checks, rounds, opening, order, quickStart, idle, hurts, stop, text, summary }; the rounds are already cut to the stop
  * and the cue budget, and the hurts hold only what the told rolls did to the bars.
  */
-export function rollStandard(plan, prepared, source, rules, { carried = null, flow = 1, wearOf = null, drop = null, opened = null, fix = false, then = false, board = false, memberRolls = null } = {}) {
+export function rollStandard(plan, prepared, source, rules, { carried = null, flow = 1, wearOf = null, drop = null, opened = null, fix = false, then = false, board = false, scaled = false, memberRolls = null, noXp = false } = {}) {
     const own = new Map();
     // (An action's dice belong to its place in the plan: the entry as prepared, even when it is rolled without its skill.)
     const diceOf = entry => {
@@ -67,10 +67,12 @@ export function rollStandard(plan, prepared, source, rules, { carried = null, fl
     const standing = id => (bars.get(id)?.value ?? 0) > 0;
     // A skill costs a block of its resource (Stamina or Mana) each time it is used; with the resource empty an action is rolled without the skill.
     // With the resource empty an action goes on with its `else:` skill when that one's resource is not empty, else as a plain attack (single foe, no skill).
+    // (a fight with the doubled bars, `scaled`: an area skill costs 2, so with 1 left it is rolled without the skill as an empty pool would be)
+    const need = entry => (scaled && entry.area ? 2 : 1);
     const usable = entry => {
         if (entry.paid === true) return entry;
-        const bar = entry.skill && entry.plain ? bars.get(`${entry.actor}:${entry.uses}`) : null;
-        if (!(bar && bar.value === 0)) return entry;
+        const pool = entry.skill && entry.plain ? bars.get(`${entry.actor}:${entry.uses}`) : null;
+        if (!(pool && pool.value < need(entry))) return entry;
         const spentOn = { without: entry.skill, ...(fix ? { withoutUses: entry.uses } : {}), base: entry.base ?? entry };
         const backup = entry.alt ? bars.get(`${entry.actor}:${entry.alt.uses}`) : null;
         if (entry.alt && backup && backup.value > 0) return { ...entry, ...entry.alt, plain: undefined, alt: undefined, ...spentOn };
@@ -83,9 +85,11 @@ export function rollStandard(plan, prepared, source, rules, { carried = null, fl
         // rolled, before its own cost: so the cue never blames the wrong pool)
         const other = then && use.without && use.withoutUses ? bars.get(`${use.actor}:${use.withoutUses === 'mana' ? 'stamina' : 'mana'}`) : null;
         const otherUp = Boolean(other && other.value > 0);
-        const cost = use.skill && use.uses && use.paid !== true ? damageOf(bars.get(`${use.actor}:${use.uses}`), 1) : undefined;
+        const cost = use.skill && use.uses && use.paid !== true ? damageOf(bars.get(`${use.actor}:${use.uses}`), need(use)) : undefined;
         return [{ ...lines[0], ...(use.without ? { without: use.without, ...(use.withoutUses ? { withoutUses: use.withoutUses } : {}), ...(otherUp ? { otherUp: true } : {}) } : {}), ...(cost ? { cost } : {}) }, ...lines.slice(1)];
     };
+    // A hit takes 1 Health block, 2 when decisive; in a fight with the doubled bars a hit made with a skill on one target takes 2, 3 when decisive. (Area damage stays as it was.)
+    const hitBlocksOf = (entry, decisive) => (decisive ? 2 : 1) + (scaled && entry.skill && !entry.area ? 1 : 0);
     const damageOf = (bar, blocks) => (blocks === 0 ? undefined : move(bar, blocks) ?? undefined);
     const checks = prepared.checks.map(base => {
         const entry = usable(base), roll = diceOf(entry), die = roll();
@@ -118,12 +122,13 @@ export function rollStandard(plan, prepared, source, rules, { carried = null, fl
         const roll = diceOf(entry), pcDie = roll(), foeDie = roll();
         // (an area attack: the foe die already drawn is the first target's, one more for each other target. An old act has no group
         // and keeps drawing for every foe bar, as it always did; a grouped act draws only for its standing group.)
-        const areaBars = entry.area ? (entry.group === undefined ? foes
+        const areaBars = entry.area && !entry.aoe ? (entry.group === undefined ? foes
             : foes.filter(bar => standing(bar.id) && (bar.foe.group ?? bar.at) === entry.group)) : [];
         const areaDice = areaBars.map((_, at) => (at === 0 ? foeDie : roll()));
         const me = bars.get(owner(entry));
         if (!standing(me.id)) return { idle: 'down' };
         if (entry.support) {
+            if (board && scaled && !entry.skill) return { idle: 'no-resource' };
             const mate = bars.get(entry.target.id);
             const total = pcDie + entry.pc.statBonus + entry.pc.classBonus + entry.pc.rank + entry.pc.edge;
             const outcome = outcomeStd(pcDie, total, entry.dc, rules);
@@ -132,13 +137,25 @@ export function rollStandard(plan, prepared, source, rules, { carried = null, fl
             return { lines: [{ kind: 'check', type: entry.type, support: true, target: entry.target.name, skill: entry.skill, ...(entry.why ? { why: entry.why } : {}), pc: { ...entry.pc, die: pcDie, total },
                 difficulty: entry.difficulty, dc: entry.dc, outcome, decisive, ...(damage ? { damage } : {}) }] };
         }
-        const hit = (foeBar, dice) => {
+        const hit = (foeBar, dice, reduced = false) => {
             const rolled = contested(entry, dice.pcDie, dice.foeDie, rules);
-            const blocks = memberRolls?.hitBlocks(entry, foeBar, rolled.decisive) ?? (rolled.decisive ? 2 : 1);
+            const blocks = memberRolls?.hitBlocks(entry, foeBar, rolled.decisive, reduced) ?? hitBlocksOf(entry, rolled.decisive);
             const damage = rolled.pcWins && ['physical', 'magic'].includes(entry.type) ? damageOf(foeBar, blocks) : undefined;
-            return { kind: 'act', type: entry.type, skill: entry.skill, ...(entry.why ? { why: entry.why } : {}), ...(entry.area ? { area: true } : {}),
+            return { kind: 'act', type: entry.type, skill: entry.skill, ...(entry.why ? { why: entry.why } : {}), ...(entry.area ? { area: true } : {}), ...(reduced ? { reduced: true } : {}),
                 pc: rolled.pc, foe: { ...rolled.foe, name: foeBar.name, slot: foeBar.slot }, outcome: rolled.outcome, decisive: rolled.decisive, ...(damage ? { damage } : {}) };
         };
+        if (entry.area && entry.aoe) {
+            // (the newer area rule, record `aoe: 1`: ONE roll, the main group's. Its group's bars take the full effect, every other standing group's bars
+            // the same roll at one Health block less. The old path below is kept for records without `aoe`.)
+            const all = foes.filter(bar => standing(bar.id)), mainOf = bar => (bar.foe.group ?? bar.at) === entry.group;
+            if (!all.length) return { idle: 'no-target' };
+            const main = all.filter(mainOf), down = !main.length;
+            // If an earlier action cleared the main group, its contest still decides the other standing groups, without hitting the Down target.
+            const targets = [...(down ? [bars.get(foeId(entry.foe.slot))] : main), ...all.filter(bar => !mainOf(bar))];
+            return { lines: targets.map((bar, at) => ({ ...hit(bars.get(bar.id), { pcDie, foeDie }, !mainOf(bar)), aoe: true,
+                aoeGroup: bar.foe.group ?? bar.at, aoeAgainst: entry.foe.name, ...(Number.isFinite(bar.foe.level) ? { aoeLevel: bar.foe.level } : {}),
+                ...(at ? { aoeFollowup: true } : {}), ...(down && !at ? { aoeNoTarget: true } : {}) })) };
+        }
         if (entry.area) {
             const targets = entry.group === undefined ? foes.filter(bar => standing(bar.id)) : areaBars;
             if (!targets.length) return { idle: 'no-target' };
@@ -233,7 +250,7 @@ export function rollStandard(plan, prepared, source, rules, { carried = null, fl
     const refused = prepared.refused.map(entry => entry.text);
     const start = new Map([...characters, ...foes, ...resources].map(bar => [bar.id, bar]));
     const cueParts = { checks, rounds: all, refused, plainRefused: prepared.plainRefused, decisive: all.length > 0 && (all.at(-1).decisive || all.at(-1).over), standard: { order, opening, quick, start },
-        ...(flow === 2 ? { flow, end: all.at(-1)?.end ?? null } : {}), ...(wearOf ? { wearOf } : {}), ...(fix && opened?.length ? { opened } : {}), ...(fix && ambush?.carried ? { carriedDrop: true } : {}), ...(fix ? {} : { legacy: true }) };
+        ...(flow === 2 ? { flow, end: all.at(-1)?.end ?? null } : {}), ...(noXp ? { noXp: true } : {}), ...(wearOf ? { wearOf } : {}), ...(fix && opened?.length ? { opened } : {}), ...(fix && ambush?.carried ? { carriedDrop: true } : {}), ...(fix ? {} : { legacy: true }) };
     const cue = board ? { count: all.length, text: '', shape: 0 } : fitCue(cueParts);
     const rounds = all.slice(0, cue.count).map(({ over: _, end: _end, ...round }) => round);
     const told = all.slice(0, cue.count);

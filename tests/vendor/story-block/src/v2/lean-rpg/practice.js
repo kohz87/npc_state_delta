@@ -16,7 +16,7 @@
 // The record (the step's receipt `data.v2.result.practice`): { skills: [{ who, skill, slot, amount, held? }] }.
 import { createEvaluation } from '../data-modules/interpreter.js';
 import { LEAN_RPG_FEATURE, PRACTICE, PRACTICE_STEP, RESOLVE, practiceOf } from './names.js';
-import { SKILL_SLOTS_MAX } from '../skill-slots.js';
+import { skillFieldSlots } from '../skill-slots.js';
 import { fold } from './read.js';
 
 /** The replies whose rolls are practised (the same as the fight's: not a Continue's, nor the extractor's late lines). */
@@ -93,10 +93,10 @@ function slotOf(domain, who, skill) {
         const definition = domain.pins?.[domain.active[module]?.hash]?.definition;
         const fields = domain.instances?.[module]?.chat?.fields;
         if (definition?.role !== 'skills' || !isObject(fields) || fold(text(fields.who)) !== fold(who)) continue;
-        for (let slot = 1; slot <= SKILL_SLOTS_MAX; slot += 1) {
+        for (let slot = 1; slot <= skillFieldSlots(fields); slot += 1) {
             if (text(fields[`skill${slot}`]) && fold(text(fields[`skill${slot}`])) === fold(skill)) return { module, slot, name: text(fields[`skill${slot}`]) };
         }
-        if (Array.from({ length: SKILL_SLOTS_MAX }, (_, i) => text(fields[`skill${i + 1}`])).some(Boolean)) return null;
+        if (Array.from({ length: skillFieldSlots(fields) }, (_, i) => text(fields[`skill${i + 1}`])).some(Boolean)) return null;
     }
     return null;
 }

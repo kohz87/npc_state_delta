@@ -21,8 +21,10 @@ export function memberRolls(plan) {
             const mine = entries.filter(entry => entry.foe.slot === bar.slot);
             return bar.foe.pack === true ? mine.slice(0, packAttacks(bar.foe.count, bar.value, bar.size)) : mine;
         },
-        hitBlocks(entry, bar, decisive) {
-            return entry.area && bar.foe.pack === true ? packAreaBlocks(bar.size, decisive) : undefined;
+        // `reduced`: a group hit beside the main target takes one Health block less, never below a plain hit (decisive 2, else 1).
+        hitBlocks(entry, bar, decisive, reduced = false) {
+            const full = entry.area && bar.foe.pack === true ? packAreaBlocks(bar.size, decisive) : undefined;
+            return reduced && full !== undefined ? Math.max(decisive ? 2 : 1, full - 1) : full;
         },
         foe(base, prepared, roll, standing = () => true) {
             const choices = rotation && base.once === true ? prepared.foeChoices?.[base.at] : null;

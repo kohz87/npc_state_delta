@@ -70,10 +70,10 @@ function standardLine(line, { names, shown, word, who, legacy = false }) {
     const bare = !line.without ? '' : legacy ? ` (${resource})` : line.skill ? ` (${resource}; ${cut(line.skill, names)} instead)` : ` (no skill: ${resource}; a plain weapon attack \u2014 name no skill)`;
     const by = line.skill ? ` (${cut(line.skill, names)})` : '';
     if (foe) return `${shown(line.foe.name)} attacks ${who}${by}${bare}: ${verdict} for ${who} ${numbers(line)}${hit}`;
-    return `${who} \u2192 ${shown(line.foe.name)}${by}${bare}${line.area ? ' (area)' : ''}: ${verdict} ${numbers(line)}${hit}`;
+    return `${who} \u2192 ${shown(line.foe.name)}${by}${bare}${line.area ? (line.reduced ? ' (area, reduced)' : ' (area)') : ''}: ${verdict} ${numbers(line)}${hit}`;
 }
 
-const IDLE_WHY = Object.freeze({ down: 'Down', beaten: 'beaten', 'no-target': 'no target left' });
+const IDLE_WHY = Object.freeze({ down: 'Down', beaten: 'beaten', 'no-target': 'no target left', 'no-resource': 'the skill\'s resource is Empty' });
 
 /** The bars the told lines moved, from `start` (id → bar): [{ id, kind, name, module, field, from, to, size }] (one per bar). */
 export function hurtsOf(start, lines) {
@@ -104,7 +104,7 @@ const FLOW_ENDS = Object.freeze({
     lost: 'everyone on your side is Down. Stop there and tell it.',
     heavy: 'a party member is badly hurt or Down. Stop there at the latest.',
 });
-const flowEnd = (n, end) => (end ? `Round ${n} ends the rolls: ${FLOW_ENDS[end]}` : `Round ${n} is the last rolled: stop there at the latest. ${STOP_POINTS}`);
+const flowEnd = (n, end, noXp) => (end ? `Round ${n} ends the rolls: ${end === 'won' && noXp ? 'every foe is Down: the fight is won. Stop there and tell it as the end of the fight, and leave the beaten groups on the Foes block (Down).' : FLOW_ENDS[end]}` : `Round ${n} is the last rolled: stop there at the latest. ${STOP_POINTS}`);
 
 // A refusal in fewer words: without its bracketed reason, and cut.
 const shortRefusal = text => cut(String(text).replace(/\s*\([^)]*\)/g, '').replace(/\s+/g, ' ').trim(), 70);
@@ -151,7 +151,7 @@ export function cueText(parts, shape = 0, { plain = false } = {}) {
         const standing = barsLine(std.start, [...std.opening, ...rounds.flatMap(round => round.lines)]);
         if (standing) lines.push(`Bars now: ${standing}.`);
     }
-    if (fight && parts.flow === 2) lines.push(flowEnd(rounds.at(-1).n, parts.end ?? null));
+    if (fight && parts.flow === 2) lines.push(flowEnd(rounds.at(-1).n, parts.end ?? null, parts.noXp === true));
     else if (fight) lines.push(`Round ${rounds.at(-1).n} is ${decisive ? (rounds.at(-1).decisive || !std ? 'decisive' : 'the end of the fight') : 'the last rolled'}: stop there at the latest. ${STOP_POINTS}`);
     for (const event of parts.wear ?? []) lines.push(`Round ${event.n}: ${wearLine(event)}.`);
     return lines.join('\n');
@@ -205,7 +205,7 @@ export function cueOfResult(result, shape = 0) {
         const end = flow2 && ['won', 'lost', 'heavy'].includes(result.stop) ? result.stop : null;
         return cueText({
             checks: result.checks, rounds, refused: (result.refused ?? []).map(entry => entry.text), decisive,
-            ...(std ? { standard: std } : {}), ...(flow2 ? { flow: 2, end } : {}), ...(result.wear ? { wear: result.wear } : {}), ...(result.fix >= 2 ? { opened: result.opened, carriedDrop: result.ambush?.spent === true } : { legacy: true }),
+            ...(std ? { standard: std } : {}), ...(flow2 ? { flow: 2, end } : {}), ...(result.noXp === true ? { noXp: true } : {}), ...(result.wear ? { wear: result.wear } : {}), ...(result.fix >= 2 ? { opened: result.opened, carriedDrop: result.ambush?.spent === true } : { legacy: true }),
         }, Number.isInteger(shape) ? shape : 0);
     } catch { return ''; }
 }

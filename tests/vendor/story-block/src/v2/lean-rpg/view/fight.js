@@ -83,7 +83,8 @@ export function createFightWidget({ headState = () => null, readerName = () => '
                 bar.setAttribute('data-foe-health', String(foe.slot));
                 bar.append(slot, edit);
                 node.appendChild(bar);
-                handles.push(meter.render(slot, { label: F.health, value: Math.min(foe.hurt, foe.max), max: foe.max, tone: foe.tone, text: foe.blocks ? foe.text : foe.down ? F.down : foe.word, segments: foe.max, icon: 'fa-heart' }, {}));
+                const value = Math.min(foe.hurt, foe.max), word = foe.down ? F.down : foe.word;
+                handles.push(meter.render(slot, { label: F.health, value, max: foe.max, tone: foe.tone, text: foe.text ?? fill(RPG_STRINGS.blocks.of, { word, n: value, max: foe.max }), bar: 'health', icon: 'fa-heart' }, {}));
                 if (typeof api?.command !== 'function' || foe.locked) return;
                 handles.push(editable.render(edit, { value: Math.min(foe.hurt, foe.max), kind: 'choice', options: foe.stages, label: fill(F.editHealth, { name: foe.name }), displayValue: false,
                     command: 'dm.set', payload: { module: foe.module, field: `hurt${foe.slot}`, ...(foe.subject ? { who: foe.subject } : {}) } }, { command: api.command }));

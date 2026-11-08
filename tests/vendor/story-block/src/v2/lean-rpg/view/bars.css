@@ -1,0 +1,21 @@
+/* Health, Stamina and Mana as one smooth strip (the owner's option B): red, green and blue from the theme's bar tokens (--ss-hp, --ss-sp, --ss-mp), the strip's
+   LENGTH following the value and its colour dulled in three steps as it empties (full, about half, low), mixed toward the theme's dark ink (--ss-on-ring).
+   The steps come from view/widgets/dom.js barStep (full from 3/4, mid above 1/3, else low). Drawing only: the same for every bar size. Covers the
+   Party card and board/foe cards (the meter widget), compact hero and HUD (the glass bar), and the battle log's status bars. */
+.ss-w-meter, .ss-bar, .rpg-bl-stat { --rpg-dull: var(--ss-on-ring); --rpg-mid: 68%; --rpg-low: 42%; }
+.ss-w-bar-health, .ss-bar-hp, .rpg-bl-health { --rpg-bar: var(--ss-hp); }
+.ss-w-bar-stamina, .ss-bar-sp, .rpg-bl-stamina { --rpg-bar: var(--ss-sp); }
+.ss-w-bar-mana, .ss-bar-mp, .rpg-bl-mana { --rpg-bar: var(--ss-mp); }
+.ss-w-bar-health .ss-w-meter-fill, .ss-w-bar-stamina .ss-w-meter-fill, .ss-w-bar-mana .ss-w-meter-fill,
+.ss-bar-hp .ss-bar-fill, .ss-bar-sp .ss-bar-fill, .ss-bar-mp .ss-bar-fill { background: var(--rpg-bar); }
+.ss-w-step-mid .ss-w-meter-fill, .ss-bar-step-mid .ss-bar-fill { background: color-mix(in srgb, var(--rpg-bar) var(--rpg-mid), var(--rpg-dull)); }
+.ss-w-step-low .ss-w-meter-fill, .ss-bar-step-low .ss-bar-fill { background: color-mix(in srgb, var(--rpg-bar) var(--rpg-low), var(--rpg-dull)); }
+.rpg-bl-stat.rpg-bl-step-full .rpg-bl-fill { background: var(--rpg-bar); }
+.rpg-bl-stat.rpg-bl-step-mid .rpg-bl-fill { background: color-mix(in srgb, var(--rpg-bar) var(--rpg-mid), var(--rpg-dull)); }
+.rpg-bl-stat.rpg-bl-step-low .rpg-bl-fill { background: color-mix(in srgb, var(--rpg-bar) var(--rpg-low), var(--rpg-dull)); }
+.rpg-bl-word { min-width: 0; overflow-wrap: anywhere; }
+/* the word and the number stay in view whatever the strip's length */
+.ss-w-bar-health .ss-w-meter-value, .ss-w-bar-stamina .ss-w-meter-value, .ss-w-bar-mana .ss-w-meter-value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+/* the glass bar's head (the compact hero and the HUD) may wrap, so "Badly wounded · 2/10" is whole at any width instead of running out of its column */
+:is(.ss-bar-hp, .ss-bar-sp, .ss-bar-mp) .ss-bar-head { flex-wrap: wrap; min-width: 0; }
+:is(.ss-bar-hp, .ss-bar-sp, .ss-bar-mp) .ss-bar-value { margin-left: auto; text-align: right; white-space: normal; overflow-wrap: anywhere; min-width: 0; }

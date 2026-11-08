@@ -241,7 +241,7 @@ function buildDef(def, env, about, keep = {}) {
     const bonus = packBonus(id, def.bonus);
     if (bonus === null) delete def.bonus;
     else def.bonus = bonus;
-    // With gear on, a cart, barrow, wagon or sledge the story names adds the capacity of its kind (gear.js KIND_CARRY) while it is owned.
+    // With gear on, a cart, barrow, sledge, carriage, coach, barge or wagon the story names adds the capacity of its kind (gear.js KIND_CARRY) while it is owned.
     if (about.gear === true && itemCarryOf(def.name)) def.carry = itemCarryOf(def.name);
     if (def.kind === 'equipment') def.stack = false;   // MODULES.md F6
     return def;

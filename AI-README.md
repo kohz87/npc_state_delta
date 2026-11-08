@@ -1,4 +1,4 @@
-# AI-README: NPC State Delta 1.13.2
+# AI-README: NPC State Delta 1.14.0
 
 For AI assistants that read this repository. Plain facts, no marketing. For people, read [README.md](README.md). For the rules
 every change must keep, read [AGENTS.md](AGENTS.md) and [docs/core-contract.md](docs/core-contract.md). Depth lives in `docs/`;
@@ -16,7 +16,7 @@ roleplay model about the NPCs who are present. With Story Block it also keeps me
 |---|---|---|---|
 | kohz87/Story_block | `story-block` | 2.22.0 | The host: store, replay, command bus, `<Changes>` capture, prompt assembly, module registry, settings window, Game view, packs and portraits, save points. |
 | kohz87/Story_director | `story-director` | 2.9.1 | Story clock and calendar, quests, map, World, key people, the living cast (who has been met, where everyone is). Needs Story Block. |
-| kohz87/npc_state_delta (this) | `npc-state-delta` | 1.13.2 | NPC dossiers, meters, stages, hidden notes ("secrets"), the Dossiers screen, cast dossiers and cast portraits, social-check modifiers. |
+| kohz87/npc_state_delta (this) | `npc-state-delta` | 1.14.0 | NPC dossiers, meters, stages, hidden notes ("secrets"), the Dossiers screen, cast dossiers and cast portraits, social-check modifiers. |
 | kohz87/Story_studio | (not an extension) | 0.6.0 | A separate page that writes and checks packs. |
 
 Data flows one way: Studio writes a pack; Story Block validates and stores it; Story Director reads what Story Block holds; Delta
@@ -56,7 +56,7 @@ packs. Nothing flows back to Studio.
 - **Named forms / current form**: an NPC who transforms keeps several appearance forms (`appearance.js`). The body belongs in
   each form. A flat `appearance` is a resolved projection.
 - **Relationship**: `trust`, `affection`, `desire`, `tension`, each -100..100. Scan changes are capped by impact tier (ordinary 1,
-  meaningful 2, major 5, extreme 10 by default).
+  meaningful 2, major 3, extreme 6 by default) and paced per person per story day (ordinary 3, meaningful 1, major 1, extreme 1; an event over its allowance counts as the next tier down; a saved 1/2/5/10 moves to the new defaults once).
 - **Slice (`npc` domain)**: Story Block's per-reply state for Delta (`src/npc-meters.js`): meters, stages, milestones, unlocked
   note ids, disposition, cast and key-away records. Numbers and ids only. Prose stays in Delta's sidecar. While hosted, the
   slice is the truth for meter values.
@@ -135,7 +135,7 @@ Extensions, or in Story Suite settings when hosted. Hosted settings (the `npc` p
 | `sourceOfTruth` | Per area (npc, calendar, scene, stats): auto, this extension, the other one. | Automatic |
 | `presentCastDisplay` | In-chat cast: full, compact, storyblock, off. | full (storyblock while hosted until chosen) |
 | `portraitGenerationEnabled`, `portraitThemePreset`, ... | Image Generation prompt building. | on, fantasy_anime |
-| `relationshipBaseline`, `relationshipCaps`, three rubric texts | Start values, per-tier caps, scoring and behavior criteria. | 0, 1/2/5/10 |
+| `relationshipBaseline`, `relationshipCaps`, three rubric texts | Start values, per-tier caps, scoring and behavior criteria. | 0, 1/2/3/6 (a saved 1/2/5/10 moves once) |
 | `changeCap` (Most a meter moves per reply) | Story lines and scans together. | 15 (max 200) |
 | `customMeters`, `stages`, `ladder`, `presets` | Meter setup (hosted). | none |
 | `conflictAt`, `demoteAfter` | Ladder promotion waits while tension is above this; a rung is lost after this many low replies. | 50, 3 |
@@ -239,7 +239,7 @@ Module id `npc-state-delta`. Registered in `src/storysuite-v2.js` (`QUERY_NAMES`
 | `npc.open` | Open or shut hidden notes. `by: 'story'` is Delta's own scan only. | Editor or scan. |
 | `npc.tick` | Per-reply step: drift, ladder demotion counting, key-away memory, cast records. | Delta only. |
 
-Page API `globalThis.NPCStateDeltaCast` for Story Director's World screen. Public global `NPCStateDelta` for Delta's own runtime.
+Page API `globalThis.NPCStateDeltaCast` (version 2) for Story Director's World screen; `busy()` is true until Delta has read the newest reply, and listeners are told once when it is done. Public global `NPCStateDelta` for Delta's own runtime.
 Story Director queries Delta reads: `director.cast`, `director.keyPeople`, `director.calendar`, `director.world.here`.
 Detail: [docs/dev/storysuite-adapter.md](docs/dev/storysuite-adapter.md), [docs/dev/storysuite-participant.md](docs/dev/storysuite-participant.md).
 
@@ -294,7 +294,7 @@ Detail: [docs/dev/storysuite-adapter.md](docs/dev/storysuite-adapter.md), [docs/
 
 ## Version
 
-NPC State Delta 1.13.2. The version lives in `manifest.json`, `package.json`, `runtime-modules.json`, `core.js`
+NPC State Delta 1.14.0. The version lives in `manifest.json`, `package.json`, `runtime-modules.json`, `core.js`
 (`NPC_STATE_VERSION`) and the `bootstrap.js` banner; `scripts/validate.mjs` checks they agree with README and CHANGELOG.
 Built for Story Block 2.22.0 and Story Director 2.9.1 in Story Suite with Story Studio 0.6.0. Persisted schema versions are
 separate from the application version.

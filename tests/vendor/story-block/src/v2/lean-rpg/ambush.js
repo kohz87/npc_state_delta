@@ -3,7 +3,7 @@
 //
 // A successful ambush check gives the party's acts of round 1 an edge of +2 (inside the 3 an edge may reach), and under Standard the quick start: each
 // character with an act against a foe gets the opening action without the lead the margin asks. A failed one (a cost counts as failed) gives nothing: no
-// surprise. Without such a check there is no ambush edge: the planner is told so, and an act's own "+2 ambush" edge is dropped when the plan has none
+// surprise. Without such a check there is no ambush edge: an act's own "+2 ambush" edge is dropped when the plan has none
 // (plan.js). The check's skill earns practice through the existing path (it is one of the roll's checks).
 import { FORMULA } from './names.js';
 

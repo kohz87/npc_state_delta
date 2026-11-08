@@ -1,6 +1,6 @@
 // Gear in the rolls (`story-block.gear`, docs/v2/GEAR.md "In the rolls"). Pure, apart from the questions put to `query`.
 //
-// What it does. While the switch is on, the planner (precall.js) asks the inventory what each party member has on and carries (`planGear`),
+// What it does. While the switch is on, the roll (the board; the old planner did so too) asks the inventory what each party member has on and carries (`planGear`),
 // and the roll carries only the version mark in its payload (`gear: { v: 1 }`); `rpg.resolve` works the gear out from the state before the roll (`planGear`
 // over the inventory's own answers) into the record `gear: { v: 1, who: { <member key>: { own, add?, enc?, items? } } }`:
 //   own    the inventory owners the member's gear is filed under (their party actor, and `party` for the reader's lead: the first character);
@@ -40,7 +40,7 @@ const lower = stats => Object.fromEntries(Object.entries(isObject(stats) ? stats
 
 /**
  * What the owners `own` of one member give: { add?, enc?, items? } from the inventory's answers (`answerOf(owner)`; `party` is the shared bag's, which also
- * says whether the load is too much). Shared by the planner (the live queries) and the guard (the state before the roll), so both read it the same way.
+ * says whether the load is too much). Shared by the roll (the live queries; old planner records too) and the guard (the state before the roll), so both read it the same way.
  */
 export function dressOf(own, party, answerOf) {
     const add = {}, items = [];
@@ -67,7 +67,7 @@ export function gearMarkOf(value) {
     return lead ? { v: GEAR_VERSION, lead } : { v: GEAR_VERSION };
 }
 
-/** Whether gear is on for a planner: the inventory answers (`query(name, args)`) and there is a Character to dress. */
+/** Whether gear is on for a roll: the inventory answers (`query(name, args)`) and there is a Character to dress. */
 export function gearIsOn(sheet, query) {
     return typeof query === 'function' && Boolean(sheet?.characters?.length) && ask(query, 'inventory.gear', { owner: 'party' })?.on === true;
 }
@@ -200,7 +200,7 @@ export function wearGear(ctx, gear, { opening = [], rounds = [], rules, condWord
     if (!gear) return events;
     const told = [...opening.map(line => ({ n: rounds[0]?.n ?? 1, line })), ...rounds.flatMap(round => round.lines.map(line => ({ n: round.n, line })))];
     for (const { n, line } of told) {
-        if (!['act', 'foe'].includes(line.kind) || line.support || line.outcome !== 'fail' || !isDecisive(line, rules)) continue;
+        if (!['act', 'foe'].includes(line.kind) || line.support || line.aoeFollowup === true || line.outcome !== 'fail' || !isDecisive(line, rules)) continue;
         const slots = line.kind === 'foe' ? ['body', 'off-hand'] : ['weapon'];
         for (const owner of gear.who?.[fold(line.pc.who)]?.own ?? []) {
             const worn = ctx.query('inventory.gear', { owner, recorded: true })?.slots ?? {};
@@ -226,6 +226,6 @@ export function earnedLegend(dice, sheet, levelled) {
     if (!levelled || dice.stop !== 'won') return false;
     const party = Math.max(0, ...(sheet?.characters ?? []).map(character => character.level ?? 0));
     const lines = [...(dice.opening ?? []), ...dice.rounds.flatMap(round => round.lines)];
-    const foes = Math.max(0, ...lines.filter(line => line.foe).map(line => line.foe.classValue ?? 0));
+    const foes = Math.max(0, ...lines.filter(line => line.foe).map(line => line.aoe && Number.isFinite(line.aoeLevel) ? line.aoeLevel : line.foe.classValue ?? 0));
     return party > 0 && foes >= party + GAP;
 }

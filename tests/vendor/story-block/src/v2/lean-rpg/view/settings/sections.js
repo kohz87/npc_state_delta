@@ -3,7 +3,7 @@
 
 import { h } from '../../../view/widgets/dom.js';
 import { boardSetting } from '../../board/settings.js';
-import { AUTO_CAP_SETTING, LEVEL, LEVEL_CAP_SETTING, autoCapFrom, levelCapOf, JOIN_SETTING, PRACTICE, PRACTICE_SETTING, practiceOf } from '../../names.js';
+import { AUTO_CAP_SETTING, PRECHECK_SETTING, precheckOn, LEVEL, LEVEL_CAP_SETTING, autoCapFrom, levelCapOf, JOIN_SETTING, PRACTICE, PRACTICE_SETTING, practiceOf } from '../../names.js';
 import { joinMode } from '../../join.js';
 import { rulesFromSettings } from '../../rules.js';
 import { XP_RATE, XP_RATE_SETTING, xpRateOf } from '../../levels.js';
@@ -47,7 +47,7 @@ export function createBasicSections({ doc, card, chips, field, numberRow, packNo
         const box = card('rolls', S.rolls);
         chips(box, S.rolls, [['automatic', S.automatic], ['off', S.off]], rollsOf(settings), value => put(ROLLS_KEY, value));
         box.appendChild(h(doc, 'p', 'rpg-set-help', S.rollsHelp));
-        if (boardFeature) box.appendChild(boardSetting(doc, boardFeature, onChange, { value: autoCapFrom(values()), set: v => put(AUTO_CAP_SETTING, v) }));
+        if (boardFeature) box.appendChild(boardSetting(doc, boardFeature, onChange, { value: autoCapFrom(values()), set: v => put(AUTO_CAP_SETTING, v) }, { value: precheckOn(values()), set: v => put(PRECHECK_SETTING, v === true) }));
     }
 
     // ---- Levels and practice: the level cap, the practice a skill use gives, the XP rate

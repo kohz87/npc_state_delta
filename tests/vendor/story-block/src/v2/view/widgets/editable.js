@@ -38,6 +38,7 @@ function render(el, input, api) {
         let p = resolveProps(props, input);
         let field = null;
         let itemCount = null;
+        let itemCarry = null;
         let itemNote = null;
         let slotSelect = null;
         let bySelect = null;
@@ -166,6 +167,16 @@ function render(el, input, api) {
                 // A pack's item keeps its kind, slot and rarity (the choice of where it is worn stays): one line says so.
                 if (p.gear && typeof p.gear.def === 'string' && p.gear.def.startsWith('pack.') && !(typeof p.gear.bound === 'string' && p.gear.bound)) {
                     rows.push(h(doc, 'p', 'ss-w-editable-item-hint ss-w-editable-pack-hint', STRINGS.inventory.gear.form.packHint));
+                }
+                // The reader's Carry (not money, not a pack's item, not a hand-made piece: that form has its own): set by the reader only.
+                itemCarry = null;
+                if (p.gear?.row?.carryEdit === true) {
+                    const GF = STRINGS.inventory.gear.form;
+                    itemCarry = h(doc, 'input', 'ss-input');
+                    itemCarry.setAttribute('aria-label', GF.carry);
+                    for (const [name, value] of [['type', 'number'], ['min', '0'], ['max', '500'], ['step', '1']]) itemCarry.setAttribute(name, value);
+                    itemCarry.value = String(Number.isSafeInteger(p.gear.row.carry) ? p.gear.row.carry : 0);
+                    rows.push(label(GF.carry, itemCarry), h(doc, 'p', 'ss-w-editable-item-hint', GF.carryHelp));
                 }
                 fieldSlot.replaceChildren(...rows);
                 chips.hidden = true;
@@ -327,8 +338,14 @@ function render(el, input, api) {
                 if (note !== p.itemNote) payload.note = note;
                 const edited = 'name' in payload || 'qty' in payload || 'note' in payload;
                 const worn = wearSteps();
-                if (!edited && !worn.length) { close(); return; }
-                if (worn.length) { await runSteps([...(edited ? [{ command: p.command, payload }] : []), ...worn]); return; }
+                const steps = [];
+                if (itemCarry) {
+                    const was = Number.isSafeInteger(p.gear.row.carry) ? p.gear.row.carry : 0, raw = String(itemCarry.value).trim(), carry = Number(raw);
+                    if (!/^\d+$/.test(raw) || !Number.isSafeInteger(carry) || carry > 500) { error.textContent = E.carryRange.replace('{max}', '500'); return; }
+                    if (carry !== was) steps.push({ command: 'inventory.carry', payload: { stack: p.payload?.stack, carry } });
+                }
+                if (!edited && !worn.length && !steps.length) { close(); return; }
+                if (worn.length || steps.length) { await runSteps([...(edited ? [{ command: p.command, payload }] : []), ...worn, ...steps]); return; }
             } else if (formFields) {
                 const read = fields.readFields(p);
                 if (read.error) { error.textContent = read.error; focusNode(read.input); return; }

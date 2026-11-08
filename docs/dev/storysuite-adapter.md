@@ -19,7 +19,20 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   sidecar): meters trust, affection, desire, tension in `BUILT_IN_RANGE` (−100..100) plus up to
   `MAX_CUSTOM_METERS` (6) custom ones, at most `MAX_NPCS` (80). While hosted this slice is the truth for meter
   values: `index.js` reads it back through `sliceView()`, and the scanner's relationship changes go in as
-  `npc.adjust`.
+  `npc.adjust`. `sliceView` overlays the slice's numbers, part-points (`progress`) and the earned milestones that are still
+  true at those numbers, at read time, for every hosted reader (cast cards, dossier view, public queries, prompt injection and
+  narrator lines, stages and tiers, the scan's starting state `hostedScanState`, the Refresh prompt and the open editor,
+  diagnostics). Nothing writes slice numbers into Delta's dossier, checkpoints or rollback snapshots (no `adapter.sliceNumbers`);
+  a hosted scan's installed working copy only becomes the sidecar, which no hosted reader reads (a bundle export is a backup of
+  the sidecar). Seeds for a person the slice has no entry for yet still read the dossier.
+- **Relationship pacing:** each record carries `impactDay` (the flat keys of the clock day only: ordinary, meaningful, major,
+  extreme; a write stores the current day's four keys, and a day's count is read from that day's keys alone). A story line goes
+  through `tiered`; a scanner change forwards as `npc.adjust` with an `impact` tier in its payload, and both spend one allowance
+  (`src/relationship-pacing.js`, `npc-meters-pacing.js`). The hooks `allowance` (events per day by tier, default 3 / 1 / 1 / 1; blank
+  = no limit) and `calendarOwn` (Delta owns the calendar: no limit) come from `src/adapter/queries.js`; the day is the story clock at
+  the start of the reply (`startTime`). An untiered `npc.adjust`, `npc.set` and a reader's edit are never held.
+- **Page API version 2:** `busy()` is true until Delta has finished reading the newest reply (`runtime.pageBusy`); one poll tells the
+  `onChange` listeners once when it turns false (`src/adapter/cast-ui/page-api.js`).
 - **Code sets numbers:** every value clamped to its range; one meter's change within one reply held to the
   change cap (`DEFAULT_CHANGE_CAP` 15; `turn.from` keeps the reply's starting values, keyed by the reply `sid`);
   per-NPC floors and ceilings; stages and ladder rungs moved by code when thresholds are crossed; the story

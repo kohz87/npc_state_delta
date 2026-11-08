@@ -1,4 +1,4 @@
-// The roll hook (SPEC_RPG §2R A3). Rolls are made by the fight board only: there is no planner and no model call before a reply.
+// The roll hook (SPEC_RPG §2R A3). Rolls are made by the fight board; the optional pre-check reads new foes without planning dice.
 // beforeGenerate carries a board fight the reader staged ("Send with this fight") as `rpg.resolve` board commands and, with no fight to carry, tells
 // the narrator how to open one (noFight); canGenerate holds a send until the waiting fight is played or chosen. Old chats keep their planner
 // rolls as records (resolve.js replays them); nothing here asks a model for a plan.
@@ -13,6 +13,8 @@ import { boardKey, boardPayload, boardSession, clearSend, lastBoard, linkBoard, 
 import { boardInputError } from './board/commit.js';
 import { CORE_FEATURE } from '../features.js';
 import { clearStart, holdStart, pendingStart } from '../turn/fight-start.js';
+import { isStandard, packRulesOf, rulesFromSettings } from './rules.js';
+import { openingPayload, runPrecheck, wantsPrecheck } from './board/precheck-run.js';
 
 // Whether the fight board is on (one literal id, read once per call).
 const boardOn = view => view?.feature?.(CORE_FEATURE.fightBoard) === true;
@@ -29,22 +31,53 @@ const readSettings = (view, moduleId) => {
 /** Whether `state` already holds this message's rolls (its claim). */
 export const claimed = (state, key) => state?.meta?.claims?.[claimKey(key)] === true;
 
+/** The text of the reply just before the reader's last message (the narration that introduced the foes), or ''. */
+const previousReply = messages => { const before = messages.at(-2); return before && !before.is_user && !before.is_system ? String(before.mes ?? '') : ''; };
+
 /**
  * The hook. `deps`: { chat() → SillyTavern's chat array, metadata() → the chat's metadata, moduleId,
- * skip { peek() → whether the next reply is to go out with no dice, clear() } (start.js: "Send without the RPG for now") }.
+ * skip { peek() → whether the next reply is to go out with no dice, clear() } (start.js: "Send without the RPG for now"),
+ * callModel(prompt, { maxTokens, profile, helper, timeoutMs }) → text (the foe pre-check's one Assist call; none: no pre-check), onPlanning(working) (the screens redraw), timeoutMs, timer }.
  * Returns { canGenerate(view, info), beforeGenerate(view, info) → { commands } | { lines } | null, afterCapture(), afterReceive(info, state, query) }.
  */
-export function createPrecall({ chat, metadata = () => null, moduleId = 'story-block', skip: noDice = { peek: () => false, clear: () => {} } }) {
+export function createPrecall({ chat, metadata = () => null, moduleId = 'story-block', skip: noDice = { peek: () => false, clear: () => {} }, callModel = null, onPlanning = () => {}, timeoutMs, timer }) {
+    // A retried interceptor must not repeat a check, but an edited or different message still needs its own check.
+    const checked = new WeakMap();
     // No foe is filled in and nothing was rolled: if a fight starts in this reply, the narrator sets the Foes line and stops at the first clash.
     // (a block of Down groups only is a won fight: no fight is on)
     const noFight = (sheet, board = false) => (sheet.foes.length && !sheet.foes.some(foe => foe.filled && foe.hurt > 0)
         ? { lines: [board ? { text: 'No foes are set. If a fight begins, set the Foes line and tell the approach only. The fight has not started: end at the moment of engagement.', keep: true } : OPEN_FIGHT_LINE] } : null);
 
+    // A running pre-check also holds another send; stale working states are ignored by pendingStart after a reload.
+    const waiting = held => (held && held.choice !== 'plain' ? held : null);
+
+    // The foe pre-check (board/precheck-run.js): a typed attack with no foe standing is read once for its groups; the opening is recorded as the old
+    // planner's was and the send is held (turn/prompt-build.js records it). → { fightStart } or null (the send goes on as it does without the pre-check).
+    async function precheck(view, sheet, messages, key, text, startAnchor) {
+        let meta;
+        try { meta = metadata(); } catch { return null; }
+        const values = readSettings(view, moduleId), held = pendingStart(meta, messages);
+        let pack = null;
+        try { pack = packRulesOf(view.query?.('packs.content', { kind: 'rpg' })); } catch { /* no pack rules */ }
+        const rules = rulesFromSettings(values, pack);
+        if (!startAnchor || !callModel || held?.choice === 'plain' || !isStandard(rules) || noDice.peek() || !wantsPrecheck(values, sheet, text)) return null;
+        checked.set(messages.at(-1), key);
+        const working = holdStart(meta, messages, { mode: 'working' });
+        try { onPlanning(true); } catch { /* the screen redraws on the next event */ }
+        let groups = [];
+        try { groups = await runPrecheck({ callModel, message: text, previous: previousReply(messages), sheet, values, limit: timeoutMs, timer }); } finally {
+            if (working) clearStart(meta, working);
+            try { onPlanning(false); } catch { /* the screen redraws on the next event */ }
+        }
+        if (!groups.length) return null;
+        return { opening: openingPayload({ groups, key, rules, anchor: startAnchor, values }), anchor: startAnchor, message: hashText(text) };
+    }
+
     function canGenerate(view, info = {}) {
         if (view?.feature?.(LEAN_RPG_FEATURE) !== true) return null;
         let meta;
         try { meta = metadata(); } catch { return null; }
-        const messages = chat() ?? [], last = messages.at(-1), session = boardSession(meta), pending = pendingStart(meta, messages);
+        const messages = chat() ?? [], last = messages.at(-1), session = boardSession(meta), pending = waiting(pendingStart(meta, messages));
         const on = boardOn(view), live = Boolean(session?.exchanges?.length);
         // (With the board off and no staged exchanges the feature is out of the way: a regenerate is allowed exactly as before it existed.)
         let board = null;
@@ -62,8 +95,8 @@ export function createPrecall({ chat, metadata = () => null, moduleId = 'story-b
                 // (the copy made at "Send with this fight" stands in when the session itself is gone)
                 if (!board) board = sentBoard(meta, messages);
             }
-            if (!board && live) return { ok: false, reason: 'The fight no longer matches this reply. Restore the reply or discard the fight.', action: false };
-            if (session?.anchor === anchor && live && !session.setup?.witness) return { ok: false, reason: 'This older fight cannot be checked. Discard it and start the fight again.', action: false };
+            if (!board && live) return { ok: false, reason: 'The fight no longer matches this reply. Restore the reply or discard the fight (Fight tab, Discard fight).', action: false };
+            if (session?.anchor === anchor && live && !session.setup?.witness) return { ok: false, reason: 'This older fight cannot be checked. Discard it (Fight tab, Discard fight) and start the fight again.', action: false };
         } else if ((on || live) && last && !last.is_user && !String(last.mes ?? '')) board = priorBoard(last)?.board;
         if (!board) {
             if (info.commit !== true || !['normal', 'regenerate'].includes(normalizeType(info.type)) || !last?.is_user || !on) return null;
@@ -75,7 +108,7 @@ export function createPrecall({ chat, metadata = () => null, moduleId = 'story-b
             }
             return null;
         }
-        if (!on) return { ok: false, reason: 'Turn on the fight board or discard the fight before sending.', action: false };
+        if (!on) return { ok: false, reason: 'Turn on the fight board or discard the fight (Fight tab, Discard fight) before sending.', action: false };
         const error = board.setup?.opening ? null : boardInputError(view.state, board);
         return error ? { ok: false, reason: error, action: false } : null;
     }
@@ -124,6 +157,10 @@ export function createPrecall({ chat, metadata = () => null, moduleId = 'story-b
             }
         }
         if (claimed(view.state, key)) return null;
+        if (on && normalizeType(info?.type) === 'normal' && info.commit !== false && !(info.again && checked.get(last) === key) && !waiting(pendingStart(meta, messages))) {
+            const fightStart = await precheck(view, sheet, messages, key, text, startAnchor);
+            if (fightStart) return { fightStart, ...(readSettings(view, moduleId)[ROLLS_SETTING] !== 'off' ? noFight(sheet, on) ?? {} : {}) };
+        }
         if (normalizeType(info?.type) === 'normal' && noDice.peek()) return null;
         if (!sheet.characters.length) return null;
         if (readSettings(view, moduleId)[ROLLS_SETTING] === 'off') return null;

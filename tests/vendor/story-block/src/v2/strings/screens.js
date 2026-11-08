@@ -55,7 +55,7 @@ export const SCREEN_STRINGS = {
         lootTakeTitle: 'Put the things you ticked in the party\'s bag',
         // Gear in fights is on (Settings -> RPG): the Carry card, the sections' order, the rows' chips and the item Edit's two choices.
         gear: {
-            carry: 'Carry', heavy: 'Heavy load', over: 'Encumbered: AGI and DEX \u2212{n}', carryLabel: 'Carried',
+            carry: 'Carry', strength: 'Strength', withParty: '(with the party)', heavy: 'Heavy load', over: 'Encumbered: AGI and DEX \u2212{n}', carryLabel: 'Carried',
             equippedBy: 'Equipped \u00b7 {name}', equippedByTitle: 'Worn by {name}', slotTitle: 'The slot it is worn in',
             words: { good: 'Good', worn: 'Worn', torn: 'Torn', broken: 'Broken' }, noBonus: 'no bonus', brokenNoBonus: '\u2014 no bonus',
             condTitle: 'Condition: Good, Worn, Torn or Broken. A broken piece gives no bonus.',
@@ -69,6 +69,7 @@ export const SCREEN_STRINGS = {
                 noGreeting: 'This chat has no greeting yet, so there is nothing to add items to. Start the chat first.',
                 kitGreeting: 'Starting kit belongs to this greeting.',
                 laterHint: 'Rarity and bonuses come from the story after the first message.',
+                carry: 'Adds carry capacity (0\u2013500)', carryHelp: 'Only you set this. The story never changes it.',
                 packHint: 'Kind, slot and rarity come from the pack.',
                 laterTitle: 'Fixed after your first message',
                 points: '{n} of {max} points for {a} {rarity} piece', pointsNone: 'A common piece has no bonus',

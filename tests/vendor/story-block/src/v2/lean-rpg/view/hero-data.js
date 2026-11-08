@@ -20,7 +20,7 @@ export function heroLead(state, { own = '', roleOf, ranks, playerRank } = {}) {
     const bars = BARS.map(key => {
         const bar = character.bars[key];
         const label = character.definition.state?.[key]?.label ?? RPG_STRINGS.bars[key];
-        return { kind: KINDS[key], label, value: bar.value, max: bar.max, text: bar.word };
+        return { kind: KINDS[key], label, value: bar.value, max: bar.max, text: bar.text ?? fill(RPG_STRINGS.blocks.of, { word: bar.word, n: bar.value, max: bar.max }) };
     });
     bars.push({ kind: 'exp', label: P.xp, value: character.xp, max: 100, text: xpLine(character) });
     return { name: character.name, bars };

@@ -16,7 +16,7 @@ import { wear, repair, gearWear, itemEquip, stow, restore, release } from './wea
 import { lootTake } from './loot.js';
 import {
     byReader, handStats, handSlot, kitOpen, holdBudget, remakeAsEquipment, guardReaderEdit, addDecision,
-    handPlace, handEdit, renameDecision, editStack, editPieces,
+    handPlace, handEdit, renameDecision, editStack, editPieces, setCarry,
 } from './edit.js';
 import { readerCarry } from './lines.js';
 import { TOLD, createWalletCommands } from './commands/wallet.js';
@@ -250,6 +250,12 @@ export function createInventoryCommands(env) {
                 ? fill(E.itemGroupRenamed, { name: oldName, qty: groupQty, renamed: name })
                 : payload.qty !== undefined ? fill(E.itemCount, { name, qty: groupQty ?? current.qty }) : payload.note !== undefined ? fill(E.itemNote, { name }) : name;
             return { summary: fill(E.itemSet, { detail }), data: { edit: true, stack: resultStack, told: TOLD.editKit }, narrate: true };
+        },
+
+        // The reader's own carry capacity for an item (0-500, 0 removes it); never from the story.
+        'inventory.carry'(ctx, payload = {}) {
+            const out = setCarry(ctx, ctx.draft('inventory'), payload);
+            return { ...out, data: { ...out.data, told: TOLD.editKit } };
         },
 
         'inventory.consume'(ctx, payload = {}) {

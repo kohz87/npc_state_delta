@@ -8,7 +8,7 @@ import { h, iconNode } from '../../view/widgets/dom.js';
 import { meter } from '../../view/widgets/meter.js';
 import { refusalText } from '../../strings.js';
 import { LEVEL, FORMULA, RANK_NAMES } from '../names.js';
-import { skillSlots } from '../../skill-slots.js';
+import { UTILITY_SLOTS, skillSlots } from '../../skill-slots.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { classTerm, hasLevels, isStandard } from '../rules.js';
 import { levelBonus, statPart } from '../formula.js';
@@ -53,9 +53,18 @@ export function rollOf(skill, character, rules = FORMULA) {
 
 /** How many slots the character's skills card shows: the slots the level opens (names.js skillSlots; a Skills block made before them is extended when the story first needs it, data-modules/part.js growSkills), never fewer than the skills it holds. */
 export const slotsShown = character => Math.max(character.skills.length, skillSlots(character.level));
+/** Whether the character's Skills block has the types (a `type1` field); one without is read as all combat. */
+export const hasTypes = character => Object.hasOwn(character?.skillsBlock?.definition?.state ?? {}, 'type1');
+const isUtility = skill => skill.type === 'utility';
+/** The two lists of a block with types: the skills of each kind, the slots each has (combat: the level's, never fewer than held) and how many are free. */
+export function poolsOf(character) {
+    const utility = character.skills.filter(isUtility), combat = character.skills.filter(skill => !isUtility(skill));
+    const combatMax = Math.max(combat.length, skillSlots(character.level));
+    return { combat, utility, combatMax, utilityMax: Math.max(utility.length, UTILITY_SLOTS) };
+}
 
 /** The record the Party tab keeps for an open Skills view (outside the DOM: the page draws a screen again on every change of the story). */
-export const newSkillsSession = character => ({ module: character.module, subject: character.subject, editing: null, start: null, draft: { name: '', about: '' }, busy: false, message: '' });
+export const newSkillsSession = character => ({ module: character.module, subject: character.subject, editing: null, start: null, draft: { name: '', about: '', type: 'combat' }, busy: false, message: '' });
 
 /**
  * Draws `character`'s skills (a readParty record) into `parent`. Options: `session` (newSkillsSession's record, kept by the caller),
@@ -74,7 +83,7 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
     const skillAt = slot => character.skills.find(skill => skill.slot === slot) ?? null;
     if (run.editing !== null) {
         const now = skillAt(run.editing);
-        if (!run.busy && (!now || now.name !== run.start?.name || now.about !== run.start?.about)) Object.assign(run, { editing: null, start: null, message: K.changed });
+        if (!run.busy && (!now || now.name !== run.start?.name || now.about !== run.start?.about || (isUtility(now) ? 'utility' : 'combat') !== run.start?.type)) Object.assign(run, { editing: null, start: null, message: K.changed });
     }
 
     const clear = () => { for (const handle of handles) handle.destroy?.(); handles = []; root.replaceChildren(); };
@@ -85,8 +94,9 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         const skill = skillAt(slot);
         if (!skill || run.busy || typeof api.command !== 'function') return;
         const explicit = board?.flags?.()?.[skillKey(character.module, skill)] ?? null;
-        const flags = board?.on?.() ? skillFlags(skill, explicit) : null;
-        Object.assign(run, { editing: slot, start: { name: skill.name, about: skill.about, ...(flags ? { flags: { ...flags } } : {}), ...(explicit ? { explicitFlags: true } : {}) }, draft: { name: skill.name, about: skill.about, ...(flags ? { flags: { ...flags } } : {}) }, message: '' });
+        // (the board flags are those of a combat skill: a utility skill has none until it is switched to combat)
+        const flags = board?.on?.() ? skillFlags({ ...skill, type: 'combat' }, explicit) : null, type = isUtility(skill) ? 'utility' : 'combat';
+        Object.assign(run, { editing: slot, start: { name: skill.name, about: skill.about, type, ...(flags ? { flags: { ...flags } } : {}), ...(explicit ? { explicitFlags: true } : {}) }, draft: { name: skill.name, about: skill.about, type, ...(flags ? { flags: { ...flags } } : {}) }, message: '' });
         draw();
     }
     function cancel() {
@@ -101,8 +111,14 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         if (slot === null || run.busy || !alive || typeof api.command !== 'function') return { ok: false };
         const name = run.draft.name.replace(/\s+/g, ' ').trim(), about = run.draft.about.replace(/\s+/g, ' ').trim();
         if (!name) { run.message = K.needName; draw(); return { ok: false }; }
-        const wordsChanged = name !== run.start.name || about !== run.start.about;
-        const flagsChanged = run.draft.flags && JSON.stringify(run.draft.flags) !== JSON.stringify(run.start.flags);
+        const typeChanged = hasTypes(character) && run.draft.type !== run.start.type;
+        if (typeChanged) {
+            const pools = poolsOf(character);
+            const full = run.draft.type === 'utility' ? pools.utility.length >= UTILITY_SLOTS : pools.combat.length >= pools.combatMax;
+            if (full) { run.message = K.poolFull; draw(); return { ok: false }; }
+        }
+        const wordsChanged = name !== run.start.name || about !== run.start.about || typeChanged;
+        const flagsChanged = run.draft.flags && run.draft.type !== 'utility' && JSON.stringify(run.draft.flags) !== JSON.stringify(run.start.flags);
         if (!wordsChanged && !flagsChanged) { cancel(); return { ok: true }; }
         run.busy = true;
         run.message = '';
@@ -111,10 +127,10 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         let failure = null;
         try {
             if (wordsChanged) {
-                const result = await api.command('dm.set', { module: block.module, fields: { [`skill${slot}`]: name, [`about${slot}`]: about } });
+                const result = await api.command('dm.set', { module: block.module, fields: { [`skill${slot}`]: name, [`about${slot}`]: about, ...(typeChanged ? { [`type${slot}`]: run.draft.type } : {}) } });
                 if (!result?.ok) failure = result ?? { ok: false };
             }
-            if (!failure && (flagsChanged || (name !== run.start.name && run.start.explicitFlags))) {
+            if (!failure && (flagsChanged || (name !== run.start.name && run.start.explicitFlags)) && run.draft.type !== 'utility') {
                 // Board on: save the three flags. Board off: only carry the explicit entry to the new name.
                 const result = run.draft.flags
                     ? await api.command('rpg.boardSkill', { module: character.module, slot, name, flags: run.draft.flags })
@@ -144,6 +160,28 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         row.appendChild(node);
     }
 
+    // "Used for": Combat or Utility. A kind whose slots are all used cannot be switched to (the skill's own kind always stays); the help says what a utility skill is.
+    function usedFor(form, skill) {
+        const pools = poolsOf(character), wrap = h(doc, 'div', 'rpg-skill-field rpg-skill-usedfor');
+        wrap.appendChild(h(doc, 'span', 'rpg-skill-field-label', K.usedFor));
+        const seg = h(doc, 'span', 'rpg-skill-seg');
+        seg.setAttribute('role', 'group');
+        seg.setAttribute('aria-label', K.usedFor);
+        for (const kind of ['combat', 'utility']) {
+            const own = (isUtility(skill) ? 'utility' : 'combat') === kind, full = !own && (kind === 'utility' ? pools.utility.length >= UTILITY_SLOTS : pools.combat.length >= pools.combatMax);
+            const option = h(doc, 'button', `rpg-skill-seg-option${run.draft.type === kind ? ' rpg-skill-seg-on' : ''}`, kind === 'utility' ? K.typeUtility : K.typeCombat);
+            option.setAttribute('type', 'button');
+            option.setAttribute('data-skill-type', kind);
+            option.setAttribute('aria-pressed', String(run.draft.type === kind));
+            if (full) { option.disabled = true; option.setAttribute('title', K.poolFull); }
+            option.addEventListener('click', () => { run.draft.type = kind; draw(); });
+            seg.appendChild(option);
+        }
+        wrap.appendChild(seg);
+        form.appendChild(wrap);
+        if (run.draft.type === 'utility') form.appendChild(h(doc, 'p', 'rpg-skill-help', K.utilityHelp));
+    }
+
     function editor(row, skill) {
         const form = h(doc, 'div', 'rpg-skill-form');
         const field = (label, node) => {
@@ -165,7 +203,8 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         if (limit(`about${skill.slot}`)) about.setAttribute('maxlength', String(limit(`about${skill.slot}`)));
         field(K.editName, name);
         field(K.editAbout, about);
-        if (run.draft.flags) drawSkillFlags(doc, form, run.draft.flags);
+        if (hasTypes(character)) usedFor(form, skill);
+        if (run.draft.flags && run.draft.type !== 'utility') drawSkillFlags(doc, form, run.draft.flags);
         name.addEventListener('input', () => { run.draft.name = name.value; });
         about.addEventListener('input', () => { run.draft.about = about.value; });
         form.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault?.(); cancel(); } });
@@ -184,7 +223,7 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
 
     function skillRow(list, skill) {
         const roll = rollOf(skill, character, rules()), mastery = masteryOf(skill);
-        const row = h(doc, 'article', 'rpg-skill');
+        const row = h(doc, 'article', `rpg-skill${isUtility(skill) ? ' rpg-skill-util' : ''}`);
         row.setAttribute('data-slot', String(skill.slot));
         const top = h(doc, 'div', 'rpg-skill-top');
         top.appendChild(h(doc, 'p', 'rpg-skill-name', skill.name));
@@ -240,8 +279,22 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         root.appendChild(legend);
         const list = h(doc, 'div', 'rpg-skill-list');
         root.appendChild(list);
-        for (const skill of character.skills) skillRow(list, skill);
-        for (let empty = character.skills.length; empty < slotsShown(character); empty += 1) list.appendChild(h(doc, 'div', 'rpg-skill-empty', fill(K.empty, { name: character.name })));
+        if (hasTypes(character)) {
+            // Two lists, each with its count and one line for the slots still free; the fight board lists the combat one only.
+            const pools = poolsOf(character);
+            const group = (head, skills, max, one, many) => {
+                const bar = h(doc, 'div', 'rpg-skill-group');
+                bar.append(h(doc, 'span', '', head), h(doc, 'span', '', fill(K.countOf, { n: skills.length, max })));
+                list.appendChild(bar);
+                for (const skill of skills) skillRow(list, skill);
+                if (max > skills.length) list.appendChild(h(doc, 'div', 'rpg-skill-empty', max - skills.length === 1 ? one : fill(many, { n: max - skills.length })));
+            };
+            group(K.combatHead, pools.combat, pools.combatMax, K.freeCombatOne, K.freeCombat);
+            group(K.utilityHead, pools.utility, pools.utilityMax, K.freeUtilityOne, K.freeUtility);
+        } else {
+            for (const skill of character.skills) skillRow(list, skill);
+            for (let empty = character.skills.length; empty < slotsShown(character); empty += 1) list.appendChild(h(doc, 'div', 'rpg-skill-empty', fill(K.empty, { name: character.name })));
+        }
         const foot = h(doc, 'div', 'rpg-skill-foot');
         const back = h(doc, 'button', 'ss-button ss-button-primary rpg-skills-back', K.back);
         back.setAttribute('type', 'button');

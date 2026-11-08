@@ -6,7 +6,7 @@ export function createStatsStep(ctx) {
     // ---- Stats ----
     const axes = now => STATS.map(stat => ({ label: stat.toUpperCase(), value: now.stats[stat], max: 20, before: now.from ? now.from.stats[stat] : draftCreation(now).start }));
     // One line of what the next points buy (the bars grow with stats).
-    const growth = now => (draftCreation(now).standard ? growthText(growthOf(now.stats, { statMax: draftCreation(now).statMax })) : '');
+    const growth = now => (draftCreation(now).standard ? growthText(growthOf(now.stats, { statMax: draftCreation(now).statMax, scale: 2 })) : '');
     let growthNode = null;
     function refreshStats() {
         const now = snap(), left = pointsLeft(now);

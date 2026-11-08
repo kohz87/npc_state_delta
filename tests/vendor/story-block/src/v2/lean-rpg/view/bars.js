@@ -1,8 +1,6 @@
 // The three stage bars (Health, Mana, Stamina) drawn the same on a Party card and on the Spend points sheet: an
-// `ss.meter` with one cell per stage, the stage word on the right and a tone by stage (good near full, warn in the
-// middle, bad near empty). A tap on a bar opens the existing inline edit (`ss.editable`, a choice of the stage words)
-// for that field, saved through `dm.set` like any other pencil. A Standard character's bars have as many cells as the bar has blocks, and
-// read "Hurt · 4 of 6" (party-data.js `blockBar`).
+// `ss.meter` with one smooth strip, the stage word and value. A tap on a bar opens the existing inline edit
+// (`ss.editable`, a choice of the stage words) for that field, saved through `dm.set` like any other pencil.
 
 import { h } from '../../view/widgets/dom.js';
 import { editable } from '../../view/widgets/editable.js';
@@ -31,7 +29,8 @@ export function drawStageBars(doc, parent, character, { api, handles }) {
         row.setAttribute('data-bar', key);
         row.append(slot, edit);
         box.appendChild(row);
-        handles.push(meter.render(slot, { label, value: bar.value, max: bar.max, tone: bar.tone, text: bar.text ?? bar.word, segments: bar.max, icon: ICONS[key] }, {}));
+        const text = bar.text ?? fill(RPG_STRINGS.blocks.of, { word: bar.word, n: bar.value, max: bar.max });
+        handles.push(meter.render(slot, { label, value: bar.value, max: bar.max, tone: bar.tone, text, bar: key, icon: ICONS[key] }, {}));
         if (typeof api?.command !== 'function' || schema?.edit === false) continue;
         const options = barOptions(key, schema, bar);
         handles.push(editable.render(edit, { value: bar.value, kind: 'choice', options, label, displayValue: false, command: 'dm.set', payload: fieldPayload(character, key) }, { command: api.command }));

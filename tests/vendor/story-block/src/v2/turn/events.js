@@ -154,7 +154,7 @@ export function createEvents(s, deps) {
             const board = boardStep(current).payload.board;
             s.session = current;
             s.heldBoard = { index, message, current, board, staged: saved.staged === true };
-            problem({ index, code: 'BOARD_HELD', message: 'The fight reply is still waiting. Restore the sheet or gear, or discard the fight and regenerate the reply.' });
+            problem({ index, code: 'BOARD_HELD', message: 'The fight reply is still waiting. Restore the sheet or gear, or discard the fight (Fight tab, Discard fight) and regenerate the reply.' });
             return;
         }
     }

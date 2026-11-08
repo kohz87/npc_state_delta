@@ -9,9 +9,9 @@ const object = value => value && typeof value === 'object' && !Array.isArray(val
 export const boardStep = current => current?.prechecks?.find(step => step?.type === 'rpg.resolve' && step.payload?.board);
 
 /** The "restore or discard" advice that ends a fight failure (none when the message already says discard). */
-export const restoreHint = (detail, tail = '.') => (/discard/i.test(detail) ? '' : ` Restore the sheet or gear, or discard the fight${tail}`);
+export const restoreHint = (detail, tail = '.') => (/discard/i.test(detail) ? '' : ` Restore the sheet or gear, or discard the fight (Fight tab, Discard fight)${tail}`);
 
-/** "<lead> <reason>. Restore the sheet or gear, or discard the fight." for a fight that could not be saved or prepared. */
+/** "<lead> <reason>. Restore the sheet or gear, or discard the fight (Fight tab, Discard fight)." for a fight that could not be saved or prepared. */
 export function boardFailure(lead, message) {
     const detail = String(message ?? 'unknown error').trim().replace(/[.\s]+$/u, '');
     return `${lead} ${detail}.${restoreHint(detail)}`;
@@ -66,6 +66,6 @@ export function boardStartState(bus, state, board) {
     const result = preview?.receipt?.data?.v2?.result;
     const dropOf = rpgLib()?.dropOf;
     if (!preview?.ok || !result || typeof dropOf !== 'function' || JSON.stringify(result.checks ?? []) !== JSON.stringify(board.setup.approach ?? [])
-        || JSON.stringify(dropOf(result)) !== JSON.stringify(board.setup.drop ?? null)) return { error: 'The fight opening changed. Restore the sheet or discard the fight.' };
+        || JSON.stringify(dropOf(result)) !== JSON.stringify(board.setup.drop ?? null)) return { error: 'The fight opening changed. Restore the sheet or discard the fight (Fight tab, Discard fight).' };
     return { state: preview.state, result };
 }

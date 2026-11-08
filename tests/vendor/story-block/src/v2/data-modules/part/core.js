@@ -41,11 +41,11 @@ export function createCore({ packs, state: head = () => null, lifecycle = () => 
         if (ctx.cause !== 'ui' || ctx.caller !== null) refuse('REFUSED', '', 'Only a direct reader action in Setup may pin, attach or migrate.');
         if (restore()?.state === 'pending') refuse('RESTORE_PENDING', '', 'A restore is pending.');
     }
-    function guard(ctx, prefix, { kind, module, hash, generation, subject = 'chat', reads = [], imports = [], actor = false, decision = {}, pin = null, bound = false, localOnly = false }) {
+    function guard(ctx, prefix, { kind, module, hash, generation, subject = 'chat', reads = [], imports = [], actor = false, decision = {}, pin = null, bound = false, localOnly = false, clock = false }) {
         const predicate = { kind, module, hash, generation, subject };
         const adapters = pin?.definition.imports ?? activeDefinition(prefix, module)?.imports ?? {};
         const available = localOnly ? [] : Object.keys(adapters).filter(alias => adapters[alias].query === 'dataModules.public');
-        const selector = { module, subject, reads, imports, actor, ...(available.length ? { available } : {}),
+        const selector = { module, subject, reads, imports, actor, ...(clock ? { clock: true } : {}), ...(available.length ? { available } : {}),
             ...(pin ? { adapters, subjects: decision.subjects ?? [] } : {}) };
         const source = copy(ctx.source);
         if (!source) refuse('DM_SCHEMA', '', 'A reply must hold this data module action.');

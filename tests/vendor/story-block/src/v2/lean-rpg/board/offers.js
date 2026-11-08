@@ -8,14 +8,33 @@ import { offerLineData } from './start-view-data.js';
 
 const standing = state => state ? readSheet(state).foes.filter(foe => foe.filled && foe.hurt > 0) : [];
 const identity = foe => `${foe.slot}:${fold(foe.name)}`;
+const byIdentity = foes => new Map(foes.map(foe => [identity(foe), foe]));
+// A group is new when its slot:name was not standing before, when its count rose, or when the reply itself set the slot
+// (a slot cleared and set again, even with the same name and numbers). Health moving either way (a foe healing) or a
+// smaller count is just the fight, never an arrival.
+const arrived = (foe, was, set) => set.has(foe.slot) || !was || foe.count > was.count;
+
+// What a reply's stored receipts say: the foe slots it set with a set-slot line, and how the board fight it carried ended.
+function receiptsOf(store, index) {
+    const slots = new Set();
+    let ended = null, entries = [];
+    try { entries = store.receipts?.() ?? []; } catch { /* no receipts to read */ }
+    for (const entry of entries) {
+        if (entry?.index !== index) continue;
+        const kind = entry.receipt?.type === 'capture.dm' ? /^set-slot-([1-4])$/u.exec(String(entry.receipt.data?.v2?.result?.kind ?? '')) : null;
+        if (kind) slots.add(Number(kind[1]));
+        const result = entry.receipt?.type === 'rpg.resolve' ? entry.receipt.data?.v2?.result : null;
+        if (result?.board && ['won', 'fled'].includes(result.stop)) ended = result.stop;
+    }
+    return { slots, ended };
+}
 
 function findFightOffer(chat, store, meta, enabled = true) {
     if (!enabled || boardSession(meta)) return null;
     let current;
     try { current = standing(store.head()); } catch { return null; }
     if (!current.length) return null;
-    const wanted = new Set(current.map(identity));
-    let next = wanted;
+    let next = byIdentity(current);
     const messages = Array.isArray(chat) ? chat : [];
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index], record = readRecord(message);
@@ -24,11 +43,15 @@ function findFightOffer(chat, store, meta, enabled = true) {
         for (let i = index - 1; i >= 0; i -= 1) {
             if (!messages[i]?.is_user && readRecord(messages[i])) { try { before = store.at(i); } catch { /* no preceding state */ } break; }
         }
-        const prior = new Set(standing(before).map(identity));
-        const introduced = ![...next].some(key => prior.has(key));
-        if (introduced) {
+        const prior = byIdentity(standing(before));
+        const { slots, ended } = receiptsOf(store, index);
+        const introduced = [...next].some(([key, foe]) => arrived(foe, prior.get(key), slots));
+        // A reply that told a board fight which ended with foes still up offers the board again ("Foes are still standing");
+        // new foes the same reply introduced keep the usual "A fight started".
+        const left = ended !== null && next.size > 0;
+        if (introduced || left) {
             if (meta?.rpgFightOffers?.[record.sid] === true) return null;
-            return { index, sid: record.sid, fight: { groups: current.map(foe => foe.slot) } };
+            return { index, sid: record.sid, fight: { groups: current.map(foe => foe.slot), ...(introduced ? {} : { standing: true }) } };
         }
         next = prior;
     }

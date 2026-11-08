@@ -1,3 +1,15 @@
+## 1.14.0
+
+- **Relationships move at a steadier pace.** A relationship now takes a set number of events each story day, for each person.
+  - **Points per event** are 1 for an ordinary moment, 2 meaningful, 3 major and 6 extreme (they were 1, 2, 5 and 10). A saved set equal to the old defaults moves to the new ones once; any other numbers you saved are kept.
+  - **Events per story day**, for each person: 3 ordinary, 1 meaningful, 1 major and 1 extreme. Change them in the relationship settings; leave a field blank for no limit, or 0 for none of that kind.
+  - **Over the allowance,** an event counts as the next kind down that still has room, and with none left it moves nothing. The kind actually used sets the points and the milestone check, so a major turned down to meaningful cannot cross 50.
+  - **One event, one line:** a line that names several meters is one event. The story's change lines and Delta's own scan share the same allowance, so they cannot spend it twice.
+  - **The story day** is the story clock when the reply began (it needs Story Director's clock; with no clock there is no limit). The reply's receipt says in plain words when an event was held. The narrator is told what each kind means and that a person can have only one major a day.
+- **Story Director's World tab can tell when Delta is still reading.** The page API (version 2) has `busy()`: true until Delta has finished reading the newest reply, and listeners are told once when it is done, so the cards stay in place meanwhile.
+- **Hosted, the relationship numbers, part-points and milestones are read from Story Block's copy everywhere** (cast cards, the dossier, the prompt, the narrator's lines, stages, the scan's starting point, Refresh, the editor and diagnostics). Delta's own saved copy is never written from it, and a bundle export is still a backup of Delta's own copy.
+- Requires Story Block 2.25.0 or later (unchanged: nothing here needs a newer Story Block); Story Block testkit re-synced to 2.27.0.
+
 ## 1.13.2
 
 - **Newly met NPCs get their detailed appearance again.** Since 1.12.0 a newly met NPC was left to the backfill alone and missed the capture catch-up's targeted Refresh, the pass that writes the structured appearance (body, hair, eyes, marks), so new dossiers came out as one short line. A newly met NPC now gets that Refresh on the reply it is admitted and its backfill right after; NPCs already met still get one model call per reply.

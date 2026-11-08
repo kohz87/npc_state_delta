@@ -5,7 +5,7 @@
 import { fold } from '../read.js';
 import { packAttacks } from './members.js';
 import { bestDefence } from './rules.js';
-import { skillFlags, skillKey } from './flags.js';
+import { healingSkill, skillFlags, skillKey } from './flags.js';
 
 const find = (entries, name, field) => entries.find(entry => fold(entry[field]) === fold(name));
 const standing = character => character.alive !== false && character.health !== 0;
@@ -14,18 +14,23 @@ const groupOf = foe => (Number.isInteger(foe?.group) ? foe.group : foe?.slot);
 const isEmpty = (name) => `${name} is Empty`;
 const flagsFor = (flags, actor, skill) => flags?.[skillKey(actor.module, skill)];
 
-/** The skills usable for an action, with the resource reason when one is empty. */
-export function actionSkills(actor, flags = {}) {
+/**
+ * The skills usable for an action, with the resource reason when one is empty. `bars`: a fight with the doubled bars (setup.bars === 2), where an area skill costs
+ * 2 of its resource: `areaReason` says so when only 1 is left (a single-target use of the same skill is still open).
+ */
+export function actionSkills(actor, flags = {}, { bars = false } = {}) {
     return (actor?.skills ?? []).flatMap(skill => {
         const scope = skillFlags(skill, flagsFor(flags, actor, skill));
         if (!scope.target && !scope.area) return [];
         const resource = skill.uses === 'mana' ? 'mana' : 'stamina';
-        return [{ skill, ...scope, reason: actor[resource] === 0 ? isEmpty(resource === 'mana' ? 'Mana' : 'Stamina') : '' }];
+        const name = resource === 'mana' ? 'Mana' : 'Stamina', reason = actor[resource] === 0 ? isEmpty(name) : '';
+        return [{ skill, ...scope, reason, areaReason: reason || (bars && scope.area && actor[resource] === 1 ? `Not enough ${name} (an area skill costs 2)` : '') }];
     });
 }
 
 /** Build a Standard plan from one choice for each standing member, or one flee choice. */
-export function exchangePlan(sheet, actions, flags = {}, number = 1, { members = false } = {}) {
+// `aoe`: the newer area rule (setup.aoe === 1): an area skill hits every standing group, the picked group is its main target. `bars`: the doubled bars (setup.bars === 2): an area skill needs 2 of its resource.
+export function exchangePlan(sheet, actions, flags = {}, number = 1, { members = false, aoe = false, bars = false } = {}) {
     const actors = (sheet?.characters ?? []).filter(standing), foes = (sheet?.foes ?? []).filter(up);
     if (!actors.length || !foes.length) return { error: 'The fight has already ended.' };
     const grouped = members;
@@ -50,6 +55,14 @@ export function exchangePlan(sheet, actions, flags = {}, number = 1, { members =
         if (area ? !scope.area : !scope.target) return { error: 'That skill cannot be used on that target.' };
         const resource = skill?.uses === 'mana' ? 'mana' : 'stamina';
         if (skill && actor[resource] === 0) return { error: `${isEmpty(resource === 'mana' ? 'Mana' : 'Stamina')}.` };
+        if (skill && area && bars && actor[resource] < 2) return { error: `Not enough ${resource === 'mana' ? 'Mana' : 'Stamina'} for an area skill (it costs 2).` };
+        if (bars && action.support === true) {
+            if (!skill || !healingSkill(skill) || area) return { error: 'That skill cannot heal a party member.' };
+            const mate = find((sheet?.characters ?? []).filter(person => person.alive !== false), action.target, 'who');
+            if (!mate) return { error: 'That party member is no longer here.' };
+            acts.push({ who: actor.who, skill: skill.name, target: mate.who, type: skill.uses === 'mana' ? 'magic' : 'physical', support: true, difficulty: 'normal' });
+            continue;
+        }
         let target = null, group;
         if (area) {
             if (grouped) {
@@ -64,7 +77,7 @@ export function exchangePlan(sheet, actions, flags = {}, number = 1, { members =
         } else target = foes.find(foe => foe.slot === action.target);
         if (!target) return { error: 'That foe is no longer standing.' };
         acts.push({ who: actor.who, ...(skill ? { skill: skill.name } : {}), target: `foe${target.slot}`, type: skill?.uses === 'mana' ? 'magic' : 'physical',
-            ...(area ? { area: true } : {}), ...(group !== undefined ? { group } : {}) });
+            ...(area ? { area: true } : {}), ...(group !== undefined ? { group } : {}), ...(area && group !== undefined && aoe ? { aoe: true } : {}) });
     }
     // Every member attacks once and a pack attacks as its thinning bar allows. The flattened attacker index rotates targets.
     // A new-board defence is charged on its first executed attack, so Standard decides `paid` at the table, not here.

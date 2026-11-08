@@ -11,7 +11,7 @@ export const RESOLVE = 'rpg.resolve';
 /** The reader's saved target, area and defence choices for one skill (board/overrides.js). */
 export const BOARD_SKILL = 'rpg.boardSkill';
 export const BOARD_SKILL_CARRY = 'rpg.boardSkillCarry';
-/** The prelude that records, with the reply, that a live fight's roll planner gave nothing usable (noroll.js): the note under the reply is drawn from it. */
+/** The prelude that records, with the reply, that a live fight's roll planner (gone; old records only) gave nothing usable (noroll.js): the note under the reply is drawn from it. */
 export const NOROLL = 'rpg.noroll';
 
 /** The step after a reply's lines that gives the party its XP for a won fight (fight.js); also the kind of its replay guard. */
@@ -49,7 +49,7 @@ export const STAGES = Object.freeze({
 
 /**
  * The stage word of a bar that holds `value` blocks of `size` (the Standard formula): the first word for none, the last for a full bar, every other
- * count the nearest word in between (blocks.js spreadWord, which the Party tab and the tail use too, so the planner's sheet, the cue and the story
+ * count the nearest word in between (blocks.js spreadWord, which the Party tab and the tail use too, so the sheet text, the cue and the story
  * all say the same word). `words` is one of STAGES.
  */
 export const stageWord = (words, value, size) => spreadWord(words, Number.isFinite(value) ? Math.trunc(value) : 0, size);
@@ -95,6 +95,10 @@ export const AUTO_CAP_SETTING = 'rpgAutoCap';
 export const AUTO_CAP = Object.freeze({ min: 1, max: 9, default: 3, end: 9 });
 export const autoCapFrom = values => (Number.isInteger(values?.[AUTO_CAP_SETTING]) && values[AUTO_CAP_SETTING] >= AUTO_CAP.min && values[AUTO_CAP_SETTING] <= AUTO_CAP.max
     ? values[AUTO_CAP_SETTING] : AUTO_CAP.default);
+/** The pre-check (board/precheck-run.js): Settings → RPG → Fight board "Set up a fight from my attack" (on unless set to false), and its time limit in ms. */
+export const PRECHECK_SETTING = 'rpgPrecheck';
+export const PRECHECK_LIMIT_MS = 20_000;
+export const precheckOn = values => values?.[PRECHECK_SETTING] !== false;
 export const autoExchanges = cap => (cap >= AUTO_CAP.end ? Infinity : cap);
 /** The most seconds an old `rpg.noroll` record may name as the limit its planner was given (replay only: the planner and its setting are gone). */
 export const NOROLL_LIMIT_MAX = 120;
@@ -107,7 +111,7 @@ export const practiceFromRollsOnly = (rpgOn, values) => rpgOn === true && values
  * are added (whole per cents, so no rounding error) and rounded down; a total above 0 is held to `min` .. `max`, a total of 0 gives nothing.
  * Level 5 against six level 5 crawlers: 6 × 1 × 2 = 12.
  */
-export const FIGHT_XP = Object.freeze({ perBand: 2, perLevels: 10, gapPercent: 10, maxPercent: 200, min: 1, max: 60 });
+export const FIGHT_XP = Object.freeze({ markedFirst: 15, markedMore: 2, perBand: 2, perLevels: 10, gapPercent: 10, maxPercent: 200, min: 1, max: 60 });
 
 /** The line the narrator writes where the fight is told (the battle log is drawn there). */
 export const BATTLE_MARKER = '[battle]';

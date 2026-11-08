@@ -203,7 +203,7 @@ export function contextNotice(fit) {
  * - `substitute` (optional): text → text, run on every text before it is counted (turn.js fills in
  *   `{{user}}` and `{{char}}` with it).
  * - `ownTokens` (optional): what modules send on their own this reply (contextFit), 0 by default.
- * - `rolled` (optional): the reply has automatic rolls (the RPG's planner returned some), told to the static parts as `hint.rolled`.
+ * - `rolled` (optional): the reply has automatic rolls (an old planner record or the fight board rolled some), told to the static parts as `hint.rolled`.
  * Returns { staticText, tailText, parts: [{ module, label, place, text, tokens, dropped? }],
  * problems, fit (contextFit, or null) }. `parts` is what the What's-sent preview lists, in prompt order.
  */

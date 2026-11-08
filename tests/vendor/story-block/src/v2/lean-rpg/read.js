@@ -11,9 +11,9 @@
 // never validates the definitions (the data-module checker did when they were pinned); a block it cannot read is left
 // out, with a plain `problems` line.
 import { FOE_SLOTS, LEVEL, STAGES, STATS, USES } from './names.js';
-import { SKILL_SLOTS_MAX } from '../skill-slots.js';
+import { skillFieldSlots, skillTypeOf } from '../skill-slots.js';
 import { dmHidden } from '../data-modules/schema.js';
-import { barOf, characterBars, sizeOf } from './blocks.js';
+import { barOf, characterBars, scaleOf, sizeOf } from './blocks.js';
 import { soulReading } from './soul.js';
 import { classOfLevel, levelOfClass } from './formula.js';
 
@@ -95,9 +95,9 @@ const fieldsOf = (domain, id) => {
 };
 
 // A field the pack hides (`prompt: false`) is hidden from the story, not from the rules (review 160). A hidden text (a name, Who, an
-// About) is not read at all: it would reach the planner, the plan and the cue. A hidden number or choice (health, a stat, Soul Class,
+// About) is not read at all: it would reach the sheet text, the plan and the cue. A hidden number or choice (health, a stat, Soul Class,
 // a rank, a foe's count, class or health, a skill's stat or resource) still counts for the dice; the entry lists it in `hidden`, and
-// the planner's sheet text leaves it out.
+// the sheet text leaves it out.
 const TEXT_KEY = /^(who|about\d*|skill\d+|foe\d+)$/;
 const hiddenOf = definition => new Set(Object.entries(isObject(definition?.state) ? definition.state : {}).filter(([key, schema]) => key !== 'alive' && dmHidden(schema)).map(([key]) => key));
 const shownFields = (fields, hidden) => (hidden.size ? Object.fromEntries(Object.entries(fields).filter(([key]) => !(hidden.has(key) && TEXT_KEY.test(key)))) : fields);
@@ -111,7 +111,7 @@ function character(id, fields, own = '', hidden = new Set(), definition = null) 
     const who = text(fields.who) || text(own);
     if (!who) return null;
     const stats = Object.fromEntries(STATS.map(stat => [stat, int(fields[stat])]));
-    // What the pack calls the Soul Class field and its current value (soul.js), for the planner's lines and the odds.
+    // What the pack calls the Soul Class field and its current value (soul.js), for the sheet lines and the odds.
     // (A block made before levels has the Soul Class and no level: its level reads as the class stands for, levelOfClass. `soul` stays what the field says,
     // which is what a roll recorded before levels used.)
     const soul = int(fields.soul) ?? 1, reading = soulReading(schema);
@@ -122,6 +122,7 @@ function character(id, fields, own = '', hidden = new Set(), definition = null) 
         module: id, who, key: fold(who),
         health: int(fields.health), mana: int(fields.mana), stamina: int(fields.stamina),
         ...(bars ? { size: { health: bars.health.size, stamina: bars.stamina.size, mana: bars.mana.size } } : {}),
+        ...(bars && scaleOf(definition.state.health) === 2 ? { scale: 2 } : {}),
         stats, soul, level, cap, ...(levelled ? { levelled: true } : {}), soulLabel: reading.label, soulWord: levelled ? String(level) : reading.word(soul), xp: int(fields.xp), points: int(fields.points),
         alive: fields.alive !== false,
         skills: [],
@@ -131,7 +132,7 @@ function character(id, fields, own = '', hidden = new Set(), definition = null) 
 
 function skillsOf(fields, hidden = new Set()) {
     const out = [];
-    for (let n = 1; n <= SKILL_SLOTS_MAX; n += 1) {
+    for (let n = 1; n <= skillFieldSlots(fields); n += 1) {
         const name = text(fields[`skill${n}`]);
         if (!name) continue;
         // A Skills block made before the stat and the resource were fields has neither: null, and the plan's stat is used.
@@ -139,6 +140,7 @@ function skillsOf(fields, hidden = new Set()) {
         out.push({
             slot: n, name, about: text(fields[`about${n}`]), rank: int(fields[`rank${n}`]) ?? 0, practice: int(fields[`practice${n}`]) ?? 0,
             stat: STATS.includes(stat) ? stat : null, uses: USES.includes(uses) ? uses : null,
+            ...(skillTypeOf(fields, n) === 'utility' ? { type: 'utility' } : {}),
             hidden: ['rank', 'practice', 'stat', 'uses'].filter(part => hidden.has(`${part}${n}`)),
         });
     }

@@ -28,9 +28,14 @@ export const DM_LIMITS = freeze({
     roleTailTokens: 300,
     // A Skills block (role `skills`) holds up to eight skill slots of six fields each, their `who` and the signature mark: more than other blocks' 32 (names.js SKILL_SLOTS_MAX).
     // Its tail may be longer too, by 47 tokens for each skill it holds past five (tailRoom in part.js: the longest line one skill makes, measured).
-    skillsFields: 56, skillTailTokens: 47,
+    // A Skills block made with the types holds eleven slots (eight combat, three utility) of seven fields each (a `type` per slot), their `who` and the mark: 79 fields and a learn and
+    // a practice line per slot, so `skillsFields` 80 and `skillsKinds` 22 (a block of the earlier eight slots is far inside both).
+    skillsLegacyFields: 56, skillsFields: 80, skillsKinds: 22, skillTailTokens: 47,
     // The most stages a role block's bar field (health, mana, stamina, a foe's health) may have, counted up from 0.
     stages: 10,
+    // The same for a character's bar that carries `scale: 2` (the doubled sizes, lean-rpg/templates-bars.js): the most it holds is 2 x (4 + 20/5) = 16 at the stat
+    // maximum 20, so 17 stages (0 to 16); a test holds this to the template's own maximum.
+    scaledStages: 17,
     // A List of entries field (`type: "entries"`): the sub-fields of one entry, the entries a story may add (default and most), and the longest `at` a line may write.
     entrySubs: 8, entriesDefault: 30, entriesMax: 50, entryAt: 60,
     // A block with a List of entries says more in the tail (its open entries by number and title): 250 tokens instead of 100.
@@ -51,7 +56,7 @@ export const DM_DESCRIPTORS = freeze({
     defaults: { imports: {}, rules: [], timers: [], rewards: {}, exports: {}, screens: [], layouts: [], migrations: [] },
     scope: ['chat', 'character'],
     fields: {
-        int: { required: ['type', 'min', 'max', 'default'], optional: ['edit', 'label', 'names', 'prompt', 'blocks'] }, bool: { required: ['type', 'default'], optional: ['edit', 'label', 'prompt'] },
+        int: { required: ['type', 'min', 'max', 'default'], optional: ['edit', 'label', 'names', 'prompt', 'blocks', 'scale'] }, bool: { required: ['type', 'default'], optional: ['edit', 'label', 'prompt'] },
         enum: { required: ['type', 'values', 'default'], optional: ['edit', 'label', 'prompt'] }, text: { required: ['type', 'max', 'default'], optional: ['edit', 'list', 'label', 'prompt'] },
         map: { required: ['type', 'keys', 'values'], optional: ['edit', 'label', 'prompt'] },
         // A list of entries: `of` holds the sub-fields (text, int or enum, no `edit`/`prompt`/`label` of their own to speak of), `max` the most entries.
