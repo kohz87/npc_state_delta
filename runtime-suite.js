@@ -34,7 +34,7 @@ export function createSuitePart(rt, deps) {
             try {
                 const key = getChatKey();
                 if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return Object.freeze([]);
-                return buildNpcProfiles(getChatState(key).npcs, { customFieldNames: getSettings().customFieldNames });
+                return buildNpcProfiles(scenePresenceView(getChatState(key).npcs || []), { customFieldNames: getSettings().customFieldNames });
             } catch (error) {
                 console.warn('[NPC State Delta] Story Suite NPC profiles failed', error);
                 return Object.freeze([]);
