@@ -30,7 +30,10 @@ function receiptsOf(store, index) {
 }
 
 function findFightOffer(chat, store, meta, enabled = true) {
-    if (!enabled || boardSession(meta)) return null;
+    // A board with exchanges staged hides the offer (never clobbered), and so does one the reader opened on the offered reply itself. A segment carried
+    // on from an earlier fight follows every later reply (receiveBoard), so it is not the fight a new group starts: a group that arrived on the reply the segment now sits on still gets its offer, an older arrival (the fight in hand) does not.
+    const session = boardSession(meta);
+    if (!enabled || session?.exchanges?.length) return null;
     let current;
     try { current = standing(store.head()); } catch { return null; }
     if (!current.length) return null;
@@ -50,7 +53,7 @@ function findFightOffer(chat, store, meta, enabled = true) {
         // new foes the same reply introduced keep the usual "A fight started".
         const left = ended !== null && next.size > 0;
         if (introduced || left) {
-            if (meta?.rpgFightOffers?.[record.sid] === true) return null;
+            if (meta?.rpgFightOffers?.[record.sid] === true || (session && !(session.carried && session.anchor === record.sid))) return null;
             return { index, sid: record.sid, fight: { groups: current.map(foe => foe.slot), ...(introduced ? {} : { standing: true }) } };
         }
         next = prior;

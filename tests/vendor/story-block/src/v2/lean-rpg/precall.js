@@ -85,18 +85,18 @@ export function createPrecall({ chat, metadata = () => null, moduleId = 'story-b
             const anchor = readRecord(messages.at(-2))?.sid;
             // The waiting reply is released only by "Send with this fight" (markSend copies the staged fight, exchanges and all): until then every
             // generation attempt stays held, whatever the board holds. A copy older than the board (more exchanges staged since) does not release it.
-            if (info.commit === true && on && pending?.choice === 'board' && session?.anchor === anchor) {
+            if (info.commit === true && on && pending?.choice === 'board' && session && session.anchor === anchor) {
                 const sent = readSend(meta, messages)?.board;
                 if (!live || !sent || (sent.exchanges?.length ?? 0) !== session.exchanges.length)
                     return { ok: false, reason: 'Play the waiting fight on the board.', action: false, fightStart: true };
             }
             if (on || live) {
-                board = session?.anchor === anchor ? boardPayload(session) : lastBoard(meta, anchor, last)?.board;
+                board = session && session.anchor === anchor ? boardPayload(session) : lastBoard(meta, anchor, last)?.board;
                 // (the copy made at "Send with this fight" stands in when the session itself is gone)
                 if (!board) board = sentBoard(meta, messages);
             }
             if (!board && live) return { ok: false, reason: 'The fight no longer matches this reply. Restore the reply or discard the fight (Fight tab, Discard fight).', action: false };
-            if (session?.anchor === anchor && live && !session.setup?.witness) return { ok: false, reason: 'This older fight cannot be checked. Discard it (Fight tab, Discard fight) and start the fight again.', action: false };
+            if (session && session.anchor === anchor && live && !session.setup?.witness) return { ok: false, reason: 'This older fight cannot be checked. Discard it (Fight tab, Discard fight) and start the fight again.', action: false };
         } else if ((on || live) && last && !last.is_user && !String(last.mes ?? '')) board = priorBoard(last)?.board;
         if (!board) {
             if (info.commit !== true || !['normal', 'regenerate'].includes(normalizeType(info.type)) || !last?.is_user || !on) return null;
@@ -136,9 +136,9 @@ export function createPrecall({ chat, metadata = () => null, moduleId = 'story-b
             const type = normalizeType(info?.type), previous = type === 'swipe' ? priorBoard(messages[index + 1]) : null;
             const remembered = type === 'regenerate' ? lastBoard(meta, startAnchor, last) : null;
             let session = boardSession(meta);
-            if (session?.anchor === startAnchor) session = reconcileBoard(meta, id => (anchorRecord?.receipts ?? []).some(item => item?.id === id));
+            if (session && session.anchor === startAnchor) session = reconcileBoard(meta, id => (anchorRecord?.receipts ?? []).some(item => item?.id === id));
             // (a live fight: this reply's own anchor holds the session)
-            const live = session?.anchor === startAnchor;
+            const live = Boolean(session) && session.anchor === startAnchor;
             // A fight the reader staged on this very anchor is what this send carries: "Send with this fight" is a 'regenerate', and the
             // cached payload of an earlier send (rpgFightLast, same anchor) must never stand in for it (it kept only the first exchange).
             const staged = live && session.exchanges?.length ? boardPayload(session) : null;

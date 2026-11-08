@@ -8,6 +8,7 @@
   - **The story day** is the story clock when the reply began (it needs Story Director's clock; with no clock there is no limit). The reply's receipt says in plain words when an event was held. The narrator is told what each kind means and that a person can have only one major a day.
 - **Story Director's World tab can tell when Delta is still reading.** The page API (version 2) has `busy()`: true until Delta has finished reading the newest reply, and listeners are told once when it is done, so the cards stay in place meanwhile.
 - **Hosted, the relationship numbers, part-points and milestones are read from Story Block's copy everywhere** (cast cards, the dossier, the prompt, the narrator's lines, stages, the scan's starting point, Refresh, the editor and diagnostics). Delta's own saved copy is never written from it, and a bundle export is still a backup of Delta's own copy.
+- **Hosted, who is present comes from the story's scene everywhere,** including the dossier's "In chat" label, the relationship map and the full cast, which could show the previous scan's list after a reload.
 - Requires Story Block 2.25.0 or later (unchanged: nothing here needs a newer Story Block); Story Block testkit re-synced to 2.27.0.
 
 ## 1.13.2

@@ -133,6 +133,14 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
             : playBoard(state, session.setup, session.exchanges);
         return { session, played, heldSid: held ? sid : null };
     };
+    // Whether the Fight tab draws a board now (the gate of `snapshot`, with none of its writes): a held reply's fight, a staged exchange, or a board
+    // open on the head reply. The Fight tab stays listed for it with no foe on the sheet, so "Fight tab, Discard fight" always has a place to go.
+    const kept = () => {
+        if (!on()) return false;
+        const index = store?.headIndex?.(), sid = store?.carrierSid?.(index), session = current();
+        if (heldForSid(meta(), sid, (store?.receipts?.() ?? []).filter(entry => entry.index === index).map(entry => entry.receipt))) return true;
+        return Boolean(session) && (session.exchanges?.length > 0 || session.anchor === sid);
+    };
     const open = ({ state = headState(), opening = null, result: approach = null } = {}) => {
         if (!on() || !isStandard(rules())) return false;
         const sid = store?.carrierSid?.(store.headIndex?.()), { gear, weapons } = equipment(state);
@@ -386,5 +394,5 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
         if (event.key === 'Escape' && targeting) { event.preventDefault?.(); event.stopImmediatePropagation?.(); event.stopPropagation?.(); keyRoot.querySelector('.rpg-board-back')?.click(); return; }
         if (/^[1-9]$/u.test(event.key)) { const node = keyRoot.querySelector(`[data-choice="${event.key}"]`); if (node && !node.disabled) { event.preventDefault?.(); node.click(); } }
     };
-    return { open, auto, snapshot, offer, render, clear() { keyRoot = null; generation += 1; }, destroy() { keyRoot = null; doc.removeEventListener?.('keydown', keydown, true); listening = false; } };
+    return { open, auto, kept, snapshot, offer, render, clear() { keyRoot = null; generation += 1; }, destroy() { keyRoot = null; doc.removeEventListener?.('keydown', keydown, true); listening = false; } };
 }
