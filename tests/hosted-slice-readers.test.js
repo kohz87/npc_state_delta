@@ -5,7 +5,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildInjection, buildScannerPrompt, normalizeNpcRecord } from '../core.js';
+import { closeOverlay } from '../dossier-tools-core.js';
+import { openDiagnostics } from '../dossier-tools.js';
 import { MODULE_ID } from '../src/storysuite-v2.js';
 import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { suite, major } from './helpers/pacing-suite.js';
@@ -28,6 +33,59 @@ async function held() {
 }
 const setSidecar = (s, trust) => { s.delta.records.npc_mira = sidecarMira(trust); };
 const viewOf = s => s.adapter.sliceView(Object.values(s.delta.records))[0];
+
+test('diagnostics renders the selected relationship view without changing the stored dossier', async () => {
+    const s = await held();
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-diagnostic-view-'));
+    fs.mkdirSync(path.join(temp, 'src'));
+    fs.writeFileSync(path.join(temp, 'package.json'), '{"type":"module"}');
+    fs.copyFileSync(fileURLToPath(new URL('../runtime-entry-public-write.js', import.meta.url)), path.join(temp, 'runtime-entry-public-write.js'));
+    fs.writeFileSync(path.join(temp, 'scan-context.js'), 'export const readAheadOf = () => [];');
+    fs.writeFileSync(path.join(temp, 'src/transcript.js'), 'export const activeReplyIds = () => [];');
+    fs.writeFileSync(path.join(temp, 'runtime-scan-helpers.js'), 'export const chatContext = () => ({}); export const inReplay = () => {};');
+    fs.writeFileSync(path.join(temp, 'src/relationship-pacing.js'), 'export const normalizeAllowance = x => x;');
+    const { createPublicApiStatePart } = await import(pathToFileURL(path.join(temp, 'runtime-entry-public-write.js')).href);
+    const api = createPublicApiStatePart({
+        getChatState: () => ({ npcs: Object.values(s.delta.records) }),
+        hostedMeterView: npcs => s.adapter.sliceView(npcs),
+        getChatKey: () => 'test', stateVersions: new Map(), persistedVersions: new Map(), stateWritePromises: new Map(), stateWriteTimers: new Map(),
+        hydratedRevision: () => null, hydratedStateMeta: new Map(), undurableNpcStateSnapshot: () => null,
+    });
+    const saved = { document: globalThis.document, api: globalThis.NPCStateDelta, raf: globalThis.requestAnimationFrame };
+    let overlay;
+    const classes = { add() {}, remove() {} };
+    globalThis.document = {
+        documentElement: { classList: classes },
+        body: { classList: classes, appendChild(node) { overlay = node; } },
+        getElementById: () => ({ querySelector: () => ({ dataset: { npcId: 'npc_mira' } }) }),
+        createElement: () => ({ dataset: {}, addEventListener() {}, setAttribute() {}, querySelector: () => null, remove() {} }),
+    };
+    globalThis.requestAnimationFrame = fn => fn();
+    globalThis.NPCStateDelta = api;
+    try {
+        const view = api.getNpc('npc_mira', { relationshipView: true });
+        assert.equal(view.relationship.trust, 5);
+        assert.equal(view.relationshipProgress.trust, 0);
+        assert.equal(api.getNpc('npc_mira').relationship.trust, 8);
+        view.relationship.trust = 70;
+        assert.equal(api.getNpc('npc_mira', { relationshipView: true }).relationship.trust, 5);
+        const standalone = createPublicApiStatePart({ getChatState: () => ({ npcs: Object.values(s.delta.records) }), hostedMeterView: npcs => npcs });
+        assert.equal(standalone.getNpc('npc_mira', { relationshipView: true }).relationship.trust, 8);
+        openDiagnostics();
+        assert.match(overlay.innerHTML, /&quot;score&quot;: 5/);
+        assert.match(overlay.innerHTML, /&quot;fractionalProgress&quot;: 0/);
+        assert.doesNotMatch(overlay.innerHTML, /&quot;score&quot;: 8/);
+        assert.equal(s.delta.records.npc_mira.relationship.trust, 8);
+        assert.equal(s.delta.records.npc_mira.relationshipProgress.trust, 0.5);
+    } finally {
+        closeOverlay({ restore: false });
+        globalThis.document = saved.document;
+        globalThis.NPCStateDelta = saved.api;
+        globalThis.requestAnimationFrame = saved.raf;
+        s.host.close();
+        fs.rmSync(temp, { recursive: true, force: true });
+    }
+});
 
 test('cast cards and the dossier view read the slice: numbers, part-points and earned milestones', async () => {
     const s = await held();

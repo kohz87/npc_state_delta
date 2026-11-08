@@ -243,7 +243,7 @@ function diagnosticsHtml(npc) {
     </section>`;
 }
 export function openDiagnostics() {
-    const npc = npcById(selectedNpcId());
+    const npc = npcById(selectedNpcId(), { relationshipView: true });
     const session = makeSession('diagnostics', { npcId: npc?.id || '' });
     const overlay = mountOverlay(diagnosticsHtml(npc), session);
     overlay.addEventListener('click', event => {

@@ -224,8 +224,8 @@ export function createStorySuiteV2Adapter({
             const npc = dossierOf(name) ?? { name };
             return entries ? entryFor(entries, npc) : null;
         },
+        /** While hosted: Delta's records with numbers, part-points and earned milestones read from the slice (read time; nothing written). */
         sliceView,
-        /** While hosted: what the slice holds for one of Delta's records, { relationship, progress }, or null (no value yet). */
         /** Runs the synchronous reads of `fn` against Story Block's state after reply `index` (query { asOf }); nothing is written or moved. */
         at: (index, fn) => {
             const real = session.sdkRef;

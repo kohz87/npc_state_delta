@@ -155,9 +155,10 @@ export function createPublicApiStatePart(deps) {
     dossierRevision: () => `${getChatKey()}|${Number(stateVersions.get(getChatKey()) || 0)}`,
     /** The current chat's dossiers are loaded (before that the list is empty and a render is not news). */
     dossiersReady: () => { const key = getChatKey(); return key !== 'no-chat' && chatHydrationStatus(key) === 'ready'; },
-    getNpc: npcId => {
+    // A selected display may request the hosted meter view without cloning the whole dossier list; ordinary readers keep the stored record.
+    getNpc: (npcId, options = {}) => {
         const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
-        return npc ? structuredClone(npc) : null;
+        return npc ? structuredClone(options?.relationshipView ? hostedMeterView([npc])[0] : npc) : null;
     },
     /** What the public paths read of a dossier without copying it (no portraits, no notes): { mood, relationship } as plain values, or null. */
     publicFields: npcId => {

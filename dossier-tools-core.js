@@ -116,8 +116,8 @@ export function modalTopLayerSupported(doc = globalThis.document) {
 export function activeChatKey() {
     try { return plain(api()?.uiStatus?.()?.chatKey); } catch { return ''; }
 }
-export function npcById(id) {
-    try { return api()?.getNpc?.(id) || null; }
+export function npcById(id, options) {
+    try { return api()?.getNpc?.(id, options) || null; }
     catch { return null; }
 }
 export function selectedNpcId() {
