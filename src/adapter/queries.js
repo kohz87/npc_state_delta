@@ -242,6 +242,8 @@ export function createQueriesPart(session, deps) {
         },
         /** npc.meters({ name }) → { key, name, meters, stages, unlocked, … } | null; no name: every entry. */
         'npc.meters': (state, args) => part.queries['npc.meters'](state, args ?? {}),
+        /** npc.pace({ name, reply, tier }) → { used, skipped } | null: what an event of that tier would count as under the allowance, read only. */
+        'npc.pace': (state, args) => part.queries['npc.pace'](state, args ?? {}),
         /** npc.cast() → the slice's NPCs with their bars, ladder line and locked-note teasers, present first (the NPC card). */
         'npc.cast': (state, args) => castFor(state, args),
         /** npc.next({ name }) → the NPC's ladder from here: { rank, next, risk, text } ("what's missing"), or null. */

@@ -384,7 +384,7 @@ export function createNpcPart(hooks = {}) {
 
     const shared = {
         call, resolve, baseline, tierCaps, rulesFor, presentNames, featureOn, catalog, normalized,
-        storedSettings, tierAllowance, defsFrom, readerAction, ownOrModule, headReply, commandReply, setupFor,
+        storedSettings, tierAllowance, clockDay, defsFrom, readerAction, ownOrModule, headReply, commandReply, setupFor,
         ownRungs, rungsFor, limitsFor, identify, ensure, note, changesFrom, settleRecord,
         openCloseNotes, tiered, run, hooks,
     };

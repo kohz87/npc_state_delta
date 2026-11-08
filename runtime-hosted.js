@@ -47,6 +47,13 @@ export function createHostedPart(rt, deps) {
         if (!adapter) return npcs;
         try { return adapter.sliceView(npcs) || npcs; } catch { return npcs; }
     }
+    // The tier an event counts as under the slice's allowance, read only (the slice counts it when the change is forwarded):
+    // { used, skipped }, or null (no host, or unknown: the event is then taken as asked).
+    function hostedPaceTier(npc, tier, reply) {
+        const adapter = storySuiteV2Meters();
+        if (!adapter || !npc?.name) return null;
+        try { return adapter.paceTier?.({ name: npc.name, reply, tier }) ?? null; } catch { return null; }
+    }
     // (v2, key people) Story Director's key people (`director.keyPeople`, read only), or null: no host, no Story Director,
     // or one without the query. Null means Delta alone: no badge, no section, no hold, nothing sent. src/key-people.js.
     function keyPeopleList() {
@@ -359,5 +366,5 @@ export function createHostedPart(rt, deps) {
         return { text: 'The latest scan found no NPC in the scene.', scan: true };
     }
 
-    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
+    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, hostedPaceTier, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
 }

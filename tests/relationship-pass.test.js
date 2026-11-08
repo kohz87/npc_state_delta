@@ -84,7 +84,9 @@ test('index.js imports the pass and keeps no copy', () => {
     assert.match(index, /suppressPrimaryRelationshipForFocusedDecisions\(fullWindowRelationship\.mergeSafe, relationshipPass\.decisions, \(\) => getChatState\(\)\.npcs\)/);
 });
 
-test('a hosted held scanner decision does not leave a conflicting stored relationship', { todo: 'the hosted projection does not reconcile the sidecar' }, async () => {
+// While hosted the slice holds the allowance. The pass reads its tier first (adapter.paceTier, read only) and applies the decision with
+// it, then the change is forwarded with that used tier (as runtime-hosted.js forwardRelationshipChangesToHost does), so both sides agree.
+async function hostedPair(allowance) {
     const clock = { id: 'clock', name: 'Clock', domains: { director: { initial: () => ({ time: { minutes: 0 } }) } },
         queries: { 'director.time': state => state?.domains?.director?.time } };
     const host = await createHost({ modules: [clock] });
@@ -95,23 +97,84 @@ test('a hosted held scanner decision does not leave a conflicting stored relatio
         delta: () => ({ isEnabled: () => true, getNpc: () => state.npcs[0],
             relationshipBaseline: () => ({ trust: 0, affection: 0, desire: 0, tension: 0 }),
             relationshipCaps: () => ({ ordinary: 1, meaningful: 2, major: 3, extreme: 6 }),
-            relationshipAllowance: () => ({ ordinary: 0, meaningful: 0, major: 0, extreme: 0 }) }),
+            relationshipAllowance: () => allowance }),
         host: () => box, headReply: () => host.store.headIndex(),
         doc: { documentElement: { dataset: {} }, getElementById: () => null, addEventListener() {}, dispatchEvent() {} },
         timers: { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} }, logger: { warn() {} },
     });
-    try {
-        adapter.start(); assert.equal(await adapter.settled(), true);
+    adapter.start(); assert.equal(await adapter.settled(), true);
+    const scan = async (text, impact) => {
         await host.send('Continue', 'The story continues.'); await adapter.ticked();
-        const before = structuredClone(state.npcs[0].relationship);
-        const decision = { relationshipImpact: 'major', relationshipDelta: { trust: 3 },
-            relationshipEvidence: { trust: 'Ari rescued Mira from the fire.' }, relationshipChangeReason: 'Ari rescued Mira from the fire.' };
-        applyFocusedRelationshipDecisions(state, new Map([['npc_mira', decision]]), undefined, host.store.headIndex());
-        assert.equal(state.npcs[0].relationship.trust, 13, 'the scanner accepted the major on the sidecar');
-        await adapter.adjust({ name: 'Mira', meters: { trust: state.npcs[0].relationship.trust - before.trust }, start: before,
-            reply: host.store.headIndex(), impact: 'major' });
-        assert.equal(host.sdk.query('npc.meters', { name: 'Mira' }).meters.trust, 10, 'the slice held the event');
-        assert.equal(adapter.sliceView(state.npcs)[0].relationship.trust, state.npcs[0].relationship.trust,
-            'the held event must not leave the sidecar at its unheld value');
-    } finally { host.close(); }
+        const reply = host.store.headIndex();
+        const before = structuredClone(state.npcs[0]);
+        const decision = { relationshipImpact: impact, relationshipDelta: { trust: 9 },
+            relationshipEvidence: { trust: text }, relationshipChangeReason: text };
+        const pace = { used: (npc, tier, at) => adapter.paceTier({ name: npc.name, reply: at, tier }) };
+        applyFocusedRelationshipDecisions(state, new Map([['npc_mira', decision]]), undefined, reply, null, pace);
+        const after = state.npcs[0];
+        const trust = after.relationship.trust - before.relationship.trust;
+        const last = after.lastRelationshipChange;
+        const sent = Boolean(trust) && JSON.stringify(last) !== JSON.stringify(before.lastRelationshipChange);
+        if (sent) await adapter.adjust({ name: 'Mira', meters: { trust }, start: before.relationship, reply, ...(typeof last.impact === 'string' ? { impact: last.impact } : {}) });
+        return { sent, reply };
+    };
+    const slice = () => host.head().domains.npc.npcs.mira;
+    const agree = label => {
+        const stored = state.npcs[0];
+        assert.equal(adapter.sliceView(state.npcs)[0].relationship.trust, stored.relationship.trust, `${label}: shown trust is the sidecar's`);
+        const entry = host.sdk.query('npc.meters', { name: 'Mira' });
+        if (!entry) return;   // nothing reached the slice (an ignored event): the sidecar's numbers are shown as they are
+        assert.equal(entry.meters.trust, stored.relationship.trust, `${label}: slice trust is the sidecar's`);
+        assert.deepEqual(slice().progress ?? {}, Object.fromEntries(Object.entries(stored.relationshipProgress ?? {}).filter(([, v]) => v)), `${label}: progress`);
+    };
+    return { host, state, adapter, scan, slice, agree };
+}
+
+test('hosted: a downgraded scanner decision leaves the sidecar and the slice on the same numbers, progress, milestones and history, also after a reload', async () => {
+    const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
+    try {
+        await h.scan('Ari rescued Mira from the fire.', 'major');
+        assert.equal(h.state.npcs[0].relationship.trust, 13);
+        h.agree('first major');
+        const second = await h.scan('Ari stood between Mira and the tax collector.', 'major');
+        assert.equal(second.sent, true);
+        assert.equal(h.state.npcs[0].relationship.trust, 15, 'the second major of the day counts as meaningful: +2');
+        assert.equal(h.state.npcs[0].lastRelationshipChange.impact, 'meaningful');
+        assert.deepEqual(h.state.npcs[0].relationshipEventHistory.map(event => event.impact), ['major', 'meaningful']);
+        h.agree('downgraded');
+        assert.equal(h.slice().impactDay.meaningful, 1, 'the slice counted the used tier once');
+        h.host.store.rebuild();
+        h.agree('after a rebuild');
+        await h.host.st.loadChat(h.host.ctx.chat);   // a cold reload of the chat: the slice is replayed from its stored ops
+        await h.adapter.ticked();
+        h.state.npcs = structuredClone(h.state.npcs);   // and Delta's own save and load hand its records back
+        h.agree('after a reload');
+        assert.deepEqual(h.state.npcs[0].relationshipMilestones, [], 'no milestone on either side');
+    } finally { h.host.close(); }
+});
+
+test('hosted: an ignored scanner decision changes nothing on either side and sends nothing', async () => {
+    const h = await hostedPair({ ordinary: 0, meaningful: 0, major: 0, extreme: 0 });
+    try {
+        const out = await h.scan('Ari rescued Mira from the fire.', 'major');
+        assert.equal(out.sent, false, 'nothing to forward');
+        assert.equal(h.state.npcs[0].relationship.trust, 10);
+        assert.deepEqual(h.state.npcs[0].relationshipEventHistory ?? [], [], 'no event in the sidecar history');
+        assert.equal(h.state.npcs[0].impactDay, undefined, 'the sidecar does not count while hosted');
+        assert.equal(h.slice()?.impactDay, undefined);
+        h.agree('ignored');
+    } finally { h.host.close(); }
+});
+
+test('hosted: a decision with room is applied as asked and the two sides agree', async () => {
+    const h = await hostedPair({ ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
+    try {
+        await h.scan('Ari rescued Mira from the fire.', 'major');
+        h.agree('with room');
+        assert.equal(h.slice().impactDay.major, 1);
+    } finally { h.host.close(); }
+});
+
+test('hosted, the scan reads the slice\'s tier first; alone it counts on the dossier', () => {
+    assert.match(runtimeSource(), /const scanPace = settings => \(hostedMeters\(\) \? \{ used: hostedPaceTier \} : \{ allowance: normalizeAllowance\(settings\.relationshipAllowance\), day: null \}\)/);
 });

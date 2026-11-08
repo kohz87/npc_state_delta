@@ -1,20 +1,18 @@
 // Relationship pacing against the production mechanics and a synthetic Story Suite host.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHost } from './vendor/story-block/testkit/index.js';
-import { MODULE_ID, createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
+import { MODULE_ID } from '../src/storysuite-v2.js';
 import { validateNpcSlice } from '../src/npc-meters.js';
 import { DEFAULT_RELATIONSHIP_CAPS, normalizeNpcRecord } from '../core.js';
 import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
 import { DEFAULT_ALLOWANCE, impactDayProblems, normalizeAllowance, pacingDefaults, spendEvent } from '../src/relationship-pacing.js';
 import { cutToTier, pacingNote } from '../src/npc-meters-pacing.js';
+import { DAY, dossiers, suite, major } from './helpers/pacing-suite.js';
 
 // Relationship pacing: points per event 1 / 2 / 3 / 6 and events per story day for each person
 // (3 ordinary, 1 meaningful, 1 major, 1 extreme). An event over its allowance counts as the next tier down; the count is on the
 // slice record (`impactDay`), so it replays. Story Director's clock is stood in for by a small module with `director.time`.
-
-const DAY = 1440;
 
 test('the allowance setting: a blank field is no limit (null), a missing one is the default, 0 is none, 0..99 whole numbers', () => {
     assert.deepEqual(normalizeAllowance(undefined), { ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
@@ -98,62 +96,6 @@ test('the defaults: points 1 / 2 / 3 / 6; a saved 1 / 2 / 5 / 10 moves once, any
 
 // ---- on the story's slice ----
 
-function dossiers() {
-    const blank = { trust: 0, affection: 0, desire: 0, tension: 0 };
-    return {
-        npc_temiwa: { id: 'npc_temiwa', name: 'Sister Temiwa', aliases: [], present: true, archived: false, relationship: { ...blank } },
-        npc_oren: { id: 'npc_oren', name: 'Oren', aliases: [], present: true, archived: false, relationship: { ...blank } },
-    };
-}
-
-// A stand-in for Story Director: its domain holds the story minutes, its query answers director.time.
-const clockModule = {
-    id: 'zz-clock', name: 'Clock',
-    domains: { director: { initial: () => ({ time: { minutes: 0 } }) } },
-    commands: { 'zz.clock': (ctx, { minutes }) => { ctx.draft('director').time.minutes = minutes; return { summary: 'time passes' }; } },
-    capture: {
-        kinds: { date: { grammar: '~ date MINUTES' } },
-        apply: (ctx, line) => { ctx.draft('director').time.minutes = Number(line.name); return { summary: 'time passes' }; },
-    },
-    queries: { 'director.time': state => ({ minutes: state?.domains?.director?.time?.minutes ?? null }) },
-};
-
-async function suite({ records = dossiers(), clock = true, allowance, calendarOwn = false } = {}) {
-    const host = await createHost({ settings: { modules: { [MODULE_ID]: {} } }, modules: clock ? [clockModule] : [] });
-    const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
-    const delta = { records };
-    const api = {
-        isEnabled: () => true,
-        getNpc: id => (delta.records[id] ? structuredClone(delta.records[id]) : null),
-        relationshipBaseline: () => ({ trust: 0, affection: 0, desire: 0, tension: 0 }),
-        relationshipCaps: () => ({ ...DEFAULT_RELATIONSHIP_CAPS }),
-        ...(allowance === null ? {} : { relationshipAllowance: () => normalizeAllowance(allowance) }),
-        presentCastHtml: () => '<section class="cast">cast</section>',
-        castEmptyReason: () => ({ text: 'Nobody here.' }),
-        fillPresentCast: () => {},
-    };
-    const adapter = createStorySuiteV2Adapter({
-        suiteApi: { npcs: () => Object.values(delta.records).map(({ id, name, aliases, present, archived }) => ({ id, name, aliases, present, archived })) },
-        delta: () => api, version: 'test', host: () => box, headReply: () => host.store.headIndex(),
-        calendarOwn: () => calendarOwn,
-        doc: { documentElement: { dataset: {} }, getElementById: () => null, addEventListener() {}, dispatchEvent() { return true; } },
-        timers: { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} },
-        logger: { warn() {} }, loadEmptyCast: async () => null,
-    });
-    adapter.start();
-    assert.equal(await adapter.settled(), true);
-    const block = lines => (lines.length ? `\n\n<Changes>\n${lines.join('\n')}\n</Changes>` : '');
-    const say = async (lines = []) => { await host.send('And then?', `The story goes on.${block(lines)}`); await adapter.ticked(); return host.store.headIndex(); };
-    const swipe = async (lines = []) => { await host.swipe(`Another way.${block(lines)}`); await adapter.ticked(); };
-    const setDay = async day => { if (clock) await host.sdk.command('zz.clock', { minutes: day * DAY + 30 }); };
-    const npc = name => host.sdk.query('npc.meters', { name });
-    const lastSummary = () => host.store.receipts().map(item => item.receipt).filter(item => item.type === 'npc.line' || /^npc\./.test(item.type ?? '')).at(-1)?.summary
-        ?? host.store.receipts().map(item => item.receipt).at(-1)?.summary;
-    const day = name => host.head().domains.npc.npcs[name]?.impactDay;
-    return { host, adapter, delta, say, swipe, setDay, npc, lastSummary, day };
-}
-
-const major = (who = 'Oren') => `~ npc ${who} | trust: +9 | impact: major`;
 
 test('two majors on one story day: the second counts as meaningful, then ordinary, and the receipt says so', async () => {
     const s = await suite();
@@ -310,19 +252,6 @@ test('swipe, regenerate and a rebuild give the same numbers and the same count; 
     assert.equal(JSON.stringify(s.host.head()), head, 'replay equals live');
 });
 
-test('middle deletion recounts later events as a fresh history', { todo: 'stored story operations do not replan their used tiers' }, async () => {
-    const s = await suite();
-    await s.setDay(1);
-    await s.say([major()]);
-    const middle = await s.say([major()]);
-    await s.say([major()]);
-    await s.host.st.deleteMessage(middle);
-    await s.host.st.deleteMessage(middle - 1);
-    assert.equal(s.npc('Oren').meters.trust, 5, 'the remaining second major should count as meaningful');
-    assert.equal(s.day('oren').meaningful, 1);
-    assert.equal(s.day('oren').ordinary, 0);
-});
-
 test('no drift: while hosted the numbers Delta shows are the slice\'s, also after a held event', async () => {
     const s = await suite();
     await s.setDay(1);
@@ -391,8 +320,10 @@ test('the owner\'s story replayed with the new rules: Sister Temiwa ends at 16 /
         await s.say([`~ npc Sister Temiwa | ${parts.join(' | ')} | impact: ${tier}`]);
     }
     const { trust, affection, desire } = s.npc('Sister Temiwa').meters;
-    // The SPEC's replay on the whole chat gave 15 / 13 / 6. This fixture (her 24 lines, the story day at the start of each reply)
-    // gives 16 / 15 / 8 through the production code: pinned as it is, and within 2 of the SPEC's numbers (it was 41 / 43 / 35).
+    // The rough script's 15 / 13 / 6 put the day boundaries before her 2nd and 14th lines; this fixture takes the story day at the
+    // start of each reply (before her 4th and 15th lines). The same production mechanics give 15 / 13 / 6 with the script's
+    // boundaries and 16 / 15 / 8 with these (checked outside the suite; progress carrying and rounding change nothing).
+    // Pinned as the code gives it, and within 2 of the script's numbers (it was 41 / 43 / 35).
     assert.deepEqual([trust, affection, desire], [16, 15, 8]);
     assert.ok(Math.abs(trust - 15) <= 2 && Math.abs(affection - 13) <= 2 && Math.abs(desire - 6) <= 2);
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);

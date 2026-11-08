@@ -223,6 +223,7 @@ Module id `npc-state-delta`. Registered in `src/storysuite-v2.js` (`QUERY_NAMES`
 | `npc.dossier` | One NPC's dossier fields by `name` (or alias) or `id`, with meters, stages and unlocked note ids. Never hidden notes. |
 | `npc.portrait` | One NPC's portrait URL, or null. |
 | `npc.meters` | One entry `{ key, name, meters, stages, unlocked, disposition?, milestones?, rank? }`, or all entries. |
+| `npc.pace` | `{ used, skipped }`: the tier an event of `{ name, reply, tier }` would count as under the allowance, or null. Read only; Delta's own scan asks it. |
 | `npc.cast` | Entries with bars, ladder line and locked-note teasers, present first (feeds the reply card). Takes `headReply`. |
 | `npc.next` | `{ rank, next, risk, text }` for an NPC's ladder, or null. |
 | `npc.keyAway` | Memory of key people's last absences (`{}` when none). |
