@@ -1,4 +1,4 @@
-/* Appearance fill (role: appearance-fill). When a NEW person is met (or the reader presses Refresh), the targeted Refresh may fill
+/* Appearance fill (role: appearance-fill). When a NEW person is met (their one new-admission backfill, or the catch-up Refresh, or the reader presses Refresh), that call may fill
    what the story never described: BLANK look fields (overallAppearance, appearance), and the hair, eyes and build MISSING from a
    PARTIAL overallAppearance ("Young human woman"), with details that fit what the story has said.
    This file owns: who qualifies (alive, not archived, no named forms, appearance not manually fixed), which of hair / eyes / build
@@ -57,7 +57,16 @@ export function partialLookGaps(npc = {}) {
 /** True when a fill call has anything to do for this record (a blank field or a partial description's gap). */
 export const fillWanted = npc => blankLookFields(npc).length > 0 || partialLookGaps(npc).length > 0;
 
-/** The Refresh prompt's tail line for a fill call, or '' (static rules stay untouched; the line exists only on this call). */
+/** True when this record is the reader's own character (name or alias equals the player's name, case-insensitive). */
+export const isReadersOwn = (npc, playerName) => {
+    const player = String(playerName || '').trim().toLowerCase();
+    return Boolean(player) && [npc?.name, ...(npc?.aliases || [])].some(label => String(label || '').trim().toLowerCase() === player);
+};
+
+/** The one gate for a fill call (Refresh and the new-admission backfill share it): something to fill, and not the reader's own character. */
+export const fillAllowed = (npc, playerName) => fillWanted(npc) && !isReadersOwn(npc, playerName);
+
+/** The prompt's tail line for a fill call, or '' (static rules stay untouched; the line exists only on this call). */
 export function fillLooksLine(npc = {}) {
     const fields = blankLookFields(npc);
     const gaps = partialLookGaps(npc);

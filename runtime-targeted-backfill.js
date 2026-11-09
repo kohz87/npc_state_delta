@@ -7,6 +7,7 @@ import { automaticBackfillStillRelevant, backfillNeedsRequest } from './scan-con
 import { recentTranscript, recentUserDevelopmentContext, currentExchangeTranscript, refreshMessageGate } from './src/transcript.js';
 import { IMPORTANT_MEMORY_LIMIT, inferNpcIdentityKind, npcCurrentlyAbsentInText, buildBackfillPrompt } from './core.js';
 import { getSettings } from './runtime-settings.js';
+import { fillAllowed, FILL_MERGE_OPTION } from './appearance-fill.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
 
 const { backfillScanMatchesTarget, rowContradictsTarget, soleRowMayBeTarget, transcriptMentionsBackfillTarget } = createTargetedScopePart();
@@ -51,6 +52,9 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
             return true;
         }
         const notes = hostedTargetNotes(existing, { newDossier: request.reason === 'new-admission', messageId });
+        // A newly met person's one backfill also fills the looks the story never gave (appearance-fill.js). A retry of it may too, while looks are
+        // still wanted; a missed-participant repair and an established person never do. No extra call: the line rides on this request.
+        const fillLooks = request.reason === 'new-admission' && fillAllowed(existing, ctx.name1);
         const prompt = buildBackfillPrompt({
             transcript,
             targetName: request.label,
@@ -59,6 +63,7 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
             charName: ctx.name2 || 'Character',
             memoryCriteria: settings.memoryCriteria,
             customFieldNames: settings.customFieldNames,
+            fillLooks,
             ...targetNoteOptions(notes),
         });
         return runTargetedDossierPass({
@@ -114,6 +119,7 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
                 // The backfill prompt asks for up to five memories (a first, whole dossier).
                 memoryInputLimit: IMPORTANT_MEMORY_LIMIT,
                 allowTargetedDurableSeed: true,
+                ...(fillLooks ? { [FILL_MERGE_OPTION]: true } : {}),
                 developmentContext: transcript,
                 userDevelopmentContext: recentUserDevelopmentContext(settings.scanDepth, { messageIds: true }),
             },
