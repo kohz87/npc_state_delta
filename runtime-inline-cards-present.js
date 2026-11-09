@@ -12,7 +12,7 @@ import { escapeHtml } from './src/util/html.js';
 import { getSettings } from './runtime-settings.js';
 
 export function createInlineCardsPresentPart(deps, inChatCastMode) {
-    const { getChatState, isKeyNpc } = deps;
+    const { getChatState, isKeyNpc, scenePresenceView } = deps;
 
     // Like the dossier, the present cast shows the current form's own portrait when that form has one,
     // and the main portrait otherwise.
@@ -156,7 +156,8 @@ export function createInlineCardsPresentPart(deps, inChatCastMode) {
     }
 
     function inlineRosterHtml(cards, messageId, mode = inChatCastMode(), { othersWithoutCast = false } = {}) {
-        const currentById = new Map(getChatState().npcs.map(npc => [npc.id, npc]));
+        // Hosted, the scene says who is here (read time, nothing written), so a card and Story Block's list cannot disagree.
+        const currentById = new Map((scenePresenceView?.(getChatState().npcs) ?? getChatState().npcs).map(npc => [npc.id, npc]));
         const visible = (cards || []).map(card => currentById.get(card.id)).filter(npc => npc?.present && !npc.archived && !npc.minor);
         if (!visible.length && !othersWithoutCast) return '';
         if (mode === 'compact') {
