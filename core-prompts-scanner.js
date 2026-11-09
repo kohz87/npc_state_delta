@@ -118,7 +118,7 @@ export function buildScannerPrompt({
         .map(npc => {
             const species = cleanText(npc.species, 120);
             const homeBase = cleanText(npc.homeBase, 240);
-            const appearance = cleanText(npc.appearance, 500);
+            const appearance = cleanText(npc.appearance, DURABLE_PROFILE_LIMITS.appearance);
             const personality = cleanWords(npc.personality, DURABLE_PROFILE_LIMITS.personality);
             const speech = cleanWords(npc.speech, DURABLE_PROFILE_LIMITS.speech);
             const behaviorProfile = normalizeBehaviorProfile(npc.behaviorProfile);

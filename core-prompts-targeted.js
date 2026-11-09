@@ -10,11 +10,12 @@ import { normalizeGender, normalizeLifeState } from './core-identity.js';
 import { IMPORTANT_MEMORY_LIMIT, normalizeNpcRecord } from './core-record.js';
 import { promptProfileEvidence } from './core-evidence.js';
 import { compactMemoryRubric, DEFAULT_MEMORY_CRITERIA } from './core-prompts-criteria.js';
+import { fillLooksLine } from './appearance-fill.js';
 // (cleanup steps 12-13) Written once for every dossier prompt: the behaviour-lever labels, the output
 // caps (the stored limits, DURABLE_PROFILE_LIMITS, so a FULL field the model returns is what is
 // kept), and the targeted prompts' return shapes (the registry's RETURN_SHAPES).
 export const BEHAVIOR_LEVER_LABELS = 'Disposition|Care|Expression|Independence|Conflict|Threat|Analytical|Presentation|Mercy|Loyalty|Drive|Honesty';
-export const PROMPT_CAPS = `homeBase 300, appearance 500, personality ${DURABLE_PROFILE_LIMITS.personality}, speech ${DURABLE_PROFILE_LIMITS.speech}, background 320, relationshipSummary 280, behaviorProfile ${BEHAVIOR_PROFILE_LIMIT}x${DURABLE_PROFILE_LIMITS.behaviorProfile}, mannerisms 4x${DURABLE_PROFILE_LIMITS.mannerism}, keyRelationships ${KEY_RELATIONSHIP_LIMIT}x${DURABLE_PROFILE_LIMITS.keyRelationship}, memory ${DURABLE_PROFILE_LIMITS.memory}`;
+export const PROMPT_CAPS = `homeBase 300, appearance ${DURABLE_PROFILE_LIMITS.appearance}, personality ${DURABLE_PROFILE_LIMITS.personality}, speech ${DURABLE_PROFILE_LIMITS.speech}, background 320, relationshipSummary 280, behaviorProfile ${BEHAVIOR_PROFILE_LIMIT}x${DURABLE_PROFILE_LIMITS.behaviorProfile}, mannerisms 4x${DURABLE_PROFILE_LIMITS.mannerism}, keyRelationships ${KEY_RELATIONSHIP_LIMIT}x${DURABLE_PROFILE_LIMITS.keyRelationship}, memory ${DURABLE_PROFILE_LIMITS.memory}`;
 // One wording for how the scanner writes a person (owner-approved style change); every dossier prompt appends it.
 export const PROFILE_STYLE_LINE = 'Style: speech=how they sound + one short line in their words if a scene gives one; personality=the tension or reason under the surface, plain words, no adjective list; behaviorProfile "Label: level - what they do" (the act seen); mannerisms=one physical habit; overallAppearance (no named forms)=readable: kind, apparent age, build, hair, eyes, then unmistakable marks; appearance=clothes and their state; both FULL, keep recorded details, add new. Every claim needs quoted evidence; unsupported = leave out.';
 const RETURN_SHAPE_LEAD = 'Return shape (write it as JSON; bare key=text, []=list, a|b=one of; a *State other than keep goes with its *Reason, e.g. ageReason, mannerismReason):';
@@ -56,7 +57,7 @@ export function buildBackfillPrompt({
         homeBase: cleanText(existingNpc.homeBase, 300),
         age: cleanText(existingNpc.age, 80),
         apparentAge: cleanText(existingNpc.apparentAge, 80),
-        appearance: cleanText(existingNpc.appearance, 500),
+        appearance: cleanText(existingNpc.appearance, DURABLE_PROFILE_LIMITS.appearance),
         personality: cleanWords(existingNpc.personality, DURABLE_PROFILE_LIMITS.personality),
         speech: cleanWords(existingNpc.speech, DURABLE_PROFILE_LIMITS.speech),
         behaviorProfile: normalizeBehaviorProfile(existingNpc.behaviorProfile),
@@ -115,7 +116,7 @@ export function buildDossierImportPrompt({
         id: cleanText(existingNpc.id, 100), name: cleanText(existingNpc.name, 120),
         aliases: cleanList(existingNpc.aliases, 8, 120), role: cleanText(existingNpc.role, 240),
         species: cleanText(existingNpc.species, 160), gender: normalizeGender(existingNpc.gender), homeBase: cleanText(existingNpc.homeBase, 300), age: cleanText(existingNpc.age, 80),
-        apparentAge: cleanText(existingNpc.apparentAge, 80), appearance: cleanText(existingNpc.appearance, 500),
+        apparentAge: cleanText(existingNpc.apparentAge, 80), appearance: cleanText(existingNpc.appearance, DURABLE_PROFILE_LIMITS.appearance),
         personality: cleanWords(existingNpc.personality, DURABLE_PROFILE_LIMITS.personality), speech: cleanWords(existingNpc.speech, DURABLE_PROFILE_LIMITS.speech),
         behaviorProfile: normalizeBehaviorProfile(existingNpc.behaviorProfile),
         background: cleanText(existingNpc.background, 320), keyRelationships: cleanWordsList(existingNpc.keyRelationships, KEY_RELATIONSHIP_LIMIT, DURABLE_PROFILE_LIMITS.keyRelationship),
@@ -158,6 +159,7 @@ export function buildProfileRefreshPrompt({
     memoryCriteria = DEFAULT_MEMORY_CRITERIA,
     turn = null,
     storyDay = null,
+    fillLooks = false,
 }) {
     const npc = normalizeNpcRecord(targetNpc || {});
     const locked = Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : [];
@@ -246,6 +248,6 @@ Recent story window (EVIDENCE ONLY; preserve [mN] order):
 ${String(transcript || '').trim()}
 
 Target NPC: ${existing.name} (${existing.id})
-Existing dossier (current authority): ${JSON.stringify(existing)}${nonLeverHint}${staleHint}
+Existing dossier (current authority): ${JSON.stringify(existing)}${nonLeverHint}${staleHint}${fillLooks ? fillLooksLine(targetNpc || {}) : ''}
 Use the exact id/name above in returned rows; reconcile only this target.`;
 }

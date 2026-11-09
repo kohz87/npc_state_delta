@@ -22,7 +22,7 @@ function lockedAppearance(npc = {}) {
 function applyModel(npc = {}, rawUpdate = null, options = {}) {
     const locked = lockedAppearance(npc);
     const model = rawUpdate
-        ? applyAppearanceUpdate(npc, rawUpdate, { locked, context: options.developmentContext || '', seedContext: options.appearanceSeedContext || '' })
+        ? applyAppearanceUpdate(npc, rawUpdate, { locked, context: options.developmentContext || '', seedContext: options.appearanceSeedContext || '', fillBlank: options.fillBlankAppearance === true })
         : normalizeAppearanceModel(npc, { locked });
     const next = { ...npc, ...model };
     next.appearance = resolveNpcAppearance(next);
@@ -173,7 +173,9 @@ export function mergeScanResult(state, rawScanResult, options = {}) {
             || (ordinaryUpdate && (ordinaryUpdate.appearanceForms ?? ordinaryUpdate.appearance_forms))
             || (profileUpdate && (profileUpdate.appearanceForms ?? profileUpdate.appearance_forms))
         );
-        const appearanceRejected = !formSwitch && (sources.length
+        // A fill call (appearance-fill.js) lets a BLANK current-look slot take the update the core merge could not ground.
+        const fillSlot = options.fillBlankAppearance === true && !String(sources[0]?.appearance || rawNpc.appearance || '').trim();
+        const appearanceRejected = !formSwitch && !fillSlot && (sources.length
             ? (sources[0]?.appearance ? mechanics.normalizeName(rawNpc.appearance) === mechanics.normalizeName(sources[0]?.appearance) : !rawNpc.appearance)
             : (!rawNpc.appearance));
         if (appearanceRejected) {

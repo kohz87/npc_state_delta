@@ -7,6 +7,7 @@ import { DEFAULT_RELATIONSHIP, relationshipSummaryConsistent, calibrateRelations
 import { setNpcChatRefreshIndicator, relationshipNumber, latestMessageId } from './runtime-scan-helpers.js';
 import { getSettings } from './runtime-settings.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
+import { blankLookFields, FILL_MERGE_OPTION } from './appearance-fill.js';
 
 const { profileRowBindsToTarget, rowContradictsTarget, soleRowMayBeTarget, edgeTouchesResolvedTarget } = createTargetedScopePart();
 
@@ -53,7 +54,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
 
     // (1.2.11) `automatic`: a one-pass catch-up, not the reader's click. It stays quiet unless it
     // changed something, and never touches a dossier open in the editor.
-    async function refreshNpcFromChat(npcId, { automatic = false } = {}) {
+    async function refreshNpcFromChat(npcId, { automatic = false, fillLooks = false } = {}) {
         const notify = automatic ? () => {} : (level, text) => globalThis.toastr?.[level]?.(text);
         const id = String(npcId || '').trim();
         const ctx = getContext();
@@ -89,6 +90,11 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
             return false;
         }
         const before = structuredClone(existing);
+        // A new person's blank looks are filled by this one call (the catch-up asks for it); the reader's own Refresh click asks too.
+        // Never the reader's own character, never a dead/archived record (blankLookFields). Nothing else changes in this call.
+        const playerLabel = String(ctx.name1 || '').trim().toLowerCase();
+        const fillBlankLooks = (fillLooks || !automatic) && blankLookFields(existing).length > 0
+            && !(playerLabel && [existing.name, ...(existing.aliases || [])].some(label => String(label || '').trim().toLowerCase() === playerLabel));
         // (v2 hidden notes) A Refresh looks for this person's story events (never writes layers: the dossier is not new).
         const notes = hostedTargetNotes(existing);
         const prompt = buildProfileRefreshPrompt({
@@ -100,6 +106,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
             turn: Number.isInteger(state.turn) ? state.turn : null,
             storyDay: storyDayAt(latestMessageId(true)),
             customFieldNames: settings.customFieldNames,
+            fillLooks: fillBlankLooks,
             ...targetNoteOptions(notes),
         });
         return runTargetedDossierPass({
@@ -152,6 +159,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
                 // (I-14) The Refresh prompt asks for at most three new memories (rule 14); its merge takes three.
                 memoryInputLimit: 3,
                 allowTargetedDurableSeed: true,
+                ...(fillBlankLooks ? { [FILL_MERGE_OPTION]: true } : {}),
                 developmentSourceMessageIds,
                 storyDays: storyDaysForTranscript(transcript),
                 developmentContext: transcript,
