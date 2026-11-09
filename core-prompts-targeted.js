@@ -45,6 +45,7 @@ export function buildBackfillPrompt({
     userName = 'User',
     charName = 'Character',
     memoryCriteria = DEFAULT_MEMORY_CRITERIA,
+    fillLooks = false,
 }) {
     const target = cleanText(targetName, 120);
     const existing = existingNpc ? {
@@ -100,7 +101,7 @@ ${memoryRubric || '(none configured; store only clearly durable story-relevant e
 ${returnShape('backfill', { relationshipSummary: `"stance toward ${userName}"` })}
 
 Recent story history:
-${String(transcript || '').trim()}`;
+${String(transcript || '').trim()}${fillLooks ? fillLooksLine(existingNpc || {}) : ''}`;
 }
 
 
