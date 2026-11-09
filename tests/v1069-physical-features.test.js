@@ -57,7 +57,7 @@ test('the outfit keeps pieces that add, negate or change a physical trait', () =
 
 test('scanner, Refresh, backfill and import prompts separate enduring body from current outfit', () => {
     const npc = createNpcRecord('Elin');
-    const PHYS = /overallAppearance=enduring body (?:traits shared by all forms )?\(height\/build\/hair\/eyes\/ears\/skin\/marks\)/;
+    const PHYS = /overallAppearance \(no named forms\)=readable: kind, apparent age, build, hair, eyes, then unmistakable marks; appearance=clothes and their state/;
     assert.match(buildScannerPrompt({ transcript: 'Elin works.', existingNpcs: [npc], userName: 'Ari', charName: 'N' }), PHYS);
     assert.match(buildProfileRefreshPrompt({ transcript: '[m1] Elin works.', targetNpc: npc, userName: 'Ari', charName: 'N' }), PHYS);
     const backfill = buildBackfillPrompt({ transcript: 'Elin works.', targetName: 'Elin', existingNpc: npc });

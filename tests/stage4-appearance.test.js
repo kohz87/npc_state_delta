@@ -339,9 +339,9 @@ test('scanner prompt treats current outfit and explicit visual corrections as Ap
         userName: 'Lucien',
         charName: 'Narrator',
     });
-    assert.match(prompt, /appearance=CURRENT outfit\/gear\/condition/i);
-    assert.match(prompt, /overallAppearance=enduring body \(height\/build\/hair\/eyes\/ears\/skin\/marks\)/i);
-    assert.match(prompt, /outfit\/gear/i);
+    assert.match(prompt, /appearance=clothes and their state/i);
+    assert.match(prompt, /overallAppearance \(no named forms\)=readable: kind, apparent age, build, hair, eyes, then unmistakable marks/i);
+    assert.match(prompt, /clothes and their state/i);
     assert.match(prompt, /Correction\/reveal/i);
     assert.doesNotMatch(prompt, /Ignore transient visual state/i);
 });

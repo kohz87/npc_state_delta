@@ -1832,7 +1832,7 @@ test('routine scanner prompt has bounded overhead and delta/profile tiers', () =
     // 1.0.99 adds the user-authorized "if no named forms" qualifier to the Appearance rule; cleanup
     // Owner-approved profile style line (~350 chars) added to the routine scanner prompt.
     // step 12 the caps sentence at the stored limits (a few characters more).
-    assert.ok(overhead < 8100, `routine scanner overhead should stay below 8100 chars after the bounded Appearance clarifications and stored-limit caps, got ${overhead}`);
+    assert.ok(overhead < 8300, `routine scanner overhead should stay below 8300 chars after the bounded Appearance clarifications and stored-limit caps, got ${overhead}`);
     assert.match(prompt, /Return compact JSON deltas/i);
     assert.match(prompt, /Existing relationship delta example/i);
     assert.match(prompt, /Relevant live context \(dynamic fields only\)/i);
