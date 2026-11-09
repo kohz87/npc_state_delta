@@ -32,8 +32,8 @@ test('1: a scan that sends the body as Physical features writes it into outfit-o
 
 test('2: the general Appearance rule no longer contradicts complete forms', () => {
     const prompt = buildScannerPrompt({ transcript: 'Noela shifts into her dragon form.', existingNpcs: [normalizeNpcRecord({ name: 'Noela', appearanceModelVersion: APPEARANCE_MODEL_VERSION, appearanceForms: [{ name: 'Dragon', appearance: 'A silver dragon' }], currentForm: 'Dragon' })] });
-    assert.match(prompt, /overallAppearance=enduring body \(height\/build\/hair\/eyes\/ears\/skin\/marks\) if no named forms/);
-    assert.doesNotMatch(prompt, /overallAppearance=enduring body \(height\/build\/hair\/eyes\/ears\/skin\/marks\);/);
+    assert.match(prompt, /overallAppearance \(no named forms\)=readable: kind/);
+    assert.doesNotMatch(prompt, /overallAppearance=readable/);
 });
 
 test('3: an unknown transformed form of an NPC with named forms gets no human body', () => {
