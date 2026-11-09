@@ -7,7 +7,7 @@ import { DEFAULT_RELATIONSHIP, relationshipSummaryConsistent, calibrateRelations
 import { setNpcChatRefreshIndicator, relationshipNumber, latestMessageId } from './runtime-scan-helpers.js';
 import { getSettings } from './runtime-settings.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
-import { blankLookFields, FILL_MERGE_OPTION } from './appearance-fill.js';
+import { fillWanted, FILL_MERGE_OPTION } from './appearance-fill.js';
 
 const { profileRowBindsToTarget, rowContradictsTarget, soleRowMayBeTarget, edgeTouchesResolvedTarget } = createTargetedScopePart();
 
@@ -91,9 +91,9 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
         }
         const before = structuredClone(existing);
         // A new person's blank looks are filled by this one call (the catch-up asks for it); the reader's own Refresh click asks too.
-        // Never the reader's own character, never a dead/archived record (blankLookFields). Nothing else changes in this call.
+        // Never the reader's own character, never a dead/archived record (appearance-fill.js). Nothing else changes in this call.
         const playerLabel = String(ctx.name1 || '').trim().toLowerCase();
-        const fillBlankLooks = (fillLooks || !automatic) && blankLookFields(existing).length > 0
+        const fillBlankLooks = (fillLooks || !automatic) && fillWanted(existing)
             && !(playerLabel && [existing.name, ...(existing.aliases || [])].some(label => String(label || '').trim().toLowerCase() === playerLabel));
         // (v2 hidden notes) A Refresh looks for this person's story events (never writes layers: the dossier is not new).
         const notes = hostedTargetNotes(existing);

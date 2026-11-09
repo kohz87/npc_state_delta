@@ -222,7 +222,7 @@ test('catch-up: every due NPC is held from the reply backfill; a newly met NPC k
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
     const key = 'chat-x';
     const state = {
-        npcs: [{ id: 'new1', archived: false }, { id: 'old1', archived: false }],
+        npcs: [{ id: 'new1', archived: false, overallAppearance: 'Young human woman' }, { id: 'old1', archived: false }],
         pendingBackfills: [
             { npcId: 'new1', reason: 'new-admission', attempts: 0 },
             { npcId: 'old1', reason: 'missed-participant', attempts: 0 },
@@ -240,7 +240,7 @@ test('catch-up: every due NPC is held from the reply backfill; a newly met NPC k
     assert.deepEqual([...rt.catchUpTaken.get(key)].sort(), ['new1', 'old1'], 'the reply backfill start skips both');
     await part.runCaptureCatchUp(key, due);
     assert.deepEqual(calls.refresh.sort(), ['new1', 'old1'], 'one Refresh each');
-    assert.equal(calls.opts.new1.fillLooks, true, 'the newly met person\'s Refresh may fill the blank looks');
+    assert.equal(calls.opts.new1.fillLooks, true, 'the newly met person\'s Refresh may fill the blank or partial looks (a partial description does not stop it)');
     assert.equal(calls.opts.old1.fillLooks, false, 'an established person\'s Refresh never does');
     assert.deepEqual(state.pendingBackfills.map(i => i.npcId), ['new1'], 'the established entry is covered by its Refresh; the new one is kept');
     assert.equal(calls.backfill.length, 1, 'one backfill start after the Refreshes');

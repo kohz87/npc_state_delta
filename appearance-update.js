@@ -12,6 +12,7 @@ import {
     isSafeUnmarkedDurableReplacement,
 } from './core-mechanics.js';
 import { APPEARANCE_FORM_LIMIT, APPEARANCE_MODEL_VERSION, appearanceText, clean, formKey, formState, hasOwn, sameAppearance, stripOverallPrefix } from './appearance-text.js';
+import { appendedLooks, attemptsExtension } from './appearance-fill.js';
 import { mergeRefinement, preserveOmittedPhysicalTraits, withoutSharedPieces } from './appearance-physical.js';
 import { completeFormWithShared, normalizeAppearanceForms, normalizeAppearanceModel, resolveNpcAppearance } from './appearance-model.js';
 
@@ -69,6 +70,10 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                 : '';
             // fillBlank (the Refresh of a new person, appearance-fill.js): this BLANK slot takes a fitted look without quoted support.
             if (fillBlank || !seedSupport || durableSeedGrounded(incoming, seedSupport)) next.overallAppearance = incoming;
+        } else if (fillBlank && attemptsExtension(next.overallAppearance, incoming)) {
+            // A fill call (appearance-fill.js): the written text survives word for word and only a missing hair/eyes/build is added;
+            // an extension that does not pass (clash, over the limit, a changed word) leaves the record as it is.
+            next.overallAppearance = appendedLooks(next.overallAppearance, incoming) || next.overallAppearance;
         } else if (incoming && normalizeName(incoming) !== normalizeName(next.overallAppearance)) {
             const state = formState(rawUpdate.overallAppearanceState ?? rawUpdate.overall_appearance_state);
             if (state === 'change') {
