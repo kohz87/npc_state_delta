@@ -120,4 +120,3 @@ test('hosted: the present cards follow the scene, not the stored flag (World →
     assert.ok(out.sceneHereStoredAway > 0, 'the scene says here and the stored flag says away: still a card');
     assert.equal(out.injected, false, 'the stored dossier is not written');
 });
-
