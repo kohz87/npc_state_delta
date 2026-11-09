@@ -63,7 +63,10 @@ export function mergeCustomFieldValues(existing, incoming, { names = [], reason 
         const prior = storedKey ? out[storedKey] : '';
         if (prior && prior.toLowerCase() === value.toLowerCase()) continue;
         if (prior && !String(reason || '').trim()) continue;
-        if (source && !source.includes(collapsedText(value))) continue;
+        // Level may be an estimate from a stated rank or a comparison (owner-approved); the text then
+        // lacks the value itself, so it needs a reason (the quoted line, which only the prompt asks for).
+        const estimated = name.toLowerCase() === 'level' && String(reason || '').trim();
+        if (source && !estimated && !source.includes(collapsedText(value))) continue;
         if (storedKey && storedKey !== name) delete out[storedKey];
         out[name] = value;
         changed = true;
