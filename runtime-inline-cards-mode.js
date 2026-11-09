@@ -65,7 +65,7 @@ export function createInlineCardsModePart(deps, inlineRosterHtml) {
         // assistant message and only NPCs physically present in the current merged state.
         const latestAssistantId = latestMessageId(true);
         if (latestAssistantId < 0) return [];
-        const presentCards = (state.npcs || [])
+        const presentCards = (scenePresenceView(state.npcs || []) || [])
             .filter(npc => !npc.archived && npc.present && !npc.minor)
             .map(snapshotNpc);
         if (!presentCards.length) return [];

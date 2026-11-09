@@ -84,3 +84,40 @@ test('full cast reads the people through the dossier panel\'s view (full-cast.js
     assert.equal((source.match(/npcApi\.getState\(\)|api\(\)\?\.getState/g) || []).length, 0, 'no raw reader left');
     assert.equal((source.match(/shownState\(/g) || []).length, 4);
 });
+
+// World → Here: a person the scene lists gets their card even when Delta's own stored flag says away, and the other way round.
+const castScenario = async () => {
+    const api = globalThis.NPCStateDelta;
+    mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'high' }], profileUpdates: [], keyRelationshipEdges: [] });
+    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is at the gate?' });
+    mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Yunyun waves from the gate.', swipe_id: 0, swipes: ['Yunyun waves from the gate.'] });
+    const id = mockState.context.chat.length - 1;
+    await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+    await sleep(400);
+    const cards = () => (String(api.presentCastHtml?.() || '').match(/npc-state-delta-present-cell/g) || []).length;
+    const storedHere = api.getState().npcs[0].present;
+    mockState.scene = ['Yunyun'];
+    const sceneHereStoredHere = cards();
+    mockState.scene = [];
+    const sceneAwayStoredHere = cards();
+    // A later scan of a reply she has left: Delta's own stored flag goes to away, while the scene (the story's list) still has her.
+    mockState.quietResponder = async () => JSON.stringify({ npcs: [{ id: api.getState().npcs[0].id, name: 'Yunyun', present: false, presenceConfidence: 1 }], profileUpdates: [], keyRelationshipEdges: [] });
+    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Where did she go?' });
+    mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Yunyun has left for the city, far away. The gate is empty.', swipe_id: 0, swipes: ['Yunyun has left for the city, far away. The gate is empty.'] });
+    await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(mockState.context.chat.length - 1)));
+    await sleep(400);
+    const injected = api.getState().npcs[0].present;
+    mockState.scene = ['Yunyun'];
+    const sceneHereStoredAway = cards();
+    console.log('RESULT ' + JSON.stringify({ storedHere, sceneHereStoredHere, sceneAwayStoredHere, sceneHereStoredAway, injected }));
+};
+
+test('hosted: the present cards follow the scene, not the stored flag (World → Here drew chips while the stored flag said away)', () => {
+    const out = resultOf(runHostScenario('presence-cards-hosted', hostedPrelude, castScenario));
+    assert.equal(out.storedHere, true);
+    assert.ok(out.sceneHereStoredHere > 0, 'scene and flag agree: a card');
+    assert.equal(out.sceneAwayStoredHere, 0, 'the scene says away: no card');
+    assert.ok(out.sceneHereStoredAway > 0, 'the scene says here and the stored flag says away: still a card');
+    assert.equal(out.injected, false, 'the stored dossier is not written');
+});
+
