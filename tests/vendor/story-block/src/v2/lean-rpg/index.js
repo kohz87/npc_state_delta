@@ -10,7 +10,7 @@
 // names.js, the plan in plan.js, the sheet reader in read.js, the pre-call in precall.js, the roll in resolve.js
 // (its header documents the `data.v2.result` record the battle log draws from) and the cue text in cue.js.
 import { stChat } from '../assist/st-adapter.js';
-import { AUTO_CAP, AUTO_CAP_SETTING, BOARD_SKILL, FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING } from './names.js';
+import { AUTO_CAP, AUTO_CAP_SETTING, BOARD_SKILL, FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, PRECHECK_LIMIT_MS, PRECHECK_SETTING, RESOLVE, ROLLS, ROLLS_SETTING } from './names.js';
 import { noRoll } from './noroll.js';
 import { fightHook, fightXp } from './fight.js';
 import { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, rankQuery } from './levels.js';
@@ -33,7 +33,7 @@ export { FIGHT_XP_HELD, fightOf, memberXp, standingSlots } from './fight.js';
 export { PRACTICE_HELD, practiceStep, usesOf } from './practice.js';
 export { NO_ROLLS_LINE, OPEN_FIGHT_LINE, OUTCOME_WORD, cueOfResult, cueText, fitCue, lineText, receiptCue } from './cue.js';
 export { QUIET_GRAMMAR, fightIsOpen, isQuiet } from './quiet.js';
-export { JOIN_ADD, JOIN_NO, checkJoin, joinCard, joinDefinitions, joinDraft, joinGrammar, joinMode, joinOffers, partyCap, partyOf, readJoin, soulNaming, soulOf } from './join.js';
+export { JOIN_ADD, JOIN_NO, checkJoin, joinCard, joinDefinitions, joinDraft, joinGrammar, joinMode, joinOffers, joinScale, partyCap, partyOf, readJoin, soulNaming, soulOf } from './join.js';
 // What the data modules' companion steps (data-modules/part.js) reach through the loaded library (rpg-lazy.js).
 export { RPG_EXTRAS, extraDefinitions, extraName, extrasPlan } from './view/wizard-data.js';
 export { RPG_STRINGS } from './strings.js';
@@ -47,7 +47,7 @@ export { boardGrammar, boardReplyGrammar, boardXpGuide } from './board/prompt.js
 export { DICE_VERSION, FLOW_VERSION, RESULT_VERSION, claimKey, leanRpgGuard, outcomeOf, positionalDice, prepare, resolve, rollPrepared, rollsOf } from './resolve.js';
 
 /** The part's setting (Story Block's own bucket): when the pre-call plans the rolls. */
-export const DEFAULT_SETTINGS = Object.freeze({ [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [AUTO_CAP_SETTING]: AUTO_CAP.default });
+export const DEFAULT_SETTINGS = Object.freeze({ [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [AUTO_CAP_SETTING]: AUTO_CAP.default, [PRECHECK_SETTING]: true });
 
 /** The offers a reply's `+ party` lines made under Ask (the card under the reply reads them): `rpg.joins { index? }` → [{ name, about, soul, best }] on the head reply (or the reply `index`). */
 export const JOINS_QUERY = 'rpg.joins';
@@ -62,11 +62,12 @@ export const ROLLS_QUERY = 'rpg.rolls';
  *   moduleId = 'story-block' (whose settings it reads)
  *   rosterOn() → whether the RPG and Gear in fights are both on (the roster is answered only then, or when asked for `recorded`)
  *   persona() → the reader's name, for `party.pc` (default: none, the first block)
+ *   callModel(prompt, { maxTokens, profile, helper, timeoutMs }) → text, onPlanning(working), timeoutMs, timer: the foe pre-check's one Assist call (none: no pre-check)
  * → { commands, queries, hooks, settings: { defaults }, guard }; `guard` is the replay guard for `rpg.resolve` blocks
  * (domains/index.js routes the guards of that predicate to it).
  */
-export function createLeanRpgPart({ chat = stChat, metadata = () => null, moduleId = 'story-block', persona = () => '', rosterOn } = {}) {
-    const precall = createPrecall({ chat, metadata, moduleId, skip: skipOf(metadata) });
+export function createLeanRpgPart({ chat = stChat, metadata = () => null, moduleId = 'story-block', persona = () => '', rosterOn, callModel, onPlanning, timeoutMs, timer } = {}) {
+    const precall = createPrecall({ chat, metadata, moduleId, skip: skipOf(metadata), callModel, onPlanning, timeoutMs, timer });
     const board = createBoardPart();
     return {
         // A prelude: previewed before the reply and stored on it before its story lines (turn.js). Not tied to the
@@ -74,7 +75,7 @@ export function createLeanRpgPart({ chat = stChat, metadata = () => null, module
         commands: {
             ...board.commands,
             [RESOLVE]: Object.assign((ctx, payload) => resolve(ctx, payload), { prelude: true, internal: true }),
-            // The note that a live fight's planner gave nothing usable, kept with the reply (noroll.js). Not tied to the feature either.
+            // The note that a live fight's planner (gone) gave nothing usable, kept with the reply; old records only (noroll.js). Not tied to the feature either.
             [NOROLL]: Object.assign((ctx, payload) => noRoll(ctx, payload), { prelude: true, internal: true }),
             // XP for a won fight, a step after the reply's lines (fight.js). Not tied to the feature either: a Re-read keeps it.
             [FIGHT]: Object.assign((ctx, payload) => fightXp(ctx, payload), { internal: true }),
@@ -99,7 +100,8 @@ export function createLeanRpgPart({ chat = stChat, metadata = () => null, module
             ...rosterQueries({ persona, on: rosterOn }) },
         hooks: {
             canGenerate: Object.assign((view, info) => precall.canGenerate(view, info), { feature: LEAN_RPG_FEATURE }),
-            beforeGenerate: (view, info) => precall.beforeGenerate(view, info),
+            // The foe pre-check may call the model once (PRECHECK_LIMIT_MS, or `timeoutMs`): the hook may take that long and a little more.
+            beforeGenerate: Object.defineProperty((view, info) => precall.beforeGenerate(view, info), 'timeoutMs', { enumerable: true, get: () => (timeoutMs ?? PRECHECK_LIMIT_MS) + 2000 }),
             afterCapture: (view, info) => {
                 precall.afterCapture(view);
                 // The fight's XP, then the rolled skills' practice: two steps after the reply's lines.

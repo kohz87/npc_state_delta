@@ -84,7 +84,7 @@ export function createDataModulesPart(opts = {}) {
                     try { pack = lib?.packRulesOf(view.query?.('packs.content', { kind: 'rpg' })); } catch { /* no pack rules */ }
                     const manual = settings()?.[ROLLS_SETTING] === 'off' || (lib && !lib.isStandard(lib.rulesFromSettings(settings(), pack)));
                     const fight = readSheet(view.state).foes.some(foe => foe.filled);
-                    lines.push(...(lib?.boardReplyGrammar?.(view.state, { fight, manual, practice: settings()?.[ROLLS_SETTING] === 'off' }) ?? []));
+                    lines.push(...(lib?.boardReplyGrammar?.(view.state, { fight, ended: ['won', 'fled', 'lost'].includes(view.boardStop), manual, practice: settings()?.[ROLLS_SETTING] === 'off' }) ?? []));
                 }
                 return { lines, optional: [] };
             },

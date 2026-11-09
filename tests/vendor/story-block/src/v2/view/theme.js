@@ -30,7 +30,7 @@
  * the furniture in the chat: the bar above the message box, the Choices under a reply, the notes under a reply. They are
  * roots so the same tokens reach them (Glass, Solid and Follow SillyTavern alike).
  */
-export const THEME_ROOTS = Object.freeze(['.story-suite-overlay', '.story-suite-sheet', '.ss-gameview', '.ss-dialog', '.ss-cards', '.ss-card', '.ss-hud', '[data-ss-screen]', '.story-suite-bar', '.story-suite-extras', '.story-suite-reply-note']);
+export const THEME_ROOTS = Object.freeze(['.story-suite-overlay', '.story-suite-sheet', '.ss-gameview', '.ss-dialog', '.ss-cards', '.ss-card', '.ss-hud', '[data-ss-screen]', '.story-suite-bar', '.story-suite-extras', '.story-suite-reply-note', '.rpg-fight-offer', '.rpg-fight-pause']);
 export const ROOT_SELECTOR = `:where(${THEME_ROOTS.join(', ')})`;
 
 /** The reader's choices (host settings `panelStyle` and `font`). */
@@ -39,7 +39,6 @@ export const FONTS = Object.freeze(['nunito', 'theme']);
 export const SCHEMES = Object.freeze(['dark', 'light']);
 export const DEFAULT_PANEL = 'glass';
 export const DEFAULT_FONT = 'nunito';
-
 /**
  * The reader's Text size (host setting `textSize`, kept as text): Normal, 110% or 120% of the size Story Suite is drawn at
  * (view/size.css `--ss-zoom`, 0.8). Normal adds nothing to the sheet, so it is the same bytes as before the setting; the
@@ -76,7 +75,7 @@ const SHARED = Object.freeze({
     '--ss-space-5': '24px',
     '--ss-hp': '#e5484d',
     '--ss-mp': '#4fa3ff',
-    '--ss-sp': '#e8b04b',
+    '--ss-sp': 'var(--ss-tick)',
     '--ss-exp': 'var(--ss-accent)',
     '--ss-tick': '#2fbf71',
     '--ss-uncommon': '#2fbf71',

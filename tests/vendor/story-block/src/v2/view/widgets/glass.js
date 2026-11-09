@@ -13,7 +13,7 @@
 //
 // Built with createElement and textContent only, like every standard widget (dom.js).
 
-import { clamp, fmt, h, iconNode, num, runCommand, setData, shell, str } from './dom.js';
+import { BAR_STEPS, barStep, clamp, fmt, h, iconNode, num, runCommand, setData, shell, str } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { cutAt } from '../../../text.js';
 
@@ -174,6 +174,8 @@ function renderBar(el, input) {
         function update() {
             for (const kind of BAR_KINDS) root.classList.remove(`ss-bar-${kind}`);
             if (BAR_KINDS.includes(p.kind)) root.classList.add(`ss-bar-${p.kind}`);
+            // (a Health, Mana or Stamina strip dulls in steps as it empties, bars.css; the experience bar does not)
+            for (const step of BAR_STEPS) root.classList.toggle(`ss-bar-step-${step}`, p.kind !== 'exp' && BAR_KINDS.includes(p.kind) && step === barStep(barRatio(p.value, num(p.max, 0))));
             const max = Math.max(0, num(p.max, 0));
             const now = clamp(num(p.value, 0), 0, max);
             const shown = p.text ? short(p.text, LABEL_MAX) : `${fmt(num(p.value, 0))} / ${fmt(max)}`;

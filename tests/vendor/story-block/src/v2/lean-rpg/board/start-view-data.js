@@ -10,6 +10,7 @@ import { text as sentence } from '../../view/widgets/dom.js';
 export const OFFER_BOARD_LABEL = 'Fight on the board';
 export const OFFER_AUTO_LABEL = 'Auto-fight';
 export const PAUSE_BOARD_LABEL = 'Fight on the board';
+export const PAUSE_SEND_LABEL = 'Send without a fight';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const list = value => (Array.isArray(value) ? value : []);
@@ -65,9 +66,11 @@ export function offerLineData(fight, { state = null, hidden = false } = {}) {
     if (!foes.length) return null;
     const names = [...new Set(foes.map(foe => foe.name))];
     const joined = names.join(', ');
+    // A fight that ended with foes still up says so (offers.js sets `standing`); the groups show their counts.
+    const standing = fight?.standing === true;
     return {
         visible: hidden !== true, foes,
-        text: `A fight started: ${joined}.`,
+        text: standing ? `Foes are still standing: ${foes.map(countName).join(', ')}` : `A fight started: ${joined}.`,
         label: `Fight offer: ${joined}`,
         boardLabel: OFFER_BOARD_LABEL,
         autoLabel: OFFER_AUTO_LABEL,
@@ -76,11 +79,23 @@ export function offerLineData(fight, { state = null, hidden = false } = {}) {
 
 /**
  * The pause screen's data for a typed attack on standing foes: the board and Auto-fight (up to the cap's exchanges).
- * → { mode: 'known', title, note, label, boardLabel, autoLabel } or null when no foe stands.
+ * → { mode: 'known' | 'new', title, note, label, boardLabel, autoLabel, sendLabel?, hint? } or null when no foe stands. With `working`: the pre-check's wait line; with `opening` (a recorded opening result): the foes it found.
  */
-export function pauseViewData({ fight = null, state = null, cap = 3 } = {}) {
-    const known = fightFoes(fight, state);
+export function pauseViewData({ fight = null, state = null, cap = 3, opening = null, working = false } = {}) {
+    // The pre-check is reading the reader's message (nothing to choose yet).
+    if (working) return { mode: 'working', title: 'Setting up the fight…', hint: 'Reading your message for the foes. If it takes more than 20 seconds, your message is sent as it is.', label: 'Setting up the fight' };
+    // Foes the pre-check found are not on the sheet yet: they come from the recorded opening.
+    const found = opening ? list(opening.opened).map(foeFrom).filter(Boolean) : [];
+    const known = found.length ? found : fightFoes(fight, state);
     if (!known.length) return null;
+    if (found.length) {
+        return {
+            mode: 'new', title: `This is an attack on ${known.map(foe => `${foe.name} (${foe.count})`).join(', ')}`,
+            note: 'Your message waits while the fight is played on the board.',
+            hint: 'Found by the pre-check from your message. Big groups fight as packs.',
+            label: 'Fight paused', boardLabel: PAUSE_BOARD_LABEL, autoLabel: autoFightLabel(cap), sendLabel: PAUSE_SEND_LABEL,
+        };
+    }
     return {
         mode: 'known', title: `This is an attack on ${known.map(countName).join(', ')}`,
         note: 'Your message waits while the fight is played on the board.',

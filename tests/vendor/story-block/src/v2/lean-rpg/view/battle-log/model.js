@@ -2,6 +2,7 @@
 // Status rows and the Foes line, read from the reply's state and the state before it.
 
 import { fold } from '../../read.js';
+import { areaLineGroups } from '../../board/order.js';
 import { RPG_STRINGS, fill } from '../../strings.js';
 import { BARS, readFoes, readParty } from '../party-data.js';
 import { B } from './constants.js';
@@ -46,9 +47,14 @@ export function panelModel({ resolve, state, before = null, roleOf, ranks = [] }
         ...(resolve.opening ? { opening: resolve.opening.map(copyLine) } : {}) };
     const recordedCosts = [...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)]
         .filter(line => line.recordedCost).map(line => `${fold(line.foe ? line.target : line.who)}|${line.recordedCost}`);
+    const recordedHealth = new Set(model.rounds.flatMap(round => round.lines).filter(line => line.recordedHealth).map(line => fold(line.target)));
     const changes = consequences(state, before, roleOf).filter(change => !resolve.virtualGroups?.includes(change.foeSlot)
-        && !recordedCosts.includes(`${fold(change.name)}|${change.kind}`));
+        && !(change.foeSlot && recordedHealth.has(fold(change.name))) && !recordedCosts.includes(`${fold(change.name)}|${change.kind}`));
     attach(model, changes);
+    for (const round of model.rounds) round.lines = areaLineGroups(round.lines).map(group => {
+        const first = group[0];
+        return first.aoe ? { ...first, target: first.aoeName || first.target, arrows: group.flatMap(line => line.arrows) } : first;
+    });
     const names = new Set([...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)].flatMap(line => [line.who, line.target]));
     const party = readParty(state, { roleOf });
     const foes = readFoes(state, { roleOf, ranks });
@@ -63,6 +69,7 @@ export function panelModel({ resolve, state, before = null, roleOf, ranks = [] }
         rows: BARS.map(key => ({ key, ...character.bars[key], label: character.definition.state?.[key]?.label ?? RPG_STRINGS.bars[key] })) }));
     // The Foes line lists the groups that took part in this reply's rolls (a group left on the block from an earlier fight is not this reply's).
     const rolledFoes = new Set([...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)].filter(line => line.foe).map(line => fold(line.who)).concat([...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)].filter(line => !line.foe && line.target).map(line => fold(line.target))));
-    model.foes = model.rounds.length ? foes.filter(foe => !rolledFoes.size || rolledFoes.has(fold(foe.name))).map(foe => ({ text: `${foe.count > 1 ? `${foe.name} ${fill(B.count, { n: foe.count })}` : foe.name} · ${foe.levelText}: ${foe.hurt === 0 ? B.down : foe.word}` })) : [];
+    const rolledGroups = new Set(model.rounds.flatMap(round => round.lines).filter(line => line.aoe).map(line => line.aoeGroup));
+    model.foes = model.rounds.length ? foes.filter(foe => !rolledFoes.size || rolledFoes.has(fold(foe.name)) || rolledGroups.has(foe.slot)).map(foe => ({ text: `${foe.count > 1 ? `${foe.name} ${fill(B.count, { n: foe.count })}` : foe.name} · ${foe.levelText}: ${foe.hurt === 0 ? B.down : foe.word}` })) : [];
     return model;
 }

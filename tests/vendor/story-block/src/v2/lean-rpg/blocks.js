@@ -19,6 +19,9 @@ const isRecord = value => value !== null && typeof value === 'object' && !Array.
 /** The bar of a field: 'health' | 'stamina' | 'mana' | 'foe' when its schema has `blocks`, else null. */
 export const barOf = schema => (schema?.type === 'int' && ['health', 'stamina', 'mana', 'foe'].includes(schema.blocks) ? schema.blocks : null);
 
+/** The scale a bar's schema carries: 2 only when its pin says `scale: 2` (every older pin has no mark and reads as 1, exactly as before). */
+export const scaleOf = schema => (schema?.scale === 2 ? 2 : 1);
+
 /** The words a bar's stages go by, empty first. A foe's Health uses Health's. */
 export const wordsOf = bar => (bar === 'foe' ? STAGES.health : STAGES[bar]) ?? STAGES.health;
 
@@ -57,7 +60,7 @@ export function sizeOf(schema, fields, key) {
         if (slot && Object.hasOwn(fields ?? {}, `level${slot}`)) return foeBlocksByLevel(whole(fields[`level${slot}`]) || 1);
         return foeHealthBlocks(slot ? whole(fields?.[`class${slot}`]) || 1 : 1);
     }
-    return blocksFor(statsOfFields(fields))[bar];
+    return blocksFor(statsOfFields(fields), scaleOf(schema))[bar];
 }
 
 /**
@@ -79,8 +82,8 @@ export function characterBars(definition, fields) {
 }
 
 /** What a new character's bars hold for `stats`: full bars, and the sizes the Standard Character block's rules compare against. */
-export function barFields(stats) {
-    const size = blocksFor(stats);
+export function barFields(stats, scale = 1) {
+    const size = blocksFor(stats, scale);
     return { health: size.health, stamina: size.stamina, mana: size.mana, 'health-blocks': size.health, 'stamina-blocks': size.stamina, 'mana-blocks': size.mana };
 }
 
@@ -91,12 +94,12 @@ const nextAbove = (value, step) => (Math.floor(whole(value) / step) + 1) * step;
  * step. `{ health: { blocks, stat, value, next }, stamina, mana, luck: { min, max, stat, current, next } }` (`next` is the stat value that
  * brings one more block, or null when there is none to come: the edge window steps at LUK 5, 7, 11, 13, 15, 17 and 19, and a bar stops growing at the stat maximum).
  */
-export function growthOf(stats, { statMax = 20 } = {}) {
-    const size = blocksFor(stats);
+export function growthOf(stats, { statMax = 20, scale = 1 } = {}) {
+    const size = blocksFor(stats, scale);
     const bar = (blocks, stat) => { const next = nextAbove(stats?.[stat], 5); return { blocks, stat, value: whole(stats?.[stat]), next: next <= statMax ? next : null }; };
     const luk = whole(stats?.luk), step = LUCK_STEPS.find(at => at > luk) ?? null;
     return { health: bar(size.health, 'vit'), stamina: bar(size.stamina, 'agi'), mana: bar(size.mana, 'int'), luck: { ...luckWindow(luk), stat: 'luk', current: luk, next: step } };
 }
 
-/** The stage word of `value` blocks left in a bar of `size` blocks, for a bar kind ('health' | 'stamina' | 'mana' | 'foe'): what the planner's sheet and the views say. */
+/** The stage word of `value` blocks left in a bar of `size` blocks, for a bar kind ('health' | 'stamina' | 'mana' | 'foe'): what the sheet text and the views say. */
 export const stageText = (bar, value, size) => spreadWord(wordsOf(bar), Math.max(0, whole(value)), size);

@@ -3,14 +3,17 @@
 import { activeDefinition } from '../../data-modules/adapters.js';
 import { moduleGrammar, referenceOf } from '../../data-modules/grammar.js';
 import { oneLine } from '../../../text.js';
-import { CLEAR_ONLY, narratedFoeGrammar } from './narrated-grammar.js';
+import { CLEAR_ONLY, NEW_GROUPS, NEW_GROUPS_MANUAL, narratedFoeGrammar } from './narrated-grammar.js';
 
 // How a fight starts under the board: the story sets a foe slot, the offer line appears, and code plays the blows.
 const START = 'A fight starts when you set a foe slot; the reader plays it on the board, so tell no blows yourself.';
 
+// After the carried fight has ended (won / fled / lost): a group that arrives later is a new fight on the board.
+const START_AFTER = 'If a new group arrives after this fight, set a foe slot; a new fight starts on the board, so tell no blows.';
+
 export { boardGrammar, boardXpGuide } from '../../data-modules/board-static.js';
 
-export function boardReplyGrammar(state, { fight = false, manual = false, practice = false } = {}) {
+export function boardReplyGrammar(state, { fight = false, ended = false, manual = false, practice = false } = {}) {
     const ids = Object.keys(state?.domains?.dataModules?.active ?? {});
     const lines = ids.flatMap(id => {
         const definition = activeDefinition(state, id);
@@ -33,6 +36,9 @@ export function boardReplyGrammar(state, { fight = false, manual = false, practi
         return [];
     });
     if (!fight) { if (ids.some(id => activeDefinition(state, id)?.role === 'foes')) lines.push(START); }
-    else lines.push(...narratedFoeGrammar(state, manual ? undefined : CLEAR_ONLY));
+    else {
+        lines.push(...narratedFoeGrammar(state, ended ? (manual ? NEW_GROUPS_MANUAL : NEW_GROUPS) : manual ? undefined : CLEAR_ONLY));
+        if (ended && ids.some(id => activeDefinition(state, id)?.role === 'foes')) lines.push(START_AFTER);
+    }
     return lines;
 }

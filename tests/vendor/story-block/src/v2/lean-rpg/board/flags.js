@@ -6,6 +6,11 @@ import { fold } from '../read.js';
 
 const AREA = /\b(?:area|all (?:foes|enemies|opponents|targets)|every (?:foe|enemy|opponent|target)|sweep(?:s|ing)?)\b/iu;
 const DEFENCE = /\b(?:dodge|dodges|dodging|evade|evades|evading|evasion|parry|parries|parrying|defen[cs]e|defend|defends|block|blocks|ward|wards|avoid|avoids)\b/iu;
+const HEALING = /\b(?:heal|heals|healing|mend|mends|mending|restore|restores|restoring|recover|recovers|recovering|remedy|remedies|cure|cures|curing|soothe|soothes|soothing|revive|revives|reviving)\b/iu;
+
+/** Whether a skill describes healing, as Auto and the marked board both understand it. */
+export const healingSkill = skill => skill?.healing === true || skill?.support === true || skill?.kind === 'heal'
+    || HEALING.test(`${skill?.name ?? ''} ${skill?.about ?? ''} ${skill?.describe ?? ''}`);
 
 /** The inferred flags are independent; a skill can attack an area and also defend. */
 export function defaultFlags(skill) {
@@ -19,8 +24,12 @@ export function skillKey(module, skill) {
     return JSON.stringify([String(module ?? ''), Number(skill?.slot) || 0, fold(skill?.name ?? '')]);
 }
 
-/** Use explicit boolean flags when present; older skills need no migration. */
+/** A utility skill (the Skills block's `type`, read.js skillsOf) is for the story: the board never offers it, Auto never picks it, and it is never a defence. */
+export const isUtility = skill => skill?.type === 'utility';
+
+/** Use explicit boolean flags when present; older skills need no migration. A utility skill has none. */
 export function skillFlags(skill, overrides = null) {
+    if (isUtility(skill)) return { target: false, area: false, defence: false };
     const defaults = defaultFlags(skill);
     return Object.fromEntries(Object.keys(defaults).map(flag => [flag, typeof overrides?.[flag] === 'boolean' ? overrides[flag] : defaults[flag]]));
 }

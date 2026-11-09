@@ -14,7 +14,7 @@ const hurtField = slot => `hurt${((slot - 1) % FOE_SLOTS) + 1}`;
 // `maxOf(module, field)`: the most the block's own field holds (a block of an older definition holds at most 5).
 export function rosterOf(sheet, maxOf) {
     const characters = sheet.characters.map((character, at) => {
-        const size = Math.max(1, Math.min(blocksFor(character.base ?? character.stats).health, maxOf(character.module, 'health')));
+        const size = Math.max(1, Math.min(blocksFor(character.base ?? character.stats, character.scale).health, maxOf(character.module, 'health')));
         const value = Number.isInteger(character.health) ? Math.max(0, Math.min(size, character.health)) : size;
         return { at, id: charId(character), kind: 'char', character, name: character.who, module: character.module, field: 'health', value, size };
     });
@@ -25,7 +25,7 @@ export function rosterOf(sheet, maxOf) {
     });
     // Stamina and Mana: a skill spends a block of its resource each use (the bars are named `c:<key>:stamina` and `c:<key>:mana`).
     const resources = characters.flatMap(({ character, name, module }) => ['stamina', 'mana'].map(field => {
-        const size = Math.max(1, Math.min(blocksFor(character.base ?? character.stats)[field], maxOf(module, field)));
+        const size = Math.max(1, Math.min(blocksFor(character.base ?? character.stats, character.scale)[field], maxOf(module, field)));
         const value = Number.isInteger(character[field]) ? Math.max(0, Math.min(size, character[field])) : size;
         return { id: `${charId(character)}:${field}`, kind: 'char', name, module, field, value, size };
     }));

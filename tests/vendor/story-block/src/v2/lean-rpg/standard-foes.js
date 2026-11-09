@@ -1,5 +1,5 @@
 // Prepares foe attacks and the board's optional alternate defenders for Standard rolls.
-// Shared sheet and skill helpers keep the planner's ordinary preparations unchanged.
+// Shared sheet and skill helpers keep the ordinary preparations (old planner records and the board) unchanged.
 
 export function prepareFoes({ plan, out, sheet, ready, refuse, skillStd, skillSide, withSkill, foeSide, charId, memberRolls }) {
     const preparedFoe = (entry, target, skillName, at, { note = true } = {}) => {

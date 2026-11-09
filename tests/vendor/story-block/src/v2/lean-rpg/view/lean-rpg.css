@@ -35,6 +35,9 @@
 .rpg-stat b { font-size: 14px; }
 .rpg-skills { font-size: 12.5px; color: var(--ss-muted); overflow-wrap: anywhere; }
 .rpg-card-actions, .rpg-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.rpg-rest-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.rpg-rest-hint, .rpg-rest-status { margin: 0; color: var(--ss-muted); font-size: 12px; }
+.rpg-rest-status:empty { display: none; }
 
 /* ---- Fight tab (mockup section 5): a grid on a wide screen, a stack on a phone ---- */
 .ss-w-rpg-fight { display: grid; gap: 14px; align-content: start; min-width: 0; container-type: inline-size; }
@@ -89,6 +92,16 @@
 .rpg-skill-roll { margin: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .rpg-skill-roll span { color: var(--ss-muted); }
 .rpg-skill-empty { padding: 12px; border-radius: 12px; border: 1px dashed color-mix(in srgb, var(--ss-text) 25%, transparent); color: var(--ss-muted); font-size: 13px; }
+/* (a Skills block with types) the two lists' heads, a utility skill's tint, the editor's Combat/Utility switch and its help */
+.rpg-skill-group { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ss-muted); }
+.rpg-skill-group:not(:first-child) { margin-top: 6px; }
+.rpg-skill-util { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ss-sp) 55%, var(--ss-muted)); }
+.rpg-skill-usedfor { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rpg-skill-seg { display: inline-flex; border: 1px solid color-mix(in srgb, var(--ss-text) 20%, transparent); border-radius: 8px; overflow: hidden; }
+.rpg-skill-seg-option { min-height: 34px; padding: 4px 12px; border: 0; background: transparent; color: var(--ss-muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+.rpg-skill-seg-option:disabled { opacity: 0.45; cursor: not-allowed; }
+.rpg-skill-seg-on { background: var(--ss-accent-soft); color: var(--ss-text); font-weight: 600; }
+.rpg-skill-help { margin: 0; font-size: 12.5px; color: var(--ss-muted); }
 .rpg-skill-form { display: grid; gap: 8px; }
 .rpg-skill-field { display: grid; gap: 4px; font-size: 13px; }
 .rpg-skill-field-label { font-size: 12px; color: var(--ss-muted); }
@@ -133,7 +146,7 @@
 .rpg-wiz-card-src { font-size: 11px; color: var(--ss-muted); margin-top: auto; }
 .rpg-wiz-tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--ss-badge); color: var(--ss-badge-text); font-weight: 700; }
 .rpg-wiz-rows { display: grid; gap: 8px; }
-.rpg-wiz-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) 78px 104px 104px 36px; gap: 8px; align-items: center; }
+.rpg-wiz-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) 78px 104px 104px 104px 36px; gap: 8px; align-items: center; }
 .rpg-wiz-colhead { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ss-muted); }
 .rpg-wiz-x { width: 36px; height: 36px; border: 0; background: transparent; color: var(--ss-muted); cursor: pointer; font-size: 18px; }
 .rpg-wiz-add { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
@@ -158,6 +171,8 @@
     .rpg-wiz-row { grid-template-columns: repeat(3, minmax(0, 1fr)) 36px; padding-bottom: 10px; border-bottom: 1px solid color-mix(in srgb, var(--ss-text) 12%, transparent); }
     .rpg-wiz-row .rpg-wiz-n { grid-column: 1 / 4; }
     .rpg-wiz-row .rpg-wiz-d { grid-column: 1 / -1; }
+    .rpg-wiz-row [data-field="start"] { grid-column: 1 / 4; }
+    .rpg-wiz-row .rpg-wiz-x { grid-column: 4; }
     .rpg-wiz-headrow { display: none; }
     .rpg-wiz-stats-body { grid-template-columns: minmax(0, 1fr); justify-items: stretch; }
     .rpg-wiz-steppers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -210,10 +225,6 @@
 .rpg-bl-label { color: var(--ss-muted); }
 .rpg-bl-track { display: block; height: 6px; border-radius: 3px; background: var(--ss-track); overflow: hidden; }
 .rpg-bl-fill { display: block; height: 100%; width: calc(var(--rpg-fill, 0) * 100%); border-radius: 3px; background: var(--ss-text); }
-/* The bars are coloured by stage (good near full, warn in the middle, bad near empty), like the Party tab's, not by resource. */
-.rpg-bl-tone-good .rpg-bl-fill { background: var(--ss-good); }
-.rpg-bl-tone-warn .rpg-bl-fill { background: var(--ss-warn); }
-.rpg-bl-tone-bad .rpg-bl-fill { background: var(--ss-bad); }
 .rpg-bl-foes { grid-template-columns: 5.5em minmax(0, 1fr); gap: 8px; }
 .rpg-bl-foe-list { overflow-wrap: anywhere; }
 @media (max-width: 600px) {

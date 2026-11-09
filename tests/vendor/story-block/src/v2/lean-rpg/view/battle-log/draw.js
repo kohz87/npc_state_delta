@@ -2,6 +2,7 @@
 // checks, ambush, opening and rounds, breakdown on tap, status bars, foes the why-it-ended line, the Receipt row and the no-rolls wording.
 
 import { RPG_STRINGS, fill } from '../../strings.js';
+import { barStep } from '../../../view/widgets/dom.js';
 import { stopLine, stopHint } from './stop.js';
 import { buildReceipt } from './receipt.js';
 import { B, FOE_WORDS, DECISIVE_WORDS, BATTLE_ROOT, BATTLE_ID, IDLE } from './constants.js';
@@ -39,11 +40,15 @@ function lineNode(doc, line, { check = false } = {}) {
         if (line.support) {
             text.append(`${line.who} ${line.heals ? B.verbHeals : B.verbHelps} ${line.target}`);
             if (line.skill) { text.append(' ('); text.appendChild(el(doc, 'span', 'rpg-skill', line.skill)); text.append(')'); }
+        } else if (line.reduced) {
+            // An area attack's other groups: the main hit is the line above; this one is the same roll at one Health block less.
+            text.append(fill(line.outcome === 'fail' ? B.alsoTargets : B.alsoHits, { name: line.target }));
         } else {
             text.append(`${line.who} ${line.skill ? B.uses : B.attacks} `);
             if (line.skill) text.appendChild(el(doc, 'span', 'rpg-skill', line.skill));
+            if (line.aoe) text.append(` (${B.area})`);
             if (line.skill && line.gear && !line.foe) text.append(` (${line.gear})`);
-            if (line.target) text.append(`${line.skill ? ` ${B.on} ` : ''}${line.target}${line.area ? ` (${B.area})` : ''}`);
+            if (line.target) text.append(`${line.skill ? ` ${B.on} ` : ''}${line.target}${line.area && !line.aoe ? ` (${B.area})` : ''}`);
             if (!line.skill && line.gear && !line.foe) text.append(` (${line.gear})`);
         }
         // The skill a defender used ("Sluice Rat A attacks Astra (Iaijutsu) — Blocked"); a roll made before there were any has none.
@@ -52,11 +57,11 @@ function lineNode(doc, line, { check = false } = {}) {
             text.appendChild(el(doc, 'span', 'rpg-skill', line.defence));
             text.append(line.gear ? `, ${line.gear})` : ')');
         } else if (line.gear && line.foe) text.append(` (${line.gear})`);
-        if (outcome) {
-            text.append(' — ');
+        if (outcome && (!line.reduced || line.outcome === 'fail')) {
+            text.append(line.aoeNoTarget ? ' — main target Down; ' : ' — ');
             text.appendChild(el(doc, 'span', `rpg-out rpg-out-${line.outcome}`, outcome));
         }
-        if (line.total !== null && line.vs !== null) text.append(` (${fill(B.vs, { total: line.total, against: line.vs })})`);
+        if (!line.reduced && line.total !== null && line.vs !== null) text.append(` (${fill(B.vs, { total: line.total, against: line.vs })})`);
         if (line.arrows.length) text.appendChild(el(doc, 'span', 'rpg-arrow', ` → ${line.arrows.join(', ')}`));
     }
     row.append(mark, text);
@@ -147,12 +152,14 @@ export function buildPanel(doc, model, { folded = false, onFold = () => {}, vari
             const cells = el(doc, 'div', 'rpg-bl-stats');
             row.appendChild(cells);
             for (const bar of who.rows) {
-                const cell = el(doc, 'span', `rpg-bl-stat rpg-bl-${bar.key} rpg-bl-tone-${bar.tone ?? 'neutral'}`);
+                const ratio = bar.max > 0 ? bar.value / bar.max : 0;
+                const cell = el(doc, 'span', `rpg-bl-stat rpg-bl-${bar.key} rpg-bl-tone-${bar.tone ?? 'neutral'} rpg-bl-step-${barStep(ratio)}`);
                 const track = el(doc, 'span', 'rpg-bl-track');
                 track.setAttribute('aria-hidden', 'true');
-                track.style.setProperty('--rpg-fill', String(bar.max > 0 ? Math.round((bar.value / bar.max) * 1000) / 1000 : 0));
+                track.style.setProperty('--rpg-fill', String(Math.round(ratio * 1000) / 1000));
                 track.appendChild(el(doc, 'span', 'rpg-bl-fill'));
-                cell.append(el(doc, 'span', 'rpg-bl-label', bar.label), track, el(doc, 'span', 'rpg-bl-word', bar.word));
+                const text = bar.text ?? fill(RPG_STRINGS.blocks.of, { word: bar.word, n: bar.value, max: bar.max });
+                cell.append(el(doc, 'span', 'rpg-bl-label', bar.label), track, el(doc, 'span', 'rpg-bl-word', text));
                 cells.appendChild(cell);
             }
             status.appendChild(row);

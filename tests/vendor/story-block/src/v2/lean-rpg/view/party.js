@@ -15,6 +15,7 @@ import { newSession, renderDistribute } from './distribute.js';
 import { growthText, readParty, xpLine } from './party-data.js';
 import { newGearSession, renderGearCard } from './gear-card.js';
 import { newSkillsSession, renderSkills } from './skills.js';
+import { isMarkedCharacter } from '../../data-modules/recovery.js';
 
 const P = RPG_STRINGS.party;
 export const PARTY_WIDGET = 'rpg.party';
@@ -110,6 +111,23 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 if (character.skillsBlock) node.appendChild(h(doc, 'div', 'rpg-skills', character.skills.length ? character.skills.map(skill => `${skill.name} (${skill.rankName})`).join(' · ') : P.noSkills));
                 // The Standard formula's bars grow with VIT, AGI and INT: how many blocks each has and the stat that earns the next one, and Luck's next step.
                 if (character.growth) node.appendChild(h(doc, 'p', 'rpg-growth', growthText(character.growth)));
+                if (isMarkedCharacter(character.definition) && ['button-rest', 'button-full-rest'].every(kind => character.definition.kinds?.[kind]?.ui)) {
+                    const rests = h(doc, 'div', 'rpg-rest-row');
+                    const status = h(doc, 'p', 'rpg-rest-status');
+                    status.setAttribute('role', 'status');
+                    for (const [kind, title] of [['button-rest', P.shortRest], ['button-full-rest', P.fullRest]]) {
+                        const control = button(rests, title, 'ss-button', async () => {
+                            control.disabled = true;
+                            try {
+                                const result = await api.command?.('dm.act', { module: character.module, kind, ...(character.subject === null ? {} : { who: character.subject }) });
+                                status.textContent = result?.ok ? '' : (result?.message || 'Could not rest.');
+                            } catch { status.textContent = 'Could not rest.'; }
+                            finally { control.disabled = false; }
+                        });
+                        control.disabled = typeof api.command !== 'function';
+                    }
+                    node.append(rests, h(doc, 'p', 'rpg-rest-hint', P.restHint), status);
+                }
                 const actions = h(doc, 'div', `rpg-card-actions${gearOn() ? ' rpg-card-actions-gear' : ''}`);
                 const spend = character.points > 0;
                 button(actions, spend ? P.spend : P.stats, `ss-button${spend ? ' ss-button-primary' : ''} rpg-open`, () => openSheet(character));

@@ -22,7 +22,8 @@
 .rpg-board-choice:active { background: var(--ss-accent-soft); transform: scale(.99); }
 .rpg-board-choice:focus-visible { outline: 2px solid var(--ss-accent); outline-offset: 1px; }
 .rpg-board-choice:disabled { opacity: .55; cursor: not-allowed; }
-.rpg-board-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.rpg-board-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.rpg-board-actions .rpg-board-discard { margin-left: auto; }   /* Discard fight at the far end, away from Auto / Back */
 .rpg-board-actions button, .rpg-board-controls > button { min-height: 44px; touch-action: manipulation; }
 .rpg-board-send { width: 100%; }
 .rpg-board-note { margin-top: 4px; font-size: 13px; }
@@ -107,6 +108,7 @@
 }
 /* The end card: Send and Discard full width, stacked with a gap (approved mockup, frame 4). */
 .rpg-board-ended .rpg-board-send { display: block; width: 100%; }
-.rpg-board-ended .rpg-board-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.rpg-board-ended .rpg-board-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin-top: 8px; }
+.rpg-board-ended .rpg-board-actions .rpg-board-discard { margin-left: 0; }
 .rpg-board-ended .rpg-board-actions button { width: 100%; }
 .rpg-board-sending { margin: 8px 0 0; font-weight: 700; }

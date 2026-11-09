@@ -42,7 +42,7 @@ export function chatterCap(value) {
 export function chatterGrammar(cap = CHATTER_MAX) {
     return `~ chatter Name: …a short unspoken thought, one line for each NPC in the scene who has something on their mind, up to ${chatterCap(cap)} (only NPCs in the scene, at most ${CHATTER_CHARS} characters; nobody hears it, so the story never reacts to it)`;
 }
-export const CHATTER_CHARS = 140;
+export const CHATTER_CHARS = 240;
 export const NAME_CHARS = 40;
 
 const ELLIPSIS = '…';

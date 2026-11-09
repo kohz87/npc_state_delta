@@ -7,6 +7,10 @@ import { moduleGrammar, referenceOf } from '../../data-modules/grammar.js';
 /** The foe kinds the story may still write beside the board: only the clears (a group fled, yielded or went away). */
 export const CLEAR_ONLY = /^clear-\d+$/u;
 
+/** After an ended fight: the clears and the set-slot kinds, so a new group that arrives later in the reply can be opened as foes. */
+export const NEW_GROUPS = /^(?:set-slot|clear)-\d+$/u;
+export const NEW_GROUPS_MANUAL = /^(?:set-slot|hurt|clear)-\d+$/u;
+
 export function narratedFoeGrammar(state, only = /^(?:hurt|clear)-\d+$/u) {
     const ids = Object.keys(state?.domains?.dataModules?.active ?? {});
     return ids.flatMap(id => {

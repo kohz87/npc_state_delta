@@ -6,7 +6,7 @@ import { copy, atPath } from '../interpreter.js';
 import { activeDefinition } from '../adapters.js';
 import { fill } from '../../strings.js';
 import { fold, readSheet } from '../../lean-rpg/read.js';
-import { SKILL_SLOTS_BASE, SKILL_SLOTS_EVERY, SKILL_SLOTS_MAX, signatureAt, skillSlots } from '../../skill-slots.js';
+import { SKILL_SLOTS_BASE, SKILL_SLOTS_EVERY, SKILL_SLOTS_MAX, SKILL_FIELDS_MAX, SLOT_NUMBER, UTILITY_SLOTS, isTypedSkills, skillTypeOf, signatureAt, skillSlots } from '../../skill-slots.js';
 import { J, rpg, rawDefinition, instancePath } from './shared.js';
 
 const skillCapacity = definition => Math.min(SKILL_SLOTS_MAX, Object.keys(definition?.state ?? {}).filter(key => /^skill\d+$/u.test(key)).length);
@@ -27,14 +27,16 @@ function skillNamed(slots, reason) {
 // eighth at 60; a level drop only closes the empty ones). `practice-N` whose reason names one of the skills credits that skill's slot.
 // → { kind, slot, name, update? } | { refuse } | null (not one of these lines: as written).
 function skillRoute(fields, kindName, args, reason, room = SKILL_SLOTS_BASE) {
-    const learn = /^learn-([1-8])$/u.exec(kindName), practice = /^practice-([1-8])$/u.exec(kindName);
-    if (!learn && !practice) return null;
-    const slots = Array.from({ length: SKILL_SLOTS_MAX }, (_, i) => ({ n: i + 1, name: typeof fields[`skill${i + 1}`] === 'string' ? fields[`skill${i + 1}`] : '', signature: signatureAt(fields.sig, i + 1) }));
+    const typed = isTypedSkills(fields), top = typed ? SKILL_FIELDS_MAX : SKILL_SLOTS_MAX;
+    const learn = new RegExp(`^learn-(${SLOT_NUMBER})$`, 'u').exec(kindName), practice = new RegExp(`^practice-(${SLOT_NUMBER})$`, 'u').exec(kindName);
+    if ((!learn && !practice) || Number((learn ?? practice)[1]) > top) return null;
+    const slots = Array.from({ length: top }, (_, i) => ({ n: i + 1, type: skillTypeOf(fields, i + 1), name: typeof fields[`skill${i + 1}`] === 'string' ? fields[`skill${i + 1}`] : '', signature: signatureAt(fields.sig, i + 1) }));
     if (learn) {
         const wanted = fold(args.name);
         const same = wanted ? slots.find(slot => slot.name && fold(slot.name) === wanted) : undefined;
         if (same?.signature) return { refuse: fill(J.signature, { who: typeof fields.who === 'string' ? fields.who : '', skill: same.name }) };
         if (same) return { kind: `learn-${same.n}`, slot: same.n, name: same.name, update: true };
+        if (typed) return typedLearn(slots, learn, args, fields, room);
         const at = Number(learn[1]);
         const free = at <= room && !slots[at - 1].name ? at : slots.find(slot => slot.n <= room && !slot.name)?.n;
         if (free) return { kind: `learn-${free}`, slot: free, name: args.name };
@@ -45,6 +47,18 @@ function skillRoute(fields, kindName, args, reason, room = SKILL_SLOTS_BASE) {
     const named = skillNamed(slots, reason);
     const slot = named ? named.n : Number(practice[1]);
     return { kind: `practice-${slot}`, slot, name: slots[slot - 1].name };
+}
+// A learn line for a new name in a block with types: the line's `type` (utility, else combat) names the pool. A combat skill needs a free one of the slots the level opens (`room`), a
+// utility skill one of the three; the skill goes to the slot the line names if it is empty, else the first empty one (any slot holds either type).
+function typedLearn(slots, learn, args, fields, room) {
+    const type = args.type === 'utility' ? 'utility' : 'combat', cap = type === 'utility' ? UTILITY_SLOTS : room;
+    const held = slots.filter(slot => slot.name && slot.type === type).length, empty = slots.filter(slot => !slot.name);
+    if (held >= cap || !empty.length) {
+        return { refuse: type === 'utility' ? fill(J.utilityFull, { skill: args.name, max: UTILITY_SLOTS })
+            : `No free skill slot for ${args.name}. ${held >= SKILL_SLOTS_MAX ? J.slotsFull : fill(J.slotLater, { level: Math.max(0, held + 1 - SKILL_SLOTS_BASE) * SKILL_SLOTS_EVERY })}`, full: true };
+    }
+    const at = Number(learn[1]), free = empty.find(slot => slot.n === at) ?? empty[0];
+    return { kind: `learn-${free.n}`, slot: free.n, name: args.name };
 }
 // How many skill slots a Skills block has open: the slots it has, as far as its character's level opens them (names.js skillSlots); a Skills block no Character names is read at level 1.
 function skillRoom(state, definition, fields) {

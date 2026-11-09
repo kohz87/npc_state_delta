@@ -17,6 +17,7 @@ import { LIMITS as PACK_LIMITS, TAB_ID } from '../../packs/limits.js';
 import { byteLength, checkPlain } from '../../packs/safety.js';
 import { STRINGS } from '../../strings.js';
 import { hasIcon } from '../../view/icons/index.js';
+import { isTypedSkills } from '../../skill-slots.js';
 
 /** Checked definitions plus an optional catalog for imports from other packs. No state is read. */
 export function validateDataModules(value, { packId, capabilities = [], definitions = [] } = {}) {
@@ -58,7 +59,13 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
             else show.tabName = oneLine(show.tabName);
         }
         if (byteLength(JSON.stringify(definition)) > L.definitionBytes) add('DM_BUDGET', at, `A definition must fit ${L.definitionBytes} UTF-8 JSON bytes.`);
-        for (const [key, schema] of named(definition.state, definition.role === 'skills' ? L.skillsFields : L.fields, `${at}.state`, add)) scalar(schema, `${at}.state.${key}`, add);
+        const typedSkills = definition.role === 'skills' && isTypedSkills(definition.state);
+        for (const [key, schema] of named(definition.state, definition.role === 'skills' ? (typedSkills ? L.skillsFields : L.skillsLegacyFields) : L.fields, `${at}.state`, add)) {
+            scalar(schema, `${at}.state.${key}`, add);
+            if (schema?.scale !== undefined && (definition.role !== 'character' || !['health', 'stamina', 'mana'].includes(key) || schema.blocks !== key)) add('DM_SCHEMA', `${at}.state.${key}.scale`, STRINGS.blocks.scaleKey);
+        }
+        if (['health', 'stamina', 'mana'].some(key => definition.state?.[key]?.scale === 2)
+            && !['health', 'stamina', 'mana'].every(key => definition.state?.[key]?.scale === 2 && definition.state[key].blocks === key)) add('DM_SCHEMA', `${at}.state`, 'A scaled character needs all three scaled bars.');
         layoutKeys(definition, at, add);
         if (definition.role !== undefined) stageFields(definition, at, add);
         imports(definition, at, add); // forms first, linking before expression analysis below
@@ -98,7 +105,7 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
             reward.when ??= true;
             effects(reward.effects, rewardEnv, `${path}.effects`, add, { reward: true });
         }
-        for (const [name, kind] of named(definition.kinds, L.kinds, `${at}.kinds`, add)) {
+        for (const [name, kind] of named(definition.kinds, definition.role === 'skills' && isTypedSkills(definition.state) ? L.skillsKinds : L.kinds, `${at}.kinds`, add)) {
             const path = `${at}.kinds.${name}`;
             if (!shape(kind, D.kind, path, add)) continue;
             if (kind.check !== undefined) add('DM_SCHEMA', `${path}.check`, 'SD checks inside a dm root need data-modules v1.1; this definition needs data-modules v1.1.');

@@ -66,7 +66,7 @@ export function renderDistribute(parent, { character, session = null, api = {}, 
         if (saveButton) saveButton.disabled = run.busy || !changed;
         if (resetButton) resetButton.disabled = run.busy || !changed;
         if (note) note.textContent = words();
-        if (growth) growth.textContent = growthText(growthOf(run.draft, { statMax: standard()?.statMax }));
+        if (growth) growth.textContent = growthText(growthOf(run.draft, { statMax: standard()?.statMax, scale: character.scale }));
     }
 
     function draw() {

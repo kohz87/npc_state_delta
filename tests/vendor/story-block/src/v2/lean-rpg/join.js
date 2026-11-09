@@ -136,8 +136,19 @@ export function joinDraft({ name = '', about = '', soul = 1, best = '', skills =
  * The two definitions a joining companion is made of (`used`: the ids of the story's blocks, so the slugs are free). The Character
  * starts with no unspent points: the named stat is raised and the rest left as it was, as the line said.
  */
-export const joinDefinitions = (request, { used = [], soul = request.soul, rules = null, cap = null, legacy = false } = {}) =>
-    buildDefinitions(joinDraft({ ...request, soul }, rules), { used, points: 0, cap, legacy });
+export const joinDefinitions = (request, { used = [], soul = request.soul, rules = null, cap = null, legacy = false, scale = 2, typed = true } = {}) =>
+    buildDefinitions(joinDraft({ ...request, soul }, rules), { used, points: 0, cap, legacy, scale, typed });
+
+/**
+ * A Re-read takes the joined character's scale from that reply's pin. Otherwise choose 1 when all existing character pins are old, else 2.
+ * Inspect pins even when a character has left or has no readable name; those old pins still identify the story's existing scale.
+ */
+export const joinScale = (state, standing = null, module = null) => {
+    const joined = module && standing ? activeDefinition(standing, module) : null;
+    if (joined?.role === 'character') return joined.state?.health?.scale === 2 ? 2 : 1;
+    const pins = Object.keys(state?.domains?.dataModules?.active ?? {}).map(id => activeDefinition(state, id)).filter(definition => definition?.role === 'character');
+    return pins.length && !pins.some(definition => definition.state?.health?.scale === 2) ? 1 : 2;
+};
 
 /**
  * The offers on a reply: the `+ party` lines that asked (Ask), read from the reply's receipts (`entries`: store.receipts() as a

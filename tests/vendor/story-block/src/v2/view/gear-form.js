@@ -113,6 +113,9 @@ export function editFields(p) {
         { key: 'count', label: F.count, type: 'number', min: 1, value: Number(p?.itemCount ?? 1), group: F.groupItem, row: 'ck' },
         { key: 'kind', label: F.kind, type: 'choice', options: kindOptions(), value: gear.kind ?? 'goods', group: F.groupItem, row: 'ck' },
         { key: 'note', label: F.note, type: 'text', value: String(p?.itemNote ?? ''), maxLength: NOTE_MAX, group: F.groupItem },
+        // (only the reader sets it; the story never does)
+        { key: 'carry', label: F.carry, type: 'number', min: 0, max: 500, value: Number.isSafeInteger(row.carry) ? row.carry : 0, group: F.groupItem },
+        { key: 'carryHelp', type: 'note', text: F.carryHelp, group: F.groupItem },
         { key: 'slot', label: F.slot, type: 'choice', options: slotOptions(), value: String(row.defSlot ?? ''), group: F.groupGear, row: 'sr', showWhen: SHOWN },
         { key: 'rarity', label: F.rarity, tone: true, type: 'choice', options: rarityOptions(), value: equipment || kit ? String(gear.rarity ?? 'common') : 'common', group: F.groupGear, row: 'sr', showWhen: SHOWN,
             ...(kit ? {} : { disabled: true, title: F.laterTitle }) },
@@ -151,6 +154,10 @@ export function editPlan(p) {
             }
         }
         const steps = [];
+        if (changed.carry !== undefined) {
+            if (!Number.isSafeInteger(all.carry) || all.carry < 0 || all.carry > 500) return { error: E.carryRange.replace('{max}', '500') };
+            steps.push({ command: 'inventory.carry', payload: { stack, carry: all.carry }, keys: ['carry'] });
+        }
         if (Object.keys(payload).length > 2) steps.push({ command: 'inventory.edit', payload, keys: ['name', 'count', 'note', 'kind', 'slot', 'rarity', 'stat1', 'points1', 'stat2', 'points2'] });
         // Who wears it: only for equipment; leaving Equipment takes it off inside the edit itself.
         if (all.kind === 'equipment') {

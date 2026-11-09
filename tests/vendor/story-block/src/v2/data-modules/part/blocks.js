@@ -7,6 +7,7 @@ import { activeDefinition, inputsOf, instanceOf, resolveActor } from '../adapter
 import { hashJson } from '../../replay.js';
 import { fill } from '../../strings.js';
 import { actorIdOf } from '../../lean-rpg/roster.js';
+import { isTypedSkills } from '../../skill-slots.js';
 import { E, B, J, stateOf, draftOf, activeCount, blockCount, instancePath, checkedTarget, newInstance } from './shared.js';
 
 export function createBlocks(deps) {
@@ -87,7 +88,7 @@ export function createBlocks(deps) {
         // Each field and each button is a slot the form uses. A block with a role is a template written by hand, whose stats and latches are
         // fields no kind sets: only its kinds count.
         const slots = definition.role ? Object.keys(definition.kinds).length : Object.keys(definition.state).length + Object.values(definition.kinds).filter(kind => kind.ui).length;
-        if (slots > L.kinds) refuse('DM_BUDGET', 'fields', B.kindLimit);
+        if (slots > (definition.role === 'skills' && isTypedSkills(definition.state) ? L.skillsKinds : L.kinds)) refuse('DM_BUDGET', 'fields', B.kindLimit);
         dependency(definition, prefix);
         const inputs = inputsOf(prefix, definition), hash = dataModuleHash(definition);
         const generation = Math.max(ctx.rev, (old?.generation ?? 0) + 1);

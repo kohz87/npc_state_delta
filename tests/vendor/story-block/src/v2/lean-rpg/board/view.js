@@ -12,10 +12,12 @@ import { readSheet } from '../read.js';
 import { planGear } from '../gear.js';
 import { isStandard } from '../rules.js';
 import { boardFlags } from './overrides.js';
+import { healthStrip } from './view-bars.js';
 import { boardChoices, memberGroups as groupsOfMembers, memberHealthWord, memberOrderLine, memberPackLine, memberTargetLine, pendingAwards, pendingAwardsLine, standingMembers, targetLabel } from './view-data.js';
 import { boardSession, discardBoard, openBoard, reconcileBoard, stageExchange } from './session.js';
 import { equipmentForBoard, playBoard } from './engine.js';
 import { barMovement, settledNote } from './note.js';
+import { areaLineGroups } from './order.js';
 import { dropOf } from '../ambush.js';
 import { AUTO_CAP, autoExchanges } from '../names.js';
 import { autoNote, runAuto } from './auto-run.js';
@@ -33,16 +35,23 @@ export const pressButton = (doc, text, cls, act) => {
 };
 const signed = n => n >= 0 ? `+${n}` : String(n);
 const labelLine = line => {
-    const pc = line.pc ?? {}, foe = line.foe ?? {}, who = line.flee ? `${pc.who} flees` : line.kind === 'foe' ? `${foe.name} attacks ${pc.who}` : `${pc.who} → ${foe.name}`;
+    const pc = line.pc ?? {}, foe = line.foe ?? {}, who = line.flee ? `${pc.who} flees` : line.support ? `${pc.who} heals ${line.target}` : line.reduced ? `… also hits ${foe.name} (reduced)` : line.kind === 'foe' ? `${foe.name} attacks ${pc.who}` : `${pc.who} → ${foe.name}`;
     const bonus = (pc.statBonus ?? 0) + (pc.classBonus ?? 0) + (pc.rank ?? 0) + (pc.edge ?? 0);
     const changes = [line.damage ? barMovement(line.damage) : '', line.cost ? barMovement(line.cost, true) : ''].filter(Boolean);
     const skill = line.skill ? ` (${line.skill})` : '';
     const verdict = `${line.kind === 'foe' ? `${pc.who}'s defence${skill}: ` : ''}${String(line.outcome).toUpperCase()}`;
     return `${who}${line.kind === 'foe' ? '' : skill}: d20 ${pc.die} ${signed(bonus)} = ${pc.total} vs ${foe.total ?? line.dc} — ${verdict}${line.decisive ? ', DECISIVE' : ''}${changes.length ? ` · ${changes.join(' · ')}` : ''}`;
 };
+const labelAreaGroup = group => {
+    const line = group[0], name = line.aoeName || line.foe?.name || '';
+    const changes = group.flatMap(item => [item.damage ? barMovement(item.damage) : '', item.cost ? barMovement(item.cost, true) : '']).filter(Boolean);
+    if (line.reduced) return `… also ${line.outcome === 'fail' ? 'targets' : 'hits'} ${name} (reduced)${changes.length ? ` → ${changes.join(', ')}` : line.outcome === 'fail' ? ' — FAIL' : ''}`;
+    const base = labelLine({ ...line, foe: { ...line.foe, name }, damage: undefined, cost: undefined });
+    return `${base}${line.aoeNoTarget ? ' · main target Down' : ''}${changes.length ? ` → ${changes.join(', ')}` : ''}`;
+};
 
 // A read-only member card in the Fight tab's own foe-card shape: name and level pills, then the existing segmented meter.
-function drawMemberCard(doc, parent, member, realFoes, handles) {
+export function drawMemberCard(doc, parent, member, realFoes, handles) {
     const real = (Array.isArray(realFoes) ? realFoes : []).find(foe => Number(foe.slot) === Number(member.group));
     const value = Math.max(0, Math.trunc(Number(member?.value ?? member?.hurt) || 0));
     const max = Math.max(1, Math.trunc(Number(member?.size) || 1)), shown = Math.min(value, max);
@@ -61,7 +70,7 @@ function drawMemberCard(doc, parent, member, realFoes, handles) {
     bar.setAttribute('data-foe-health', String(member?.slot ?? ''));
     bar.appendChild(slot);
     node.appendChild(bar);
-    handles.push(meter.render(slot, { label: 'Health', value: shown, max, tone: stageTone(shown, max), text: memberHealthWord(member), segments: max, icon: 'fa-heart' }, {}));
+    handles.push(meter.render(slot, healthStrip({ value: shown, max, tone: stageTone(shown, max), word: memberHealthWord(member), icon: 'fa-heart' }), {}));
     if (member?.pack && !down) node.appendChild(h(doc, 'p', 'rpg-pack-line', memberPackLine(member)));
 }
 
@@ -118,11 +127,19 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
         if (!held) fresh(session, state);
         const played = held ? { error: meta()?.rpgFightHeldDiscarded?.[sid]
             ? 'The fight was discarded. Regenerate the held reply.'
-            : 'The fight reply is waiting. Restore the sheet or gear, or discard the fight and regenerate the reply.' }
-            : !matched ? { error: 'The fight no longer matches this reply. Restore the reply or discard the fight.' }
+            : 'The fight reply is waiting. Restore the sheet or gear, or discard the fight (Fight tab, Discard fight) and regenerate the reply.' }
+            : !matched ? { error: 'The fight no longer matches this reply. Restore the reply or discard the fight (Fight tab, Discard fight).' }
             : !isStandard(rules()) ? { error: 'The fight board needs Standard rules. Switch back to Standard or discard this fight.' }
             : playBoard(state, session.setup, session.exchanges);
         return { session, played, heldSid: held ? sid : null };
+    };
+    // Whether the Fight tab draws a board now (the gate of `snapshot`, with none of its writes): a held reply's fight, a staged exchange, or a board
+    // open on the head reply. The Fight tab stays listed for it with no foe on the sheet, so "Fight tab, Discard fight" always has a place to go.
+    const kept = () => {
+        if (!on()) return false;
+        const index = store?.headIndex?.(), sid = store?.carrierSid?.(index), session = current();
+        if (heldForSid(meta(), sid, (store?.receipts?.() ?? []).filter(entry => entry.index === index).map(entry => entry.receipt))) return true;
+        return Boolean(session) && (session.exchanges?.length > 0 || session.anchor === sid);
     };
     const open = ({ state = headState(), opening = null, result: approach = null } = {}) => {
         if (!on() || !isStandard(rules())) return false;
@@ -169,8 +186,10 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
         const discard = () => { discardBoard(meta()); if (heldSid) discardHeld(meta(), heldSid); start?.discard?.(); persist(); reset(); redraw(); };
         const confirmDiscard = panel => {
             panel.appendChild(h(doc, 'p', '', 'Discard this fight and its unsent exchanges?'));
-            panel.appendChild(button(doc, 'Discard fight', 'ss-button rpg-board-confirm', discard));
-            panel.appendChild(button(doc, 'Cancel', 'ss-button', () => { confirm = false; redraw(); }));
+            const pair = h(doc, 'div', 'rpg-board-actions rpg-board-confirm-row');   // one row, 8px apart (never stacked)
+            pair.appendChild(button(doc, 'Discard fight', 'ss-button rpg-board-confirm', discard));
+            pair.appendChild(button(doc, 'Cancel', 'ss-button', () => { confirm = false; redraw(); }));
+            panel.appendChild(pair);
         };
         if (notice) root.appendChild(h(doc, 'p', 'rpg-board-error', notice));
         if (!listening) { doc.addEventListener?.('keydown', keydown, true); listening = true; }
@@ -184,6 +203,7 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
             root.appendChild(panel);
             return;
         }
+        const tools = h(doc, 'div', 'rpg-board-actions');   // Auto / Back on the left, Discard fight at the far end, in one row
         const state = played.state, { ranks, playerRank } = levels(), party = readParty(state, { own: readerName(), roleOf, ranks, playerRank }), foes = readFoes(state, { roleOf, ranks });
         const members = Array.isArray(played.result.members) ? played.result.members : null;
         root.classList.toggle('rpg-board-members', members !== null);
@@ -197,14 +217,14 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
                 const card = h(doc, 'article', 'rpg-foe ss-glass');
                 card.appendChild(h(doc, 'p', 'rpg-name', `${foe.name} · ${foe.levelText}`));
                 const slot = h(doc, 'div', 'rpg-bar-meter'); card.appendChild(slot);
-                handles.push(meter.render(slot, { label: 'Health', value: foe.hurt, max: foe.max ?? 5, tone: foe.hurt ? 'warn' : 'bad', text: foe.word, segments: foe.max ?? 5 }, {}));
+                handles.push(meter.render(slot, healthStrip({ value: foe.hurt, max: foe.max ?? 5, tone: foe.hurt ? 'warn' : 'bad', word: foe.word }), {}));
                 cards.appendChild(card);
             }
         }
         for (const character of party) {
             const card = h(doc, 'article', 'rpg-pc ss-glass');
             card.appendChild(h(doc, 'p', 'rpg-name', character.name));
-            const bars = Object.fromEntries(Object.entries(character.bars).map(([key, bar]) => [key, { ...bar, text: bar.word }]));
+            const bars = Object.fromEntries(Object.entries(character.bars).map(([key, bar]) => [key, { ...bar, text: bar.text ?? bar.word }]));
             drawStageBars(doc, card, { ...character, bars }, { api: null, handles });
             cards.appendChild(card);
         }
@@ -223,7 +243,8 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
             for (const line of result.opening ?? []) logContent.appendChild(h(doc, 'p', '', `Opening · ${labelLine(line)}`));
             for (const round of result.rounds ?? []) {
                 logContent.appendChild(h(doc, 'p', 'rpg-board-round', `Exchange ${round.n}`));
-                for (const line of round.lines) logContent.appendChild(h(doc, 'p', '', labelLine(line)));
+                for (const group of areaLineGroups(round.lines)) logContent.appendChild(h(doc, 'p', '', group[0].aoe ? labelAreaGroup(group) : labelLine(group[0])));
+                for (const item of round.idle ?? []) if (item.why === 'no-resource') logContent.appendChild(h(doc, 'p', '', `${item.who} cannot heal: the skill's resource is Empty.`));
             }
         }
         if (!logContent.childNodes.length) logContent.appendChild(h(doc, 'p', '', 'Choose an action to begin.'));
@@ -231,7 +252,7 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
         root.appendChild(log);
         const panel = h(doc, 'div', 'rpg-board-controls');
         const gear = session.setup.gear ? equipmentForBoard(state, session.setup.gear) : {};
-        const memberGroupList = members ? groupsOfMembers(members, foes) : null;
+        const memberGroupList = members ? groupsOfMembers(members, foes, { aoe: session.setup.aoe === 1 }) : null;
         const data = boardChoices(state, { ...session.setup, ...gear }, chosen, memberGroupList), ended = played.result.stop !== 'open', sending = ended && Boolean(start?.sending?.());
         const standing = members ? standingMembers(members) : data.foes;
         if (confirm) confirmDiscard(panel);
@@ -250,11 +271,13 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
             }));
         } else {
             if (autoLine) panel.appendChild(h(doc, 'p', 'rpg-board-auto-note', autoLine));
-            panel.appendChild(h(doc, 'p', 'rpg-board-prompt', targeting ? (targeting.groupMode ? 'Choose a group' : 'Choose a target') : `${data.actor?.who ?? 'Party'}: choose an action`));
+            const mainTarget = Boolean(targeting?.groupMode) && session.setup.aoe === 1;
+            panel.appendChild(h(doc, 'p', 'rpg-board-prompt', mainTarget ? `${data.actor?.who ?? 'Party'}: ${targeting.action.skill} (area)` : targeting ? (targeting.groupMode ? 'Choose a group' : 'Choose a target') : `${data.actor?.who ?? 'Party'}: choose an action`));
+            if (mainTarget) panel.appendChild(h(doc, 'p', 'rpg-board-area-note', 'Hits every enemy group. The group you pick takes the full effect, and the others take one Health block less.'));
             if (!targeting) panel.appendChild(h(doc, 'p', 'rpg-board-defence', `Defence: ${data.defence ?? 'plain defence'}, automatic`));
             const list = h(doc, 'div', 'rpg-board-choices');
             const options = targeting ? (targeting.groupMode
-                ? memberGroupList.map((group, at) => ({ label: `${at + 1}. ${group.label}`, group: group.group, literal: true }))
+                ? memberGroupList.map((group, at) => ({ label: mainTarget ? `Main target: ${group.label}` : `${at + 1}. ${group.label}`, group: group.group, literal: true }))
                 : standing.map((foe, at) => members
                     ? { label: memberTargetLine(foe, at + 1), target: foe.slot, literal: true }
                     : { label: targetLabel(foe), target: foe.slot }))
@@ -268,6 +291,7 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
                     targeting = null;
                 }
                 else if (item.action.kind === 'flee') chosen = [item.action];
+                else if (item.action.support) chosen.push(item.action);
                 else if (item.action.area && members) {
                     if (memberGroupList.length > 1) targeting = { groupMode: true, action: item.action };
                     else chosen.push({ ...item.action, ...(memberGroupList[0] ? { group: memberGroupList[0].group } : {}) });
@@ -295,14 +319,13 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
                 line.setAttribute('data-choice', String(at + 1)); list.appendChild(line);
             });
             panel.appendChild(list);
-            if (autoNode) panel.appendChild(autoNode);
+            if (autoNode) tools.appendChild(autoNode);
             if (!targeting && autoLine && session.exchanges.length && start?.waiting?.() && !start.sending?.())
                 panel.appendChild(pressButton(doc, 'Send with this fight', 'ss-button ss-button-primary rpg-board-send', () => { start.send(); redraw(); }));
-            if (targeting) panel.appendChild(button(doc, 'Back', 'ss-button rpg-board-back', () => { targeting = null; redraw(); }));
+            if (targeting) tools.appendChild(button(doc, 'Back', 'ss-button rpg-board-back', () => { targeting = null; redraw(); }));
         }
         if (ended) panel.classList.add('rpg-board-ended');
         if (!sending) {
-            const tools = h(doc, 'div', 'rpg-board-actions');
             tools.appendChild(button(doc, 'Discard fight', 'ss-button rpg-board-discard', () => { confirm = true; redraw(); }));
             panel.appendChild(tools);
         }
@@ -371,5 +394,5 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
         if (event.key === 'Escape' && targeting) { event.preventDefault?.(); event.stopImmediatePropagation?.(); event.stopPropagation?.(); keyRoot.querySelector('.rpg-board-back')?.click(); return; }
         if (/^[1-9]$/u.test(event.key)) { const node = keyRoot.querySelector(`[data-choice="${event.key}"]`); if (node && !node.disabled) { event.preventDefault?.(); node.click(); } }
     };
-    return { open, auto, snapshot, offer, render, clear() { keyRoot = null; generation += 1; }, destroy() { keyRoot = null; doc.removeEventListener?.('keydown', keydown, true); listening = false; } };
+    return { open, auto, kept, snapshot, offer, render, clear() { keyRoot = null; generation += 1; }, destroy() { keyRoot = null; doc.removeEventListener?.('keydown', keydown, true); listening = false; } };
 }

@@ -54,7 +54,7 @@ export function createPromptBuild(s, deps) {
         const cues = {};
         let committed = false;
         const prechecks = [];
-        let previewState = null;
+        let previewState = null, boardStop = null;
         const requested = [];
         const commit = !dryRun && type !== 'continue';
         // `again`: an earlier attempt at this reply was never captured (a retried interceptor), so a hook may reuse its work.
@@ -69,6 +69,19 @@ export function createPromptBuild(s, deps) {
             if (out === TIMED_OUT) {
                 problem({ module: moduleId, code: 'TIMEOUT', message: `beforeGenerate did not answer within ${limit / 1000} s; the reply went on without its notes.` });
                 continue;
+            }
+            // The foe pre-check found new foes (lean-rpg/precall.js): the opening is previewed, recorded as the hold, and the send waits for the reader's choice.
+            // If the opening cannot be prepared, the send goes on as it does without the pre-check (nothing is recorded).
+            if (out?.fightStart?.opening) {
+                const chat = ctx?.chat ?? [], last = chat.at(-1);
+                if (!last?.is_user || readRecord(chat.at(-2))?.sid !== out.fightStart.anchor || hashText(String(last.mes ?? '').trim()) !== out.fightStart.message) {
+                    return { blocked: { moduleId, reason: 'The chat changed while the fight was being prepared.' } };
+                }
+                const result = bus.run(RPG_RESOLVE, out.fightStart.opening, { cause: 'system' });
+                if (result?.ok && result.receipt?.data?.v2?.result?.opened?.length
+                    && holdStart(metadata(), ctx?.chat, { mode: 'new', opening: { payload: out.fightStart.opening, seed: result.receipt.seed }, result: result.receipt.data.v2.result })) {
+                    return { blocked: { moduleId, reason: 'Choose how to play the waiting fight.', fightStart: true } };
+                }
             }
             // A merged hook (domains/index.js mergeParts) keeps the answers of the parts that did answer and reports the others.
             for (const entry of Array.isArray(out?.problems) ? out.problems : []) problem({ module: moduleId, code: entry.code, message: entry.message });
@@ -114,6 +127,8 @@ export function createPromptBuild(s, deps) {
             if (result?.ok) {
                 // The RPG's rolls move bars (hits, heals, skill costs): the tail's block lines are read from the state they leave, so they say what the cue says.
                 if (preludeType === RPG_RESOLVE && result.state) previewState = result.state;
+                // How the carried board fight ended (won / fled / lost / open): the tail reads it to allow a new foe group only after an ended fight.
+                if (preludeType === RPG_RESOLVE && payload?.board) boardStop = result.receipt?.data?.v2?.result?.stop ?? null;
                 prechecks.push({ type: preludeType, payload, seed: result.receipt.seed });
                 // A prelude that says it is not for the narrator (`narrate: false`, the RPG's no-rolls note) is stored with the reply and told to no one.
                 if (result.receipt.narrate === false) continue;
@@ -132,7 +147,7 @@ export function createPromptBuild(s, deps) {
             store.deferSave?.();
             s.deferred = true;
         }
-        return { cues, prechecks, previewState };
+        return { cues, prechecks, previewState, boardStop };
     }
 
     // What modules send with the reply on their own, under their own prompt keys (SPEC §5: NPC State
@@ -163,10 +178,10 @@ export function createPromptBuild(s, deps) {
         return out;
     }
 
-    function build(cues = {}, state = null) {
+    function build(cues = {}, state = null, boardStop = null) {
         const untold = store.untold();
         // (`state`: the state the reply's prelude rolls leave, when it has one; the tail's lines are made from it)
-        const current = state ? makeView({ store, registry, settings, chat: ctx?.chat, active: viewReader, state }) : view();
+        const current = state ? makeView({ store, registry, settings, chat: ctx?.chat, active: viewReader, state, boardStop }) : view();
         const own = sentByModules(current);
         const ownTokens = own.reduce((sum, part) => sum + part.tokens, 0);
         const result = assemble({ registry, view: current, untold, settings: hostSettings(), cues, substitute: text => substituteNames(text, ctx), context: contextNow(), ownTokens, rolled: state !== null });
@@ -334,7 +349,7 @@ export function createPromptBuild(s, deps) {
             }
             await ensureModules({ store, bus, registry, events });
             if (s.heldBoard) {
-                block({ moduleId: 'story-block', reason: 'Restore the fight sheet or gear, or discard the fight and regenerate the held reply.', keepSession: true }, abort);
+                block({ moduleId: 'story-block', reason: 'Restore the fight sheet or gear, or discard the fight (Fight tab, Discard fight) and regenerate the held reply.', keepSession: true }, abort);
                 return;
             }
             const blocked = await blockedBy(kind);
@@ -342,9 +357,9 @@ export function createPromptBuild(s, deps) {
                 block(blocked, abort);
                 return;
             }
-            const { cues, prechecks, previewState, blocked: cueBlocked } = await runCues(kind);
+            const { cues, prechecks, previewState, boardStop, blocked: cueBlocked } = await runCues(kind);
             if (cueBlocked) { block(cueBlocked, abort); return; }
-            const built = build(cues, previewState);
+            const built = build(cues, previewState, boardStop);
             tellTooSmall(built.fit);
             const chat = ctx.chat;
             const last = chat.length - 1;

@@ -10,6 +10,7 @@ import { oneLine } from '../../../text.js';
 import { editableLayout } from '../editable-layout.js';
 import { blockTabScreen } from '../block-screen.js';
 import { boardGrammar, boardXpGuide } from '../board-static.js';
+import { isMarkedCharacter } from '../recovery.js';
 import { rpgLib } from '../../rpg-lazy.js';
 import { hashOf, sizeOf, subjectsOf, activeCount, blockCount, checkedTarget } from './shared.js';
 
@@ -83,9 +84,11 @@ export function grammarFor(state, quiet = null, { rolled = false, board = false 
     // that told it to practise a skill say nothing of it (the Combat rules' XP guide line, the Skills block's description).
     const noPractice = text => String(text ?? '').replace(/\s*Practice a skill 5 to 20 per use\./u, '').replace(/\s+and adds practice/u, '');
     const active = Object.keys(state?.domains?.dataModules?.active ?? {});
+    const marked = active.some(id => isMarkedCharacter(activeDefinition(state, id)));
     const seen = new Map();
     const lines = active.map(id => {
-        const definition = activeDefinition(state, id);
+        let definition = activeDefinition(state, id);
+        if (marked && definition?.role === 'rules' && typeof definition.prompt === 'string') definition = { ...definition, prompt: definition.prompt.replace(/\s*XP guide:.*$/gmu, '').trim() };
         // (The board's pieces come from a static file, so a preview before the lazy RPG library has loaded words them the same.)
         const only = (board && boardGrammar(definition?.role)) || (quiet && definition?.role ? quiet[definition.role] : null);
         if (definition && only?.skip) {
@@ -102,10 +105,11 @@ export function grammarFor(state, quiet = null, { rolled = false, board = false 
 
 // Witnesses contain only relevant local paths. A guard never interprets effects or asks live
 // services: it verifies the recorded decision against the prefix and allows the host's saved ops.
-export function replayInputs(state, { module, subject = 'chat', reads = [], imports = [], actor = false, adapters = null, subjects = [], available = [] } = {}) {
+export function replayInputs(state, { module, subject = 'chat', reads = [], imports = [], actor = false, adapters = null, subjects = [], available = [], clock = false } = {}) {
     const domain = state?.domains?.dataModules, active = domain?.active?.[module];
     const definition = activeDefinition(state, module), instance = instanceOf(state, module, subject);
     return { active: active ? { hash: active.hash, generation: active.generation, attached: active.subjects.includes(subject) } : null,
+        ...(clock ? { clock: state?.domains?.director?.time?.minutes ?? null } : {}),
         reads: reads.map(path => ({ path, value: copy(atPath(instance, path)) })),
         imports: Object.fromEntries(imports.map(alias => [alias, (adapters ?? definition?.imports)?.[alias] ? projectImport(state, (adapters ?? definition.imports)[alias]) : null])),
         actor: actor ? actorsOf(state)[subject] ?? null : null,

@@ -6,12 +6,15 @@ import { readRecord } from '../persist.js';
 import { fold } from '../lean-rpg/read.js';
 
 const KEY = 'rpgFightStart';
+// A running check is page-local. A copied or reloaded metadata object cannot still have a call in flight.
+const working = new WeakMap();
 const anchorOf = chat => readRecord(chat?.at(-2))?.sid;
 const keyOf = message => hashText(String(message?.mes ?? '').trim());
 
 export function pendingStart(meta, chat) {
     const pending = meta?.[KEY], last = chat?.at(-1);
-    if (!pending || !last?.is_user || !pending.anchor || pending.anchor !== anchorOf(chat) || pending.message !== keyOf(last)) return null;
+    if (!pending || !last?.is_user || !pending.anchor || pending.anchor !== anchorOf(chat) || pending.message !== keyOf(last)
+        || (pending.mode === 'working' && working.get(meta) !== pending)) return null;
     return pending;
 }
 
@@ -20,11 +23,15 @@ export function holdStart(meta, chat, value = {}) {
     if (!meta || typeof meta !== 'object' || !last?.is_user || !anchor || !String(last.mes ?? '').trim()) return null;
     const pending = { anchor, message: keyOf(last), mode: 'known', choice: null, ...value };
     meta[KEY] = pending;
+    if (pending.mode === 'working') working.set(meta, pending); else working.delete(meta);
     return pending;
 }
 
-export function clearStart(meta) {
-    if (meta && typeof meta === 'object') delete meta[KEY];
+export function clearStart(meta, expected = null) {
+    if (meta && typeof meta === 'object' && (!expected || meta[KEY] === expected)) {
+        working.delete(meta);
+        delete meta[KEY];
+    }
 }
 
 // The gate for a known fight must not turn a conversation or a quiet observation into a fight.

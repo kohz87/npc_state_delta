@@ -6,7 +6,7 @@ import { activeDefinition, inputsOf, instanceOf } from '../adapters.js';
 import { cutAt, oneLine } from '../../../text.js';
 import { roleTail } from '../../lean-rpg/tail.js';
 import { barOf, sizeOf as barSizeOf, spreadWord, wordsOf } from '../../lean-rpg/blocks.js';
-import { SKILL_SLOTS_BASE, SKILL_SLOTS_MAX } from '../../skill-slots.js';
+import { SKILL_SLOTS_BASE, skillFieldSlots } from '../../skill-slots.js';
 import { kept, subjectsOf } from './shared.js';
 import { moduleView } from './views.js';
 
@@ -62,7 +62,7 @@ const namedChanges = (definition, before, after) => Object.entries(definition.st
 // characters); a slot that holds no skill reserves nothing. `fields` is the block's fields (none: nothing is held).
 export const tailRoom = (definition, rpg = true, fields = null) => {
     if (!(rpg && definition?.role)) return Object.values(definition?.state ?? {}).some(schema => schema?.type === 'entries') ? L.listTailTokens : L.tailTokens;
-    const held = definition.role === 'skills' && fields ? Array.from({ length: SKILL_SLOTS_MAX }, (_, i) => fields[`skill${i + 1}`]).filter(name => typeof name === 'string' && name.trim()).length : 0;
+    const held = definition.role === 'skills' && fields ? Array.from({ length: skillFieldSlots(fields) }, (_, i) => fields[`skill${i + 1}`]).filter(name => typeof name === 'string' && name.trim()).length : 0;
     return L.roleTailTokens + L.skillTailTokens * Math.max(0, held - SKILL_SLOTS_BASE);
 };
 

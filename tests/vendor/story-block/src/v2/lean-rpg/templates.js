@@ -7,6 +7,9 @@
 import { CREATION, LEVEL, STATS, STAGES, USES } from './names.js';
 import { SIGNATURE_FIELD, SKILL_SLOTS_MAX } from '../skill-slots.js';
 import { STANDARD_NUMBERS } from './formula.js';
+import { scaledCharacter } from './templates-bars.js';
+import { withRecovery } from './templates-recovery.js';
+import { typedSkills } from './templates-skills.js';
 
 const names = (words, first = 0) => Object.fromEntries(words.map((word, index) => [String(index + first), word]));
 const HEALTH = names(STAGES.health);
@@ -173,7 +176,7 @@ const sizeRule = (id, key, sizeKey, size) => ({ id, when: ['ne', get(sizeKey), s
         // A bar that shrank holds at most its new size (its new size is never below 3, so a character who is up stays up).
         { op: 'set', path: [key], value: ['min', get(key), size] }] });
 
-const standardCharacter = {
+const standardCharacterV1 = {
     slug: 'character', name: 'Character', role: 'character', schema: 1, stateVersion: 2, scope: 'chat',
     prompt: 'One character: who they are, health, stamina and mana (words, shown as bars), seven stats 1 to 20, points, Level 1 to 99 and XP to 100. The narrator sets health, mana, stamina and XP by words. The story cannot kill them outright: they die only when Down before a reply and still Down at its end. The reader sets stats and points; XP at 100 raises the Level, and every third Level gives a point.',
     show: character.show,
@@ -211,6 +214,11 @@ const standardCharacter = {
     cards: character.cards,
 };
 
+/** The Character template as it was before the doubled bars (no `scale` mark: Health 4 + VIT/5, Stamina 3 + AGI/5, Mana 3 + INT/5): a chat's earlier characters, and a companion joining a chat that has only those. */
+export const characterV1For = () => structuredClone(standardCharacterV1);
+// The template the chooser, the wizard and an import make blocks from: the same Character with the doubled bars (templates-bars.js).
+const standardCharacter = withRecovery(scaledCharacter(standardCharacterV1, SIZE));
+
 const standardFoes = {
     slug: 'foes', name: 'Foes', role: 'foes', schema: 1, stateVersion: 2, scope: 'chat',
     prompt: 'Up to four foe groups in the fight, one slot each: name, count (0 = empty slot), its level from 1 to 99 and health (words). The narrator sets a slot when a group arrives, hurts it as the fight goes and clears it when the group is down, gone, fled, captured or yielded.',
@@ -237,6 +245,9 @@ const standardFoes = {
  * The Combat rules text: the base one, a little shorter (the block's prompt holds at most 1200 characters), with the roll types and the
  * blocks in words. No numbers: the roll table, the odds and the foe's numbers are the rules' (Settings → RPG); the narrator follows the told result.
  */
+/** The most one Foes group may count: read from the stock Foes definition, so the pre-check never exceeds its own block. */
+export const FOE_COUNT_MAX = standardFoes.state.count1.max;
+
 export const COMBAT_PROMPT_STANDARD = [
     '[COMBAT SYSTEM]',
     'No Plot Armor: combat follows physical reality and the lore. Size, skill, numbers, reach, armor, terrain, preparation and Level all matter. Against a stronger foe, {{user}} loses unless a believable edge exists: ambush, terrain, numbers, poison, preparation.',
@@ -244,15 +255,18 @@ export const COMBAT_PROMPT_STANDARD = [
     'Weight & Risk: every strike, miss, wound and hesitation carries impact. Injury, fatigue, fear and pain carry into the next exchange and the next scene.',
     'Believable Outcomes: fights end when logic demands it: death, surrender, retreat, capture or collapse. Victory must be earned; survival must be justified.',
     'Rolls: tell the rolled result as given; code moves the bars for hits, heals, skill costs: never set those.',
-    'XP guide: code gives XP for a won fight and practises rolled skills; write none for them. Other deeds 5 to 40.',
 ].join('\n');
 
 const standardCombat = { ...combat, stateVersion: 2, prompt: COMBAT_PROMPT_STANDARD };
 
 /** The Standard formula's four templates, in the chooser's order. Skills are the base block with the learn guard. */
+/** The Skills template as the eight-slot release had it (no types): a Re-read of a join made before them, and a block in a chat that has only such blocks. */
+export const skillsV2For = () => structuredClone(standardSkills);
+// The Skills template new blocks are made from: the eight slots plus three utility ones, a type on every slot (templates-skills.js).
+const typedStandardSkills = typedSkills(standardSkills, 'Five combat skills (more with levels) and three utility ones, for the story only. Each has a description, a stat, what it uses, a rank and practice 0 to 100. A learn line names a skill (type combat or utility, combat if left out); 100 practice raises the rank.');
 export const STANDARD_TEMPLATES = Object.freeze([
     { name: 'Character', definition: standardCharacter },
-    { name: 'Skills', definition: standardSkills },
+    { name: 'Skills', definition: typedStandardSkills },
     { name: 'Foes', definition: standardFoes },
     { name: 'Combat rules', definition: standardCombat },
 ]);
@@ -302,3 +316,6 @@ export const SKILL_SETS = Object.freeze([
         skill('Read people', 'int', 'Spotting a lie, a worry or a hidden rank from small signs.'),
         skill('Haggle', 'cha', 'Bargaining a price down, or a favour up.')] },
 ]);
+
+/** The Standard templates with the Skills block as the eight-slot release had it (no types): what a chat made before the types still holds; the tests of such chats read it. */
+export const STANDARD_TEMPLATES_EIGHT = Object.freeze(STANDARD_TEMPLATES.map(entry => (entry.name === 'Skills' ? { name: entry.name, definition: skillsV2For() } : entry)));

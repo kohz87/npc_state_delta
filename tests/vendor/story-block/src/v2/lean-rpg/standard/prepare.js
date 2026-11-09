@@ -84,7 +84,7 @@ export function prepareStandard(plan, sheet, rules, { maxOf = () => Infinity, lv
     // What the action rolls if its skill's resource runs out before its turn: no skill, rank 0, the type's own stat.
     const NONE = { skill: null, rank: 0, stat: null, uses: null };
     // (a plain roll is a weapon attack on one foe: `area: false`; its type is physical unless the plan asked for a social or check one, because a magic type
-    // the planner wrote for a mana skill belonged to the skill, which is spent)
+    // an old planner record wrote for a mana skill belonged to the skill, which is spent)
     const plainType = (planned, skill) => (skill.skill ? (TYPE_FREE.includes(planned.type) ? planned.type : 'physical') : typeOf(planned, NONE));
     const withSkill = (skill, character, type, extra, typeBare = type, alt = null) => (skill.skill
         ? { uses: skill.uses, plain: { type: typeBare, skill: null, uses: null, ...(fix ? { area: false } : {}), pc: sideStd(character, typeBare, NONE, extra, rules) }, ...(alt && fix ? { alt } : {}) } : {});
@@ -133,7 +133,7 @@ export function prepareStandard(plan, sheet, rules, { maxOf = () => Infinity, lv
             out.acts.push({ ...entry, support: true, difficulty: act.difficulty, dc: LIMITS.dc[act.difficulty], target: { id: charId(mate), name: mate.who } });
         } else {
             const later = then && act.then ? laterOf(actor.character, act) : null;
-            out.acts.push({ ...entry, ...(act.area === true && !spent ? { area: true } : {}), ...(act.group !== undefined ? { group: act.group } : {}),
+            out.acts.push({ ...entry, ...(act.area === true && !spent ? { area: true } : {}), ...(act.group !== undefined ? { group: act.group } : {}), ...(act.aoe === true && !spent ? { aoe: true } : {}),
                 ...(later ? { then: later } : {}), foe: foeSide(foe) });
         }
     }

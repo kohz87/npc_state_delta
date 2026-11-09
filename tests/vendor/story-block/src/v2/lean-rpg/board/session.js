@@ -34,7 +34,8 @@ export function openBoard(meta, state, { sid, rules, gear = null, weapons = {}, 
     // A fight against the foes a fled or lost fight left starts from that fight's exact bars (resume.js), if the Foes block still reads what the board left.
     const resumed = resumeMembers(records, groups, sheet.foes);
     const session = { id: `${sid}:${attempt}`, origin: sid, anchor: sid, groups, ...(resumed ? { resumed: true } : {}),
-        setup: { seed, offset: 0, rules: structuredClone(rules), members: 1, ...(resumed ? { carriedMembers: resumed } : {}), ...(opened ? { opened } : {}),
+        // (`bars: 2`: the fight's rule mark for the doubled bars, set only when every character on the sheet has them; a mixed or older party plays as before)
+        setup: { seed, offset: 0, rules: structuredClone(rules), members: 1, aoe: 1, ...(sheet.characters.length && sheet.characters.every(actor => actor.scale === 2) ? { bars: 2 } : {}), ...(resumed ? { carriedMembers: resumed } : {}), ...(opened ? { opened } : {}),
             flags: boardFlags(state), weapons: structuredClone(weapons), ...(gear ? { gear: structuredClone(gear) } : {}) }, exchanges: [] };
     const preview = playBoard(state, session.setup, []);
     if (preview.error) return preview;
@@ -46,7 +47,7 @@ export function openBoard(meta, state, { sid, rules, gear = null, weapons = {}, 
 export function stageExchange(meta, state, actions) {
     const session = boardSession(meta);
     if (!session) return { error: 'Open a fight first.' };
-    if (session.exchanges.length && session.setup.witness?.offset !== session.setup.offset) return { error: 'This fight cannot be checked. Discard it and start the fight again.' };
+    if (session.exchanges.length && session.setup.witness?.offset !== session.setup.offset) return { error: 'This fight cannot be checked. Discard it (Fight tab, Discard fight) and start the fight again.' };
     const exchanges = [...session.exchanges, { actions: structuredClone(actions) }];
     const setup = { ...session.setup, witness: session.setup.witness ?? { offset: session.setup.offset, hash: boardWitness(state, session.setup) } };
     const preview = playBoard(state, setup, exchanges);
@@ -166,7 +167,7 @@ export function reconcileBoard(meta, hasReceipt) {
 
 /**
  * "Send with this fight": at the press the staged fight is copied, byte for byte, beside the reader's waiting message and its anchor reply.
- * The send takes the fight from this copy whenever the session itself is not there, so the planner can never stand in for a staged fight.
+ * The send takes the fight from this copy whenever the session itself is not there, so nothing else can stand in for a staged fight.
  */
 export function markSend(meta, pending, session) {
     if (!object(meta) || !object(pending) || !object(session) || !session.exchanges?.length || session.anchor !== pending.anchor) return false;

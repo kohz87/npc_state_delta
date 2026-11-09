@@ -45,7 +45,8 @@ const STAGE_FIELD = /^(health|mana|stamina|hurt[1-4])$/;
 export function stageFields(definition, at, add) {
     for (const [key, schema] of entries(definition.state)) {
         if (!STAGE_FIELD.test(key) || !dmObject(schema) || schema.type !== 'int' || !dmInt(schema.min) || !dmInt(schema.max)) continue;
-        if (schema.max - schema.min >= L.stages || schema.max > L.stages) add('DM_BOUNDS', `${at}.state.${key}`, fill(STRINGS.blocks.stagesLimit, { max: L.stages }));
+        const top = definition.role === 'character' && schema.scale === 2 && schema.blocks === key && ['health', 'stamina', 'mana'].includes(key) ? L.scaledStages : L.stages;
+        if (schema.max - schema.min >= top || schema.max > top) add('DM_BOUNDS', `${at}.state.${key}`, fill(STRINGS.blocks.stagesLimit, { max: top }));
     }
 }
 

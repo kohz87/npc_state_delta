@@ -18,6 +18,7 @@ export const MESSAGE_STRINGS = {
         itemAdded: 'You added {item}.', itemCount: '{name} to {qty}', itemNote: "{name}'s note",
         itemGroupRenamed: '{name} to {qty}; one renamed {renamed}',
         itemSet: 'You set {detail}.', itemUnstackable: '{name} does not stack; each piece is kept separately.',
+        carryRange: 'Carry capacity is a whole number from 0 to {max}.', carryPack: 'This item comes from a pack, which sets its own carry capacity.', carryMoney: 'Money has no carry capacity to set.',
         itemEditDamaged: 'The saved item edit is damaged.', itemEditGone: 'The item for this edit has changed or is gone.',
         itemPiecesChanged: 'The separate pieces for this edit have changed.', itemDecisionChanged: 'The item or stack chosen for this edit has changed.',
         itemGroupLimit: 'Keep at most {max} pieces of this item.',

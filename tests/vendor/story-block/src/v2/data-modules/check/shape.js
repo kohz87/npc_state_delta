@@ -79,6 +79,8 @@ export function scalar(schema, path, add, { label = false, map = true } = {}) {
     // `blocks` marks an int field as one of the Standard formula's bars: its value counts the blocks left, the bar's size comes from the stats.
     if (!label && schema.prompt !== undefined && (typeof schema.prompt !== 'boolean' || !map)) add('DM_SCHEMA', `${path}.prompt`, STRINGS.blocks.hiddenFlag);
     if (schema.names !== undefined && !map) add('DM_SCHEMA', `${path}.names`, STRINGS.blocks.namesKey);
+    // `scale: 2` (a Standard bar of the doubled sizes, templates-bars.js) goes only on a character's own bars; a bar with no mark is the earlier sizes.
+    if (schema.scale !== undefined && (schema.scale !== 2 || !['health', 'stamina', 'mana'].includes(schema.blocks))) add('DM_SCHEMA', `${path}.scale`, STRINGS.blocks.scaleKey);
     if (schema.blocks !== undefined && (label || !map || schema.type !== 'int' || !DM_BLOCK_BARS.includes(schema.blocks))) add('DM_SCHEMA', `${path}.blocks`, STRINGS.blocks.blocksKey);
     if (schema.type === 'int') {
         if (!dmInt(schema.min) || !dmInt(schema.max) || schema.min > schema.max) add('DM_BOUNDS', path, 'Integer bounds must be ordered safe integers.');

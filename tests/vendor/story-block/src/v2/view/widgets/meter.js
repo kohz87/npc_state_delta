@@ -14,12 +14,13 @@
 //   a value inside one marks the meter `ss-w-critical` (and the band it is in `ss-w-in`).
 // Each is left out when not given or outside the range; the spoken value names them in words.
 
-import { clamp, fmt, h, iconNode, num, setTone, shell, str } from './dom.js';
+import { BAR_STEPS, barStep, clamp, fmt, h, iconNode, num, setTone, shell, str } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { oneLine } from '../../../text.js';
 
 const MAX_SEGMENTS = 64;
 const MAX_TICKS = 16;
+const METER_BARS = ['health', 'stamina', 'mana'];
 const TICK_LABEL = 40;
 
 const props = {
@@ -29,6 +30,7 @@ const props = {
     label: { type: 'string', default: '' },
     tone: { type: 'string', default: 'neutral' },
     segments: { type: 'number', default: 0 },
+    bar: { type: 'string', default: '' },         // health | stamina | mana: the strip's colour, dulled in steps as it empties (bars.css)
     icon: { type: 'string', default: '' },
     text: { type: 'string', default: '' },        // the value as shown ("77 / 82" by default)
     showValue: { type: 'boolean', default: true },
@@ -151,6 +153,8 @@ function render(el, input) {
             if (hasCap) spoken.push(`can go up to ${fmt(cap)} for now`);
             if (warning) spoken.push(warning === 'low' ? 'critically low' : 'critically high');
             setTone(root, p.tone);
+            for (const name of METER_BARS) root.classList.toggle(`ss-w-bar-${name}`, p.bar === name);
+            for (const step of BAR_STEPS) root.classList.toggle(`ss-w-step-${step}`, METER_BARS.includes(p.bar) && step === barStep(ratio));
             root.classList.toggle('ss-w-full', ratio >= 1);
             root.classList.toggle('ss-w-empty', ratio <= 0);
             root.setAttribute('aria-valuemin', fmt(min));

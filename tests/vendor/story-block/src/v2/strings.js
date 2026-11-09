@@ -109,6 +109,7 @@ export const STRINGS = deepFreeze({
         hiddenLine: 'The story cannot change this.',
         namesLimit: 'Give 1 to 32 values a name.',
         namesKey: 'Names go on a number field, for whole values inside its range.',
+        scaleKey: 'Scale is 2 or left out, and goes only on a health, stamina or mana bar.',
         blocksKey: 'Blocks go on a number field of a block with a role and say which bar it is: health, stamina, mana or foe.',
         namesText: 'A name is 1 to 40 characters and not a number.',
         namesSame: 'Two values have the same name.',
