@@ -104,7 +104,7 @@ Generated 2026-11-07.
 - `appearance-text.js`: Text/form primitives, shared-prefix combination and public appearance form/version limits split from `appearance.js`.
 - `appearance-physical.js`: Physical-trait keys, enduring-trait carry, shared-piece deduplication and refinement similarity split from `appearance.js`.
 - `appearance-model.js`: Form parsing, legacy-form conversion, canonical appearance model and resolution split from `appearance.js`.
-- `appearance-fill.js`: Who a new-person look fill may write (blank, alive, no named forms), its one Refresh prompt line and the merge option name; pure, nothing stored.
+- `appearance-fill.js`: Who a new-person look fill may write (blank fields, or the hair/eyes/build missing from a partial overallAppearance; alive, no named forms), the per-feature word lists, its one Refresh prompt line, the verbatim-append gate and the merge option name; pure, nothing stored.
 - `appearance-update.js`: Form reconciliation, omitted-trait carry and appearance update application split from `appearance.js`.
 - `appearance-portrait.js`: Per-form portrait assets and resolved-appearance fingerprint split from `appearance.js`.
 - `appearance-draft.js`: Appearance editor draft and lock handling split from `appearance.js`.

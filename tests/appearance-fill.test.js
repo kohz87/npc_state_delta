@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildBackfillPrompt, buildDossierImportPrompt, buildProfileRefreshPrompt, buildScannerPrompt, createNpcRecord, DURABLE_PROFILE_LIMITS, mergeScanResult } from '../core.js';
-import { blankLookFields, fillLooksLine } from '../appearance-fill.js';
+import { appendedLooks, blankLookFields, describedFeatures, fillLooksLine, fillWanted, missingFeatures, partialLookGaps } from '../appearance-fill.js';
 
 const NONE = { relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } };
 const story = 'Tamsin, the ferry keeper from the salt marsh, tied the boat and asked the stranger for the toll. The tide was out.';
@@ -14,6 +14,7 @@ const run = (npc, update, context, extra = {}) => mergeScanResult(state(npc), {
     npcs: [{ id: npc.id, name: 'Tamsin', ...NONE }], profileUpdates: [{ id: npc.id, ...update }], keyRelationshipEdges: [],
 }, { turn: 5, sourceMessageId: 12, developmentContext: context, skipRelationshipUpdate: true, allowTargetedDurableSeed: true, ...extra }).state.npcs[0];
 const FILL = { fillBlankAppearance: true };
+const FULL = 'Tall, lean woman with grey braids and blue eyes.';
 const invented = { overallAppearance: 'A slim young fox-eared woman, russet hair, amber eyes, weathered hands.', appearance: 'A salt-stained oilskin coat, boots.' };
 
 test('a new person with blank looks is filled through the Refresh merge without quoted evidence', () => {
@@ -73,7 +74,7 @@ test('the fill is deterministic: the same inputs make the same record (replay ==
 test('who qualifies: blank, alive, not archived, no named forms, no appearance lock', () => {
     assert.deepEqual(blankLookFields(person()), ['overallAppearance', 'appearance']);
     assert.deepEqual(blankLookFields(person({ overallAppearance: 'Tall, dark.' })), ['appearance']);
-    assert.deepEqual(blankLookFields(person({ overallAppearance: 'Tall.', appearance: 'A coat.' })), []);
+    assert.deepEqual(blankLookFields(person({ overallAppearance: FULL, appearance: 'A coat.' })), []);
     assert.deepEqual(blankLookFields(person({ lifeState: 'deceased' })), []);
     assert.deepEqual(blankLookFields(person({ archived: true })), []);
     assert.deepEqual(blankLookFields(person({ appearanceForms: [{ name: 'Wolf', appearance: 'Grey fur.' }] })), []);
@@ -90,10 +91,10 @@ test('the Refresh prompt gets one tail line only on a fill call; the prefix and 
     assert.match(line, /no quoted evidence needed/);
     assert.match(line, /Never contradict or repeat anything stated/);
     assert.doesNotMatch(line, /sex|nude|breast|body shape/i);
-    for (const npc of [person({ lifeState: 'deceased' }), person({ archived: true }), person({ overallAppearance: 'Tall.', appearance: 'A coat.' })]) {
+    for (const npc of [person({ lifeState: 'deceased' }), person({ archived: true }), person({ overallAppearance: FULL, appearance: 'A coat.' })]) {
         assert.equal(buildProfileRefreshPrompt({ transcript: story, targetNpc: npc, fillLooks: true }), buildProfileRefreshPrompt({ transcript: story, targetNpc: npc }));
     }
-    console.log(`fill line adds ${line.length} chars (both fields blank); one field blank: ${fillLooksLine(person({ overallAppearance: 'Tall.' })).length}`);
+    console.log(`fill line adds ${line.length} chars (both fields blank); one field blank: ${fillLooksLine(person({ overallAppearance: FULL })).length}`);
 });
 
 test('an 800-character stored appearance reaches the backfill, import, refresh and scanner prompts whole, and a refine keeps its tail', () => {
@@ -113,4 +114,120 @@ test('an 800-character stored appearance reaches the backfill, import, refresh a
     assert.ok(refined.overallAppearance.endsWith(tail) || refined.overallAppearance.includes(tail), 'the tail survives a refine');
     const scanner = buildScannerPrompt({ transcript: `[m1] ${story}`, existingNpcs: [{ ...npc, present: true }] });
     assert.ok(scanner.includes(tail), 'the scanner hint carries the whole stored appearance');
+});
+
+// ---- partial descriptions: the fill adds only the missing hair, eyes and build; the written text is kept word for word ----
+const PARTIAL = 'Young human woman';
+const partial = (extra = {}) => person({ overallAppearance: PARTIAL, appearance: 'A salt-stained coat.', ...extra });
+const ADDED = `${PARTIAL}, long copper hair, green eyes, lean build`;
+
+test('a partial description missing hair and eyes gets exactly those (and build) appended, the written text untouched', () => {
+    assert.deepEqual(partialLookGaps(partial()), ['hair', 'eyes', 'build']);
+    const saved = run(partial(), { overallAppearance: ADDED }, story, FILL);
+    assert.equal(saved.overallAppearance, ADDED);
+    assert.ok(saved.overallAppearance.startsWith(PARTIAL), 'byte-identical prefix');
+    assert.deepEqual(partialLookGaps(saved), [], 'nothing missing afterwards, so no further fill line');
+    const hairless = partial({ overallAppearance: 'Slim young woman with green eyes' });
+    assert.deepEqual(partialLookGaps(hairless), ['hair']);
+    assert.match(fillLooksLine(hairless), /does not yet describe this person's hair\. /);
+    assert.doesNotMatch(fillLooksLine(hairless), /hair, eyes|eyes, build|blank/);
+    assert.match(fillLooksLine(partial()), /followed by a short addition for hair, eyes, build only/);
+    assert.match(fillLooksLine(partial()), /Add nothing already described, and never a second colour or style/);
+});
+
+test('a fully described person sends no fill line and changes nothing', () => {
+    const full = person({ overallAppearance: FULL, appearance: 'A coat.' });
+    assert.equal(fillWanted(full), false);
+    assert.equal(fillLooksLine(full), '');
+    assert.equal(buildProfileRefreshPrompt({ transcript: story, targetNpc: full, fillLooks: true }), buildProfileRefreshPrompt({ transcript: story, targetNpc: full }));
+    const saved = run(full, { overallAppearance: `${FULL} Copper hair.` }, story, FILL);
+    assert.equal(saved.overallAppearance, FULL, 'a pointless addition is refused');
+});
+
+test('detection is per feature and generous: a copper mane is hair, scales need no hair, gaze is eyes', () => {
+    assert.deepEqual(describedFeatures('A copper mane down her back'), ['hair']);
+    for (const text of ['bald and scarred', 'braided locks', 'a shaved head', 'tight curls', 'a grey ponytail', 'long tresses']) assert.ok(describedFeatures(text).includes('hair'), text);
+    for (const text of ['a steady gaze', 'pale irises', 'one blue eye', 'amber-eyed']) assert.ok(describedFeatures(text).includes('eyes'), text);
+    for (const text of ['stocky', 'a gaunt frame', 'broad-shouldered', 'wiry', 'curvy figure', 'heavy-set', 'tall', 'muscled', 'slender']) assert.ok(describedFeatures(text).includes('build'), text);
+    assert.deepEqual(missingFeatures('Scaled lizardfolk with a gaze like glass'), ['build']);
+    assert.ok(!missingFeatures('Feathered, tall harpy').includes('hair'));
+    assert.ok(!missingFeatures('Chitin-plated insectoid').includes('hair'));
+    assert.deepEqual(missingFeatures('Young human woman'), ['hair', 'eyes', 'build']);
+    assert.deepEqual(missingFeatures(''), [], 'blank is the blank fill, not a gap');
+    assert.deepEqual(partialLookGaps(person({ overallAppearance: 'Scaled, tall, one gold eye' })), []);
+});
+
+test('the existing text survives byte for byte; a rewrite or a changed word is refused and the record is unchanged', () => {
+    assert.equal(appendedLooks(PARTIAL, ADDED), ADDED);
+    for (const rewrite of ['A young woman, long copper hair, green eyes', 'young human woman, long copper hair, green eyes', 'Young human womankind, long copper hair']) {
+        assert.equal(appendedLooks(PARTIAL, rewrite), null, rewrite);
+        const saved = run(partial(), { overallAppearance: rewrite }, story, FILL);
+        assert.equal(saved.overallAppearance, PARTIAL, `refused: ${rewrite}`);
+    }
+});
+
+test('an addition that describes what is already written (a second hair colour) is refused', () => {
+    const had = 'Young human woman with dark hair';
+    assert.equal(appendedLooks(had, `${had}, bright red hair, green eyes`), null);
+    assert.equal(run(partial({ overallAppearance: had }), { overallAppearance: `${had}, bright red hair, green eyes` }, story, FILL).overallAppearance, had);
+    assert.equal(appendedLooks(had, `${had}, green eyes`), `${had}, green eyes`);
+    assert.equal(appendedLooks('Scaled lizardfolk', 'Scaled lizardfolk, long blonde hair'), null);
+});
+
+test('a result over the 800-character limit changes nothing', () => {
+    const near = `${PARTIAL} ${'x'.repeat(DURABLE_PROFILE_LIMITS.appearance - PARTIAL.length - 10)}`.trim();
+    assert.equal(appendedLooks(near, `${near}, green eyes, copper hair, lean build`), null);
+    const saved = run(partial({ overallAppearance: near }), { overallAppearance: `${near}, green eyes, copper hair, lean build` }, story, FILL);
+    assert.equal(saved.overallAppearance, near);
+    assert.equal(appendedLooks(PARTIAL, `${PARTIAL}, ${'green eyes, '.repeat(100)}`), null);
+});
+
+test('a later stated line replaces an appended detail: the refine and change paths leave no old invented eye colour', () => {
+    const filled = run(partial(), { overallAppearance: `${PARTIAL}, long copper hair, amber eyes, lean build` }, story, FILL);
+    assert.match(filled.overallAppearance, /amber eyes/);
+    const line = 'Tamsin pushed back her hood; her eyes were green as bottle glass.';
+    // The refine path: the model returns the whole text, the new clause is grounded, the old invented one never needed to be.
+    const refined = run(filled, {
+        evidence: { appearance: ['her eyes were green as bottle glass'] },
+        overallAppearance: `${PARTIAL}, long copper hair, green eyes, lean build`, overallAppearanceState: 'refine',
+    }, `${story} ${line}`);
+    assert.match(refined.overallAppearance, /green eyes/);
+    assert.doesNotMatch(refined.overallAppearance, /amber/);
+    // The change path (preserveOmittedPhysicalTraits): the stated eyes own the trait, so the invented eyes do not come back.
+    const changed = run(filled, {
+        evidence: { appearance: ['her eyes were green as bottle glass'] },
+        overallAppearance: 'Green eyes, as bottle glass', overallAppearanceState: 'change', overallAppearanceReason: 'her eyes were green as bottle glass',
+    }, `${story} ${line}`);
+    assert.doesNotMatch(changed.overallAppearance, /amber/);
+});
+
+test('personality, speech and mannerisms are still refused in a partial fill call', () => {
+    const saved = run(partial(), { overallAppearance: ADDED, personality: 'Warm and endlessly generous.', speech: 'Soft and lilting.', mannerisms: ['hums'] }, story, FILL);
+    assert.equal(saved.overallAppearance, ADDED);
+    assert.equal(saved.personality || '', '');
+    assert.equal(saved.speech || '', '');
+    assert.deepEqual(saved.mannerisms || [], []);
+});
+
+test('without the allowance (scanner, capture, ordinary Refresh) an invented addition to a partial text is refused', () => {
+    assert.equal(run(partial(), { overallAppearance: ADDED }, story).overallAppearance, PARTIAL);
+});
+
+test('the partial fill is excluded for dead, archived, named-form and locked records, and clothes stay blank-only', () => {
+    for (const extra of [{ lifeState: 'deceased' }, { archived: true }, { appearanceForms: [{ name: 'Wolf', appearance: 'Grey fur.' }] }, { manualProfileFields: ['appearance'] }]) {
+        assert.equal(fillWanted(partial(extra)), false, JSON.stringify(extra));
+    }
+    const saved = run(partial(), { overallAppearance: ADDED, appearance: 'A scarlet gown, silver rings.' }, story, FILL);
+    assert.match(saved.appearance, /salt-stained coat/, 'a written appearance is not rewritten');
+    assert.doesNotMatch(saved.appearance, /scarlet/);
+});
+
+test('the partial fill is deterministic (replay == live) and a new person with partial looks reaches the fill', () => {
+    const a = run(partial(), { overallAppearance: ADDED }, story, FILL), b = run(partial(), { overallAppearance: ADDED }, story, FILL);
+    const norm = x => JSON.stringify({ ...x, id: 0, lastScannedAt: 0, createdAt: 0, updatedAt: 0 });
+    assert.equal(norm(a), norm(b));
+    assert.equal(fillWanted(partial()), true, 'the Refresh asks for the fill on a person whose looks are only partly written');
+    assert.equal(buildProfileRefreshPrompt({ transcript: story, targetNpc: partial(), fillLooks: true }).includes('FILL LOOKS: overallAppearance does not yet describe'), true);
+    assert.equal(buildProfileRefreshPrompt({ transcript: story, targetNpc: partial() }).includes('FILL LOOKS'), false, 'a normal call is unchanged');
+    console.log(`partial fill line adds ${fillLooksLine(partial()).length} chars (hair, eyes, build missing, appearance written)`);
 });
