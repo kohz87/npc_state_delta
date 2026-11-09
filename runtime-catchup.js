@@ -57,7 +57,7 @@ export function createCatchUpPart(rt, deps) {
                 if (!getChatState(chatKey).npcs.some(npc => npc.id === id && !npc.archived)) continue;
                 const fresh = newlyMet(chatKey, id);
                 if (fresh) meetsBackfill = true; else established.push(id);
-                const refreshed = await refreshNpcFromChat(id, { automatic: true });
+                const refreshed = await refreshNpcFromChat(id, { automatic: true, fillLooks: fresh });
                 // A Refresh that worked has covered an established person; the queued repair would only repeat it. A newly met one keeps its backfill.
                 if (refreshed && !fresh && getChatKey() === chatKey) {
                     const latest = getChatState(chatKey);

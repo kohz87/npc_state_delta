@@ -50,7 +50,7 @@ export function carryOmittedPhysicalTraits(previous = {}, next = {}) {
     return appearance === after ? next : { ...next, appearance };
 }
 
-export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '', seedContext = '' } = {}) {
+export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '', seedContext = '', fillBlank = false } = {}) {
     const next = normalizeAppearanceModel(record, { locked });
     if (locked || !rawUpdate || typeof rawUpdate !== 'object') return { ...next, appearance: resolveNpcAppearance(next) };
     const priorOverall = next.overallAppearance;
@@ -67,7 +67,8 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             const seedSupport = narration
                 ? [narration, next.appearance, next.unclassifiedAppearance, ...next.appearanceForms.map(form => form.appearance)].filter(Boolean).join(' ')
                 : '';
-            if (!seedSupport || durableSeedGrounded(incoming, seedSupport)) next.overallAppearance = incoming;
+            // fillBlank (the Refresh of a new person, appearance-fill.js): this BLANK slot takes a fitted look without quoted support.
+            if (fillBlank || !seedSupport || durableSeedGrounded(incoming, seedSupport)) next.overallAppearance = incoming;
         } else if (incoming && normalizeName(incoming) !== normalizeName(next.overallAppearance)) {
             const state = formState(rawUpdate.overallAppearanceState ?? rawUpdate.overall_appearance_state);
             if (state === 'change') {
@@ -163,7 +164,7 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                 // so traits already held there are not carried into the current presentation again.
                 const previous = next.appearance;
                 next.appearance = withoutSharedPieces(
-                    preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, context), { alsoPresent: next.overallAppearance }),
+                    preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, fillBlank && !previous ? '' : context), { alsoPresent: next.overallAppearance }),
                     next.overallAppearance,
                 );
             }

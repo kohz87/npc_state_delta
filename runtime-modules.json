@@ -111,6 +111,7 @@
     { "path": "appearance.js", "role": "appearance-forms", "required": true },
     { "path": "appearance-draft.js", "role": "appearance-forms-draft", "required": true },
     { "path": "appearance-model.js", "role": "appearance-forms-model", "required": true },
+    { "path": "appearance-fill.js", "role": "appearance-fill", "required": true },
     { "path": "appearance-physical.js", "role": "appearance-forms-physical", "required": true },
     { "path": "appearance-portrait.js", "role": "appearance-forms-portrait", "required": true },
     { "path": "appearance-text.js", "role": "appearance-forms-text", "required": true },
