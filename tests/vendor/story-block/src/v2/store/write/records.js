@@ -1,12 +1,28 @@
-// Story Suite v2: the store's record reads and small writes: setNarrated, setPracticeRule, receipts, truncate (return in
+// Story Suite v2: the store's record reads and small writes: setNarrated, setPracticeRule, setFoeCap, setRuleMarks, receipts, truncate (return in
 // time), untold and work. Moved out of createWrite unchanged; createWrite puts them in api at the places they were.
 
 import { carrierIndexes, lastCarrier, readRecord } from '../../persist.js';
 import { deepFreeze, revOf } from '../constants.js';
 import { isMetaSpan } from '../../replay.js';
+import { ruleMarksOf } from '../../turn/rule-marks.js';
 
 export function createRecords(s, deps) {
     const { baseFor, carrierAt, current, frozenReceipts, lineOf, list, marked, ORPHAN, quarantined, replayRecord, retain, saver, spansFor, stateBefore, take, writable, write } = deps;
+
+    // One mark on a reply's record (kept with the reply: a Re-read, an edit, a rebuild and a reload keep it).
+    function markRecord(index, field, make) {
+        writable();
+        const arr = list();
+        const head = current();
+        const atHead = index === head.key.index;
+        const { message, record, fresh } = take(arr, index, atHead ? head.state : undefined);
+        const value = typeof make === 'function' ? make(record[field]) : make;
+        if (JSON.stringify(record[field]) === JSON.stringify(value)) return;
+        const rev = fresh ? revOf(atHead ? head.state : stateBefore(arr, index)) : record.rev;
+        write(message, { ...record, [field]: value, ...(rev === undefined ? {} : { rev }) });
+        saver.touch();
+        if (atHead) retain(arr, head.state, head.problems);
+    }
 
     return {
         // `reply`: the record is of a received message Story Block captured (never a greeting): it is marked `reply: true`.
@@ -30,17 +46,20 @@ export function createRecords(s, deps) {
          * with the reply (a Re-read, an edit, a rebuild and a reload keep it). Only replies with a story practice line get it (turn.js); an older reply
          * has none and keeps its practice lines. Not a replay input.
          */
-        setPracticeRule(index) {
-            writable();
-            const arr = list();
-            const head = current();
-            const atHead = index === head.key.index;
-            const { message, record, fresh } = take(arr, index, atHead ? head.state : undefined);
-            if (record.practiceRule === 'rolls') return;
-            const rev = fresh ? revOf(atHead ? head.state : stateBefore(arr, index)) : record.rev;
-            write(message, { ...record, practiceRule: 'rolls', ...(rev === undefined ? {} : { rev }) });
-            saver.touch();
-            if (atHead) retain(arr, head.state, head.problems);
+        setPracticeRule(index) { markRecord(index, 'practiceRule', 'rolls'); },
+
+        /**
+         * Marks the reply at `index` as captured under the rule that a new foe's guessed level may reach the party's highest + 20 (`foeCap: 20` on its record).
+         * A reply's first live capture gets it (capture-flow.js); an older reply has none and keeps the +10 cap on a Re-read. Not a replay input.
+         */
+        setFoeCap(index) { markRecord(index, 'foeCap', 20); },
+
+        /**
+         * Adds rule marks (turn/rule-marks.js) to the reply at `index`: `rules: [names]` on its record, kept with the reply like `foeCap`. A module reads them as
+         * `ctx.carrier.rules`. A reply's first live capture gets every current mark; an older reply has none. Not a replay input. Unknown names are dropped.
+         */
+        setRuleMarks(index, names) {
+            markRecord(index, 'rules', old => ruleMarksOf([...ruleMarksOf(old), ...(names ?? [])]));
         },
 
         // Every stored receipt on the current line of history, in chat order: [{ index, receipt }]

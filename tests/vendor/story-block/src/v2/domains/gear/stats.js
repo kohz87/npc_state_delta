@@ -12,7 +12,7 @@ export const GEAR = Object.freeze({
     stats: Object.freeze(['STR', 'VIT', 'AGI', 'DEX', 'INT', 'LUK', 'CHA']),
     slotStat: Object.freeze({ weapon: 'STR', body: 'VIT', 'off-hand': 'VIT', head: 'VIT', cloak: 'AGI', feet: 'AGI', accessory: 'LUK' }),
     // The total stat points a rarity gives (Plan A: stats stay 1–20, so gear stays small).
-    budget: Object.freeze({ common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 }),
+    budget: Object.freeze({ common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5 }),
     // A pack item's own `bonus` is its budget instead, 0…6 (the Studio / a pack only).
     bonusMax: 6,
     // A stat with gear added up may pass 20 but never this (part 2 holds the effective stat to it).

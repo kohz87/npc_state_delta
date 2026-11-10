@@ -334,7 +334,7 @@ export function createStore({
     });
     // The write part (store/write.js): the methods of `api` that change the chat's records. Wired last, after every part and function it
     // calls; nothing here is looked up before it runs.
-    const { touch, lifecycleChanged, append, before, replaceStory, reconcile, setNarrated, setPracticeRule, receipts, truncate, untold, work, rebuild, archived, archiveList, batch, renamed, saveIdle, saveLate, idleSaves } = createWrite(s, {
+    const { touch, lifecycleChanged, append, before, replaceStory, reconcile, setNarrated, setPracticeRule, setFoeCap, setRuleMarks, receipts, truncate, untold, work, rebuild, archived, archiveList, batch, renamed, saveIdle, saveLate, idleSaves } = createWrite(s, {
         advanced, archive, asOps, baseFor, blockParts, bury2, carrierAt, current, forgetMemos, frozenReceipts, guardHolds, headKey, idsOf,
         intactReason, isGuardedBlock, keeps, lineOf, list, marked, markNow, ORPHAN, ownedAlready, place, publish, quarantined, receiptsFor,
         receiptsOf, replay, replayGuarded, replayLegacy, replayRecord, rerunBlock, rescue, retain, sameKey, saver, settleAll, skipped,
@@ -357,8 +357,8 @@ export function createStore({
         // attachGuard: store/guards.js
         attachGuard,
 
-        // append, before, replaceStory, reconcile, setNarrated, setPracticeRule, receipts, truncate, untold, work, rebuild, archived, archiveList, batch, renamed: store/write.js
-        append, before, replaceStory, reconcile, setNarrated, setPracticeRule, receipts, truncate, untold, work, rebuild, archived, archiveList, batch, renamed,
+        // append, before, replaceStory, reconcile, setNarrated, setPracticeRule, setFoeCap, setRuleMarks, receipts, truncate, untold, work, rebuild, archived, archiveList, batch, renamed: store/write.js
+        append, before, replaceStory, reconcile, setNarrated, setPracticeRule, setFoeCap, setRuleMarks, receipts, truncate, untold, work, rebuild, archived, archiveList, batch, renamed,
 
         scheduleSave(ms = 400) { saver.schedule(ms); },
         /**

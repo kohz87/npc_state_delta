@@ -101,3 +101,6 @@
     background-color: var(--ss-field-bg);
     cursor: pointer;
 }
+
+/* The dialog's step row keeps its full height: an overflow container in a flex column has min-height 0 and would shrink under the body (mounts.css styles the row). */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-dialog-steps { flex: none; }

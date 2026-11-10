@@ -56,9 +56,9 @@ const RANK_MAX = 12;
  * held to 1–12 (none: 1). The level is the one written (held to 1–99); else the rank's band (a rank no pack names is passed over); else an old class
  * stands for its level; else the level is left to be drawn when the plan is rolled.
  */
-export function vetOpen(requested, sheet, texts, { rankAt = null } = {}) {
+export function vetOpen(requested, sheet, texts, { rankAt = null, stated = null } = {}) {
     const open = [], refused = [];
-    // A new foe is at most one band (10 levels) above the party's highest level: a level or rank above that is held down to it.
+    // A new foe with a GUESSED level is at most the party's highest level + 20: a level or rank above that is held down to it.
     const cap = foeLevelCap(partyLevels(sheet));
     // (a standing group is already there; a Down one is beaten and a new group of its name is new: openFoes replaces it)
     const known = new Set((sheet?.foes ?? []).filter(foe => foe.filled && foe.hurt > 0).map(foe => fold(foe.name)));
@@ -71,6 +71,11 @@ export function vetOpen(requested, sheet, texts, { rankAt = null } = {}) {
         known.add(key);
         const count = Number.parseInt(oneLine(entry.count), 10);
         const counted = Number.isInteger(count) ? Math.max(1, Math.min(OPEN_MAX_COUNT, count)) : 1;
+        // A person's own Level (stated-level.js, read by the caller before the plan is recorded) passes the cap and wins over what the entry wrote.
+        let given = null;
+        try { given = counted === 1 && typeof stated === 'function' ? stated(name) : null; } catch { given = null; }
+        if (given && Number.isInteger(given.level)) { open.push({ name, count: counted, level: levelOf(given.level) }); continue; }
+        if (given && typeof given.rank === 'string' && Number.isInteger(given.from) && Number.isInteger(given.to) && given.from <= given.to) { open.push({ name, count: counted, rank: given.rank, from: given.from, to: given.to }); continue; }
         const level = levelWritten(entry.level) ?? (oneLine(entry.rank) ? null : classWritten(entry.class));
         if (level !== null) { open.push({ name, count: counted, level: Math.min(level, cap) }); continue; }
         const rank = oneLine(entry.rank).slice(0, RANK_MAX), band = rank ? bandOfRank(rank, rankAt) : null;

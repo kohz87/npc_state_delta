@@ -33,7 +33,8 @@ function lineNode(doc, line, { check = false } = {}) {
     const mark = el(doc, 'span', 'rpg-act-mark', line.breakdown ? '▸' : '');
     mark.setAttribute('aria-hidden', 'true');
     const text = el(doc, 'span', 'rpg-act-text');
-    const outcome = line.outcome ? (line.decisive ? DECISIVE_WORDS[line.foe ? `foe-${line.outcome}` : line.outcome] ?? (line.foe ? FOE_WORDS[line.outcome] : B[line.outcome]) : line.foe ? FOE_WORDS[line.outcome] : B[line.outcome]) : '';
+    // (a hit the defender's VIT soaked: told plainly, in the amber of a graze)
+    const outcome = line.soaked ? B.foeSoaked : line.outcome ? (line.decisive ? DECISIVE_WORDS[line.foe ? `foe-${line.outcome}` : line.outcome] ?? (line.foe ? FOE_WORDS[line.outcome] : B[line.outcome]) : line.foe ? FOE_WORDS[line.outcome] : B[line.outcome]) : '';
     if (check) text.append(fill(B.check, { who: line.who, what: line.what, total: line.total ?? '?', against: line.vs ?? '?', outcome }));
     else {
         // A heal or a help names the one helped ("Ren heals Wessel (Mend)"), never "attacks".
@@ -59,7 +60,7 @@ function lineNode(doc, line, { check = false } = {}) {
         } else if (line.gear && line.foe) text.append(` (${line.gear})`);
         if (outcome && (!line.reduced || line.outcome === 'fail')) {
             text.append(line.aoeNoTarget ? ' — main target Down; ' : ' — ');
-            text.appendChild(el(doc, 'span', `rpg-out rpg-out-${line.outcome}`, outcome));
+            text.appendChild(el(doc, 'span', `rpg-out rpg-out-${line.soaked ? 'cost' : line.outcome}`, outcome));
         }
         if (!line.reduced && line.total !== null && line.vs !== null) text.append(` (${fill(B.vs, { total: line.total, against: line.vs })})`);
         if (line.arrows.length) text.appendChild(el(doc, 'span', 'rpg-arrow', ` → ${line.arrows.join(', ')}`));

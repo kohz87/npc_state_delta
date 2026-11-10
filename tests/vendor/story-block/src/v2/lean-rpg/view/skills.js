@@ -14,6 +14,7 @@ import { classTerm, hasLevels, isStandard } from '../rules.js';
 import { levelBonus, statPart } from '../formula.js';
 import { skillFlags, skillKey } from '../board/flags.js';
 import { drawSkillFlags } from '../board/skill-editor.js';
+import { effOf } from './gear-stats.js';
 
 const K = RPG_STRINGS.skills;
 
@@ -42,13 +43,13 @@ export function rollOf(skill, character, rules = FORMULA) {
     const bonus = character.levelled && !hasLevels(rules) ? levelBonus(character.level, LEVEL.divisor) : classTerm(rules, character).classBonus;
     if (isStandard(rules) && entry) {
         // The Standard formula: the skill's stat in the main slot with half of DEX (a Mana skill is magic, a Stamina skill physical), halved once.
-        const stats = Object.fromEntries(character.stats.map(stat => [stat.key, stat.value]));
+        const stats = Object.fromEntries(character.stats.map(stat => [stat.key, effOf(stat)]));
         const part = statPart(skill.uses === 'mana' ? 'magic' : 'physical', stats, { skillStat: skill.stat });
         const second = character.stats.find(stat => stat.key === part.second);
-        return { total: part.value + skill.rank + bonus, stat: entry.label, value: entry.value, half: part.value, rank: skill.rank, bonus, second: second?.label ?? part.second.toUpperCase(), secondValue: second?.value ?? 0 };
+        return { total: part.value + skill.rank + bonus, stat: entry.label, value: entry.value, half: part.value, rank: skill.rank, bonus, second: second?.label ?? part.second.toUpperCase(), secondValue: second ? effOf(second) : 0 };
     }
-    const half = entry ? Math.floor(entry.value / 2) : 0;
-    return { total: half + skill.rank + bonus, stat: entry?.label ?? null, value: entry?.value ?? 0, half, rank: skill.rank, bonus };
+    const half = entry ? Math.floor(effOf(entry) / 2) : 0;
+    return { total: half + skill.rank + bonus, stat: entry?.label ?? null, value: entry ? effOf(entry) : 0, half, rank: skill.rank, bonus };
 }
 
 /** How many slots the character's skills card shows: the slots the level opens (names.js skillSlots; a Skills block made before them is extended when the story first needs it, data-modules/part.js growSkills), never fewer than the skills it holds. */
