@@ -9,7 +9,7 @@ import { FULL_SCAN_RESPONSE_LENGTH, SCAN_RESPONSE_LENGTH, generateParsedNpcJson 
 import { applyFocusedRelationshipDecisions, runFocusedRelationshipPass, suppressPrimaryRelationshipForFocusedDecisions } from './src/relationship-pass.js';
 import { prepareFullWindowRelationshipPayload, buildScannerPrompt, mergeScanResult, tagScanEvidence, resolveInterimIdentityPromotions, hasCompactMeguminWorldState, extractExplicitKeyRelationshipEdges } from './core.js';
 import { chatLineage, fingerprintMessage } from './branch.js';
-import { getSettings } from './runtime-settings.js';
+import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { clockNow, lineageMoved, notify, replayScope, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 import { createCatchUpPart } from './runtime-catchup.js';
 import { capCaptureAdmissions, queueScanFollowUps } from './runtime-scan-backfill.js';
@@ -237,7 +237,7 @@ export function createScanPart(rt, deps) {
                 scenePresent: scenePresentAt(targetMessageId),
                 calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
                 storyDay: storyDayAt(targetMessageId),
-                customFieldNames: settings.customFieldNames,
+                customFieldNames: effectiveCustomFieldNames(settings),
                 relationshipBaseline: settings.relationshipBaseline,
                 relationshipCaps: settings.relationshipCaps,
                 autoArchiveDeaths: settings.autoArchiveDeaths !== false,

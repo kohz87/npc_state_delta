@@ -8,7 +8,7 @@ import { recentTranscript } from './src/transcript.js';
 import { NPC_STATE_VERSION, buildNarrationCapturePrompt, setExternalCalendarSource } from './core.js';
 import { storySuite } from './suite.js';
 import { SUITE_AREAS, SUITE_SHOWS, NARRATION_CAPTURE_OUTPUT_ESTIMATE_CHARS, announceNpcStateDelta, areaOwner, buildManageApi, buildNpcProfiles, ensureSuiteStylesheet, replyTokenEstimate, resolveDossierTarget, externalCalendar, normalizeSourceOfTruth, statsOverlapWarning, suiteManageAvailable } from './suite-handshake.js';
-import { EXTENSION_NAME, persistSettings, getSettings } from './runtime-settings.js';
+import { EXTENSION_NAME, persistSettings, getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 
 export function createSuitePart(rt, deps) {
     const { chatHydrationStatus, effectivePresentCastChoice, getChatKey, getChatState, hostedNotePromptOptions, liveInjectionText, narrationCaptureEnabled, openLauncherDossier, queueInlineRender, renderDossier, scannerPromptOptions, scenePresenceView, startInlineWatchdog, UI_ID, updateInjection } = deps;
@@ -34,7 +34,7 @@ export function createSuitePart(rt, deps) {
             try {
                 const key = getChatKey();
                 if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return Object.freeze([]);
-                return buildNpcProfiles(scenePresenceView(getChatState(key).npcs || []), { customFieldNames: getSettings().customFieldNames });
+                return buildNpcProfiles(scenePresenceView(getChatState(key).npcs || []), { customFieldNames: effectiveCustomFieldNames() });
             } catch (error) {
                 console.warn('[NPC State Delta] Story Suite NPC profiles failed', error);
                 return Object.freeze([]);

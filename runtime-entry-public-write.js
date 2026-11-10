@@ -6,6 +6,7 @@ import { readAheadOf } from './scan-context.js';
 import { activeReplyIds } from './src/transcript.js';
 import { chatContext, inReplay } from './runtime-scan-helpers.js';
 import { normalizeAllowance } from './src/relationship-pacing.js';
+import { effectiveCustomFieldNames } from './runtime-settings.js';
 
 const quietKeys = new Set(['timeline', 'catchUp']);
 
@@ -168,7 +169,7 @@ export function createPublicApiStatePart(deps) {
         return { mood: typeof npc.mood === 'string' ? npc.mood : null, relationship };
     },
     /** The configured custom field names (the dossier shows these; a stored value under another name stays in the editor only). */
-    customFieldNames: () => [...getSettings().customFieldNames],
+    customFieldNames: () => [...effectiveCustomFieldNames()],
     /** (the living cast) The reader pins this dossier's person as a key person (Story Director's `keypeople.pin`) → { ok, message }. */
     pinKeyPerson: async npcId => {
         const adapter = storySuiteV2Meters();
@@ -183,7 +184,7 @@ export function createPublicApiStatePart(deps) {
             formPortraits[npcId] = Object.fromEntries(Object.values(forms || {}).filter(portrait => portrait?.dataUrl)
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: viewNpcCopies(scenePresenceView(hostedMeterView(state.npcs))), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], ...dossierHostViews(state) };
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: viewNpcCopies(scenePresenceView(hostedMeterView(state.npcs))), portraitAssets: {}, formPortraits, customFieldNames: [...effectiveCustomFieldNames()], ...dossierHostViews(state) };
     },
     /** (perf) What the dossier panel needs before it draws: the chat and its load state (uiStatus also builds branch diagnostics). */
     dossierViewStatus: () => {
@@ -201,7 +202,7 @@ export function createPublicApiStatePart(deps) {
         if (key === 'no-chat' || hydration !== 'ready') return JSON.stringify([key, hydration, hydrationErrors.get(key)?.message || null]);
         const state = getChatState(key);
         const npcs = scenePresenceView(hostedMeterView(state.npcs));   // hosted: the scene's presence moves the panel too
-        return JSON.stringify([key, hydration, Number(stateVersions.get(key) || 0), latestReplyIndex(), getSettings().customFieldNames, portraitFilesVersion(),
+        return JSON.stringify([key, hydration, Number(stateVersions.get(key) || 0), latestReplyIndex(), effectiveCustomFieldNames(), portraitFilesVersion(),
             npcs === state.npcs ? null : npcs.map(npc => [npc?.relationship ?? null, Boolean(npc?.present)]), dossierHostViews(state)]);
     },
     persistenceStatus: () => {
