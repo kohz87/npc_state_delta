@@ -13,7 +13,7 @@ import { currentPresentationText, normalizeAppearanceModel, resolveNpcAppearance
 import { castFromHtml, castProjection, projectDossierState } from '../dossier-ui.js';
 import { FEATURE_STAGES, normalizeSecrets, observeCast, validateNpcSlice } from '../src/npc-meters.js';
 import {
-    applyCastEntry, applyCastPortrait, castBadge, castPortraitWanted, castSecrets, castView, dossierFor, findCastPerson, markCastPortraitRemoved, metWithEntry, normalizeCast, normalizeEntry, shortPackName,
+    applyCastEntry, applyCastPortrait, castBadge, castPortraitWanted, castSecrets, castView, dossierFor, findCastPerson, markCastPortraitRemoved, metWithEntry, normalizeCast, normalizeEntry, parsePeople, shortPackName,
 } from '../src/cast-dossier.js';
 import { preserveUserNpcMetadata } from '../branch-core.js';
 import { MODULE_ID, createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
@@ -1448,4 +1448,43 @@ test('the narrator hears a cast person\'s levers, mannerisms and summary: inject
     const mild = normalizeProduction({ ...applyTemiwa({ ...BEHAVED, withYou: 'Wary of you, but curious; tests your patience before she trusts.' }), present: true });
     assert.match(buildInjection([mild], scene, 3, 3), /TOWARD PLAYER \(secondary\): Wary of you, but curious; tests your patience before she trusts\./);
     process.stdout.write(`\n[injection with the fields]\n${b}\n`);
+});
+
+// ---- the People field fills species, gender and ages ----
+
+test('parsePeople reads each People form into the shapes the dossier stores', () => {
+    const empty = { species: '', gender: '', age: '', apparentAge: '' };
+    assert.deepEqual(parsePeople('Dogfolk woman, 21'), { ...empty, species: 'Dogfolk', gender: 'female', age: '21' });
+    assert.deepEqual(parsePeople('Dwelf, 58 (looks about 25)'), { ...empty, species: 'Dwelf', age: '58', apparentAge: '~25' });
+    assert.deepEqual(parsePeople('Elf, about 240 (looks about 35)'), { ...empty, species: 'Elf', age: 'about 240', apparentAge: '~35' });
+    assert.deepEqual(parsePeople('Fairy, about 160'), { ...empty, species: 'Fairy', age: 'about 160' });
+    assert.deepEqual(parsePeople('Spiritfolk, formed about 300 years ago (looks about 30)'), { ...empty, species: 'Spiritfolk', age: 'about 300', apparentAge: '~30' });
+    assert.deepEqual(parsePeople('Human man, 40'), { ...empty, species: 'Human', gender: 'male', age: '40' });
+    assert.equal(parsePeople('Orc, 30').gender, '', 'gender is never inferred');
+});
+
+test('parsePeople leaves unparsable text alone: nothing is guessed', () => {
+    const none = { species: '', gender: '', age: '', apparentAge: '' };
+    for (const text of ['', 'Wanders the marsh at night', 'Elf, ancient', 'Elf, young (looks about 20 or so)', '12, 21', 'Elf']) assert.deepEqual(parsePeople(text), none, text);
+});
+
+test('a made dossier takes species, gender and age from People, and keeps People as a custom field', () => {
+    const [p] = normalizeCast([person({ entry: { ...FENNA_ENTRY, fields: { People: 'Elf woman, about 240 (looks about 35)' } } })], dateText);
+    const made = normalizeProduction(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil' }));
+    assert.deepEqual([made.species, made.gender, made.age, made.apparentAge], ['Elf', 'female', 'about 240', '~35']);
+    assert.equal(made.customFields.People, 'Elf woman, about 240 (looks about 35)');
+    const again = normalizeProduction(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil' }));
+    const { createdAt, updatedAt, ...sameAgain } = again, { createdAt: c0, updatedAt: u0, ...sameMade } = made;
+    assert.deepEqual(sameAgain, sameMade, 'the same entry gives the same dossier (replay and import)');
+});
+
+test('People never overwrites a value the record already has, and unparsable People changes nothing', () => {
+    const [p] = normalizeCast([person({ entry: { ...FENNA_ENTRY, fields: { People: 'Elf woman, 30' } } })], dateText);
+    const base = { ...createNpcRecord('Fenna', []), species: 'Human', age: '41' };
+    const made = applyCastEntry(base, p, { packName: 'Ersveil' });
+    assert.deepEqual([made.species, made.gender, made.age], ['Human', 'female', '41']);
+    const [q] = normalizeCast([person({ entry: { ...FENNA_ENTRY, fields: { People: 'Roams the hills' } } })], dateText);
+    const plain = applyCastEntry(createNpcRecord('Fenna', []), q, { packName: 'Ersveil' });
+    assert.deepEqual([plain.species, plain.gender, plain.age, plain.apparentAge], ['', '', '', '']);
+    assert.equal(plain.customFields.People, 'Roams the hills');
 });
