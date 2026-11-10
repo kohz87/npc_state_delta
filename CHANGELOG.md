@@ -5,7 +5,7 @@
 - **A Level custom field for fights.** While Story Block's RPG is on, a Level field appears in every dossier by itself (with the RPG off it is hidden, and stored values are kept). The scanner may fill it only from a stated level or rank ("probably rank C or D" becomes C-D) or a direct comparison with your character's strength, never from dramatic description, and only with a quote from the story.
 - **World, Here shows the cards for everyone the scene lists,** even when Delta's own presence flag disagreed (it could show plain name chips instead).
 - Long appearance texts reach the prompts whole (up to 800 characters; some hints cut them at 500).
-- Requires Story Block 2.25.0 or later (unchanged); Story Block testkit re-synced to 2.28.0.
+- Requires Story Block 2.25.0 or later (unchanged); Story Block testkit re-synced from Story Block main (the 2.28.0 code, before its version bump).
 
 ## 1.14.0
 
