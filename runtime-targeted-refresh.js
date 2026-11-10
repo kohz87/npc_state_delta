@@ -157,6 +157,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
                 // (I-14) The Refresh prompt asks for at most three new memories (rule 14); its merge takes three.
                 memoryInputLimit: 3,
                 allowTargetedDurableSeed: true,
+                ...(fillBlankLooks ? { requireAppearanceSeedGrounding: true } : {}),
                 ...(fillBlankLooks ? { [FILL_MERGE_OPTION]: true } : {}),
                 developmentSourceMessageIds,
                 storyDays: storyDaysForTranscript(transcript),

@@ -78,6 +78,10 @@ export function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAU
         if (field === 'relationshipSummary') continue; // gated after relationship evidence is accepted
         if (typeof value !== 'string' || !value.trim()) continue;
         if ((field === 'gender' || field === 'homeBase' || field === 'background') && !durableTextAccepted(field, existing, incoming, value, lifecycleOptions)) continue;
+        // Refresh/backfill may seed other durable fields on the targeted route, but an unfilled
+        // appearance still needs support. The continuity owner applies the explicit fill exception.
+        if (field === 'appearance' && !String(existing.appearance || '').trim() && lifecycleOptions.requireAppearanceSeedGrounding
+            && !durableRefinementCandidateGrounded('appearance', '', value, lifecycleOptions.developmentContext, [], incomingBinding)) continue;
         if (['personality', 'speech', 'appearance'].includes(field)
             && !String(existing[field] || '').trim()
             && !targetedDurableSeedAllowed

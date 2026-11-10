@@ -12,7 +12,7 @@ import {
     isSafeUnmarkedDurableReplacement,
 } from './core-mechanics.js';
 import { APPEARANCE_FORM_LIMIT, APPEARANCE_MODEL_VERSION, appearanceText, clean, formKey, formState, hasOwn, sameAppearance, stripOverallPrefix } from './appearance-text.js';
-import { appendedLooks, attemptsExtension } from './appearance-fill.js';
+import { appendedLooks, attemptsExtension, describedFeatures, lookOnly } from './appearance-fill.js';
 import { mergeRefinement, preserveOmittedPhysicalTraits, withoutSharedPieces } from './appearance-physical.js';
 import { completeFormWithShared, normalizeAppearanceForms, normalizeAppearanceModel, resolveNpcAppearance } from './appearance-model.js';
 
@@ -68,12 +68,16 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             const seedSupport = narration
                 ? [narration, next.appearance, next.unclassifiedAppearance, ...next.appearanceForms.map(form => form.appearance)].filter(Boolean).join(' ')
                 : '';
-            // fillBlank (the Refresh of a new person, appearance-fill.js): this BLANK slot takes a fitted look without quoted support.
-            if (fillBlank || !seedSupport || durableSeedGrounded(incoming, seedSupport)) next.overallAppearance = incoming;
+            // A blank shared slot may not invent a second version of a feature already in the current look.
+            const clash = describedFeatures(next.appearance).some(key => describedFeatures(incoming).includes(key));
+            // Ungrounded text is looks-only: anything else (a deed, a secret) needs the story's own support.
+            if (fillBlank ? ((!clash && (lookOnly(incoming) || (seedSupport && durableSeedGrounded(incoming, seedSupport))))
+                    || groundedAppearanceCorrection(next.appearance, incoming, context, [], { npc: record, targeted: true }))
+                : (!seedSupport || durableSeedGrounded(incoming, seedSupport))) next.overallAppearance = incoming;
         } else if (fillBlank && attemptsExtension(next.overallAppearance, incoming)) {
             // A fill call (appearance-fill.js): the written text survives word for word and only a missing hair/eyes/build is added;
             // an extension that does not pass (clash, over the limit, a changed word) leaves the record as it is.
-            next.overallAppearance = appendedLooks(next.overallAppearance, incoming) || next.overallAppearance;
+            next.overallAppearance = appendedLooks(next.overallAppearance, incoming, undefined, stripOverallPrefix(next.appearance, priorOverall)) || next.overallAppearance;
         } else if (incoming && normalizeName(incoming) !== normalizeName(next.overallAppearance)) {
             const state = formState(rawUpdate.overallAppearanceState ?? rawUpdate.overall_appearance_state);
             if (state === 'change') {
@@ -167,9 +171,11 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             } else {
                 // Without a selected/unknown form the shared physical features are prepended when resolved,
                 // so traits already held there are not carried into the current presentation again.
-                const previous = next.appearance;
+                const previous = fillBlank ? stripOverallPrefix(next.appearance, priorOverall) : next.appearance;
+                const conflictsWithShared = fillBlank && !previous && describedFeatures(next.overallAppearance)
+                    .some(key => describedFeatures(localAppearance).includes(key));
                 next.appearance = withoutSharedPieces(
-                    preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, fillBlank && !previous ? '' : context), { alsoPresent: next.overallAppearance }),
+                    preserveOmittedPhysicalTraits(previous, conflictsWithShared ? previous : reconcileFormAppearance(previous, update, fillBlank && !previous && lookOnly(localAppearance, { clothes: true }) ? '' : (fillBlank && !previous ? context || '-' : context)), { alsoPresent: next.overallAppearance }),
                     next.overallAppearance,
                 );
             }

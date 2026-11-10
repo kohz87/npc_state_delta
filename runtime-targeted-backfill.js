@@ -119,6 +119,7 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
                 // The backfill prompt asks for up to five memories (a first, whole dossier).
                 memoryInputLimit: IMPORTANT_MEMORY_LIMIT,
                 allowTargetedDurableSeed: true,
+                ...(fillLooks ? { requireAppearanceSeedGrounding: true } : {}),
                 ...(fillLooks ? { [FILL_MERGE_OPTION]: true } : {}),
                 developmentContext: transcript,
                 userDevelopmentContext: recentUserDevelopmentContext(settings.scanDepth, { messageIds: true }),

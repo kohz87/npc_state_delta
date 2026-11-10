@@ -1,6 +1,7 @@
 /* NPC State Delta Stage 4 continuity facade. */
 import * as mechanics from './core-mechanics.js';
 import { stripRecordCitations } from './core-record.js';
+import { blankLookFields } from './appearance-fill.js';
 import {
     APPEARANCE_MODEL_VERSION,
     applyAppearanceUpdate,
@@ -174,7 +175,7 @@ export function mergeScanResult(state, rawScanResult, options = {}) {
             || (profileUpdate && (profileUpdate.appearanceForms ?? profileUpdate.appearance_forms))
         );
         // A fill call (appearance-fill.js) lets a BLANK current-look slot take the update the core merge could not ground.
-        const fillSlot = options.fillBlankAppearance === true && !String(sources[0]?.appearance || rawNpc.appearance || '').trim();
+        const fillSlot = options.fillBlankAppearance === true && sources.length > 0 && blankLookFields(sources[0]).includes('appearance');
         const appearanceRejected = !formSwitch && !fillSlot && (sources.length
             ? (sources[0]?.appearance ? mechanics.normalizeName(rawNpc.appearance) === mechanics.normalizeName(sources[0]?.appearance) : !rawNpc.appearance)
             : (!rawNpc.appearance));

@@ -3,7 +3,7 @@
 // look fields take a fitted value without quoted evidence. Everything else keeps the evidence rule.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildBackfillPrompt, buildDossierImportPrompt, buildProfileRefreshPrompt, buildScannerPrompt, createNpcRecord, DURABLE_PROFILE_LIMITS, mergeScanResult } from '../core.js';
+import { buildBackfillPrompt, buildDossierImportPrompt, buildProfileRefreshPrompt, buildScannerPrompt, createNpcRecord, DURABLE_PROFILE_LIMITS, mergeScanResult, normalizeNpcRecord } from '../core.js';
 import { appendedLooks, blankLookFields, describedFeatures, fillLooksLine, fillWanted, missingFeatures, partialLookGaps } from '../appearance-fill.js';
 
 const NONE = { relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } };
@@ -35,6 +35,16 @@ test('without the fill allowance the same invented looks are still refused (scan
     const saved = run(person(), invented, story);
     assert.equal(saved.overallAppearance || '', '');
     assert.doesNotMatch(saved.appearance || '', /oilskin|russet/);
+});
+
+test('a non-fill targeted NPC row cannot seed an unsupported current look', () => {
+    const npc = person();
+    const saved = mergeScanResult(state(npc), { npcs: [{ id: npc.id, name: npc.name, appearance: 'A crimson silk coat.', ...NONE }] },
+        { turn: 5, sourceMessageId: 12, developmentContext: story, skipRelationshipUpdate: true, allowTargetedDurableSeed: true, requireAppearanceSeedGrounding: true }).state.npcs[0];
+    assert.equal(saved.appearance, '');
+    const grounded = mergeScanResult(state(npc), { npcs: [{ id: npc.id, name: npc.name, appearance: 'A crimson silk coat.', ...NONE }] },
+        { turn: 5, sourceMessageId: 12, developmentContext: `${story} Tamsin wears a crimson silk coat.`, skipRelationshipUpdate: true, allowTargetedDurableSeed: true, requireAppearanceSeedGrounding: true }).state.npcs[0];
+    assert.match(grounded.appearance, /crimson silk coat/);
 });
 
 test('personality, speech and the rest keep the evidence rule even in a fill call', () => {
@@ -230,4 +240,90 @@ test('the partial fill is deterministic (replay == live) and a new person with p
     assert.equal(buildProfileRefreshPrompt({ transcript: story, targetNpc: partial(), fillLooks: true }).includes('FILL LOOKS: overallAppearance does not yet describe'), true);
     assert.equal(buildProfileRefreshPrompt({ transcript: story, targetNpc: partial() }).includes('FILL LOOKS'), false, 'a normal call is unchanged');
     console.log(`partial fill line adds ${fillLooksLine(partial()).length} chars (hair, eyes, build missing, appearance written)`);
+});
+
+test('an ungrounded partial fill cannot append unrelated claims, including in the same sentence', () => {
+    for (const suffix of [', owns three ships', ', green eyes and a scar', ', green eyes and secretly cruel', ', green eyes; she is a spy', ', green eyes, a ruby']) {
+        const update = `${PARTIAL}${suffix}`;
+        assert.equal(appendedLooks(PARTIAL, update), null, suffix);
+        assert.equal(run(partial(), { overallAppearance: update }, story, FILL).overallAppearance, PARTIAL, suffix);
+    }
+    assert.equal(run(partial(), { overallAppearance: ADDED }, story, FILL).overallAppearance, ADDED);
+    const natural = `${PARTIAL}, with long auburn hair, blue eyes and a broad frame`;
+    assert.equal(run(partial(), { overallAppearance: natural }, story, FILL).overallAppearance, natural);
+});
+
+test('stored physical traits in the current look cannot be contradicted by the fill', () => {
+    const flat = normalizeNpcRecord(person({ appearance: 'Short black hair and a blue cloak.' }));
+    const saved = run(flat, { overallAppearance: 'A slender woman with long red hair and green eyes.' }, story, FILL);
+    assert.equal(saved.overallAppearance, '');
+    assert.match(saved.appearance, /black hair/);
+    assert.doesNotMatch(saved.appearance, /red hair/);
+    const other = run(flat, { overallAppearance: 'A slender woman with long red hair and green eyes.' }, `${story} Mira revealed her long red hair and green eyes.`, FILL);
+    assert.equal(other.overallAppearance, '', 'another person does not authorize a correction');
+    const split = normalizeNpcRecord(person({ overallAppearance: PARTIAL, appearance: 'Short black hair; a blue cloak.' }));
+    assert.ok(!partialLookGaps(split).includes('hair'));
+    assert.equal(run(split, { overallAppearance: `${PARTIAL}, long red hair and green eyes` }, story, FILL).overallAppearance, PARTIAL);
+});
+
+test('a resolved physical projection does not hide a blank outfit', () => {
+    const npc = normalizeNpcRecord(person({ overallAppearance: FULL }));
+    assert.equal(npc.appearance, FULL);
+    assert.deepEqual(blankLookFields(npc), ['appearance']);
+    const saved = run(npc, { appearance: 'A patched green cloak.' }, story, FILL);
+    assert.equal(saved.overallAppearance, FULL);
+    assert.match(saved.appearance, /patched green cloak/);
+    const conflicting = run(npc, { appearance: 'Long red hair; a green cloak.' }, story, FILL);
+    assert.equal(conflicting.appearance, FULL, 'a blank outfit cannot invent a conflicting body');
+    const npcRow = mergeScanResult(state(npc), { npcs: [{ id: npc.id, name: npc.name, appearance: 'A patched green cloak.', ...NONE }] },
+        { turn: 5, sourceMessageId: 12, developmentContext: story, skipRelationshipUpdate: true, allowTargetedDurableSeed: true, ...FILL }).state.npcs[0];
+    assert.match(npcRow.appearance, /patched green cloak/);
+});
+
+test('both fill prompts supply the exact partial physical text separately from its resolved outfit', () => {
+    const npc = normalizeNpcRecord(person({ overallAppearance: PARTIAL, appearance: 'A salt-stained coat.' }));
+    const expected = `Existing overallAppearance: ${JSON.stringify(PARTIAL)}.`;
+    for (const prompt of [buildBackfillPrompt({ transcript: story, targetName: npc.name, existingNpc: npc, fillLooks: true }),
+        buildProfileRefreshPrompt({ transcript: story, targetNpc: npc, fillLooks: true })]) {
+        assert.ok(prompt.includes(expected));
+        assert.ok(prompt.includes('salt-stained coat'));
+    }
+    assert.ok(!buildBackfillPrompt({ transcript: story, targetName: npc.name, existingNpc: npc }).includes(expected));
+});
+
+test('a partial body too long to accept any addition does not request one', () => {
+    const npc = person({ overallAppearance: 'Young human woman ' + 'x'.repeat(785), appearance: 'A coat.' });
+    assert.deepEqual(partialLookGaps(npc), []);
+    assert.doesNotMatch(fillLooksLine(npc), /Existing overallAppearance/);
+});
+
+test('an ungrounded blank fill is looks-only: a deed, secret or object clause is refused or the whole fill is dropped', () => {
+    for (const bad of ['A slim woman with green eyes; she secretly murdered the ferryman.', 'Young human woman, green eyes with a ruby', 'A slim woman with green eyes, trusted by the duke.']) {
+        const saved = run(person(), { overallAppearance: bad, appearance: 'A grey tunic and she stole the toll.' }, story, FILL);
+        assert.equal(saved.overallAppearance || '', '', bad);
+        assert.doesNotMatch(saved.appearance || '', /stole/, bad);
+        assert.doesNotMatch(JSON.stringify(saved), /murdered|ruby|trusted/, bad);
+    }
+    const ok = run(person(), invented, story, FILL);
+    assert.match(ok.overallAppearance, /russet hair/);
+});
+
+test('an ungrounded partial addition is looks-only, and a clause ending in a non-look word is refused', () => {
+    assert.equal(appendedLooks('Young human woman', 'Young human woman, green eyes with a ruby'), null);
+    assert.equal(appendedLooks('Young human woman', 'Young human woman, green eyes and she killed a guard'), null);
+    assert.equal(appendedLooks('Young human woman', 'Young human woman, green eyes'), 'Young human woman, green eyes');
+});
+
+test('a claim in a fill that the story itself supports is still accepted, so evidence keeps its route', () => {
+    const grounded = 'A slim woman with green eyes who limps.';
+    const saved = run(person(), { overallAppearance: grounded }, `${story} Tamsin is a slim woman with green eyes who limps.`, FILL);
+    assert.equal(saved.overallAppearance, grounded);
+});
+
+test('a non-fill targeted call keeps its old first-appearance rule; only the fill call demands support', () => {
+    const npc = person();
+    const row = { npcs: [{ id: npc.id, name: npc.name, appearance: 'A crimson silk coat.', ...NONE }] };
+    const base = { turn: 5, sourceMessageId: 12, developmentContext: story, skipRelationshipUpdate: true, allowTargetedDurableSeed: true };
+    assert.match(mergeScanResult(state(npc), row, base).state.npcs[0].appearance, /crimson/);
+    assert.equal(mergeScanResult(state(npc), row, { ...base, ...FILL, requireAppearanceSeedGrounding: true }).state.npcs[0].appearance, '');
 });

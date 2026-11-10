@@ -35,10 +35,10 @@ test('the backfill merge keeps the fill for blank and for partial looks (word fo
 });
 
 test('catch-up then backfill for one person leaves one consistent description; replay == live', () => {
-    const first = merge(person(), { overallAppearance: 'Fox-eared woman, russet hair, amber eyes.' }, FILL);
+    const first = merge(person(), { overallAppearance: 'Fox-eared woman, russet hair, amber eyes.', appearance: 'A patched cloak.' }, FILL);
     assert.equal(fillAllowed(first, 'Kazuma'), true, 'only the build is still missing: the second call may add just that');
     assert.match(fillLooksLine(first), /build/);
-    assert.doesNotMatch(fillLooksLine(first), /hair/);
+    assert.match(fillLooksLine(first), /does not yet describe this person's build\./);
     const second = merge(first, { overallAppearance: 'Fox-eared woman, russet hair, amber eyes. Broad-shouldered.' }, FILL);
     assert.equal(second.overallAppearance, 'Fox-eared woman, russet hair, amber eyes. Broad-shouldered.');
     const clash = merge(first, { overallAppearance: 'Fox-eared woman, russet hair, amber eyes. Black hair, green eyes.' }, FILL);
@@ -46,7 +46,7 @@ test('catch-up then backfill for one person leaves one consistent description; r
     const done = merge(second, { overallAppearance: 'Totally different.' }, FILL);
     assert.equal(done.overallAppearance, second.overallAppearance);
     assert.equal(fillAllowed(second, 'Kazuma'), false, 'nothing left: the second call sends no line');
-    const again = merge(person(), { overallAppearance: 'Fox-eared woman, russet hair, amber eyes.' }, FILL);
+    const again = merge(person(), { overallAppearance: 'Fox-eared woman, russet hair, amber eyes.', appearance: 'A patched cloak.' }, FILL);
     const norm = x => ({ ...x, createdAt: 0, updatedAt: 0, lastScannedAt: 0 });
     assert.deepEqual(norm(again), norm(first));
 });
@@ -102,4 +102,39 @@ test('through the synthetic host: a person met on a non-catch-up reply is filled
         assert.ok(repair.length >= 1, 'a missed-participant repair for Tamsin ran');
         assert.ok(repair.every(text => !text.includes('FILL LOOKS')), 'an established person, repaired as a missed participant, never fills');
     });
+});
+
+test('the production history replay repeats the same new-admission fill as the live path', () => {
+    runEditorHostScenario('fill-replay', async () => {
+        const runtime = globalThis.NPCStateDelta;
+        const { createCatchUp } = await import(pathToFileURL(path.join(sourceRoot, 'src/storysuite-participant/history-replay.js')).href);
+        const zero = { trust: 0, affection: 0, desire: 0, tension: 0 };
+        const prompts = [];
+        mockState.quietResponder = async (args = {}) => {
+            const prompt = String(args.prompt || '');
+            prompts.push(prompt);
+            const npc = { name: 'Tamsin', present: true, role: 'ferry keeper', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named person', directInteraction: true, relationshipImpact: 'none', relationshipDelta: zero };
+            if (prompt.includes('targeted dossier backfill extractor')) Object.assign(npc, { overallAppearance: 'A slim woman, copper hair, green eyes.', appearance: 'A patched cloak.' });
+            return JSON.stringify({ npcs: [npc] });
+        };
+        mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who runs the ferry?' });
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Tamsin the ferry keeper ties the boat.', swipe_id: 0, swipes: ['Tamsin the ferry keeper ties the boat.'], send_date: '2026-01-01T00:01:00.000Z' });
+        await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(1)));
+        await sleep(700);
+        const look = () => { const npc = runtime.getState().npcs.find(item => item.name === 'Tamsin'); return [npc?.overallAppearance, npc?.appearance]; };
+        const live = look();
+        assert.match(live[0], /copper hair/);
+        const calls = prompts.length;
+        const catchUp = createCatchUp({ chatKey: () => runtime.chatKey(), enabled: () => true, live: () => runtime.replay, changed() {}, publish: async () => {}, warn() {} });
+        catchUp.rebuild({ replies: null });
+        await catchUp.idle();
+        assert.equal(catchUp.status().outcome, 'done');
+        assert.deepEqual(look(), live);
+        assert.ok(prompts.slice(calls).some(prompt => prompt.includes('FILL LOOKS')));
+    });
+});
+
+test('a fill call cannot smuggle a deed in the flat appearance row of a new person, on the backfill route too', () => {
+    const merged = merge(person(), { overallAppearance: 'A slim woman with green eyes; she secretly murdered the ferryman.', appearance: 'A grey tunic; she poisoned the well.' }, { ...FILL, requireAppearanceSeedGrounding: true });
+    assert.doesNotMatch(JSON.stringify(merged), /murdered|poisoned/);
 });

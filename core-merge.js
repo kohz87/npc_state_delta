@@ -65,6 +65,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         skipRelationshipUpdate: Boolean(options.skipRelationshipUpdate),
         developmentContext: String(options.developmentContext || ''),
         allowTargetedDurableSeed: options.allowTargetedDurableSeed === true,
+        requireAppearanceSeedGrounding: options.requireAppearanceSeedGrounding === true,
         memoryInputLimit,
         customFieldNames: normalizeCustomFieldNames(options.customFieldNames),
     };
