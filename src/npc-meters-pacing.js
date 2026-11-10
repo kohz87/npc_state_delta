@@ -32,3 +32,34 @@ export function cutToTier(changes, used, caps, value) {
         return { ...change, value: step };
     });
 }
+
+const FLAT_DAY = /^d(-?\d{1,9}):(ordinary|meaningful|major|extreme)$/;
+
+/**
+ * What the newest reply did to one NPC's four built-in meters, read from the record as it is kept (nothing is stored for it):
+ * { reply (index), delta: { trust, ... } (the net change from the reply's start: after pacing, caps and gates), source ('story' when a
+ * story line took part, else 'scanner'), held (the reader's words when the day's allowance was used up and nothing moved, else '') },
+ * or null when nothing moved and nothing was held. The tier and amounts a held event asked are not kept, so the words name every full tier.
+ */
+export function lastChangeOf(record, allowance) {
+    const turn = record?.turn;
+    if (!turn || typeof turn !== 'object' || !turn.from || typeof turn.from !== 'object') return null;
+    const reply = Number.isInteger(turn.at) ? turn.at : Number.isInteger(turn.reply) ? turn.reply : null;
+    if (reply === null) return null;
+    const delta = Object.fromEntries(RELATIONSHIP_KEYS.map(key => [key, Number.isInteger(record.meters?.[key]) && Number.isInteger(turn.from[key]) ? record.meters[key] - turn.from[key] : 0]));
+    const moved = Object.values(delta).some(Boolean);
+    let held = '';
+    const day = record.impactDay;
+    if (!moved && allowance && day && typeof day === 'object' && day.reply === turn.reply) {
+        const days = new Set(Object.keys(day).map(key => FLAT_DAY.exec(key)?.[1]).filter(Boolean));
+        const [only] = days;
+        const full = [];
+        if (days.size === 1) for (const tier of PACING_TIERS) {
+            if (allowance[tier] === null || allowance[tier] === undefined || !(day[`d${only}:${tier}`] >= allowance[tier])) break;
+            full.push(tier);
+        }
+        if (full.length) held = pacingNote(full.at(-1), null, full);
+    }
+    if (!moved && !held) return null;
+    return { reply, delta, source: Array.isArray(turn.story) ? 'story' : 'scanner', held };
+}

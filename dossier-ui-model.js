@@ -62,14 +62,36 @@ function relationshipChangeProjection(change = {}) {
     const delta = source.delta && typeof source.delta === 'object' ? source.delta : {};
     const turn = Number.isFinite(Number(source.turn)) ? Number(source.turn) : null;
     const message = wholeNumber(source.message);
+    const impact = plain(source.impact, 'none').toLocaleLowerCase();
+    // Where it came from, only while hosted (the caller names it): a story line or the scanner. A manual edit keeps its own label.
+    const origin = impact !== 'manual' && ['story', 'scanner'].includes(source.source) ? source.source : '';
     return {
-        impact: plain(source.impact, 'none').toLocaleLowerCase(),
+        impact,
         delta: Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(delta[axis]) || 0)])),
         reason: plain(source.reason),
         turn,
         message,
+        ...(origin ? { origin } : {}),
+        ...(plain(source.held) ? { held: plain(source.held) } : {}),
         when: changeStamp({ turn, message }).label,
     };
+}
+
+// The newest change that reached the meters, whichever wrote it. While hosted, `npc.sliceChange` is what the slice kept for the
+// newest reply (net amounts after pacing, a story line or the scanner, or that the day's allowance held it); the dossier's own
+// `lastRelationshipChange` has the scanner's reason. A newer slice reply wins; the same reply keeps the sidecar's reason and impact
+// with the slice's amounts; an older one, or a manual edit, leaves the sidecar's. Read only: nothing is stored.
+function newestRelationshipChange(npc) {
+    const side = npc?.lastRelationshipChange;
+    const live = npc?.sliceChange;
+    if (!live || !Number.isInteger(live.reply)) return relationshipChangeProjection(side);
+    const sideMessage = wholeNumber(side?.message);
+    const real = side && plain(side.impact, 'none') !== 'none' && (plain(side.reason) || side.impact === 'manual');
+    if (!real || sideMessage === null || live.reply > sideMessage) {
+        return relationshipChangeProjection({ impact: 'slice', delta: live.delta, message: live.reply, source: live.source, held: live.held });
+    }
+    if (live.reply === sideMessage && side.impact !== 'manual') return relationshipChangeProjection({ ...side, delta: live.delta, source: 'scanner', held: live.held });
+    return relationshipChangeProjection(real && side.impact !== 'manual' ? { ...side, source: 'scanner' } : side);
 }
 
 const FIELD_CHANGE_LABELS = Object.freeze({
@@ -194,7 +216,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
         keyRelationships: stringList(npc?.keyRelationships, 12),
         customFields: shownCustomFields(npc, customFieldNames),
         relationshipSummary: plain(npc?.relationshipSummary),
-        lastRelationshipChange: relationshipChangeProjection(npc?.lastRelationshipChange),
+        lastRelationshipChange: newestRelationshipChange(npc),
         fieldChanges: fieldChangesProjection(npc?.fieldChanges, npc?.fieldChangeMessages),
         portraitAppearanceChanged: portraitAppearanceChanged(npc, shown),
         portraitForm: shown.form,

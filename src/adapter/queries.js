@@ -316,6 +316,8 @@ export function createQueriesPart(session, deps) {
                 relationship, relationshipProgress: normalizeRelationshipProgress(entry.progress),
                 relationshipMilestones: normalizeRelationshipMilestones(npc.relationshipMilestones, relationship, { inferFromRelationship: false }).filter(holds),
             };
+            // What the newest reply did, for the dossier's "Last relationship change" (dossier-ui-model.js picks the newer of this and the sidecar's).
+            if (entry.last) next.sliceChange = entry.last;
             if (Object.keys(next).every(key => JSON.stringify(npc[key]) === JSON.stringify(next[key]))) return npc;
             changed = true;
             return { ...npc, ...next };

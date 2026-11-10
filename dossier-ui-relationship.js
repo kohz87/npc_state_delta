@@ -31,8 +31,10 @@ function impactLabel(impact) {
     return value.charAt(0).toLocaleUpperCase() + value.slice(1);
 }
 
+const ORIGIN_CHIPS = Object.freeze({ story: 'From the story', scanner: 'From the scanner' });
+
 export function lastRelationshipChangeHtml(change) {
-    if (!change || change.impact === 'none' || (!change.reason && change.impact !== 'manual')) {
+    if (!change || change.impact === 'none' || (!change.reason && change.impact !== 'manual' && change.impact !== 'slice')) {
         return `<div class="delta-rel-last"><h4>Last relationship change</h4><p class="delta-muted">No relationship change recorded yet.</p></div>`;
     }
     const deltas = RELATIONSHIP_AXES
@@ -43,8 +45,9 @@ export function lastRelationshipChangeHtml(change) {
         })
         .join('');
     return `<div class="delta-rel-last">
-        <div class="delta-rel-last-head"><h4>Last relationship change</h4><span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>${stampHtml(changeStamp(change))}</div>
-        <div class="delta-rel-deltas">${deltas || '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>'}</div>
+        <div class="delta-rel-last-head"><h4>Last relationship change</h4>${change.impact === 'slice' ? '' : `<span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>`}${ORIGIN_CHIPS[change.origin] ? `<span class="delta-rel-origin">${ORIGIN_CHIPS[change.origin]}</span>` : ''}${stampHtml(changeStamp(change))}</div>
+        <div class="delta-rel-deltas">${deltas || (change.held ? '' : '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>')}</div>
+        ${change.held ? `<p class="delta-rel-held">Held: ${escapeHtml(change.held)}. Nothing moved.</p>` : ''}
         ${change.reason ? `<p>${escapeHtml(change.reason)}</p>` : ''}
     </div>`;
 }

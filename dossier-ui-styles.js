@@ -187,6 +187,8 @@ export const STYLES = `
 #${ROOT_ID} .delta-rel-last-head h4 { margin:0; }
 #${ROOT_ID} .delta-rel-last-head small { color:var(--delta-muted); font-size:.72rem; }
 #${ROOT_ID} .delta-rel-impact { display:inline-flex; padding:1px 7px; border:1px solid rgba(255,255,255,.14); border-radius:999px; font-size:.68rem; letter-spacing:.04em; text-transform:uppercase; color:var(--delta-muted); }
+#${ROOT_ID} .delta-rel-origin { display:inline-flex; padding:1px 7px; border-radius:999px; font-size:.68rem; font-weight:700; background:rgba(138,155,255,.22); }
+#${ROOT_ID} .delta-rel-held { color:#e8c46a; font-size:.78rem; }
 #${ROOT_ID} .delta-rel-impact-meaningful { color:#d7e6ff; border-color:rgba(138,163,200,.4); }
 #${ROOT_ID} .delta-rel-impact-major, #${ROOT_ID} .delta-rel-impact-extreme { color:#ffe2a8; border-color:rgba(216,188,120,.5); }
 #${ROOT_ID} .delta-rel-deltas { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:7px; }
