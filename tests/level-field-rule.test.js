@@ -52,16 +52,27 @@ test('in a one-pass capture the Level sentence sits in the context part, not the
     assert.ok(parts.context.includes(LEVEL_FIELD_RULE));
 });
 
-test('merge: a Level estimate with a reason passes, without one it does not, a hand-set value is kept, other fields still need the text', () => {
+test('merge: a Level estimate needs a quote that is really in the story; hand-set values and other fields keep their rules', () => {
     const base = { npcs: [{ ...createNpcRecord('Mira'), id: 'npc_mira' }], candidates: [], turn: 1 };
     const scan = (state, fields, reason, context) => mergeScanResult(state, { npcs: [{ id: 'npc_mira', name: 'Mira', customFields: fields, customFieldsReason: reason }] },
         { turn: 1, customFieldNames: ['Level', 'Class'], developmentContext: context }).state;
-    const story = 'Mira walks in. "He is far beyond anything I can sense," the captain whispers.';
-    assert.equal(scan(base, { Level: '40' }, 'far beyond anything I can sense', story).npcs[0].customFields?.Level, '40');
-    assert.equal(scan(base, { Level: '40' }, '', story).npcs[0].customFields, undefined, 'no quoted line, no estimate');
+    const story = 'Mira walks in. "He is far beyond anything I can sense," the captain whispers. Mira is level 3.';
+    const quote = 'Level: "far beyond anything I can sense"';
+    assert.equal(scan(base, { Level: '40' }, quote, story).npcs[0].customFields?.Level, '40', 'quoted line in the text passes');
+    assert.equal(scan(base, { Level: '40' }, 'Level: "he is a legend of the northern wars"', story).npcs[0].customFields, undefined, 'a made-up reason is dropped');
+    assert.equal(scan(base, { Level: '40' }, 'Level: "beyond"', story).npcs[0].customFields, undefined, 'a one-word quote is dropped');
+    assert.equal(scan(base, { Level: '40' }, 'far beyond anything I can sense', story).npcs[0].customFields, undefined, 'a quote not written after "Level" is dropped');
+    assert.equal(scan(base, { Level: '40' }, '', story).npcs[0].customFields, undefined, 'no reason, no estimate');
+    assert.equal(scan(base, { Level: '40', Class: 'Rogue' }, 'Class: "far beyond anything I can sense" Level: a guess', story).npcs[0].customFields, undefined, 'a quote meant for another field does not carry Level');
+    assert.equal(scan(base, { Level: '40' }, 'Level: "far beyond anything I can sense"', story).npcs[0].customFields?.Level, '40');
+    const aged = (fields, reason) => mergeScanResult(base, { npcs: [{ id: 'npc_mira', name: 'Mira', customFields: fields, customFieldsReason: reason }] },
+        { turn: 1, customFieldNames: ['Level', 'Age'], developmentContext: 'The damage she did was far beyond anything I can sense.' }).state.npcs[0].customFields;
+    assert.equal(aged({ Level: '40' }, 'Level: "the damage she did was far beyond anything I can sense"')?.Level, '40', 'a field name inside the quote does not cut it');
+    assert.equal(aged({ Level: '40', Age: '30' }, 'Age: "x" Level: "the damage she did was far beyond anything I can sense"')?.Level, '40');
+    assert.equal(scan(base, { Level: '3' }, '', story).npcs[0].customFields?.Level, '3', 'a value in the text keeps its path');
     assert.equal(scan(base, { Class: 'Rogue' }, 'a guess', story).npcs[0].customFields, undefined, 'other fields still need the value in the text');
-    const set = scan(base, { Level: '40' }, 'far beyond anything I can sense', story);
+    const set = scan(base, { Level: '40' }, quote, story);
     assert.equal(scan(set, { Level: '50' }, '', story).npcs[0].customFields.Level, '40', 'an established value needs a reason');
     set.npcs[0].manualProfileFields = ['customFields'];
-    assert.equal(scan(set, { Level: '50' }, 'far beyond anything I can sense', story).npcs[0].customFields.Level, '40', 'a hand-set value is never overwritten');
+    assert.equal(scan(set, { Level: '50' }, quote, story).npcs[0].customFields.Level, '40', 'a hand-set value is never overwritten');
 });
