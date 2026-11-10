@@ -73,7 +73,7 @@ function relationshipChangeProjection(change = {}) {
         message,
         ...(origin ? { origin } : {}),
         ...(plain(source.held) ? { held: plain(source.held) } : {}),
-        // From the slice's reply window (hosted): what was asked per axis, the impact tier, the story date. Absent on an older record.
+        // From the reply's receipts (hosted): what a held meter asked, the tier pacing cut it to, the story date. Absent on an older record.
         ...(source.ask && typeof source.ask === 'object' && Object.keys(source.ask).length ? { ask: Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(source.ask[axis]) || 0)]).filter(([, step]) => step)) } : {}),
         ...(['ordinary', 'meaningful', 'major', 'extreme'].includes(source.tier) ? { tier: source.tier } : {}),
         ...(plain(source.date) ? { date: plain(source.date) } : {}),
@@ -81,21 +81,20 @@ function relationshipChangeProjection(change = {}) {
     };
 }
 
-// The newest change that reached the meters, whichever wrote it. While hosted, `npc.sliceChange` is what the slice kept for the
-// newest reply (net amounts after pacing, a story line or the scanner, or that the day's allowance held it); the dossier's own
-// `lastRelationshipChange` has the scanner's reason. A newer slice reply wins; the same reply keeps the sidecar's reason and impact
-// with the slice's amounts; an older one, or a manual edit, leaves the sidecar's. Read only: nothing is stored.
-function newestRelationshipChange(npc) {
+// The newest change that reached the meters, whichever wrote it. While hosted, `hostChange` is what Story Block's receipts of the
+// newest reply say (src/npc-meters-pacing.js lastChangeOf: the moved amounts, the held words, what a held meter asked, the tier
+// pacing cut it to, the story date); it is the authority for the amounts. The dossier's own `lastRelationshipChange` keeps the
+// scanner's reason: shown only on the same reply and only when the scanner's receipt shows its change moved a meter. A newer
+// reply's receipts win; an older reply's, or a manual edit at that reply, leave the sidecar's. Read only: nothing is stored.
+function newestRelationshipChange(npc, hostChange = null) {
     const side = npc?.lastRelationshipChange;
-    const live = npc?.sliceChange;
-    if (!live || !Number.isInteger(live.reply)) return relationshipChangeProjection(side);
+    const live = hostChange && typeof hostChange === 'object' && Number.isInteger(hostChange.reply) ? hostChange : null;
+    if (!live) return relationshipChangeProjection(side);
     const sideMessage = wholeNumber(side?.message);
     const real = side && plain(side.impact, 'none') !== 'none' && (plain(side.reason) || side.impact === 'manual');
-    if (!real || sideMessage === null || live.reply > sideMessage) {
-        return relationshipChangeProjection({ impact: 'slice', delta: live.delta, message: live.reply, source: live.source, held: live.held, ask: live.ask, tier: live.tier, date: live.date });
-    }
-    if (live.reply === sideMessage && side.impact !== 'manual') return relationshipChangeProjection({ ...side, delta: live.delta, source: 'scanner', held: live.held, ask: live.ask, date: live.date });
-    return relationshipChangeProjection(real && side.impact !== 'manual' ? { ...side, source: 'scanner' } : side);
+    if (real && sideMessage !== null && (live.reply < sideMessage || (live.reply === sideMessage && side.impact === 'manual'))) return relationshipChangeProjection(side);
+    const reason = real && live.reply === sideMessage && live.scannerMoved === true && side.impact !== 'manual' ? plain(side.reason) : '';
+    return relationshipChangeProjection({ impact: 'slice', delta: live.delta, message: live.reply, source: live.source, held: live.held, ask: live.ask, tier: live.tier, date: live.date, reason });
 }
 
 const FIELD_CHANGE_LABELS = Object.freeze({
@@ -197,7 +196,7 @@ function shownCustomFields(npc, customFieldNames) {
         .map(([name, value]) => [plain(name), plain(value)]).filter(([name, value]) => name && value).slice(0, 12);
 }
 
-export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortraits = {}, { customFieldNames } = {}) {
+export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortraits = {}, { customFieldNames, hostChange = null } = {}) {
     const rel = npc?.relationship && typeof npc.relationship === 'object' ? npc.relationship : {};
     const shown = displayedPortrait(npc, portraitAssets, formPortraits);
     return {
@@ -220,7 +219,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
         keyRelationships: stringList(npc?.keyRelationships, 12),
         customFields: shownCustomFields(npc, customFieldNames),
         relationshipSummary: plain(npc?.relationshipSummary),
-        lastRelationshipChange: newestRelationshipChange(npc),
+        lastRelationshipChange: newestRelationshipChange(npc, hostChange),
         fieldChanges: fieldChangesProjection(npc?.fieldChanges, npc?.fieldChangeMessages),
         portraitAppearanceChanged: portraitAppearanceChanged(npc, shown),
         portraitForm: shown.form,

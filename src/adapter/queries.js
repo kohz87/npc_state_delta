@@ -11,6 +11,7 @@ import { storyMinuteText } from '../../calendar.js';
 import { resolveDossierTarget } from '../../suite-handshake.js';
 import { FEATURE_SOCIAL, SOCIAL_QUERY, createNpcPart, normalizeSecrets } from '../npc-meters.js';
 import { normalizeLimits, presetCatalog } from '../npc-meters-presets.js';
+import { lastChangeOf } from '../npc-meters-pacing.js';
 import { RELATIONSHIP_KEYS, dossierFields, portraitUrl } from './queries-dossier.js';
 import { createDirectorQueriesPart } from './queries-director.js';
 
@@ -112,7 +113,6 @@ export function createQueriesPart(session, deps) {
                 return Number.isInteger(time) ? time : time?.minutes ?? null;
             } catch { return null; }
         },
-        dateText: minutes => storyMinuteText(minutes, director.directorCalendar()),
         // Only the rules (and the titles screens show while locked) leave the dossier for the
         // handlers and screens; the texts go to the tail and to an unlocked note's screen line alone.
         secretRules: (name, labels = []) => {
@@ -318,8 +318,6 @@ export function createQueriesPart(session, deps) {
                 relationship, relationshipProgress: normalizeRelationshipProgress(entry.progress),
                 relationshipMilestones: normalizeRelationshipMilestones(npc.relationshipMilestones, relationship, { inferFromRelationship: false }).filter(holds),
             };
-            // What the newest reply did, for the dossier's "Last relationship change" (dossier-ui-model.js picks the newer of this and the sidecar's).
-            if (entry.last) next.sliceChange = entry.last;
             if (Object.keys(next).every(key => JSON.stringify(npc[key]) === JSON.stringify(next[key]))) return npc;
             changed = true;
             return { ...npc, ...next };
@@ -327,8 +325,38 @@ export function createQueriesPart(session, deps) {
         return changed ? out : npcs;
     }
 
+    /**
+     * The newest change that reached each dossier's four relationship meters, by dossier id ({} without a host, or a host that
+     * cannot list receipts), for the dossier view only (runtime-hosted.js dossierHostViews): read from Story Block's receipts of the
+     * replies that remain (npc-meters-pacing.js lastChangeOf), with the story date before that reply when the clock and the date
+     * writer are there. Nothing here is stored, scanned or checkpointed, so it is as current as the receipts.
+     */
+    function dossierChanges(npcs) {
+        const sdk = session.sdkRef;
+        if (!session.hosted || !Array.isArray(npcs) || typeof sdk?.receipts !== 'function') return {};
+        let entries;
+        let known;
+        try { entries = sdk.receipts(); known = sliceEntries(); } catch { return {}; }
+        if (!Array.isArray(entries) || !known?.length) return {};
+        const out = {};
+        for (const npc of npcs) {
+            const entry = npc && typeof npc === 'object' && npc.id ? entryFor(known, npc) : null;
+            const change = entry ? lastChangeOf(entries, entry.key) : null;
+            if (!change) continue;
+            let date = '';
+            try {
+                const time = calendarOwn?.() === true || change.reply < 1 ? null : sdk.query?.('director.time', { asOf: change.reply - 1 });
+                const minutes = Number.isInteger(time) ? time : time?.minutes;
+                const text = Number.isInteger(minutes) ? storyMinuteText(minutes, director.directorCalendar()) : '';
+                date = typeof text === 'string' ? text.trim().slice(0, 40) : '';
+            } catch { date = ''; }
+            out[npc.id] = { ...change, ...(date ? { date } : {}) };
+        }
+        return out;
+    }
+
     return {
         warn, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
-        entryFor, queries, ...director, send, sliceView,
+        entryFor, queries, ...director, send, sliceView, dossierChanges,
     };
 }

@@ -39,7 +39,7 @@ const datedStamp = change => {
     return change.date && stamp.label ? { ...stamp, label: `${stamp.label} · ${change.date}` } : stamp;
 };
 
-// "Asked: Trust +1, Affection +1" (a held change only: what the story or scanner wanted before the day's allowance).
+// "Asked: Trust +2" (a meter the receipt says was held: what the story or scanner wanted before the allowance or the cap).
 const askedHtml = change => {
     const parts = RELATIONSHIP_AXES.filter(([axis]) => change.ask?.[axis]).map(([axis, label]) => `${label} ${change.ask[axis] > 0 ? '+' : ''}${change.ask[axis]}`);
     return parts.length ? `Asked: ${escapeHtml(parts.join(', '))}` : '';
@@ -56,10 +56,10 @@ export function lastRelationshipChangeHtml(change) {
             return `<span class="delta-rel-delta delta-rel-delta-${value > 0 ? 'up' : 'down'} delta-rel-${escapeHtml(axis)}">${escapeHtml(label)} ${value > 0 ? '+' : ''}${value}</span>`;
         })
         .join('');
-    // Asked (held only), the held words and the reason: one line each, none when empty.
+    // The held words, what was asked and the reason: one line each, none when empty (Held before Asked, as the approved card).
     const notes = [
-        change.held && askedHtml(change) ? `<p class="delta-rel-asked">${askedHtml(change)}</p>` : '',
         change.held ? `<p class="delta-rel-held">Held: ${escapeHtml(change.held)}. Nothing moved.</p>` : '',
+        askedHtml(change) ? `<p class="delta-rel-asked">${askedHtml(change)}</p>` : '',
         change.reason ? `<p>${escapeHtml(change.reason)}</p>` : '',
     ].filter(Boolean).map(line => `\n        ${line}`).join('');
     return `<div class="delta-rel-last">

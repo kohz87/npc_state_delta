@@ -2,6 +2,7 @@
 // lower tier. A pure part of the pacing rule (src/relationship-pacing.js, which holds the count); never imports npc-meters.js.
 import { RELATIONSHIP_KEYS, RELATIONSHIP_MILESTONE_REQUIREMENTS, RELATIONSHIP_MILESTONE_THRESHOLDS } from '../core-relationship-model.js';
 import { PACING_TIERS } from './relationship-pacing.js';
+import { NPC_KIND } from './npc-meters-config.js';
 
 const list = words => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : words[0]);
 
@@ -33,62 +34,54 @@ export function cutToTier(changes, used, caps, value) {
     });
 }
 
-/**
- * What the event asked, per built-in axis, before pacing and the yield to a story line: { trust: +1, ... } (whole numbers, none
- * for a meter the event leaves alone or one the story line already named: `left`). `value(meter)` is the meter now (for `=N`).
- */
-export function askedAmounts(changes, left, value) {
-    const out = {};
-    for (const change of changes) {
-        if (!RELATIONSHIP_KEYS.includes(change.meter) || left.includes(change.meter) || !Number.isInteger(change.value)) continue;
-        const step = change.mode === 'add' ? change.value : change.value - value(change.meter);
-        if (step) out[change.meter] = (out[change.meter] ?? 0) + step;
-    }
-    return out;
-}
-
-/** Keeps on the reply's window what the event asked (summed per axis), its tier (the highest of the reply) and the story date (the first). */
-export function stampEvent(turn, { ask, tier, date }) {
-    if (ask && Object.keys(ask).length) {
-        const sum = { ...(turn.ask ?? {}) };
-        for (const [key, step] of Object.entries(ask)) sum[key] = (sum[key] ?? 0) + step;
-        turn.ask = Object.fromEntries(Object.entries(sum).filter(([, step]) => step));
-        if (!Object.keys(turn.ask).length) delete turn.ask;
-    }
-    if (PACING_TIERS.includes(tier) && !(PACING_TIERS.indexOf(turn.tier) >= PACING_TIERS.indexOf(tier))) turn.tier = tier;
-    if (date && !turn.date) turn.date = date;
-}
-
-const FLAT_DAY = /^d(-?\d{1,9}):(ordinary|meaningful|major|extreme)$/;
+const TIER = '(ordinary|meaningful|major|extreme)';
+const CUT_NOTE = new RegExp(`\\(${TIER} counted as ${TIER}: today's [^)]*\\)`);
+const HELD_NOTE = /nothing changed \((today's [^)]*)\)/;
+const ASKED_NOTE = /([a-z]+) -?\d+ → -?\d+ \(held at -?\d+[^;)]*; ([+-]?\d+) asked\)/g;
+const RANK = name => PACING_TIERS.indexOf(name);
 
 /**
- * What the newest reply did to one NPC's four built-in meters, read from the record as it is kept (nothing is stored for it):
- * { reply (index), delta: { trust, ... } (the net change from the reply's start: after pacing, caps and gates), source ('story' when a
- * story line took part, else 'scanner'), held (the reader's words when the day's allowance was used up and nothing moved, else '') },
- * or null when nothing moved and nothing was held; plus, when the window kept them (stampEvent): ask (what was asked per axis), tier (the
- * impact tier the event spent, or the tier it asked when held) and date (the story date before the reply). A held change names the asked tier.
+ * What the newest reply that touched one NPC's four built-in meters did, read from Story Block's own receipts of that reply (the
+ * host's `receipts()`: [{ index, receipt }] on the current line of history; nothing is stored for it, so a swipe, a deleted
+ * message or a reload gives the card of the reply that remains). Looks at NPC State Delta's story-line receipts (`capture.npc`) and
+ * its scanner's (`npc.adjust`) for `key`, newest reply first, and reads each receipt's moved amounts (`data.changes`), its held
+ * meters' "+N asked" and the pacing words of its summary.
+ * → { reply, delta: { trust, ... } (what moved), source ('story' when a story line's receipt took part, else 'scanner'),
+ * scannerMoved (the scanner's receipt moved a meter), held ('' or the reader's words: the day's allowance held it and nothing
+ * moved), ask: { axis: n } (what a held meter asked), tier (the tier actually spent, only when pacing cut it) } or null.
  */
-export function lastChangeOf(record, allowance) {
-    const turn = record?.turn;
-    if (!turn || typeof turn !== 'object' || !turn.from || typeof turn.from !== 'object') return null;
-    const reply = Number.isInteger(turn.at) ? turn.at : Number.isInteger(turn.reply) ? turn.reply : null;
-    if (reply === null) return null;
-    const delta = Object.fromEntries(RELATIONSHIP_KEYS.map(key => [key, Number.isInteger(record.meters?.[key]) && Number.isInteger(turn.from[key]) ? record.meters[key] - turn.from[key] : 0]));
-    const moved = Object.values(delta).some(Boolean);
-    let held = '';
-    const day = record.impactDay;
-    if (!moved && allowance && day && typeof day === 'object' && day.reply === turn.reply) {
-        const days = new Set(Object.keys(day).map(key => FLAT_DAY.exec(key)?.[1]).filter(Boolean));
-        const [only] = days;
-        const full = [];
-        const reach = PACING_TIERS.includes(turn.tier) ? PACING_TIERS.indexOf(turn.tier) + 1 : PACING_TIERS.length;
-        if (days.size === 1) for (const tier of PACING_TIERS.slice(0, reach)) {
-            if (allowance[tier] === null || allowance[tier] === undefined || !(day[`d${only}:${tier}`] >= allowance[tier])) break;
-            full.push(tier);
+export function lastChangeOf(entries, key) {
+    const mine = (Array.isArray(entries) ? entries : []).filter(({ index, receipt }) => Number.isInteger(index)
+        && receipt?.module === 'npc-state-delta' && (receipt.type === 'npc.adjust' || receipt.type === `capture.${NPC_KIND}`)
+        && receipt.data?.key === key && Array.isArray(receipt.data.changes));
+    const replies = [...new Set(mine.map(entry => entry.index))].sort((a, b) => b - a);
+    for (const reply of replies) {
+        const delta = Object.fromEntries(RELATIONSHIP_KEYS.map(axis => [axis, 0]));
+        const ask = {};
+        let story = false;
+        let scannerMoved = false;
+        let held = '';
+        let tier = '';
+        for (const { index, receipt } of mine) {
+            if (index !== reply) continue;
+            const summary = typeof receipt.summary === 'string' ? receipt.summary : '';
+            let moved = false;
+            for (const change of receipt.data.changes) {
+                if (!RELATIONSHIP_KEYS.includes(change?.meter) || !Number.isInteger(change.before) || !Number.isInteger(change.after) || change.after === change.before) continue;
+                delta[change.meter] += change.after - change.before;
+                moved = true;
+            }
+            for (const [, axis, amount] of summary.matchAll(ASKED_NOTE)) if (RELATIONSHIP_KEYS.includes(axis)) ask[axis] = Number(amount);
+            const cut = CUT_NOTE.exec(summary)?.[2];
+            if (cut && RANK(cut) >= RANK(tier)) tier = cut;
+            const words = HELD_NOTE.exec(summary)?.[1];
+            if (words && !receipt.data.changes.length) held = words;
+            if (receipt.type === 'npc.adjust') scannerMoved ||= moved;
+            else story ||= moved || Boolean(words);
         }
-        if (full.length === reach || (reach === PACING_TIERS.length && full.length)) held = pacingNote(full.at(-1), null, full);
+        if (!Object.values(delta).some(Boolean) && !held) continue;
+        const asked = Object.fromEntries(Object.entries(ask).filter(([axis]) => delta[axis] !== undefined));
+        return { reply, delta, source: story ? 'story' : 'scanner', scannerMoved, held: Object.values(delta).some(Boolean) ? '' : held, ...(Object.keys(asked).length ? { ask: asked } : {}), ...(tier ? { tier } : {}) };
     }
-    if (!moved && !held) return null;
-    const ask = turn.ask && typeof turn.ask === 'object' ? turn.ask : null;
-    return { reply, delta, source: Array.isArray(turn.story) ? 'story' : 'scanner', held, ...(ask ? { ask } : {}), ...(turn.tier ? { tier: turn.tier } : {}), ...(turn.date ? { date: turn.date } : {}) };
+    return null;
 }

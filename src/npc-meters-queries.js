@@ -1,17 +1,16 @@
 // Read-only NPC meter queries and screen views. A pure part of npc-meters.js (same owner, moved without change);
 // npc-meters.js re-exports every public name it exported before. Never imports npc-meters.js.
 import { NPC_DOMAIN, MAX_STAGES_PER_METER, SECRET_TITLE_MAX, NAME_MAX, isObject, isInt, isReplyId, sameReply, clean, own, bandWord, needMet, thresholdReached, stageAt, clamp, intOr } from './npc-meters-config.js';
-import { lastChangeOf } from './npc-meters-pacing.js';
 import { initialNpcSlice, findNpcKey, meterValue, rungMet, conflictOn } from './npc-meters-slice.js';
 import { FEATURE_SOCIAL, SOCIAL_QUERY, socialModifier, socialSettings, socialSkill } from './social-check.js';
 
 export function createNpcQueries({
-    call, hooks, resolve, presentNames, featureOn, storedSettings, defsFrom, setupFor, rungsFor, limitsFor, identify, rulesFor, tierAllowance,
+    call, hooks, resolve, presentNames, featureOn, storedSettings, defsFrom, setupFor, rungsFor, limitsFor, identify, rulesFor,
 }) {
     // ---- queries ----
 
     const sliceOf = state => (isObject(state?.domains?.[NPC_DOMAIN]?.npcs) ? state.domains[NPC_DOMAIN] : initialNpcSlice());
-    const entryView = (key, record, defs, rungs, last = lastChangeOf(record, tierAllowance())) => ({
+    const entryView = (key, record, defs, rungs) => ({
         key,
         name: record.name,
         meters: Object.fromEntries(defs.map(def => [def.id, meterValue(record, def)])),
@@ -24,8 +23,6 @@ export function createNpcQueries({
         ...(isObject(record.progress) && Object.keys(record.progress).length ? { progress: { ...record.progress } } : {}),
         ...(isObject(record.milestones) && Object.keys(record.milestones).length ? { milestones: { ...record.milestones } } : {}),
         ...(rungs.find(step => step.key === record.rank) ? { rank: rungs.find(step => step.key === record.rank).name } : {}),
-        // What the newest reply did to the four built-in meters, or why it held (npc-meters-pacing.js lastChangeOf); read only.
-        ...(last ? { last } : {}),
     });
 
     /**

@@ -179,7 +179,8 @@ export function createHostedPart(rt, deps) {
         const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
         const keyViews = dossierKeyViews(state);
         const castViews = dossierCastViews(state);
-        return { meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}) };
+        const changes = storySuiteV2Meters()?.dossierChanges?.(state.npcs) ?? {};
+        return { meterViews, ...(Object.keys(changes).length ? { changeViews: changes } : {}), ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}) };
     }
     // (perf) The dossiers as the views read them: a copy, except that a portrait's picture (its data URL, an immutable string of up to
     // a few hundred KB) is shared rather than copied; the portrait record itself is still a copy.

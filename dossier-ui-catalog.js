@@ -122,10 +122,11 @@ export function projectDossierState(state = {}, status = {}) {
     const formPortraits = state?.formPortraits && typeof state.formPortraits === 'object' ? state.formPortraits : {};
     const customFieldNames = Array.isArray(state?.customFieldNames) ? state.customFieldNames : undefined;
     const meterViews = state?.meterViews && typeof state.meterViews === 'object' ? state.meterViews : {};
+    const changeViews = state?.changeViews && typeof state.changeViews === 'object' ? state.changeViews : {};
     const keyViews = state?.keyViews && typeof state.keyViews === 'object' ? state.keyViews : {};
     const castViews = state?.castViews && typeof state.castViews === 'object' ? state.castViews : {};
     const details = records.map(npc => {
-        const detail = dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames });
+        const detail = dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames, hostChange: Object.hasOwn(changeViews, String(npc?.id ?? '')) ? changeViews[npc.id] : null });
         const meters = v2MetersProjection(Object.hasOwn(meterViews, String(npc?.id ?? '')) ? meterViews[npc.id] : null);
         const key = keyProjection(Object.hasOwn(keyViews, String(npc?.id ?? '')) ? keyViews[npc.id] : null);
         const cast = castProjection(Object.hasOwn(castViews, String(npc?.id ?? '')) ? castViews[npc.id] : null);
