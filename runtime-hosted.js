@@ -10,6 +10,7 @@ import { defersArea, resolveDossierTarget } from './suite-handshake.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
 import { castView, findCastPerson, normalizeCast } from './src/cast-dossier.js';
 import { getSettings, setRpgProbe } from './runtime-settings.js';
+import { stage1Refresh } from './dossier-tools-core.js';
 
 export function createHostedPart(rt, deps) {
     const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex } = deps;
@@ -250,6 +251,7 @@ export function createHostedPart(rt, deps) {
             for (const change of changes) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.adjust(change);
+                stage1Refresh();   // an open dossier panel draws again once the host's meters took this change
             }
         })();
     }
