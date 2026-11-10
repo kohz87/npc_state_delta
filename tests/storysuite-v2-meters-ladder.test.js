@@ -19,6 +19,7 @@ import { fakeRoot } from './helpers/fake-dom.js';
 import { fakeDocument } from './helpers/fake-dom.js';
 import { runtimeSource } from './helpers/runtime-source.js';
 import { relationshipHistoryHtml } from '../dossier-ui-relationship.js';
+import { storyMinuteText } from '../calendar.js';
 
 // TRS ideas 1-4 on the NPC meters (stage ladders with several needs and milestones, per-NPC ceilings
 // and floors, fuller custom meters with presets and drift, locked-note teasers), against Story
@@ -46,7 +47,7 @@ function dossiers() {
  * A whole Story Block host with Delta's adapter registered on it. `features`: { id: bool }, the
  * reader's choices in Story Block's Features; `modules`: more module definitions.
  */
-async function suite({ settings = {}, records = dossiers(), features = null, modules = [], doc = null, wrap = false, packs = [] } = {}) {
+async function suite({ settings = {}, records = dossiers(), features = null, modules = [], doc = null, wrap = false, packs = [], apiExtra = {} } = {}) {
     // The reader's feature choices live in extension_settings.storySuite.features (Story Block's
     // Features), installed packs in extension_settings.storySuite.packs.
     const installed = packs.map(pack => ({ id: pack.id, version: pack.version, enabled: true, source: 'file', origin: `${pack.id}.json`, pack: structuredClone(pack) }));
@@ -62,6 +63,7 @@ async function suite({ settings = {}, records = dossiers(), features = null, mod
         presentCastHtml: () => '<section class="cast">cast</section>',
         castEmptyReason: () => ({ text: 'Nobody here.' }),
         fillPresentCast: () => {},
+        ...apiExtra,
     };
     const warnings = [];
     const adapter = createStorySuiteV2Adapter({
@@ -620,7 +622,7 @@ function cardOf(s, record = s.delta.records.npc_mira) {
     return { shown, html: lastRelationshipChangeHtml(shown), npc };
 }
 
-test('net change card: a story-line move shows the net amounts and the reply (no source chip, no tier, no reason)', async () => {
+test('net change card: a story-line move without Delta\'s tier caps shows the net amounts and the reply (no source chip, no tier, no reason)', async () => {
     const s = await suite();
     const reply = await s.say(['~ npc Mira | trust: +5 | tension: +2']);
     const now = s.npc('Mira').meters;
@@ -724,6 +726,7 @@ test('hosted forward: an open dossier panel draws again when each delayed npc.ad
     const calls = [];
     let release = null;
     const refreshes = [];
+    let cleanup = null;
     const prior = globalThis.document;
     globalThis.document = { documentElement: { dataset: { npcStateDeltaStoryBlockV2: '1' } }, getElementById: id => (id === 'npc_state_delta_dossier_root' ? { __npcStateDeltaStage1Ui: { scheduleRefresh: () => refreshes.push(calls.length) } } : null) };
     try {
@@ -734,6 +737,7 @@ test('hosted forward: an open dossier panel draws again when each delayed npc.ad
         fs.cpSync(root, temp, { recursive: true, filter: from => !/[\\/](tests|docs|scripts|\.git|node_modules|dist)([\\/]|$)/.test(path.relative(root, from)) });
         fs.writeFileSync(path.join(temp, 'runtime-scan-helpers.js'), 'export const chatContext = () => ({ chat: [] }); export const replayScope = () => null; export const scopedAdapter = a => a;');
         fs.writeFileSync(path.join(temp, 'runtime-settings.js'), 'export const getSettings = () => ({}); export const setRpgProbe = () => {};');
+        cleanup = temp;
         const { createHostedPart } = await import(pathToFileURL(path.join(temp, 'runtime-hosted.js')).href);
         const part = createHostedPart(rt, { chatHydrationStatus: () => 'ready', getChatKey: () => 'c1', getChatState: () => ({ npcs: [] }), latestMessageId: () => 1, latestReplyIndex: () => 1 });
         const npc = (id, trust) => ({ id, name: id, relationship: { trust, affection: 0, desire: 0, tension: 0 } });
@@ -746,5 +750,187 @@ test('hosted forward: an open dossier panel draws again when each delayed npc.ad
         release(); await new Promise(resolve => setImmediate(resolve));
         assert.deepEqual(calls, ['a', 'b']);
         assert.deepEqual(refreshes, [1, 2]);
-    } finally { globalThis.document = prior; }
+    } finally {
+        globalThis.document = prior;
+        if (cleanup) fs.rmSync(cleanup, { recursive: true, force: true });
+    }
+});
+
+// ---- 8. the card's event details: the tier, "Held" and "Asked", and the story date (the reply's own record, written whole) ----
+
+const CLOCK = {
+    id: 'zz-clock', name: 'Clock',
+    domains: { director: { initial: () => ({ time: { minutes: 0 } }) } },
+    commands: { 'zz.clock': (ctx, { minutes }) => { ctx.draft('director').time.minutes = minutes; return { summary: 'time passes' }; } },
+    queries: { 'director.time': state => ({ minutes: state?.domains?.director?.time?.minutes ?? null }) },
+};
+const TIERS = { ordinary: 1, meaningful: 2, major: 5, extreme: 10 };
+/** A hosted chat with Delta's tier caps and a per-day allowance (and a clock): the day's events are paced. */
+const pacedSuite = async (allowance, extra = {}) => {
+    const s = await suite({ modules: [CLOCK], apiExtra: { relationshipCaps: () => ({ ...TIERS }), relationshipAllowance: () => ({ ...allowance }) }, ...extra });
+    await s.host.sdk.command('zz.clock', { minutes: 12 * 1440 });
+    return s;
+};
+const LOOSE = { ordinary: 99, meaningful: 99, major: 99, extreme: 99 };
+const SHUT = { ordinary: 0, meaningful: 0, major: 0, extreme: 0 };
+const eventOf = (s, who = 'Mira') => JSON.parse(s.host.head().domains.npc.npcs[who.toLowerCase()].lastEvent);
+
+test('event card: a story line that moved shows the tier chip, the amounts and the story date in the stamp', async () => {
+    const s = await pacedSuite(LOOSE);
+    const reply = await s.say(['~ npc Mira | trust: +1 | affection: +1 | tension: +1']);
+    const { shown, html } = cardOf(s);
+    const date = storyMinuteText(12 * 1440);
+    assert.ok(date, 'the clock gives a date');
+    assert.match(html, /delta-rel-impact-ordinary">Ordinary</);
+    assert.match(html, new RegExp(`Reply #${reply} · ${date}`));
+    assert.match(html, /Trust \+1/);
+    assert.doesNotMatch(html, /Held|Asked|Old sidecar/);
+    assert.equal(shown.event.held, false);
+});
+
+test('event card: the highest tier actually spent is shown (a meaningful line cut to ordinary by the day shows Ordinary)', async () => {
+    const s = await pacedSuite({ ordinary: 9, meaningful: 0, major: 0, extreme: 0 });
+    await s.say(['~ npc Mira | trust: +9 | impact: major']);
+    assert.match(cardOf(s).html, /delta-rel-impact-ordinary">Ordinary</);
+    assert.deepEqual(eventOf(s).events.map(item => [item.tier, item.held]), [['ordinary', false]]);
+});
+
+test('event card: a line the day held shows "Held: …. Nothing moved." and what was asked; the meters do not move', async () => {
+    const s = await pacedSuite({ ordinary: 1, meaningful: 0, major: 0, extreme: 0 });
+    await s.say(['~ npc Mira | trust: +1']);
+    const before = JSON.stringify(s.npc('Mira').meters);
+    const reply = await s.say(['~ npc Mira | trust: +1 | affection: +1']);
+    assert.equal(JSON.stringify(s.npc('Mira').meters), before, 'nothing moved');
+    const { html } = cardOf(s);
+    assert.match(html, /delta-rel-impact-ordinary">Ordinary</);
+    assert.match(html, new RegExp(`Reply #${reply} · ${storyMinuteText(12 * 1440)}`));
+    assert.match(html, /Held: today&#039;s ordinary is used\. Nothing moved\./);
+    assert.match(html, /Asked: Trust \+1, Affection \+1/);
+    assert.doesNotMatch(html, /Progress only|Old sidecar/);
+});
+
+test('event card: two held story lines on one reply sum their asks per axis', async () => {
+    const s = await pacedSuite(SHUT);
+    await s.say(['~ npc Mira | trust: +1', '~ npc Mira | trust: +1 | desire: +2']);
+    assert.equal(eventOf(s).events.length, 2);
+    assert.match(cardOf(s).html, /Asked: Trust \+2, Desire \+2/);
+});
+
+test('event card: a scanner request for a story-named axis is not counted twice; its other axes are', async () => {
+    const s = await pacedSuite(SHUT);
+    const reply = await s.say(['~ npc Mira | trust: +1']);
+    await s.adapter.adjust({ name: 'Mira', meters: { trust: 1, affection: 1 }, reply, impact: 'ordinary' });
+    assert.deepEqual(eventOf(s).events.map(item => item.src), ['story', 'scan']);
+    assert.match(cardOf(s).html, /Asked: Trust \+1, Affection \+1/);
+    // A story line that moved leaves its axis to itself: the scan's request for it makes no event at all.
+    const loose = await pacedSuite(LOOSE);
+    const next = await loose.say(['~ npc Mira | trust: +1']);
+    await loose.adapter.adjust({ name: 'Mira', meters: { trust: 1 }, reply: next, impact: 'ordinary' });
+    assert.deepEqual(eventOf(loose).events.map(item => item.src), ['story']);
+});
+
+test('event card: a later reply replaces the record whole; a reply whose window moved on shows the plain card', async () => {
+    const s = await pacedSuite(LOOSE);
+    const first = await s.say(['~ npc Mira | trust: +1']);
+    const second = await s.say(['~ npc Mira | affection: +1']);
+    assert.equal(eventOf(s).at, s.host.store.carrierSid(second), 'only the newest reply is kept');
+    assert.notEqual(first, second);
+    const entry = s.npc('Mira');
+    assert.equal(entry.event.events.length, 1);
+    await s.say([]);   // a reply with no line for Mira: the window and the event stay the second reply's
+    assert.match(cardOf(s).html, new RegExp(`Reply #${second}`));
+});
+
+test('event card: replay equals live, and the meters match a chat that never had the deleted reply (middle delete, rebuild)', async () => {
+    const lines = [['~ npc Mira | trust: +3'], ['~ npc Mira | affection: +2'], ['~ npc Mira | trust: +1 | tension: +1']];
+    const a = await pacedSuite(LOOSE);
+    await a.say(['~ npc Mira | trust: +1']);
+    for (const set of lines) await a.say(set);
+    const gone = a.host.store.headIndex() - 2;   // the second of the three
+    await a.host.st.deleteMessage(gone);
+    await a.host.st.deleteMessage(gone - 1);
+    assert.deepEqual(a.host.store.problems(), [], 'nothing was skipped');
+    const b = await pacedSuite(LOOSE);
+    await b.say(['~ npc Mira | trust: +1']);
+    for (const set of [lines[0], lines[2]]) await b.say(set);
+    assert.equal(JSON.stringify(a.npc('Mira').meters), JSON.stringify(b.npc('Mira').meters), 'the meters are the same');
+    assert.deepEqual(validateNpcSlice(a.host.head().domains.npc), []);
+    // The event is the surviving reply's own whole record (the net amounts and the stamp's number are the window's, as on main).
+    assert.deepEqual(eventOf(a).events, eventOf(b).events, 'the surviving reply\'s event');
+    assert.equal(eventOf(a).date, eventOf(b).date);
+    assert.match(cardOf(a).html, /delta-rel-impact-ordinary">Ordinary<.*January 13/s);
+    const head = JSON.stringify(a.host.head());
+    a.host.store.rebuild();
+    assert.equal(JSON.stringify(a.host.head()), head, 'replay equals the live state');
+});
+
+test('event card: a swipe falls back to the earlier reply\'s card; a regenerate and a delete follow their own reply', async () => {
+    const s = await pacedSuite(LOOSE);
+    await s.say(['~ npc Mira | trust: +1']);
+    const first = s.host.store.headIndex();
+    await s.say(['~ npc Mira | affection: +1']);
+    await s.swipe([]);
+    const swiped = cardOf(s);
+    assert.match(swiped.html, new RegExp(`Reply #${first}`), 'the swiped reply made no event: the earlier reply\'s card');
+    assert.doesNotMatch(swiped.html, /Affection/);
+    await s.regenerate(['~ npc Mira | trust: +2']);
+    assert.match(cardOf(s).html, /delta-rel-impact-ordinary">Ordinary</);
+    assert.match(cardOf(s).html, /Trust \+1/, 'asked +2, the ordinary tier moved +1');
+    await s.host.st.deleteMessage(s.host.store.headIndex());
+    await s.host.st.deleteMessage(s.host.store.headIndex());
+    assert.deepEqual(s.host.store.problems(), []);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('event card: an older record without a last event (or an unusable one) shows exactly the net card', async () => {
+    const s = await pacedSuite(LOOSE);
+    await s.say(['~ npc Mira | trust: +2']);
+    const withEvent = cardOf(s).html;
+    const part = createNpcPart({});
+    const slice = structuredClone(s.host.head().domains.npc);
+    delete slice.npcs.mira.lastEvent;
+    assert.deepEqual(validateNpcSlice(slice), [], 'an old record is valid');
+    for (const bad of ['{', '{"at":1,"date":"","events":[]}', JSON.stringify({ at: 1, date: 'x'.repeat(41), events: [{ src: 'story', ask: { trust: 1 }, tier: 'ordinary', held: true, note: '' }] }),
+        JSON.stringify({ at: 1, date: '', events: [{ src: 'story', ask: { luck: 1 }, tier: 'ordinary', held: true, note: '' }] }),
+        JSON.stringify({ at: 1, date: '', events: [{ src: 'story', ask: { trust: 1.5 }, tier: 'ordinary', held: true, note: '' }] }),
+        JSON.stringify({ at: 1, date: '', events: [{ src: 'story', ask: { trust: 1 }, tier: 'huge', held: true, note: '' }] }),
+        JSON.stringify({ at: 1, date: '', events: Array.from({ length: 5 }, () => ({ src: 'scan', ask: {}, tier: 'ordinary', held: false, note: '' })) }), 7]) {
+        const copy = structuredClone(slice);
+        copy.npcs.mira.lastEvent = bad;
+        assert.equal(validateNpcSlice(copy).length, 1, `unusable: ${String(bad).slice(0, 50)}`);
+    }
+    assert.ok(part && withEvent.includes('Ordinary'));
+});
+
+test('event card: a hosted manual edit keeps "Manual edit" with the edited amounts (the save writes the manual change; the slice window restarts)', async () => {
+    assert.match(fs.readFileSync(fileURLToPath(new URL('../runtime-editor-save.js', import.meta.url)), 'utf8'), /else if \(meterEdits && shownRelationship\) \{[^}]*impact: 'manual',\s*delta: edited/s);
+    const s = await pacedSuite(LOOSE);
+    const reply = await s.say(['~ npc Mira | trust: +1']);
+    await s.adapter.setMeters({ name: 'Mira', meters: { trust: 30 } });
+    const npc = { ...structuredClone(s.delta.records.npc_mira), lastRelationshipChange: { impact: 'manual', delta: { trust: 19, affection: 0, desire: 0, tension: 0 }, reason: '', message: reply } };
+    const shown = projectDossierState({ npcs: [npc], meterViews: s.adapter.dossierMeters([npc]) }, { chatKey: 'c1' }).npcs[0].lastRelationshipChange;
+    const html = lastRelationshipChangeHtml(shown);
+    assert.match(html, /Manual edit/);
+    assert.match(html, /Trust \+19/);
+});
+
+test('event card: same-reply history is filtered before the display limit (older rows are not pushed out)', async () => {
+    const s = await pacedSuite(LOOSE);
+    const reply = await s.say(['~ npc Mira | trust: +1']);
+    const mk = (n, message) => ({ impact: 'ordinary', delta: { trust: 1, affection: 0, desire: 0, tension: 0 }, reason: `Event ${n}.`, message });
+    const history = [mk(1, reply - 3), mk(2, reply - 2), mk(3, reply - 1), mk(4, reply), mk(5, reply)];
+    const npc = { ...structuredClone(s.delta.records.npc_mira), lastRelationshipChange: history.at(-1), relationshipEventHistory: history };
+    const shown = projectDossierState({ npcs: [npc], meterViews: s.adapter.dossierMeters([npc]) }, { chatKey: 'c1' }).npcs[0];
+    const html = relationshipHistoryHtml(shown.recentRelationshipChanges, shown.lastRelationshipChange);
+    assert.doesNotMatch(html, /Event 4|Event 5/);
+    for (const n of [1, 2, 3]) assert.match(html, new RegExp(`Event ${n}\\.`));
+});
+
+test('event card: a host capture or Re-read that settles after Delta\'s render asks an open panel to draw again', async () => {
+    const draws = [];
+    const doc = { documentElement: { dataset: {} }, getElementById: id => (id === 'npc_state_delta_dossier_root' ? { __npcStateDeltaStage1Ui: { scheduleRefresh: () => draws.push(1) } } : null), addEventListener() {}, dispatchEvent() { return true; } };
+    const s = await suite({ doc });
+    const before = draws.length;
+    await s.say(['~ npc Mira | trust: +2']);
+    assert.ok(draws.length > before, 'the host\'s turn event asked the panel to refresh');
 });

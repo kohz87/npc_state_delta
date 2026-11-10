@@ -32,3 +32,74 @@ export function cutToTier(changes, used, caps, value) {
         return { ...change, value: step };
     });
 }
+
+// ---- the last event of a reply (record.lastEvent): what the reply's meter lines and scans asked, and what the day's allowance made of it ----
+//
+// Stored as ONE text leaf (compact JSON), so the host always writes and replays it whole: { at: reply, date, events: [{ src, ask, tier,
+// held, note }] } (up to 4 events; `ask`: the four built-in axes' asked amounts; `date`: the story date before the reply). A new reply
+// replaces it; another event of the same reply writes the whole longer list. Display only: nothing that decides meters reads it.
+const AXES = ['trust', 'affection', 'desire', 'tension'];
+export const EVENT_MAX = 4;
+const EVENT_TEXT_MAX = 900;
+const NOTE_MAX = 120;
+const DATE_MAX = 40;
+const SOURCES = ['story', 'scan'];
+const wholeInt = value => Number.isSafeInteger(value);
+const replyOk = value => (typeof value === 'string' && value.length > 0 && value.length <= 80) || (wholeInt(value) && value >= 0);
+
+function validEvent(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item) || !SOURCES.includes(item.src) || !PACING_TIERS.includes(item.tier)) return false;
+    if (typeof item.held !== 'boolean' || typeof item.note !== 'string' || item.note.length > NOTE_MAX) return false;
+    const ask = item.ask;
+    return Boolean(ask) && typeof ask === 'object' && !Array.isArray(ask) && Object.keys(ask).every(axis => AXES.includes(axis) && wholeInt(ask[axis]) && ask[axis] !== 0);
+}
+
+/** The parsed last event ({ at, date, events }) of stored text, or null when it is absent or not valid in every part. */
+export function readEvent(text) {
+    if (typeof text !== 'string' || !text || text.length > EVENT_TEXT_MAX) return null;
+    let value;
+    try { value = JSON.parse(text); } catch { return null; }
+    if (!value || typeof value !== 'object' || !replyOk(value.at) || typeof value.date !== 'string' || value.date.length > DATE_MAX) return null;
+    if (!Array.isArray(value.events) || !value.events.length || value.events.length > EVENT_MAX || !value.events.every(validEvent)) return null;
+    return value;
+}
+
+/** What a hosted run records for one paced event: the whole new text for the record (`prior`: the stored text), or null when it need not change. */
+export function nextEvent(prior, { reply, date, src, ask, tier, held, note }) {
+    const old = readEvent(prior);
+    const events = old && old.at === reply ? old.events : [];
+    if (events.length >= EVENT_MAX) return null;
+    const mine = Object.fromEntries(AXES.filter(axis => wholeInt(ask?.[axis]) && ask[axis] !== 0).map(axis => [axis, ask[axis]]));
+    const item = { src, ask: mine, tier, held: Boolean(held), note: String(note || '').slice(0, NOTE_MAX) };
+    const text = JSON.stringify({ at: reply, date: String(date || '').slice(0, DATE_MAX), events: [...events, item] });
+    return validEvent(item) && text.length <= EVENT_TEXT_MAX ? text : null;
+}
+
+/**
+ * The card's words for one reply's events: { tier, held, note, ask, date }. `tier`: the highest tier actually spent, else the highest
+ * asked; `held`: every event was held (then `note` is the first hold's words); `ask`: the held events' asks summed per axis, an axis a
+ * story line named counted from the story only (a scanner's request for it is left out).
+ */
+export function eventSummary(event) {
+    if (!event) return null;
+    const rank = name => PACING_TIERS.indexOf(name);
+    const top = list => list.reduce((best, item) => (rank(item.tier) > rank(best) ? item.tier : best), list[0].tier);
+    const spent = event.events.filter(item => !item.held);
+    const held = spent.length === 0;
+    const named = new Set(event.events.filter(item => item.src === 'story').flatMap(item => Object.keys(item.ask)));
+    const ask = {};
+    for (const item of event.events.filter(entry => entry.held)) {
+        for (const [axis, value] of Object.entries(item.ask)) if (item.src === 'story' || !named.has(axis)) ask[axis] = (ask[axis] || 0) + value;
+    }
+    return { tier: top(held ? event.events : spent), held, note: held ? event.events[0].note : '', ask, date: event.date };
+}
+
+/** What `changes` ask of the four built-in axes, per axis: an add is its value, a set the distance from the value now (`now(meter)`). */
+export function askedOf(changes, now) {
+    const ask = {};
+    for (const change of changes) {
+        if (!RELATIONSHIP_KEYS.includes(change.meter)) continue;
+        ask[change.meter] = (ask[change.meter] || 0) + (change.mode === 'add' ? change.value : change.value - now(change.meter));
+    }
+    return ask;
+}

@@ -2,6 +2,7 @@
 // npc-meters.js re-exports every public name it exported before. Never imports npc-meters.js.
 import { NPC_DOMAIN, MAX_STAGES_PER_METER, SECRET_TITLE_MAX, NAME_MAX, isObject, isInt, isReplyId, sameReply, clean, own, bandWord, needMet, thresholdReached, stageAt, clamp, intOr } from './npc-meters-config.js';
 import { initialNpcSlice, findNpcKey, meterValue, rungMet, conflictOn } from './npc-meters-slice.js';
+import { readEvent } from './npc-meters-pacing.js';
 import { FEATURE_SOCIAL, SOCIAL_QUERY, socialModifier, socialSettings, socialSkill } from './social-check.js';
 
 export function createNpcQueries({
@@ -22,6 +23,8 @@ export function createNpcQueries({
         ...(isInt(record.turn?.at) ? { reply: record.turn.at } : isInt(record.turn?.reply) ? { reply: record.turn.reply } : {}),
         // The window's own start values and the meters a story line named on that reply (read only; the dossier's net change card).
         ...(isObject(record.turn?.from) ? { window: { from: { ...record.turn.from }, story: Array.isArray(record.turn.story) ? [...record.turn.story] : [] } } : {}),
+        // The reply's last event (tier, held, asked, date) only while it is the window's own reply (read only; the card's details).
+        ...(isObject(record.turn) && readEvent(record.lastEvent)?.at === record.turn.reply ? { event: readEvent(record.lastEvent) } : {}),
         ...(isObject(record.progress) && Object.keys(record.progress).length ? { progress: { ...record.progress } } : {}),
         ...(isObject(record.milestones) && Object.keys(record.milestones).length ? { milestones: { ...record.milestones } } : {}),
         ...(rungs.find(step => step.key === record.rank) ? { rank: rungs.find(step => step.key === record.rank).name } : {}),

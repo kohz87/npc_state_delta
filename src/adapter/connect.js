@@ -13,9 +13,18 @@ export function isV2Host(host) {
 export function createConnectPart(session, deps) {
     const {
         aliveMs, announceHosted, attempts, cardSettings, chatKeyOf, definition, dossiersReady, host, listen, loadDossierList,
-        loadEmptyCast, onTurn, portraitFill, registerCardSettings, registerPublicPaths, retryMs, startTimeline, stopTimeline,
+        doc, loadEmptyCast, onTurn: runTurn, portraitFill: fillPortraits, registerCardSettings, registerPublicPaths, retryMs, startTimeline, stopTimeline,
         syncDrawer, timers, unmountSection, warn,
     } = deps;
+
+    // A host capture or Re-read that settles after Delta's last render: an open dossier panel asks to draw again (it draws only
+    // when its view token moved).
+    function refreshPanel() {
+        try { doc?.getElementById?.('npc_state_delta_dossier_root')?.__npcStateDeltaStage1Ui?.scheduleRefresh?.(); } catch { /* no panel open */ }
+    }
+    // The host's 'turn' and 'head' events run Delta's own steps, then the panel's refresh.
+    const onTurn = turn => { try { return runTurn(turn); } finally { refreshPanel(); } };
+    const portraitFill = (...args) => { try { return fillPortraits(...args); } finally { refreshPanel(); } };
 
     let aliveTimer = null;
     let hostRef = null;          // the Story Block global we connected to

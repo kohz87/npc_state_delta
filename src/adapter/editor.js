@@ -7,6 +7,7 @@
 import {
     FEATURE_STAGES, limitsFromLines, limitsToLines, meterValue, MAX_SECRETS, normalizeSecrets, secretsFromLines, secretsToLines, wordKey,
 } from '../npc-meters.js';
+import { eventSummary } from '../npc-meters-pacing.js';
 import { escapeHtml } from '../util/html.js';
 
 // The scan's short list of story events to watch for: this many people, this many events each.
@@ -198,15 +199,18 @@ export function createEditorPart(session, deps) {
             delta[axis] = Number.isInteger(from) && Number.isInteger(now) ? now - from : 0;
         }
         const moved = BUILT_IN_AXES.filter(axis => delta[axis] !== 0);
-        if (!moved.length) return null;
-        return { message: slice.reply, delta };
+        // This reply's event (tier, held, asked, date), when the slice kept one for the window's own reply.
+        const event = eventSummary(slice.event);
+        if (!moved.length && !event?.held) return null;
+        return { message: slice.reply, delta, ...(event ? { event } : {}) };
     }
 
     /**
      * Each dossier's v2 meters for Delta's dossier view, by dossier id ({} without a host): { bars:
      * [{ id, label, value, min, max, text, tone, builtIn, ceiling?, delta? }], rank, next, milestones:
      * [names], secrets: [see secretsViewOf] }. A hidden note is its rule only, never its title or text.
-     * `relChange` ({ message, delta }) is the meters' own net change of the latest reply window, when it moved an axis.
+     * `relChange` ({ message, delta, event? }) is the meters' own net change of the latest reply window, when it moved an axis or the day's allowance held it;
+     * `event` ({ tier, held, note, ask, date }) is that reply's event.
      */
     function dossierMeters(npcs) {
         if (!session.hosted || !Array.isArray(npcs) || typeof session.sdkRef?.query !== 'function') return {};

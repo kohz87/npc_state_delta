@@ -43,9 +43,14 @@ export function lastRelationshipChangeHtml(change) {
             return `<span class="delta-rel-delta delta-rel-delta-${good ? 'up' : 'down'} delta-rel-${escapeHtml(axis)}">${escapeHtml(label)} ${value > 0 ? '+' : ''}${value}</span>`;
         })
         .join('');
+    const event = change.hosted ? change.event : null;
+    const tier = change.hosted ? (event ? event.tier : '') : change.impact;
+    const stamp = changeStamp(change);
+    const asked = event?.held ? RELATIONSHIP_AXES.filter(([axis]) => event.ask?.[axis]).map(([axis, label]) => `${label} ${event.ask[axis] > 0 ? '+' : ''}${event.ask[axis]}`).join(', ') : '';
     return `<div class="delta-rel-last">
-        <div class="delta-rel-last-head"><h4>Last relationship change</h4>${change.hosted ? '' : `<span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>`}${stampHtml(changeStamp(change))}</div>
-        <div class="delta-rel-deltas">${deltas || '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>'}</div>
+        <div class="delta-rel-last-head"><h4>Last relationship change</h4>${tier ? `<span class="delta-rel-impact delta-rel-impact-${escapeHtml(tier)}">${escapeHtml(impactLabel(tier))}</span>` : ''}${stampHtml(event?.date && stamp.label ? { ...stamp, label: `${stamp.label} · ${event.date}` } : stamp)}</div>
+        ${event?.held ? `<p class="delta-rel-held">Held: ${escapeHtml(event.note || 'the day\'s allowance is used')}. Nothing moved.</p>${asked ? `<p class="delta-muted delta-rel-asked">Asked: ${escapeHtml(asked)}</p>` : ''}`
+        : `<div class="delta-rel-deltas">${deltas || '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>'}</div>`}
         ${change.reason ? `<p>${escapeHtml(change.reason)}</p>` : ''}
     </div>`;
 }
