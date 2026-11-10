@@ -65,7 +65,9 @@ test('(2) mockup case 2: the daily allowance held the change: "Held: ... Nothing
         assert.match(html, new RegExp(HELD_TEXT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
         assert.doesNotMatch(html, /delta-rel-delta-|Progress only/);
         assert.equal(relationshipStepHtml('trust', 'Trust', change, reply), '');
-        assert.equal(change.ask, undefined, 'a receipt of a fully held event names no asked amounts');
+        assert.deepEqual(change.ask, { trust: 2 }, 'the receipt of a fully held event names what was asked');
+        assert.match(htmlOf(change), /Asked: Trust \+2/);
+        assert.equal(change.tier, 'meaningful', 'the asked tier of a held event');
         // A meter held at its cap names what it asked, after Held (the receipt\'s "+N asked").
         await s.setDay(2);
         await s.say(['~ npc Oren | trust: +9 | impact: ordinary']);
@@ -274,3 +276,72 @@ const GOLDEN = {
     },
     "step": "<span class=\"delta-rel-step delta-rel-step-good\" title=\"Trust up 3 since the last reply (reply #14)\" aria-label=\"Trust up 3 since the last reply (reply #14)\">▲3</span>"
 };
+
+// The receipts of Oren's meter changes, as [{ index, receipt }] (what Story Block's receipts() gives).
+const oren = s => s.host.store.receipts().filter(({ receipt }) => receipt.module === 'npc-state-delta' && receipt.data?.key === 'oren' && Array.isArray(receipt.data.changes));
+
+test('(11) the meter receipts carry ask and tier (display-only): a story line, a scanner change that yields an axis, a held change; the card shows Asked and the chip; slice bytes stay', async () => {
+    const s = await suite();
+    try {
+        await s.setDay(1);
+        const first = await s.say(['~ npc Oren | trust: +1 | affection: +1 | impact: ordinary']);
+        const story = oren(s).filter(item => item.index === first).at(-1).receipt;
+        assert.equal(story.type, 'capture.npc');
+        assert.deepEqual(story.data.ask, { trust: 1, affection: 1 });
+        assert.equal(story.data.tier, 'ordinary');
+        const html = htmlOf(cardOf(s));
+        assert.match(html, /delta-rel-impact-ordinary">Ordinary</, 'the chip for an uncut change');
+        assert.doesNotMatch(html, /Asked:/, 'nothing was held: no Asked');
+        // A scanner change on the reply: the axis the story named is left out of its ask; the tier is the one spent.
+        await s.adapter.adjust({ name: 'Oren', meters: { trust: 3, desire: 2 }, start: ZERO, reply: first, impact: 'meaningful' });
+        const scan = oren(s).filter(item => item.receipt.type === 'npc.adjust').at(-1).receipt;
+        assert.deepEqual(scan.data.ask, { desire: 2 });
+        assert.equal(scan.data.tier, 'meaningful');
+        // A held change: the day's ordinary is used.
+        await s.setDay(2);
+        await fillDay(s);
+        const held = await s.say(['~ npc Oren | trust: +2 | affection: +1 | impact: meaningful']);
+        const receipt = oren(s).filter(item => item.index === held).at(-1).receipt;
+        assert.deepEqual(receipt.data.changes, []);
+        assert.deepEqual(receipt.data.ask, { trust: 2, affection: 1 });
+        assert.equal(receipt.data.tier, 'meaningful');
+        const change = cardOf(s);
+        assert.deepEqual(change.ask, { trust: 2, affection: 1 });
+        assert.equal(change.tier, 'meaningful');
+        assert.match(htmlOf(change), /Asked: Trust \+2.*Affection \+1/s);
+        assert.match(htmlOf(change), /delta-rel-impact-meaningful">Meaningful</);
+        // Nothing that replays reads them: the slice holds neither, and keeps its bytes through rebuild, reload, swipe and deletion.
+        assert.doesNotMatch(sliceBytes(s), /"ask"|"tier"/);
+        const bytes = sliceBytes(s);
+        s.host.store.rebuild();
+        assert.equal(sliceBytes(s), bytes);
+        await s.host.st.loadChat(s.host.ctx.chat);
+        await s.adapter.ticked();
+        assert.equal(sliceBytes(s), bytes);
+        await s.swipe(['~ npc Oren | desire: +1 | impact: ordinary']);
+        assert.deepEqual(oren(s).filter(item => item.index === s.host.store.headIndex()).at(-1).receipt.data.ask, { desire: 1 }, 'the swipe has its own receipt');
+        assert.doesNotMatch(sliceBytes(s), /"ask"|"tier"/);
+        await s.host.st.deleteMessage(s.host.ctx.chat.length - 1);
+        await s.host.st.deleteMessage(s.host.ctx.chat.length - 1);
+        await s.adapter.ticked();
+        assert.doesNotMatch(sliceBytes(s), /"ask"|"tier"/);
+        assert.deepEqual(s.host.store.problems(), []);
+    } finally { s.host.close(); }
+});
+
+test('(12) older receipts without ask or tier read as before: the summary\'s "+N asked" and the cut note; a fully held one shows no Asked and no chip', () => {
+    const at = (summary, data) => [{ index: 5, receipt: { module: 'npc-state-delta', type: 'capture.npc', summary, data: { key: 'oren', ...data } } }];
+    const cut = lastChangeOf(at('Oren: trust 0 → 2 (major counted as meaningful: today\'s major is used)', { changes: [{ meter: 'trust', before: 0, after: 2, held: true }] }), 'oren');
+    assert.equal(cut.tier, 'meaningful');
+    assert.equal(cut.ask, undefined);
+    const capped = lastChangeOf(at('Oren: trust 0 → 1 (held at 1; +9 asked)', { changes: [{ meter: 'trust', before: 0, after: 1, held: true }] }), 'oren');
+    assert.deepEqual(capped.ask, { trust: 9 });
+    const heldOld = lastChangeOf(at('Oren: nothing changed (today\'s ordinary is used)', { changes: [] }), 'oren');
+    assert.equal(heldOld.held, 'today\'s ordinary is used');
+    assert.equal(heldOld.ask, undefined);
+    assert.equal(heldOld.tier, undefined);
+    // Malformed ask and tier are ignored; only the four axes, whole numbers.
+    const bad = lastChangeOf(at('Oren: nothing changed (today\'s ordinary is used)', { changes: [], ask: { trust: 1.5, mood: 2, desire: 3 }, tier: 'huge' }), 'oren');
+    assert.deepEqual(bad.ask, { desire: 3 });
+    assert.equal(bad.tier, undefined);
+});

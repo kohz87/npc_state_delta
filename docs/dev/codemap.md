@@ -40,7 +40,7 @@ Generated 2026-11-07.
 - `src/npc-meters-commands.js`: Story-line capture, milestone intake and the hosted npc command handlers split from `src/npc-meters.js`.
 - `src/npc-meters-queries.js`: Read-only npc meter/cast/next/social queries and their screen views split from `src/npc-meters.js`.
 - `src/relationship-pacing.js`: Events-per-story-day allowance by impact tier: the used-tier rule, the per-NPC `impactDay` count, pacing defaults and migration. Pure.
-- `src/npc-meters-pacing.js`: The reader's words for a held event and the cut of a forwarded scanner change to a lower tier, split from `src/npc-meters.js`; also reads the last relationship change from Story Block's receipts (nothing stored).
+- `src/npc-meters-pacing.js`: The reader's words for a held event and the cut of a forwarded scanner change to a lower tier, split from `src/npc-meters.js`; also reads the last relationship change from Story Block's receipts (nothing stored; the receipts' display-only `ask` and `tier` come from `askedOf` here and `result()` in `src/npc-meters-slice.js`).
 - `src/npc-meters-prompt.js`: The NPC meter prompt line, reminder tail and locked-note redaction split from `src/npc-meters.js`.
 - `src/adapter/queries-dossier.js`: Dossier field copies and portrait URL safety helpers split from `src/adapter/queries.js`.
 - `src/adapter/queries-director.js`: Story Director and pack lookups split from `src/adapter/queries.js`.

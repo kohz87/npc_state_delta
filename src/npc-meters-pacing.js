@@ -34,6 +34,17 @@ export function cutToTier(changes, used, caps, value) {
     });
 }
 
+/** What a change asked of the four built-in meters before pacing and yield ({ axis: whole amount }), for the receipt's display-only `ask`. */
+export function askedOf(changes, value) {
+    const out = {};
+    for (const change of changes) {
+        if (!RELATIONSHIP_KEYS.includes(change.meter)) continue;
+        const amount = (change.mode === 'add' ? change.value : change.value - value(change.meter)) + (out[change.meter] ?? 0);
+        if (Number.isSafeInteger(amount) && amount) out[change.meter] = amount;
+    }
+    return out;
+}
+
 const TIER = '(ordinary|meaningful|major|extreme)';
 const CUT_NOTE = new RegExp(`\\(${TIER} counted as ${TIER}: today's [^)]*\\)`);
 const HELD_NOTE = /nothing changed \((today's [^)]*)\)/;
@@ -48,7 +59,7 @@ const RANK = name => PACING_TIERS.indexOf(name);
  * meters' "+N asked" and the pacing words of its summary.
  * → { reply, delta: { trust, ... } (what moved), source ('story' when a story line's receipt took part, else 'scanner'),
  * scannerMoved (the scanner's receipt moved a meter), held ('' or the reader's words: the day's allowance held it and nothing
- * moved), ask: { axis: n } (what a held meter asked), tier (the tier actually spent, only when pacing cut it) } or null.
+ * moved), ask: { axis: n } (what a held meter asked), tier (the tier actually spent: the receipt's `tier`, else the cut note) } or null.
  */
 export function lastChangeOf(entries, key) {
     const mine = (Array.isArray(entries) ? entries : []).filter(({ index, receipt }) => Number.isInteger(index)
@@ -71,8 +82,13 @@ export function lastChangeOf(entries, key) {
                 delta[change.meter] += change.after - change.before;
                 moved = true;
             }
-            for (const [, axis, amount] of summary.matchAll(ASKED_NOTE)) if (RELATIONSHIP_KEYS.includes(axis)) ask[axis] = Number(amount);
-            const cut = CUT_NOTE.exec(summary)?.[2];
+            const given = receipt.data.ask && typeof receipt.data.ask === 'object' ? receipt.data.ask : null;
+            if (given) {
+                for (const axis of RELATIONSHIP_KEYS) if (Number.isSafeInteger(given[axis]) && given[axis]) ask[axis] = given[axis];
+            } else {
+                for (const [, axis, amount] of summary.matchAll(ASKED_NOTE)) if (RELATIONSHIP_KEYS.includes(axis)) ask[axis] = Number(amount);
+            }
+            const cut = PACING_TIERS.includes(receipt.data.tier) ? receipt.data.tier : CUT_NOTE.exec(summary)?.[2];
             if (cut && RANK(cut) >= RANK(tier)) tier = cut;
             const words = HELD_NOTE.exec(summary)?.[1];
             if (words && !receipt.data.changes.length) held = words;
@@ -80,7 +96,7 @@ export function lastChangeOf(entries, key) {
             else story ||= moved || Boolean(words);
         }
         if (!Object.values(delta).some(Boolean) && !held) continue;
-        const asked = Object.fromEntries(Object.entries(ask).filter(([axis]) => delta[axis] !== undefined));
+        const asked = Object.fromEntries(Object.entries(ask).filter(([axis, amount]) => amount !== delta[axis]));
         return { reply, delta, source: story ? 'story' : 'scanner', scannerMoved, held: Object.values(delta).some(Boolean) ? '' : held, ...(Object.keys(asked).length ? { ask: asked } : {}), ...(tier ? { tier } : {}) };
     }
     return null;
