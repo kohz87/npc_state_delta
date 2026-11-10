@@ -201,7 +201,7 @@ export function createEditorPart(session, deps) {
         const moved = BUILT_IN_AXES.filter(axis => delta[axis] !== 0);
         // This reply's event (tier, held, asked, date), when the slice kept one for the window's own reply.
         const event = eventSummary(slice.event);
-        if (!moved.length && !event?.held) return null;
+        if (!moved.length && !(event?.held && Object.keys(event.ask).length)) return null;
         return { message: slice.reply, delta, ...(event ? { event } : {}) };
     }
 

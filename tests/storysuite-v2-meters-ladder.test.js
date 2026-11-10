@@ -20,6 +20,7 @@ import { fakeDocument } from './helpers/fake-dom.js';
 import { runtimeSource } from './helpers/runtime-source.js';
 import { relationshipHistoryHtml } from '../dossier-ui-relationship.js';
 import { storyMinuteText } from '../calendar.js';
+import { eventSummary } from '../src/npc-meters-pacing.js';
 
 // TRS ideas 1-4 on the NPC meters (stage ladders with several needs and milestones, per-NPC ceilings
 // and floors, fuller custom meters with presets and drift, locked-note teasers), against Story
@@ -933,4 +934,22 @@ test('event card: a host capture or Re-read that settles after Delta\'s render a
     const before = draws.length;
     await s.say(['~ npc Mira | trust: +2']);
     assert.ok(draws.length > before, 'the host\'s turn event asked the panel to refresh');
+});
+
+test('event card: a held line that names only custom meters has no Asked, so it does not replace the older card', async () => {
+    const s = await pacedSuite(SHUT, { settings: { customMeters: [{ name: 'Awe', min: 0, max: 50 }] } });
+    await s.say(['~ npc Mira | awe: +3 | impact: major']);
+    const { shown, html } = cardOf(s);
+    assert.equal(shown.event, undefined);
+    assert.doesNotMatch(html, /Held:/);
+    assert.match(html, /Old sidecar/);
+});
+
+test('event summary: events naming only custom meters do not count toward the tier chip; the colour of Held comes from the theme', () => {
+    const item = (tier, ask, held = false) => ({ src: 'scan', ask, tier, held, note: '' });
+    const tier = events => eventSummary({ at: 1, date: '', events }).tier;
+    assert.equal(tier([item('major', {}), item('ordinary', { trust: 1 })]), 'ordinary');
+    assert.equal(tier([item('major', {}), item('meaningful', { trust: 1 }, true)]), 'meaningful', 'all that ask were held: the asked tier');
+    assert.equal(tier([item('major', {})]), 'major', 'nothing asks anything: as before');
+    assert.match(fs.readFileSync(new URL('../dossier-ui-styles.js', import.meta.url), 'utf8'), /\.delta-rel-held \{ color:var\(--ss-warn-text, var\(--ss-warn, #e8c46a\)\)/);
 });

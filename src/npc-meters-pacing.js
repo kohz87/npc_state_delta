@@ -1,5 +1,5 @@
 // What the hosted slice does with a held event: the reader's words for the receipt and the cut of a forwarded scanner change to a
-// lower tier. A pure part of the pacing rule (src/relationship-pacing.js, which holds the count); never imports npc-meters.js.
+// lower tier, and the reply's last-event record (lastEvent: readEvent, nextEvent, eventSummary, askedOf). A pure part of the pacing rule (src/relationship-pacing.js, which holds the count); never imports npc-meters.js.
 import { RELATIONSHIP_KEYS, RELATIONSHIP_MILESTONE_REQUIREMENTS, RELATIONSHIP_MILESTONE_THRESHOLDS } from '../core-relationship-model.js';
 import { PACING_TIERS } from './relationship-pacing.js';
 
@@ -77,7 +77,7 @@ export function nextEvent(prior, { reply, date, src, ask, tier, held, note }) {
 
 /**
  * The card's words for one reply's events: { tier, held, note, ask, date }. `tier`: the highest tier actually spent, else the highest
- * asked; `held`: every event was held (then `note` is the first hold's words); `ask`: the held events' asks summed per axis, an axis a
+ * asked (events naming only custom meters are left out); `held`: every event was held (then `note` is the first hold's words); `ask`: the held events' asks summed per axis, an axis a
  * story line named counted from the story only (a scanner's request for it is left out).
  */
 export function eventSummary(event) {
@@ -86,12 +86,16 @@ export function eventSummary(event) {
     const top = list => list.reduce((best, item) => (rank(item.tier) > rank(best) ? item.tier : best), list[0].tier);
     const spent = event.events.filter(item => !item.held);
     const held = spent.length === 0;
+    // An event that names only custom meters asks nothing of the axes: it does not set the chip (unless no event asks anything).
+    const asking = event.events.filter(item => Object.keys(item.ask).length);
+    const counted = asking.length ? asking : event.events;
+    const countedSpent = counted.filter(item => !item.held);
     const named = new Set(event.events.filter(item => item.src === 'story').flatMap(item => Object.keys(item.ask)));
     const ask = {};
     for (const item of event.events.filter(entry => entry.held)) {
         for (const [axis, value] of Object.entries(item.ask)) if (item.src === 'story' || !named.has(axis)) ask[axis] = (ask[axis] || 0) + value;
     }
-    return { tier: top(held ? event.events : spent), held, note: held ? event.events[0].note : '', ask, date: event.date };
+    return { tier: top(countedSpent.length ? countedSpent : counted), held, note: held ? event.events[0].note : '', ask, date: event.date };
 }
 
 /** What `changes` ask of the four built-in axes, per axis: an add is its value, a set the distance from the value now (`now(meter)`). */
