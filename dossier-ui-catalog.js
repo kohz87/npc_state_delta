@@ -121,7 +121,7 @@ export function castFromHtml(cast, npcId = '') {
 function ownRelationshipChange(stored, net) {
     if (stored?.impact === 'manual' && (stored.message ?? -1) >= net.message) return stored;
     const delta = Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(net.delta?.[axis]) || 0)]));
-    return { impact: 'net', delta, reason: '', turn: null, message: net.message, when: changeStamp({ message: net.message }).label, hosted: true, source: net.source };
+    return { impact: 'net', delta, reason: '', turn: null, message: net.message, when: changeStamp({ message: net.message }).label, hosted: true };
 }
 
 export function projectDossierState(state = {}, status = {}) {
