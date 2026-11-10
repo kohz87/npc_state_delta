@@ -186,10 +186,30 @@ export function createEditorPart(session, deps) {
         return out;
     }
 
+    // The meters' own net change on the four built-in axes over the entry's latest reply window (window start → now), or null
+    // (no window, no reply number, no net movement). `source`: 'story' when every moved axis was named by a story line on that
+    // reply, 'scanner' when no story line touched the record on it, else ''. Read time only; nothing is stored.
+    const BUILT_IN_AXES = ['trust', 'affection', 'desire', 'tension'];
+    function ownChangeOf(slice) {
+        if (!slice?.window || !Number.isInteger(slice.reply) || slice.reply < 0) return null;
+        const delta = {};
+        for (const axis of BUILT_IN_AXES) {
+            const from = slice.window.from?.[axis];
+            const now = slice.meters?.[axis];
+            delta[axis] = Number.isInteger(from) && Number.isInteger(now) ? now - from : 0;
+        }
+        const moved = BUILT_IN_AXES.filter(axis => delta[axis] !== 0);
+        if (!moved.length) return null;
+        const story = Array.isArray(slice.window.story) ? slice.window.story : [];
+        const source = !story.length ? 'scanner' : moved.every(axis => story.includes(axis)) ? 'story' : '';
+        return { message: slice.reply, delta, source };
+    }
+
     /**
      * Each dossier's v2 meters for Delta's dossier view, by dossier id ({} without a host): { bars:
      * [{ id, label, value, min, max, text, tone, builtIn, ceiling?, delta? }], rank, next, milestones:
      * [names], secrets: [see secretsViewOf] }. A hidden note is its rule only, never its title or text.
+     * `relChange` ({ message, delta, source }) is the meters' own net change of the latest reply window, when it moved an axis.
      */
     function dossierMeters(npcs) {
         if (!session.hosted || !Array.isArray(npcs) || typeof session.sdkRef?.query !== 'function') return {};
@@ -213,7 +233,9 @@ export function createEditorPart(session, deps) {
             // Someone with notes but no meters yet still has a Secrets section (every note hidden).
             const secrets = secretsViewOf(npc, slice);
             if (!entry && !secrets.length) continue;
+            const net = ownChangeOf(slice);
             out[npc.id] = {
+                ...(net ? { relChange: net } : {}),
                 bars: (entry?.bars ?? []).map(bar => ({ ...bar, builtIn: builtIn.has(bar.id) })),
                 rank: entry?.rank ?? '',
                 next: entry?.next ?? '',

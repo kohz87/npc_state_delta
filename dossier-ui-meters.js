@@ -14,7 +14,9 @@ export function v2MetersProjection(view) {
         const ceiling = Number.isInteger(bar.ceiling) && bar.ceiling < max ? bar.ceiling : null;
         return { id: plain(bar.id), label: plain(bar.label, plain(bar.id)), value, min, max, text: plain(bar.text, String(value)), ceiling, delta: Number.isInteger(bar.delta) ? bar.delta : 0 };
     });
+    const net = view.relChange && typeof view.relChange === 'object' ? view.relChange : null;
     return {
+        ...(net && Number.isInteger(net.message) && net.message >= 0 ? { relChange: { message: net.message, delta: net.delta, source: net.source === 'story' || net.source === 'scanner' ? net.source : '' } } : {}),
         bars,
         rank: plain(view.rank),
         next: plain(view.next),

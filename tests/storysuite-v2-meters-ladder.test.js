@@ -10,9 +10,10 @@ import {
 } from '../src/npc-meters.js';
 import { BUILT_IN_PRESETS, presetCatalog } from '../src/npc-meters-presets.js';
 import { metersCardScreen } from '../src/npc-meters-screen.js';
-import { v2MetersHtml, v2MetersProjection, v2SecretsHtml } from '../dossier-ui.js';
+import { lastRelationshipChangeHtml, projectDossierState, v2MetersHtml, v2MetersProjection, v2SecretsHtml } from '../dossier-ui.js';
 import { fakeRoot } from './helpers/fake-dom.js';
 import { fakeDocument } from './helpers/fake-dom.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // TRS ideas 1-4 on the NPC meters (stage ladders with several needs and milestones, per-NPC ceilings
 // and floors, fuller custom meters with presets and drift, locked-note teasers), against Story
@@ -602,4 +603,94 @@ test('standalone: with Story Block alone, a pack\'s meter preset gives a dating 
     assert.equal(s.npc('Mira').meters.nerves, 50);
     assert.deepEqual(s.host.store.problems(), []);
     assert.deepEqual(s.host.turn.problems().filter(problem => problem.module === MODULE_ID), []);
+});
+
+// ---- 7. the dossier's "Last relationship change" is the meters' own net change (hosted; read time only) ----
+
+const STORED = { impact: 'ordinary', delta: { trust: 1, affection: 0, desire: 0, tension: 0 }, reason: 'Old sidecar reason.', message: 1 };
+function cardOf(s, record = s.delta.records.npc_mira) {
+    const npc = { ...structuredClone(record), lastRelationshipChange: structuredClone(STORED) };
+    const state = { npcs: [npc], meterViews: s.adapter.dossierMeters([npc]), reply: s.host.store.headIndex() };
+    const shown = projectDossierState(state, { chatKey: 'c1' }).npcs[0].lastRelationshipChange;
+    return { shown, html: lastRelationshipChangeHtml(shown), npc };
+}
+
+test('net change card: a story-line move shows the net amounts, the reply and "From the story" (no tier, no reason)', async () => {
+    const s = await suite();
+    const reply = await s.say(['~ npc Mira | trust: +5 | tension: +2']);
+    const now = s.npc('Mira').meters;
+    const { shown, html } = cardOf(s);
+    assert.equal(shown.message, reply);
+    assert.equal(shown.delta.trust, now.trust - 10);
+    assert.equal(shown.delta.tension, now.tension);
+    assert.ok(shown.delta.trust > 0 && shown.delta.tension > 0);
+    assert.match(html, /From the story/);
+    assert.match(html, new RegExp(`Reply #${reply}`));
+    assert.match(html, new RegExp(`Trust \\+${shown.delta.trust}`));
+    assert.doesNotMatch(html, /Old sidecar|Ordinary|Meaningful|Asked|Held|From the scanner/);
+});
+
+test('net change card: a scanner-only move shows "From the scanner"; a mixed reply shows amounts with no chip', async () => {
+    const s = await suite();
+    const first = await s.say([]);
+    await s.adapter.adjust({ name: 'Mira', meters: { trust: 3 }, start: { trust: 10, affection: 0, desire: 0, tension: 0 }, reply: first });
+    let card = cardOf(s);
+    assert.equal(card.shown.delta.trust, 3);
+    assert.match(card.html, /From the scanner/);
+    assert.match(card.html, new RegExp(`Reply #${first}`));
+    const second = await s.say(['~ npc Mira | trust: +2']);
+    await s.adapter.adjust({ name: 'Mira', meters: { affection: 2 }, reply: second });
+    card = cardOf(s);
+    assert.ok(card.shown.delta.trust > 0 && card.shown.delta.affection > 0, 'both axes moved on that reply');
+    assert.match(card.html, /Trust \+/);
+    assert.match(card.html, /Affection \+/);
+    assert.doesNotMatch(card.html, /From the story|From the scanner/);
+});
+
+test('net change card: a latest window with no net built-in movement, or none at all, shows the stored card as today', async () => {
+    const s = await suite({ settings: { customMeters: [{ name: 'Awe', min: 0, max: 50 }] } });
+    assert.equal(cardOf(s).shown.reason, 'Old sidecar reason.', 'no window yet');
+    await s.say(['~ npc Mira | awe: +4']);
+    const card = cardOf(s);
+    assert.equal(card.shown.reason, 'Old sidecar reason.', 'only a custom meter moved');
+    assert.doesNotMatch(card.html, /From the story|From the scanner/);
+    assert.match(card.html, /Old sidecar reason/);
+});
+
+test('net change card: a manual edit at or after the window keeps "Manual edit"', async () => {
+    const s = await suite();
+    const reply = await s.say(['~ npc Mira | trust: +5']);
+    const npc = { ...structuredClone(s.delta.records.npc_mira), lastRelationshipChange: { impact: 'manual', delta: { trust: 4, affection: 0, desire: 0, tension: 0 }, reason: '', message: reply } };
+    const shown = projectDossierState({ npcs: [npc], meterViews: s.adapter.dossierMeters([npc]) }, { chatKey: 'c1' }).npcs[0].lastRelationshipChange;
+    assert.equal(shown.impact, 'manual');
+    assert.match(lastRelationshipChangeHtml(shown), /Manual edit/);
+});
+
+test('net change card: the projection never reaches the scan view or stored dossier data; swipes and reloads recompute it; standalone is unchanged', async () => {
+    const s = await suite();
+    await s.say(['~ npc Mira | trust: +5']);
+    const stored = JSON.stringify(s.delta.records);
+    const { npc } = cardOf(s);
+    assert.equal(JSON.stringify(s.delta.records), stored, 'the stored dossiers are untouched');
+    assert.deepEqual(npc.lastRelationshipChange, STORED, 'the record the projection read keeps its own value');
+    const scanView = s.adapter.sliceView(Object.values(s.delta.records));
+    assert.ok(scanView.every(item => !item.lastRelationshipChange || JSON.stringify(item.lastRelationshipChange) === JSON.stringify(s.delta.records[item.id].lastRelationshipChange)), 'sliceView carries no projection');
+    assert.doesNotMatch(JSON.stringify(s.host.head().domains), /From the story|relChange/, 'nothing of it is in Story Block\'s state');
+    await s.swipe([]);
+    assert.equal(cardOf(s).shown.reason, 'Old sidecar reason.', 'the swiped reply moved nothing: back to the stored card');
+    await s.regenerate(['~ npc Mira | trust: +3']);
+    assert.match(cardOf(s).html, /From the story/);
+    s.adapter.stop();
+    assert.deepEqual(s.adapter.dossierMeters(Object.values(s.delta.records)), {});
+    const alone = projectDossierState({ npcs: [{ ...structuredClone(s.delta.records.npc_mira), lastRelationshipChange: STORED }] }, { chatKey: 'c1' }).npcs[0].lastRelationshipChange;
+    assert.equal(alone.reason, 'Old sidecar reason.');
+    assert.equal(alone.hosted, undefined);
+});
+
+test('net change card: the open-panel token covers the host views, so a changed card refreshes the panel', async () => {
+    const s = await suite();
+    const before = JSON.stringify(s.adapter.dossierMeters(Object.values(s.delta.records)));
+    await s.say(['~ npc Mira | trust: +5']);
+    assert.notEqual(JSON.stringify(s.adapter.dossierMeters(Object.values(s.delta.records))), before);
+    assert.match(runtimeSource(), /dossierHostViews\(state\)\]\);/, 'dossierViewToken ends with the host views');
 });

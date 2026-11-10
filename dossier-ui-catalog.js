@@ -1,7 +1,7 @@
 /* NPC State Delta dossier surface: index filtering, cast/key projections and dossier-state shaping. */
 import { escapeHtml } from './src/util/html.js';
 import { awayRange } from './src/key-people.js';
-import { dossierDetailProjection, plain, wholeNumber } from './dossier-ui-model.js';
+import { changeStamp, dossierDetailProjection, plain, RELATIONSHIP_AXES, wholeNumber } from './dossier-ui-model.js';
 import { v2MetersProjection } from './dossier-ui-meters.js';
 
 export function sortDossierIndex(rows = []) {
@@ -116,6 +116,14 @@ export function castFromHtml(cast, npcId = '') {
     </section>`;
 }
 
+// (hosted) The card's change is the meters' own net change of the latest reply window; a newer-or-equal manual edit keeps its
+// card. Display only: built here from the view, never stored. Without a net change (or off a host) the stored change shows as before.
+function ownRelationshipChange(stored, net) {
+    if (stored?.impact === 'manual' && (stored.message ?? -1) >= net.message) return stored;
+    const delta = Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(net.delta?.[axis]) || 0)]));
+    return { impact: 'net', delta, reason: '', turn: null, message: net.message, when: changeStamp({ message: net.message }).label, hosted: true, source: net.source };
+}
+
 export function projectDossierState(state = {}, status = {}) {
     const portraitAssets = state?.portraitAssets && typeof state.portraitAssets === 'object' ? state.portraitAssets : {};
     const records = Array.isArray(state?.npcs) ? state.npcs : [];
@@ -129,7 +137,7 @@ export function projectDossierState(state = {}, status = {}) {
         const meters = v2MetersProjection(Object.hasOwn(meterViews, String(npc?.id ?? '')) ? meterViews[npc.id] : null);
         const key = keyProjection(Object.hasOwn(keyViews, String(npc?.id ?? '')) ? keyViews[npc.id] : null);
         const cast = castProjection(Object.hasOwn(castViews, String(npc?.id ?? '')) ? castViews[npc.id] : null);
-        return { ...detail, ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}) };
+        return { ...detail, ...(meters?.relChange ? { lastRelationshipChange: ownRelationshipChange(detail.lastRelationshipChange, meters.relChange) } : {}), ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}) };
     }).filter(npc => npc.id);
     return {
         chatKey: plain(status?.chatKey, 'no-chat'),

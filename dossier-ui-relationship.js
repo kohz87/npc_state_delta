@@ -31,8 +31,14 @@ function impactLabel(impact) {
     return value.charAt(0).toLocaleUpperCase() + value.slice(1);
 }
 
+// The meters' own net change names its source only when the slice window proves it; no tier, no reason.
+function sourceChipHtml(source) {
+    const text = source === 'story' ? 'From the story' : source === 'scanner' ? 'From the scanner' : '';
+    return text ? `<span class="delta-rel-impact delta-rel-impact-source">${text}</span>` : '';
+}
+
 export function lastRelationshipChangeHtml(change) {
-    if (!change || change.impact === 'none' || (!change.reason && change.impact !== 'manual')) {
+    if (!change || change.impact === 'none' || (!change.reason && change.impact !== 'manual' && !change.hosted)) {
         return `<div class="delta-rel-last"><h4>Last relationship change</h4><p class="delta-muted">No relationship change recorded yet.</p></div>`;
     }
     const deltas = RELATIONSHIP_AXES
@@ -43,7 +49,7 @@ export function lastRelationshipChangeHtml(change) {
         })
         .join('');
     return `<div class="delta-rel-last">
-        <div class="delta-rel-last-head"><h4>Last relationship change</h4><span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>${stampHtml(changeStamp(change))}</div>
+        <div class="delta-rel-last-head"><h4>Last relationship change</h4>${change.hosted ? sourceChipHtml(change.source) : `<span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>`}${stampHtml(changeStamp(change))}</div>
         <div class="delta-rel-deltas">${deltas || '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>'}</div>
         ${change.reason ? `<p>${escapeHtml(change.reason)}</p>` : ''}
     </div>`;
