@@ -118,10 +118,20 @@ export function castFromHtml(cast, npcId = '') {
 
 // (hosted) The card's change is the meters' own net change of the latest reply window; a newer-or-equal manual edit keeps its
 // card. Display only: built here from the view, never stored. Without a net change (or off a host) the stored change shows as before.
+// The event's words, cleaned for the card: { tier, held, note, ask: { axis: n }, date } or null.
+function eventDetails(event) {
+    if (!event || typeof event !== 'object') return null;
+    const tier = ['ordinary', 'meaningful', 'major', 'extreme'].includes(event.tier) ? event.tier : null;
+    if (!tier) return null;
+    const ask = Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(event.ask?.[axis]) || 0)]).filter(([, value]) => value !== 0));
+    return { tier, held: event.held === true, note: plain(event.note).slice(0, 120), ask, date: plain(event.date).slice(0, 40) };
+}
+
 function ownRelationshipChange(stored, net) {
     if (stored?.impact === 'manual' && (stored.message ?? -1) >= net.message) return stored;
     const delta = Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(net.delta?.[axis]) || 0)]));
-    return { impact: 'net', delta, reason: '', turn: null, message: net.message, when: changeStamp({ message: net.message }).label, hosted: true };
+    const event = eventDetails(net.event);
+    return { impact: 'net', delta, reason: '', turn: null, message: net.message, when: changeStamp({ message: net.message }).label, hosted: true, ...(event ? { event } : {}) };
 }
 
 export function projectDossierState(state = {}, status = {}) {

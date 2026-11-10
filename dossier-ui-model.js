@@ -199,7 +199,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
         portraitAppearanceChanged: portraitAppearanceChanged(npc, shown),
         portraitForm: shown.form,
         recentRelationshipChanges: (Array.isArray(npc?.relationshipEventHistory) ? npc.relationshipEventHistory : [])
-            .slice(-4)
+            .slice(-12)   // the card shows three, after it leaves out this reply's own event (dossier-ui-relationship.js)
             .reverse()
             .map(event => ({
                 impact: plain(event?.impact, 'ordinary').toLocaleLowerCase(),

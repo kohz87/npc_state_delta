@@ -6,6 +6,7 @@ import { isKey, memoryKey, RECENT_REPLIES } from './key-people.js';
 import { CAST_KEY, metWithEntry } from './cast-dossier.js';
 import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
 import { flatDayProblems } from './relationship-pacing.js';
+import { readEvent } from './npc-meters-pacing.js';
 
 /** The slice of a chat with no NPC meters yet. */
 export function initialNpcSlice() {
@@ -159,6 +160,7 @@ export function validateNpcSlice(slice) {
                 || Object.values(turn.from).some(value => !isInt(value))
                 || (turn.story !== undefined && (!Array.isArray(turn.story) || turn.story.some(id => typeof id !== 'string')))) errors.push(`${where} has an unusable reply window.`);
         }
+        if (record.lastEvent !== undefined && !readEvent(record.lastEvent)) errors.push(`${where} has an unusable last event.`);
         if (record.milestones !== undefined) {
             const list = isObject(record.milestones) ? Object.entries(record.milestones) : null;
             if (!list) errors.push(`${where} has an unusable milestones record.`);

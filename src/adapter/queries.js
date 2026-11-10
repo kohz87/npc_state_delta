@@ -11,6 +11,7 @@ import { resolveDossierTarget } from '../../suite-handshake.js';
 import { FEATURE_SOCIAL, SOCIAL_QUERY, createNpcPart, normalizeSecrets } from '../npc-meters.js';
 import { normalizeLimits, presetCatalog } from '../npc-meters-presets.js';
 import { RELATIONSHIP_KEYS, dossierFields, portraitUrl } from './queries-dossier.js';
+import { storyMinuteText } from '../../calendar.js';
 import { createDirectorQueriesPart } from './queries-director.js';
 
 export { dossierFields, safeImageUrl, portraitUrl } from './queries-dossier.js';
@@ -110,6 +111,14 @@ export function createQueriesPart(session, deps) {
                 const time = session.sdkRef?.query?.('director.time', { asOf: index - 1 });
                 return Number.isInteger(time) ? time : time?.minutes ?? null;
             } catch { return null; }
+        },
+        startDate: index => {
+            if (!Number.isInteger(index) || index < 1) return '';
+            try {
+                const time = session.sdkRef?.query?.('director.time', { asOf: index - 1 });
+                const minutes = Number.isInteger(time) ? time : time?.minutes;
+                return Number.isInteger(minutes) ? storyMinuteText(minutes, director.directorCalendar()) : '';
+            } catch { return ''; }
         },
         // Only the rules (and the titles screens show while locked) leave the dossier for the
         // handlers and screens; the texts go to the tail and to an unlocked note's screen line alone.

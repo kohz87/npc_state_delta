@@ -144,6 +144,19 @@ export function createEditorSave(rt, deps, helpers) {
                 ...relationshipEventMessage({ message: latestReplyIndex() }),
             };
         }
+        else if (meterEdits && shownRelationship) {
+            // A hosted edit of the built-in meters: the host keeps the values (setMeters below); the card still says "Manual edit" with the amounts.
+            const edited = Object.fromEntries(['trust', 'affection', 'desire', 'tension'].map(key => [key, Object.hasOwn(meterEdits, key) ? meterEdits[key] - Number(shownRelationship[key] || 0) : 0]));
+            next.lastRelationshipChange = {
+                impact: 'manual',
+                delta: edited,
+                evidence: normalizeRelationshipEvidence(),
+                reason: 'Manual dossier adjustment by player.',
+                sourceMessageId: latestMessageId(false),
+                turn: Number.isFinite(Number(state.turn)) ? Number(state.turn) : null,
+                ...relationshipEventMessage({ message: latestReplyIndex() }),
+            };
+        }
         Object.assign(next, editorProfileLocks(current, next, { protect: Boolean(document.getElementById('npc_state_delta_edit_lock_profile')?.checked) }));
         next.retentionProtected = Boolean(document.getElementById('npc_state_delta_edit_retention_protected')?.checked);
         next.minor = Boolean(document.getElementById('npc_state_delta_edit_minor')?.checked);

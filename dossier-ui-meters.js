@@ -16,7 +16,7 @@ export function v2MetersProjection(view) {
     });
     const net = view.relChange && typeof view.relChange === 'object' ? view.relChange : null;
     return {
-        ...(net && Number.isInteger(net.message) && net.message >= 0 ? { relChange: { message: net.message, delta: net.delta } } : {}),
+        ...(net && Number.isInteger(net.message) && net.message >= 0 ? { relChange: { message: net.message, delta: net.delta, ...(net.event && typeof net.event === 'object' ? { event: net.event } : {}) } } : {}),
         bars,
         rank: plain(view.rank),
         next: plain(view.next),
