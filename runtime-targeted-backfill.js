@@ -6,7 +6,7 @@ import { isScannerRoutingError } from './scanner-routing.js';
 import { automaticBackfillStillRelevant, backfillNeedsRequest } from './scan-context.js';
 import { recentTranscript, recentUserDevelopmentContext, currentExchangeTranscript, refreshMessageGate } from './src/transcript.js';
 import { IMPORTANT_MEMORY_LIMIT, inferNpcIdentityKind, npcCurrentlyAbsentInText, buildBackfillPrompt } from './core.js';
-import { getSettings } from './runtime-settings.js';
+import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { fillAllowed, FILL_MERGE_OPTION } from './appearance-fill.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
 
@@ -62,7 +62,7 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
             userName: ctx.name1 || 'User',
             charName: ctx.name2 || 'Character',
             memoryCriteria: settings.memoryCriteria,
-            customFieldNames: settings.customFieldNames,
+            customFieldNames: effectiveCustomFieldNames(settings),
             fillLooks,
             ...targetNoteOptions(notes),
         });
