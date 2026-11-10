@@ -259,9 +259,9 @@ export function createStorySuiteV2Adapter({
         packPortraitUrl,
         /** While hosted: a pack cast member's "Gear: A, B" line for the narrator's entry, or ''. */
         castGearLine,
-        /** While hosted: the "Scan after every reply" switch (index.js asks before each automatic scan). */
         /** While hosted: whether Story Block's RPG feature is on (the custom field "Level" then appears by itself). */
         rpgOn: () => session.hosted === true && part.featureOn(RPG_FEATURE) === true,
+        /** While hosted: the "Scan after every reply" switch (index.js asks before each automatic scan). */
         scanEveryReply: () => part.featureOn(FEATURE_SCAN_EVERY_REPLY) !== false,
         /**
          * Where the calendar in Delta's settings stands: 'story-director' (Story Director's calendar is the one in
