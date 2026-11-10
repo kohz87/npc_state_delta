@@ -5,9 +5,9 @@
 import { replayScope } from './runtime-scan-helpers.js';
 import { getContext } from '../../../extensions.js';
 import { EDITOR_FIELDS } from './src/dossier-edit.js';
-import { DEFAULT_RELATIONSHIP, KEY_RELATIONSHIP_LIMIT, BEHAVIOR_PROFILE_LIMIT, isTerminalNpcDeath, PORTRAIT_NPC_PROMPT_LIMIT, normalizeCustomFieldNames, normalizeCustomFields } from './core.js';
+import { DEFAULT_RELATIONSHIP, KEY_RELATIONSHIP_LIMIT, BEHAVIOR_PROFILE_LIMIT, isTerminalNpcDeath, PORTRAIT_NPC_PROMPT_LIMIT, normalizeCustomFields } from './core.js';
 import { escapeHtml } from './src/util/html.js';
-import { getSettings } from './runtime-settings.js';
+import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { createEditorSave } from './runtime-editor-save.js';
 
 export function createEditorPart(rt, deps) {
@@ -140,7 +140,7 @@ export function createEditorPart(rt, deps) {
 
     // Configured custom fields, plus any value stored under a name no longer configured so it can be cleared.
     function customFieldEditorNames(npc) {
-        const names = [...normalizeCustomFieldNames(getSettings().customFieldNames)];
+        const names = [...effectiveCustomFieldNames()];
         for (const key of Object.keys(normalizeCustomFields(npc?.customFields))) {
             if (!names.some(name => name.toLowerCase() === key.toLowerCase())) names.push(key);
         }

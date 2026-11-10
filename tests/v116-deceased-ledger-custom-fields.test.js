@@ -95,7 +95,7 @@ test('settings, editor, scans and imports are wired to the custom fields', () =>
     assert.match(index, /customFieldNames: \[\],/);
     assert.match(index, /assign\('customFieldNames', normalizeCustomFieldNames\(settings\.customFieldNames\), sameJson\)/);
     assert.match(index, /id="npc_state_delta_custom_fields"/);
-    assert.equal((index.match(/customFieldNames: settings\.customFieldNames/g) || []).length, 6, 'three prompts, the scan merge, the one targeted-pass merge (Refresh, backfill and import) and the injection');
+    assert.equal((index.match(/customFieldNames: effectiveCustomFieldNames\(settings\)/g) || []).length, 6, 'three prompts, the scan merge, the one targeted-pass merge (Refresh, backfill and import) and the injection');
     assert.match(index, /\$\{customFieldEditorHtml\(npc\)\}/);
     assert.match(index, /customFields: customFieldEditorValues\(current\)/);
     assert.ok(EDITOR_LOCKABLE_FIELDS.includes('customFields'), 'manual edits lock custom fields like other stable fields');

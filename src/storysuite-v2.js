@@ -81,6 +81,8 @@ export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
 // Story Director's reader-only pin for key people (its feature switch is `story-director.key-people`).
 const KEY_PIN_COMMAND = 'keypeople.pin';
+// Story Block's lean RPG feature (its names.js LEAN_RPG_FEATURE); an extension cannot import Story Block.
+const RPG_FEATURE = 'story-block.rpg';
 export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity', 'npc.catchUp']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.open', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
@@ -258,6 +260,8 @@ export function createStorySuiteV2Adapter({
         /** While hosted: a pack cast member's "Gear: A, B" line for the narrator's entry, or ''. */
         castGearLine,
         /** While hosted: the "Scan after every reply" switch (index.js asks before each automatic scan). */
+        /** While hosted: whether Story Block's RPG feature is on (the custom field "Level" then appears by itself). */
+        rpgOn: () => session.hosted === true && part.featureOn(RPG_FEATURE) === true,
         scanEveryReply: () => part.featureOn(FEATURE_SCAN_EVERY_REPLY) !== false,
         /**
          * Where the calendar in Delta's settings stands: 'story-director' (Story Director's calendar is the one in

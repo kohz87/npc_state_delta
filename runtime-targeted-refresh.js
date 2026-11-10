@@ -5,7 +5,7 @@ import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { recentTranscript, recentUserDevelopmentContext, currentExclusions, storyDayAt, storyDaysForTranscript, refreshMessageGate } from './src/transcript.js';
 import { DEFAULT_RELATIONSHIP, relationshipSummaryConsistent, calibrateRelationshipSummary, npcMatchesLabel, buildProfileRefreshPrompt, extractExplicitKeyRelationshipEdges, normalizeCustomFields } from './core.js';
 import { setNpcChatRefreshIndicator, relationshipNumber, latestMessageId } from './runtime-scan-helpers.js';
-import { getSettings } from './runtime-settings.js';
+import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
 import { fillAllowed, FILL_MERGE_OPTION } from './appearance-fill.js';
 
@@ -103,7 +103,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
             memoryCriteria: settings.memoryCriteria,
             turn: Number.isInteger(state.turn) ? state.turn : null,
             storyDay: storyDayAt(latestMessageId(true)),
-            customFieldNames: settings.customFieldNames,
+            customFieldNames: effectiveCustomFieldNames(settings),
             fillLooks: fillBlankLooks,
             ...targetNoteOptions(notes),
         });

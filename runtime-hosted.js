@@ -9,10 +9,11 @@ import { normalizeRelationshipBaseline, isTerminalNpcDeath, npcMatchesLabel, sto
 import { defersArea, resolveDossierTarget } from './suite-handshake.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
 import { castView, findCastPerson, normalizeCast } from './src/cast-dossier.js';
-import { getSettings } from './runtime-settings.js';
+import { getSettings, setRpgProbe } from './runtime-settings.js';
 
 export function createHostedPart(rt, deps) {
     const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex } = deps;
+    setRpgProbe(() => (storyBlockV2Hosted() && rt.storySuiteV2?.hosted?.() ? rt.storySuiteV2.rpgOn?.() === true : false));
 
     // Set by src/storysuite-v2.js while Delta is registered with a Story Block v2 host.
     function storyBlockV2Hosted() {

@@ -8,7 +8,7 @@ import { storyDayAt, currentExclusions, refreshMessageGate, activeChat } from '.
 import { BACKFILL_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { buildDossierImportPrompt, mergeScanResult, protectTerminalNpc } from './core.js';
 import { chatLineage } from './branch.js';
-import { getSettings } from './runtime-settings.js';
+import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { replayScope, setNpcDossierScanIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
 import { createTargetedRefreshPart } from './runtime-targeted-refresh.js';
@@ -131,7 +131,7 @@ export function createTargetedPart(rt, deps) {
                 scenePresent: scenePresentAt(targetMessageId),
                 calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
                 storyDay: storyDayAt(targetMessageId),
-                customFieldNames: settings.customFieldNames,
+                customFieldNames: effectiveCustomFieldNames(settings),
                 relationshipBaseline: settings.relationshipBaseline,
                 relationshipCaps: settings.relationshipCaps,
                 autoArchiveDeaths: settings.autoArchiveDeaths !== false,
@@ -222,7 +222,7 @@ export function createTargetedPart(rt, deps) {
             userName: ctx.name1 || 'User',
             charName: ctx.name2 || 'Character',
             // (I-13) The configured custom fields, as the merge already accepts them from the import.
-            customFieldNames: getSettings().customFieldNames,
+            customFieldNames: effectiveCustomFieldNames(),
         });
         return runTargetedDossierPass({
             chatKey, ctx, id, prompt,
