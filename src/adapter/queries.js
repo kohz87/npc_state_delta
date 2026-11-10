@@ -7,6 +7,7 @@
 // is given: no SillyTavern import.
 
 import { normalizeRelationshipMilestones, normalizeRelationshipProgress } from '../../core-relationship-model.js';
+import { storyMinuteText } from '../../calendar.js';
 import { resolveDossierTarget } from '../../suite-handshake.js';
 import { FEATURE_SOCIAL, SOCIAL_QUERY, createNpcPart, normalizeSecrets } from '../npc-meters.js';
 import { normalizeLimits, presetCatalog } from '../npc-meters-presets.js';
@@ -111,6 +112,7 @@ export function createQueriesPart(session, deps) {
                 return Number.isInteger(time) ? time : time?.minutes ?? null;
             } catch { return null; }
         },
+        dateText: minutes => storyMinuteText(minutes, director.directorCalendar()),
         // Only the rules (and the titles screens show while locked) leave the dossier for the
         // handlers and screens; the texts go to the tail and to an unlocked note's screen line alone.
         secretRules: (name, labels = []) => {

@@ -5,7 +5,7 @@
 //
 //   npc = {
 //     npcs: { [key]: { name, meters: { trust, affection, desire, tension, ...custom }, stages: { meter: name },
-//                      unlocked: [noteId], held?: [noteId], disposition?, turn?: { reply, from: { meter: value } },
+//                      unlocked: [noteId], held?: [noteId], disposition?, turn?: { reply, from: { meter: value }, ask?: { meter: n }, tier?, date? },
 //                      milestones?: { [milestoneKey]: name }, rank?: rungKey, low?: n, day?: n } },
 //     problems: [{ rev, text }],          // the last change lines code could not use in full (last 20)
 //   }
@@ -73,7 +73,7 @@ import { createNpcCommands } from './npc-meters-commands.js';
 import { createNpcQueries } from './npc-meters-queries.js';
 import { createNpcPrompt } from './npc-meters-prompt.js';
 import { normalizeAllowance, pacedTier, spendFlatEvent } from './relationship-pacing.js';
-import { cutToTier, pacingNote } from './npc-meters-pacing.js';
+import { askedAmounts, cutToTier, pacingNote, stampEvent } from './npc-meters-pacing.js';
 export { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, BUILT_IN_RANGE, CUSTOM_RANGE, MAX_CUSTOM_METERS, MAX_NPCS, MAX_METERS_PER_NPC, MAX_STAGES_PER_METER, MAX_SECRETS, MAX_GENERATED_SECRETS, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, MAX_TRACKS, MAX_BANDS, MAX_NEEDS, DEFAULT_CHANGE_CAP, MAX_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, SECRET_WHEN_MAX, NOTE_SOURCES, MILESTONE_MAX, DESCRIBE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURES, replyKey, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, parseBands, bandWord, parseNeeds, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
 export { normalizeSecrets, secretId, normalizeGeneratedSecrets, secretsToLines, secretsFromLines, limitsToLines, limitsFromLines } from './npc-meters-secrets.js';
 export { initialNpcSlice, observeKeyAway, CAST_QUERY, CAST_MADE_MAX, observeCast, validateNpcSlice, findNpcKey, meterValue, rungMet } from './npc-meters-slice.js';
@@ -91,6 +91,7 @@ export { FEATURE_SOCIAL, SOCIAL_QUERY };
  *   allowance()       → the reader's events per story day { ordinary, meaningful, major, extreme } (null: no limit; relationship-pacing.js)
  *   calendarOwn()     → true while the reader keeps the calendar in Delta (then there is no story day to count on)
  *   startTime(index)  → story-clock minutes before that reply (null when unavailable)
+ *   dateText(minutes) → that story minute as the Director's note writes it ("Goldwane 13"); none: the window keeps no date
  *   secretRules(name) → that dossier's notes as [{ id, meter?, at?, when?, title? }] (never their text)
  *   secretTexts(name, ids) → [{ id, text }] for those notes (the tail and screens only)
  *   setup(name, labels) → that dossier's meter setup { track, limits } (the editor's)
@@ -125,10 +126,20 @@ export function createNpcPart(hooks = {}) {
         const value = call(hooks.allowance, null);
         return isObject(value) ? normalizeAllowance(value) : null;
     };
-    const clockDay = at => {
+    const clockMinutes = at => {
         if (call(hooks.calendarOwn, false) === true) return null;
         const minutes = call(hooks.startTime, null, at);
-        return isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
+        return isInt(minutes) ? minutes : null;
+    };
+    const clockDay = at => {
+        const minutes = clockMinutes(at);
+        return minutes === null ? null : Math.floor(minutes / DAY_MINUTES);
+    };
+    // The story date before the reply as text ("Goldwane 13"), '' without a clock or a date writer.
+    const clockDate = at => {
+        const minutes = clockMinutes(at);
+        const text = minutes === null ? '' : call(hooks.dateText, '', minutes);
+        return typeof text === 'string' ? text.trim().slice(0, 40) : '';
     };
     const rulesFor = (name, aliases = []) => {
         const value = call(hooks.secretRules, [], name, aliases);
@@ -336,6 +347,7 @@ export function createNpcPart(hooks = {}) {
         // Pacing (relationship-pacing.js): one event per line or scanner change, counted once whatever number of meters it names.
         // A story line (`impact`) and a forwarded scanner change (`scanTier`) share the record's count; a change with neither is not paced.
         const asked = impact?.tier ?? pacedTier(scanTier);
+        const ask = asked && mine.length && limit ? askedAmounts(changes, left, id => meterValue(record, defs.find(def => def.id === id))) : null;
         const spent = asked && mine.length && limit ? spendFlatEvent(record.impactDay, { tier: asked, reply: replyKey(reply, reply), clockDay: clockDay(at), allowance: tierAllowance() }) : null;
         if (spent?.next) record.impactDay = spent.next;
         const pace = spent ? pacingNote(asked, spent.used, spent.skipped) : '';
@@ -344,6 +356,8 @@ export function createNpcPart(hooks = {}) {
         else if (impact) stepped = tiered(record, mine, defs, { ...impact, tier: spent?.used ?? impact.tier });
         else if (spent?.used && spent.used !== asked) stepped = cutToTier(mine, spent.used, normalizeRelationshipCaps(tierCaps() ?? {}), id => meterValue(record, defs.find(def => def.id === id)));
         const moved = moveMeters(record, stepped, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup), story });
+        // What was asked, its tier and the date, on the reply's window (read by the card; no value depends on them).
+        if (asked && mine.length && limit && record.turn && sameReply(record.turn, reply)) stampEvent(record.turn, { ask, tier: spent?.used || asked, date: clockDate(at) });
         if (!limit) {
             // The reader's own value for a built-in meter ends the part-points the story lines had gathered on it.
             for (const change of changes) if (record.progress) delete record.progress[change.meter];

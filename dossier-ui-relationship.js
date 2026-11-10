@@ -33,6 +33,18 @@ function impactLabel(impact) {
 
 const ORIGIN_CHIPS = Object.freeze({ story: 'From the story', scanner: 'From the scanner' });
 
+// "Reply #N · Goldwane 13": the reply stamp with the story date the slice kept (none on an older record).
+const datedStamp = change => {
+    const stamp = changeStamp(change);
+    return change.date && stamp.label ? { ...stamp, label: `${stamp.label} · ${change.date}` } : stamp;
+};
+
+// "Asked: Trust +1, Affection +1" (a held change only: what the story or scanner wanted before the day's allowance).
+const askedHtml = change => {
+    const parts = RELATIONSHIP_AXES.filter(([axis]) => change.ask?.[axis]).map(([axis, label]) => `${label} ${change.ask[axis] > 0 ? '+' : ''}${change.ask[axis]}`);
+    return parts.length ? `Asked: ${escapeHtml(parts.join(', '))}` : '';
+};
+
 export function lastRelationshipChangeHtml(change) {
     if (!change || change.impact === 'none' || (!change.reason && change.impact !== 'manual' && change.impact !== 'slice')) {
         return `<div class="delta-rel-last"><h4>Last relationship change</h4><p class="delta-muted">No relationship change recorded yet.</p></div>`;
@@ -44,11 +56,15 @@ export function lastRelationshipChangeHtml(change) {
             return `<span class="delta-rel-delta delta-rel-delta-${value > 0 ? 'up' : 'down'} delta-rel-${escapeHtml(axis)}">${escapeHtml(label)} ${value > 0 ? '+' : ''}${value}</span>`;
         })
         .join('');
+    // Asked (held only), the held words and the reason: one line each, none when empty.
+    const notes = [
+        change.held && askedHtml(change) ? `<p class="delta-rel-asked">${askedHtml(change)}</p>` : '',
+        change.held ? `<p class="delta-rel-held">Held: ${escapeHtml(change.held)}. Nothing moved.</p>` : '',
+        change.reason ? `<p>${escapeHtml(change.reason)}</p>` : '',
+    ].filter(Boolean).map(line => `\n        ${line}`).join('');
     return `<div class="delta-rel-last">
-        <div class="delta-rel-last-head"><h4>Last relationship change</h4>${change.impact === 'slice' ? '' : `<span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>`}${ORIGIN_CHIPS[change.origin] ? `<span class="delta-rel-origin">${ORIGIN_CHIPS[change.origin]}</span>` : ''}${stampHtml(changeStamp(change))}</div>
-        <div class="delta-rel-deltas">${deltas || (change.held ? '' : '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>')}</div>
-        ${change.held ? `<p class="delta-rel-held">Held: ${escapeHtml(change.held)}. Nothing moved.</p>` : ''}
-        ${change.reason ? `<p>${escapeHtml(change.reason)}</p>` : ''}
+        <div class="delta-rel-last-head"><h4>Last relationship change</h4>${change.impact === 'slice' && !change.tier ? '' : `<span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact === 'slice' ? change.tier : change.impact)}">${escapeHtml(impactLabel(change.impact === 'slice' ? change.tier : change.impact))}</span>`}${ORIGIN_CHIPS[change.origin] ? `<span class="delta-rel-origin">${ORIGIN_CHIPS[change.origin]}</span>` : ''}${stampHtml(datedStamp(change))}</div>
+        <div class="delta-rel-deltas">${deltas || (change.held ? '' : '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>')}</div>${notes}
     </div>`;
 }
 

@@ -73,6 +73,10 @@ function relationshipChangeProjection(change = {}) {
         message,
         ...(origin ? { origin } : {}),
         ...(plain(source.held) ? { held: plain(source.held) } : {}),
+        // From the slice's reply window (hosted): what was asked per axis, the impact tier, the story date. Absent on an older record.
+        ...(source.ask && typeof source.ask === 'object' && Object.keys(source.ask).length ? { ask: Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(source.ask[axis]) || 0)]).filter(([, step]) => step)) } : {}),
+        ...(['ordinary', 'meaningful', 'major', 'extreme'].includes(source.tier) ? { tier: source.tier } : {}),
+        ...(plain(source.date) ? { date: plain(source.date) } : {}),
         when: changeStamp({ turn, message }).label,
     };
 }
@@ -88,9 +92,9 @@ function newestRelationshipChange(npc) {
     const sideMessage = wholeNumber(side?.message);
     const real = side && plain(side.impact, 'none') !== 'none' && (plain(side.reason) || side.impact === 'manual');
     if (!real || sideMessage === null || live.reply > sideMessage) {
-        return relationshipChangeProjection({ impact: 'slice', delta: live.delta, message: live.reply, source: live.source, held: live.held });
+        return relationshipChangeProjection({ impact: 'slice', delta: live.delta, message: live.reply, source: live.source, held: live.held, ask: live.ask, tier: live.tier, date: live.date });
     }
-    if (live.reply === sideMessage && side.impact !== 'manual') return relationshipChangeProjection({ ...side, delta: live.delta, source: 'scanner', held: live.held });
+    if (live.reply === sideMessage && side.impact !== 'manual') return relationshipChangeProjection({ ...side, delta: live.delta, source: 'scanner', held: live.held, ask: live.ask, date: live.date });
     return relationshipChangeProjection(real && side.impact !== 'manual' ? { ...side, source: 'scanner' } : side);
 }
 

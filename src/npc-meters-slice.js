@@ -1,7 +1,7 @@
 // NPC meters, the per-reply slice: the initial slice, key-person absence and cast memory, slice validation, meter moves, the stage
 // and ladder settling, and the change text. A pure part of npc-meters.js (same owner, moved without change); npc-meters.js
 // re-exports every name it exported before. Never imports npc-meters.js.
-import { clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KEYS, isInt, isObject, isReplyId, KEY_MAX, MAX_METERS_PER_NPC, MAX_MILESTONES, MAX_NPCS, MAX_PROBLEMS, MAX_RUNGS, MAX_UNLOCKED, METER_ID_MAX, MILESTONE_MAX, NAME_MAX, needMet, npcKey, own, RECORD_FIELDS, replyKey, sameReply, signed, STAGE_NAME_MAX, stageAt, thresholdReached, WORDS } from './npc-meters-config.js';
+import { clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KEYS, IMPACT_TIERS, isInt, isObject, isReplyId, KEY_MAX, MAX_METERS_PER_NPC, MAX_MILESTONES, MAX_NPCS, MAX_PROBLEMS, MAX_RUNGS, MAX_UNLOCKED, METER_ID_MAX, MILESTONE_MAX, NAME_MAX, needMet, npcKey, own, RECORD_FIELDS, replyKey, sameReply, signed, STAGE_NAME_MAX, stageAt, thresholdReached, WORDS } from './npc-meters-config.js';
 import { isKey, memoryKey, RECENT_REPLIES } from './key-people.js';
 import { CAST_KEY, metWithEntry } from './cast-dossier.js';
 import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
@@ -157,7 +157,10 @@ export function validateNpcSlice(slice) {
             if (!isObject(turn) || replyKey(turn.reply, turn.reply) === null || !isObject(turn.from)
                 || (turn.at !== undefined && (!isInt(turn.at) || turn.at < 0 || !isReplyId(turn.reply)))
                 || Object.values(turn.from).some(value => !isInt(value))
-                || (turn.story !== undefined && (!Array.isArray(turn.story) || turn.story.some(id => typeof id !== 'string')))) errors.push(`${where} has an unusable reply window.`);
+                || (turn.story !== undefined && (!Array.isArray(turn.story) || turn.story.some(id => typeof id !== 'string')))
+                || (turn.ask !== undefined && (!isObject(turn.ask) || Object.entries(turn.ask).some(([id, step]) => !id || id.length > 40 || !isInt(step))))
+                || (turn.tier !== undefined && !IMPACT_TIERS.includes(turn.tier))
+                || (turn.date !== undefined && (typeof turn.date !== 'string' || !turn.date || turn.date.length > 40))) errors.push(`${where} has an unusable reply window.`);
         }
         if (record.milestones !== undefined) {
             const list = isObject(record.milestones) ? Object.entries(record.milestones) : null;

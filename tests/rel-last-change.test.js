@@ -30,7 +30,7 @@ test('(1) a story "~ npc" line moved the meters: the card shows the moved amount
         assert.match(html, /<span class="delta-rel-origin">From the story<\/span>/);
         assert.match(html, /Trust \+2/);
         assert.match(html, /Affection -1/);
-        assert.doesNotMatch(html, /delta-rel-impact-/, 'the slice has no impact badge of its own');
+        assert.match(html, /delta-rel-impact-meaningful">Meaningful</, 'the tier the line spent, kept on the window');
         assert.match(html, new RegExp(`Reply #${reply}`));
         // The ▲/▼ on the meters, on the latest reply, uses the same numbers.
         assert.match(relationshipStepHtml('trust', 'Trust', change, s.host.store.headIndex()), />▲2<\/span>$/);
@@ -190,3 +190,117 @@ const GOLDEN = {
     },
     "step": "<span class=\"delta-rel-step delta-rel-step-good\" title=\"Trust up 3 since the last reply (reply #14)\" aria-label=\"Trust up 3 since the last reply (reply #14)\">▲3</span>"
 };
+
+// ---- what was asked, its tier and the story date (turn.ask / turn.tier / turn.date on the slice record's reply window) ----
+import { storyMinuteText } from '../calendar.js';
+import { DAY } from './helpers/pacing-suite.js';
+import { lastChangeOf } from '../src/npc-meters-pacing.js';
+import { validateNpcSlice } from '../src/npc-meters-slice.js';
+
+const dateOfDay = day => storyMinuteText(day * DAY + 30);
+const windowOf = (s, name = 'oren') => s.host.head().domains.npc.npcs[name].turn;
+// The window without its reply id (a swipe is a new reply with its own id).
+const shown = s => JSON.stringify({ ...windowOf(s), reply: 0 });
+// Fill the day so an ordinary and a meaningful event are both held.
+const fillDay = async s => {
+    await s.say(['~ npc Oren | trust: +2 | impact: meaningful']);
+    for (let n = 0; n < 3; n += 1) await s.say(['~ npc Oren | trust: +1 | impact: ordinary']);
+};
+
+test('(6) a story line stores what it asked, the tier it spent and the date before the reply; the card shows the tier chip and "Reply #N · date"', async () => {
+    const s = await suite();
+    try {
+        await s.setDay(1);
+        const reply = await s.say(['~ npc Oren | trust: +2 | affection: +1 | impact: meaningful']);
+        const turn = windowOf(s);
+        assert.deepEqual(turn.ask, { trust: 2, affection: 1 });
+        assert.equal(turn.tier, 'meaningful');
+        assert.equal(turn.date, dateOfDay(1));
+        assert.deepEqual([s.npc('Oren').meters.trust, s.npc('Oren').meters.affection], [2, 1], 'meter values as before');
+        assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+        const change = cardOf(s);
+        assert.equal(change.tier, 'meaningful');
+        const html = htmlOf(change);
+        assert.match(html, /delta-rel-impact-meaningful">Meaningful</, 'the chip for a story-line change');
+        assert.match(html, new RegExp(`Reply #${reply} · ${dateOfDay(1)}`));
+        assert.doesNotMatch(html, /Asked:/, 'Asked only on a held change');
+    } finally { s.host.close(); }
+});
+
+test('(7) a forwarded scanner change stores asked amounts, the tier it spent (the cut one) and the date', async () => {
+    const s = await suite();
+    try {
+        await s.setDay(3);
+        await s.say([major()]);
+        const reply = await s.say();
+        await s.adapter.adjust({ name: 'Oren', meters: { trust: 3, affection: 3 }, start: { trust: 3, affection: 0, desire: 0, tension: 0 }, reply, impact: 'major' });
+        const turn = windowOf(s);
+        assert.deepEqual(turn.ask, { trust: 3, affection: 3 }, 'before the cut');
+        assert.equal(turn.tier, 'meaningful', 'the tier the event spent');
+        assert.equal(turn.date, dateOfDay(3));
+        assert.deepEqual([s.npc('Oren').meters.trust, s.npc('Oren').meters.affection], [5, 2], 'meter values as before');
+    } finally { s.host.close(); }
+});
+
+test('(8) a held change shows "Asked: ..." and names the asked tier; an ordinary ask on a full day names only ordinary', async () => {
+    const s = await suite();
+    try {
+        await s.setDay(1);
+        await fillDay(s);
+        const reply = await s.say(['~ npc Oren | trust: +1 | affection: +1 | impact: ordinary']);
+        const turn = windowOf(s);
+        assert.deepEqual([turn.ask, turn.tier], [{ trust: 1, affection: 1 }, 'ordinary']);
+        const change = cardOf(s);
+        assert.equal(change.held, "today's ordinary is used", 'the asked tier, not every full tier');
+        const html = htmlOf(change);
+        assert.match(html, /Asked: Trust \+1, Affection \+1/);
+        assert.match(html, /Held: today&#039;s ordinary is used\. Nothing moved\./);
+        assert.match(html, /delta-rel-impact-ordinary">Ordinary</);
+        assert.match(html, new RegExp(`Reply #${reply} · ${dateOfDay(1)}`));
+        // A meaningful ask reads both tiers.
+        await s.say(['~ npc Oren | trust: +2 | impact: meaningful']);
+        assert.equal(cardOf(s).held, "today's ordinary and meaningful are used");
+        assert.match(htmlOf(cardOf(s)), /Asked: Trust \+2/);
+    } finally { s.host.close(); }
+});
+
+test('(9) swipe, rebuild and reload keep ask, tier and date; a swipe replaces them with its own', async () => {
+    const s = await suite();
+    try {
+        await s.setDay(1);
+        await fillDay(s);
+        await s.say(['~ npc Oren | trust: +2 | impact: meaningful']);
+        const kept = shown(s);
+        assert.match(kept, /"ask":\{"trust":2\}.*"tier":"meaningful"/);
+        await s.swipe(['~ npc Oren | trust: +2 | impact: meaningful']);
+        assert.equal(shown(s), kept, 'the same line again');
+        await s.swipe(['~ npc Oren | affection: +1 | impact: ordinary']);
+        assert.deepEqual([windowOf(s).ask, windowOf(s).tier], [{ affection: 1 }, 'ordinary'], 'the swipe is its own reply: nothing of the old one stays');
+        await s.swipe(['~ npc Oren | trust: +2 | impact: meaningful']);
+        assert.equal(shown(s), kept, 'back to the first');
+        const head = JSON.stringify(s.host.head());
+        s.host.store.rebuild();
+        assert.equal(JSON.stringify(s.host.head()), head, 'rebuild equals live');
+        await s.host.st.loadChat(s.host.ctx.chat);
+        await s.adapter.ticked();
+        assert.equal(shown(s), kept, 'a cold reload keeps them');
+        assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    } finally { s.host.close(); }
+});
+
+test('(10) no clock: no date is stored; an old record without ask, tier or date renders without them and validates', async () => {
+    const s = await suite({ clock: false });
+    try {
+        await s.say(['~ npc Oren | trust: +1 | impact: ordinary']);
+        assert.equal(windowOf(s).date, undefined);
+        assert.deepEqual(windowOf(s).ask, { trust: 1 });
+    } finally { s.host.close(); }
+    const old = { meters: { trust: 2, affection: 0, desire: 0, tension: 0 }, turn: { reply: 5, from: { trust: 0, affection: 0, desire: 0, tension: 0 }, story: ['trust'] } };
+    const last = lastChangeOf(old, null);
+    assert.deepEqual(Object.keys(last).sort(), ['delta', 'held', 'reply', 'source']);
+    assert.deepEqual(validateNpcSlice({ npcs: { oren: { name: 'Oren', ...old, stages: {}, unlocked: [], milestones: {} } }, problems: [] }), []);
+    const html = lastRelationshipChangeHtml(dossierDetailProjection({ id: 'x', name: 'X', sliceChange: last }).lastRelationshipChange);
+    assert.match(html, /Trust \+2/);
+    assert.doesNotMatch(html, /Asked:|·|delta-rel-impact-/);
+    assert.ok(validateNpcSlice({ npcs: { oren: { name: 'Oren', ...old, turn: { ...old.turn, tier: 'huge' }, stages: {}, unlocked: [], milestones: {} } }, problems: [] }).length, 'a bad tier is refused');
+});

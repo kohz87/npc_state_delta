@@ -33,13 +33,40 @@ export function cutToTier(changes, used, caps, value) {
     });
 }
 
+/**
+ * What the event asked, per built-in axis, before pacing and the yield to a story line: { trust: +1, ... } (whole numbers, none
+ * for a meter the event leaves alone or one the story line already named: `left`). `value(meter)` is the meter now (for `=N`).
+ */
+export function askedAmounts(changes, left, value) {
+    const out = {};
+    for (const change of changes) {
+        if (!RELATIONSHIP_KEYS.includes(change.meter) || left.includes(change.meter) || !Number.isInteger(change.value)) continue;
+        const step = change.mode === 'add' ? change.value : change.value - value(change.meter);
+        if (step) out[change.meter] = (out[change.meter] ?? 0) + step;
+    }
+    return out;
+}
+
+/** Keeps on the reply's window what the event asked (summed per axis), its tier (the highest of the reply) and the story date (the first). */
+export function stampEvent(turn, { ask, tier, date }) {
+    if (ask && Object.keys(ask).length) {
+        const sum = { ...(turn.ask ?? {}) };
+        for (const [key, step] of Object.entries(ask)) sum[key] = (sum[key] ?? 0) + step;
+        turn.ask = Object.fromEntries(Object.entries(sum).filter(([, step]) => step));
+        if (!Object.keys(turn.ask).length) delete turn.ask;
+    }
+    if (PACING_TIERS.includes(tier) && !(PACING_TIERS.indexOf(turn.tier) >= PACING_TIERS.indexOf(tier))) turn.tier = tier;
+    if (date && !turn.date) turn.date = date;
+}
+
 const FLAT_DAY = /^d(-?\d{1,9}):(ordinary|meaningful|major|extreme)$/;
 
 /**
  * What the newest reply did to one NPC's four built-in meters, read from the record as it is kept (nothing is stored for it):
  * { reply (index), delta: { trust, ... } (the net change from the reply's start: after pacing, caps and gates), source ('story' when a
  * story line took part, else 'scanner'), held (the reader's words when the day's allowance was used up and nothing moved, else '') },
- * or null when nothing moved and nothing was held. The tier and amounts a held event asked are not kept, so the words name every full tier.
+ * or null when nothing moved and nothing was held; plus, when the window kept them (stampEvent): ask (what was asked per axis), tier (the
+ * impact tier the event spent, or the tier it asked when held) and date (the story date before the reply). A held change names the asked tier.
  */
 export function lastChangeOf(record, allowance) {
     const turn = record?.turn;
@@ -54,12 +81,14 @@ export function lastChangeOf(record, allowance) {
         const days = new Set(Object.keys(day).map(key => FLAT_DAY.exec(key)?.[1]).filter(Boolean));
         const [only] = days;
         const full = [];
-        if (days.size === 1) for (const tier of PACING_TIERS) {
+        const reach = PACING_TIERS.includes(turn.tier) ? PACING_TIERS.indexOf(turn.tier) + 1 : PACING_TIERS.length;
+        if (days.size === 1) for (const tier of PACING_TIERS.slice(0, reach)) {
             if (allowance[tier] === null || allowance[tier] === undefined || !(day[`d${only}:${tier}`] >= allowance[tier])) break;
             full.push(tier);
         }
-        if (full.length) held = pacingNote(full.at(-1), null, full);
+        if (full.length === reach || (reach === PACING_TIERS.length && full.length)) held = pacingNote(full.at(-1), null, full);
     }
     if (!moved && !held) return null;
-    return { reply, delta, source: Array.isArray(turn.story) ? 'story' : 'scanner', held };
+    const ask = turn.ask && typeof turn.ask === 'object' ? turn.ask : null;
+    return { reply, delta, source: Array.isArray(turn.story) ? 'story' : 'scanner', held, ...(ask ? { ask } : {}), ...(turn.tier ? { tier: turn.tier } : {}), ...(turn.date ? { date: turn.date } : {}) };
 }
