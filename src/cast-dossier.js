@@ -36,6 +36,7 @@ import { portraitHasImage } from './portrait-file.js';
 import { isBehaviorLever, normalizeBehaviorProfile } from '../core-behavior.js';
 import { normalizeMannerisms } from '../core-durable.js';
 import { DURABLE_PROFILE_LIMITS } from '../core-relationship.js';
+import { normalizeAge, normalizeApparentAge, normalizeGender } from '../core-identity.js';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const clip = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
@@ -286,6 +287,36 @@ export function shortPackName(name) {
     return clip(text, 40);
 }
 
+const PEOPLE_LOOKS = /\s*\(?\blooks?\s+(?:(?:about|around|approx\.?|approximately)\s+)?(\d{1,3})\)?\s*$/i;
+const PEOPLE_AGE = /^(?:formed\s+)?(?:(about|around|approx\.?|approximately)\s+)?(\d{1,3})(?:\s*(?:years?|yrs?)(?:\s+(?:old|ago))?)?$/i;
+const PEOPLE_HEAD = /^(\p{L}[\p{L}'-]*(?:\s+\p{L}[\p{L}'-]*){0,2}?)(?:\s+(woman|man|female|male))?$/iu;
+
+/**
+ * A pack's `People` field ("Dogfolk woman, 21", "Dwelf, 58 (looks about 25)", "Elf, about 240 (looks about 35)", "Fairy, about 160",
+ * "Spiritfolk, formed about 300 years ago (looks about 30)") read as { species, gender, age, apparentAge } (each '' when absent), in the
+ * shapes the dossier stores them (core-identity: gender male|female, age "21" or "about 240", apparent age "~25"). Gender only from
+ * woman/man/female/male, never inferred. Text that does not fit whole gives all empty: nothing is guessed.
+ */
+export function parsePeople(raw) {
+    const none = { species: '', gender: '', age: '', apparentAge: '' };
+    let text = clip(raw, FIELD_VALUE_MAX);
+    let looks = '';
+    const seen = PEOPLE_LOOKS.exec(text);
+    if (seen) { looks = seen[1]; text = text.slice(0, seen.index).trim(); }
+    const [headText, ...rest] = text.split(',');
+    const head = PEOPLE_HEAD.exec(headText.trim());
+    if (!head) return none;
+    let age = '';
+    if (rest.length) {
+        const match = PEOPLE_AGE.exec(rest.join(',').trim());
+        if (!match) return none;
+        age = normalizeAge(`${match[1] ? 'about ' : ''}${match[2]}`);
+    }
+    const species = clip(head[1], 160);
+    if (!species || (!age && !looks && !head[2])) return none;
+    return { species, gender: normalizeGender(head[2]), age, apparentAge: looks ? normalizeApparentAge(`about ${looks}`) : '' };
+}
+
 const BUILT_IN_METERS = Object.freeze(['trust', 'affection', 'desire', 'tension']);
 
 /**
@@ -314,6 +345,9 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
     const relationship = { ...(isObject(base.relationship) ? base.relationship : {}) };
     for (const meter of BUILT_IN_METERS) if (Number.isInteger(entry.meters.values[meter])) relationship[meter] = Math.max(-100, Math.min(100, entry.meters.values[meter]));
     npc.relationship = relationship;
+    // The People field also fills the dossier's own species, gender and ages, only where the fresh dossier holds nothing yet.
+    const people = parsePeople(entry.fields[Object.keys(entry.fields).find(name => name.toLowerCase() === 'people')]);
+    for (const field of ['species', 'gender', 'age', 'apparentAge']) if (people[field] && !String(npc[field] ?? '').trim()) npc[field] = people[field];
     if (entry.meters.preset) npc.meterSetup = { track: entry.meters.preset, limits: {} };
     const secrets = castSecrets(entry.secrets);
     if (secrets.length) npc.secrets = secrets;
