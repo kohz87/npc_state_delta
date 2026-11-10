@@ -8,7 +8,7 @@ import { hashJson } from '../../replay.js';
 import { fold, readSheet } from '../../lean-rpg/read.js';
 import { LEAN_RPG_FEATURE } from '../../lean-rpg/names.js';
 import { XP_RATE, scaleXp, xpRateFrom } from '../../lean-rpg/levels.js';
-import { averageLevel, bandOfRank, foeRandom, foeLevelCap, levelOf, partyLevels, pickLevel } from '../../lean-rpg/foes.js';
+import { FOE_LEVEL, averageLevel, bandOfRank, foeRandom, foeLevelCap, levelOf, partyLevels, pickLevel } from '../../lean-rpg/foes.js';
 import { SKILL_SLOTS_MAX, SLOT_NUMBER, isTypedSkills } from '../../skill-slots.js';
 import { RESTED_FIELD, RESTED_KNOWN, SET_KINDS, fullRestTooSoon, isMarkedCharacter, recoveryNote } from '../recovery.js';
 import { B, rpg, draftOf, stateOf, pairKey, subjectsOf, instancePath, prefixImports } from './shared.js';
@@ -18,23 +18,23 @@ import { namedChanges } from './prompt.js';
 const LEARN_KIND = new RegExp(`^learn-${SLOT_NUMBER}$`, 'u');
 const PRACTICE_KIND = new RegExp(`^practice-${SLOT_NUMBER}$`, 'u');
 
+// Resolve an omitted kind only when exactly one kind with this op accepts the labels;
+// capture and record marking share this rule, so a guessed foe still gets its cap mark.
+export function withKind(definition, line) {
+    const labels = line.labels ?? {};
+    if (dmOwn(labels, 'kind')) return labels;
+    const fits = Object.keys(definition.kinds).filter(name => {
+        if (definition.kinds[name].op !== line.op) return false;
+        try { parseLabels(definition, definition.kinds[name], { ...labels, kind: name }, { text: true }); return true; } catch (error) {
+            if (error instanceof DataModuleError) return false;
+            throw error;
+        }
+    });
+    return fits.length === 1 ? { ...labels, kind: fits[0] } : labels;
+}
+
 export function createAct(deps) {
     const { dependency, guard, finish, growSkills, skillRoute, skillRoom, skillWant, settings } = deps;
-    // A story line with no `kind:` (a model often leaves it out, or puts a label like `letter: F` where `kind: promote` belongs): when exactly
-    // one kind of this module, written with the line's op, accepts the line's labels as they are, that is its kind; with none or several
-    // the line is refused as before (kind must be …), never guessed. → the line's labels, with `kind` added when it was found.
-    function withKind(definition, line) {
-        const labels = line.labels ?? {};
-        if (dmOwn(labels, 'kind')) return labels;
-        const fits = Object.keys(definition.kinds).filter(name => {
-            if (definition.kinds[name].op !== line.op) return false;
-            try { parseLabels(definition, definition.kinds[name], { ...labels, kind: name }, { text: true }); return true; } catch (error) {
-                if (error instanceof DataModuleError) return false;
-                throw error;
-            }
-        });
-        return fits.length === 1 ? { ...labels, kind: fits[0] } : labels;
-    }
     // A Foes block of the Levels rules (its set-slot kind has a `level` label): a line that gives a level keeps it; one that gives a rank gets a level drawn inside that
     // rank's band (the `rpg.rank` query names the ranks); one that gives neither gets a level within ±2 of the party's average. The draw is from the reply's seed, so a
     // swipe draws anew and a Re-read keeps it. `rank` is not a label of the kind: it is taken out of the line here.
@@ -46,8 +46,8 @@ export function createAct(deps) {
         const known = !dmOwn(rest, 'level') && !(typeof rank === 'string' && rank.trim()) && typeof rest.name === 'string' && have
             ? [1, 2, 3, 4].find(n => typeof have[`foe${n}`] === 'string' && have[`count${n}`] > 0 && fold(have[`foe${n}`]) === fold(rest.name) && Number.isSafeInteger(have[`level${n}`])) : undefined;
         if (known !== undefined) return { ...rest, level: String(have[`level${known}`]) };
-        // A level or rank above one band (10 levels) over the party's highest level is held down to it.
-        const levels = partyLevels(readSheet({ domains: { dataModules: prefix.domains?.dataModules } })), cap = foeLevelCap(levels);
+        // A level or rank above the party's highest level + 20 is held down to it (+ 10 on a reply captured before that rule: it has no `foeCap` mark, so a Re-read agrees with the live capture).
+        const levels = partyLevels(readSheet({ domains: { dataModules: prefix.domains?.dataModules } })), cap = foeLevelCap(levels, ctx.carrier?.foeCap === 20 ? FOE_LEVEL.band : FOE_LEVEL.oldBand);
         if (dmOwn(rest, 'level')) { const given = levelOf(rest.level); return given === null ? rest : { ...rest, level: String(Math.min(given, cap)) }; }
         const band = typeof rank === 'string' && rank.trim() ? bandOfRank(rank, level => ctx.query('rpg.rank', { level })) : null;
         const ask = band ? { from: Math.min(band.from, cap), to: Math.min(band.to, cap) } : {};

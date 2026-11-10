@@ -19,6 +19,7 @@ const shape = board => isObject(board) && isObject(board.setup) && Array.isArray
     && Array.isArray(board.groups) && board.groups.length > 0 && board.groups.length <= 64
     && board.groups.every(slot => Number.isInteger(slot) && slot >= 1 && slot <= 64)
     && (board.setup.bars === undefined || board.setup.bars === 2)
+    && (board.setup.soak === undefined || (board.setup.soak === 1 && board.setup.bars === 2))
     && (board.setup.witness === undefined ? board.exchanges.length === 0
         : isObject(board.setup.witness) && board.setup.witness.offset === board.setup.offset && /^[0-9a-f]{64}$/u.test(board.setup.witness.hash));
 // The guard's input witness. Records made before this hashed the whole dataModules domain, other replies' `perReply` scratch included,
@@ -65,7 +66,7 @@ export function resolveBoard(ctx, payload) {
         if (wear.length) result.wear = wear;
         if (earnedLegend(result, applyGear(readSheet(state), gear), hasLevels(rules))) result.legend = 1;
     }
-    const predicate = { kind: RESOLVE, board: 1, key, setup: ctx.hash(board), rules: ctx.hash(rules), practice, ...(board.setup.bars === 2 ? { bars: 2 } : {}) };
+    const predicate = { kind: RESOLVE, board: 1, key, setup: ctx.hash(board), rules: ctx.hash(rules), practice, ...(board.setup.bars === 2 ? { bars: 2 } : {}), ...(board.setup.soak === 1 ? { soak: 1 } : {}) };
     ctx.replayGuard({ owner: ctx.module, version: 2, epoch: ctx.epoch, rulesHash: null, predicate,
         inputHash: ctx.hash({ source: ctx.source, predicate, witness: witness(state) }) }, { key, board, practice });
     if (result.hurts.length) applyHurts(ctx.draft('dataModules'), result.hurts);
@@ -79,7 +80,7 @@ export function boardGuard({ state, hash }, { guard, source, recorded }) {
         const predicate = guard?.predicate, board = recorded?.board;
         if (guard?.version !== 2 || guard.rulesHash !== null || predicate?.kind !== RESOLVE || predicate?.board !== 1
             || !shape(board) || recorded.key !== predicate.key || hash(board) !== predicate.setup || hash(normalizeRules(board.setup.rules)) !== predicate.rules
-            || recorded.practice !== predicate.practice || (board.setup.bars === 2 ? 2 : undefined) !== predicate.bars || practiceOf(recorded.practice) === null) return bad('The saved fight is damaged.');
+            || recorded.practice !== predicate.practice || (board.setup.bars === 2 ? 2 : undefined) !== predicate.bars || (board.setup.soak === 1 ? 1 : undefined) !== predicate.soak || practiceOf(recorded.practice) === null) return bad('The saved fight is damaged.');
         if (board.setup.gear && (!gearValid(board.setup.gear) || !gearMatches(state, board.setup.gear, hash))) return bad('The gear before the fight changed.');
         if (board.setup.witness && board.setup.witness.hash !== boardWitness(state, board.setup)) return bad('The sheet or gear before the fight changed.');
         return [witnessNew, witnessOld].some(make => hash({ source, predicate, witness: make(state) }) === guard.inputHash) ? { ok: true } : bad('The sheet before the fight changed.');

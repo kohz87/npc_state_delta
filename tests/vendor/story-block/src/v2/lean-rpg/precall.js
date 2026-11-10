@@ -65,7 +65,7 @@ export function createPrecall({ chat, metadata = () => null, moduleId = 'story-b
         const working = holdStart(meta, messages, { mode: 'working' });
         try { onPlanning(true); } catch { /* the screen redraws on the next event */ }
         let groups = [];
-        try { groups = await runPrecheck({ callModel, message: text, previous: previousReply(messages), sheet, values, limit: timeoutMs, timer }); } finally {
+        try { groups = await runPrecheck({ callModel, message: text, previous: previousReply(messages), sheet, values, limit: timeoutMs, timer, query: (name, args) => view.query?.(name, args) }); } finally {
             if (working) clearStart(meta, working);
             try { onPlanning(false); } catch { /* the screen redraws on the next event */ }
         }

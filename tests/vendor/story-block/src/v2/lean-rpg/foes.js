@@ -14,7 +14,7 @@ export { LV_VERSION, classOfLevel, levelBonus };
 export const levelOfClass = soulClass => (Number.isInteger(soulClass) && soulClass >= 1 && soulClass <= 9 ? mapClass(soulClass) : null);
 
 /** The levels a foe may have, how far from the party's average an unplanned one lands, the roll term's default divisor, and the Health block rule. */
-export const FOE_LEVEL = Object.freeze({ min: 1, max: 99, spread: 2, divisor: 5, healthBase: 4, healthStep: 30, band: 10 });
+export const FOE_LEVEL = Object.freeze({ min: 1, max: 99, spread: 2, divisor: 5, healthBase: 4, healthStep: 30, band: 20, oldBand: 10 });
 
 const whole = value => (typeof value === 'number' && Number.isInteger(value) ? value : typeof value === 'string' && /^\s*-?\d+\s*$/u.test(value) ? Number(value) : null);
 
@@ -28,8 +28,11 @@ export const levelOf = value => {
 /** A Standard foe's Health blocks: 4 + floor(level / 30) (levels 1–29 give 4, 30–59 give 5, 60–89 give 6, 90–99 give 7). */
 export const foeBlocksByLevel = level => FOE_LEVEL.healthBase + Math.floor(Math.max(FOE_LEVEL.min, Number(level) || 0) / FOE_LEVEL.healthStep);
 
-/** The most a NEW foe's level may be: the party's highest level + 10 (one band), at most 99 (1 for the party with no one is level 1, so 11). */
-export const foeLevelCap = levels => Math.min(FOE_LEVEL.max, Math.max(FOE_LEVEL.min, ...(levels ?? []).filter(value => Number.isInteger(value) && value >= 1)) + FOE_LEVEL.band);
+/**
+ * The most a NEW foe's level may be: the party's highest level + 20 (`band`), at most 99 (the party with no one is level 1, so 21). `band` 10 (`oldBand`) is the
+ * cap a reply captured before the +20 rule keeps on a Re-read (it has no `foeCap` mark; act.js). It is a ceiling only: nothing raises a level to it.
+ */
+export const foeLevelCap = (levels, band = FOE_LEVEL.band) => Math.min(FOE_LEVEL.max, Math.max(FOE_LEVEL.min, ...(levels ?? []).filter(value => Number.isInteger(value) && value >= 1)) + band);
 
 /** The party's average level, rounded to the nearest whole level (1 with no one): `levels` is a list of numbers, anything else in it is passed over. */
 export function averageLevel(levels) {

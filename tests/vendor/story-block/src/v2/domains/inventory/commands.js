@@ -95,7 +95,7 @@ export function createInventoryCommands(env) {
             const slot = handSlot(ctx, payload.slot);
             // The starting kit: Rarity above Common and a Bonus only while the chat is at its first message (an imported character's `starting: true` things are the file's own).
             const open = kitOpen(env);
-            // A character file's things (`starting: true`) come as written only while the kit is open; later they come in as Common with no bonus, and the Problems list says so.
+            // A character file's things (`starting: true`) come as written only while the kit is open; later they come in as Common, and the Problems list says so.
             let written = name;
             const imported = gear && payload.starting === true && !open;
             if (imported && (keep.rarity ?? 'common') !== 'common' || imported && (slot || Object.keys(stats).length)) {

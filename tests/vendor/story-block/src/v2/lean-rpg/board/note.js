@@ -28,7 +28,9 @@ function lineNote(line, members = null) {
     const area = line.aoe ? (line.reduced ? ' (area, reduced)' : ' (area)') : '';
     const action = line.flee ? `${who} flees from ${foe}` : line.support ? `${who} heals ${clean(line.target)}${skill}` : line.kind === 'foe' ? `${foe} attacks ${who}` : `${who} attacks ${foe}${skill}${area}`;
     const result = line.outcome === 'cost' ? 'success at a cost' : line.outcome;
-    const verdict = line.kind === 'foe' ? `${who}'s defence${skill}: ${result}` : result;
+    // (a hit soaked by the defender's VIT, even at soak 0: told briefly, no number)
+    const glance = line.kind === 'foe' && Number.isInteger(line.soaked) && line.soaked >= 0;
+    const verdict = glance ? `blow glances off${skill}` : line.kind === 'foe' ? `${who}'s defence${skill}: ${result}` : result;
     const slot = line.foe?.slot ?? Number(/^f:(\d+)/u.exec(line.damage?.id ?? '')?.[1] ?? NaN);
     const target = line.kind === 'foe' ? null : { ...(members?.get(slot) ?? {}), ...(line.foe ?? {}) };
     const changes = [line.damage ? barMovement(line.damage, false, target) : '', line.cost ? barMovement(line.cost, true) : ''].filter(Boolean);

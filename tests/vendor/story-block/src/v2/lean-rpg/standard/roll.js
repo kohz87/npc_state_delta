@@ -5,6 +5,7 @@ import { foeInitiativeBonus, initiativeBonus, quickStart, turnOrder } from '../f
 import { FORMULA, PACE } from '../names.js';
 import { fitCue, hurtsOf } from '../cue.js';
 import { classTerm } from '../rules.js';
+import { soakOf, soaked } from '../soak.js';
 import { foeId } from './roster.js';
 
 const DIE = FORMULA.die;
@@ -53,7 +54,7 @@ function move(bar, blocks) {
  * start can happen). → { checks, rounds, opening, order, quickStart, idle, hurts, stop, text, summary }; the rounds are already cut to the stop
  * and the cue budget, and the hurts hold only what the told rolls did to the bars.
  */
-export function rollStandard(plan, prepared, source, rules, { carried = null, flow = 1, wearOf = null, drop = null, opened = null, fix = false, then = false, board = false, scaled = false, memberRolls = null, noXp = false } = {}) {
+export function rollStandard(plan, prepared, source, rules, { carried = null, flow = 1, wearOf = null, drop = null, opened = null, fix = false, then = false, board = false, scaled = false, soak = false, memberRolls = null, noXp = false } = {}) {
     const own = new Map();
     // (An action's dice belong to its place in the plan: the entry as prepared, even when it is rolled without its skill.)
     const diceOf = entry => {
@@ -171,8 +172,11 @@ export function rollStandard(plan, prepared, source, rules, { carried = null, fl
         if (!standing(foeBar.id)) return { idle: 'beaten' };
         if (!standing(me.id)) return { idle: 'no-target' };
         const rolled = contested(entry, pcDie, foeDie, rules);
-        const damage = rolled.pcWins ? undefined : damageOf(me, rolled.decisive ? 2 : 1);
-        return { lines: [{ kind: 'foe', type: 'defence', skill: entry.skill, pc: rolled.pc, foe: rolled.foe, outcome: rolled.outcome, decisive: rolled.decisive, ...(damage ? { damage } : {}) }] };
+        // (a marked fight, `soak`: a hit that is not decisive and is within 2 + S of the defender's total glances off; the skill's cost is paid as ever)
+        const s = soak && !rolled.pcWins ? soakOf(me.character.stats?.vit) : 0;
+        const glance = soak && !rolled.pcWins && soaked(s, rolled.foe.total - rolled.pc.total, rolled.decisive);
+        const damage = rolled.pcWins || glance ? undefined : damageOf(me, rolled.decisive ? 2 : 1);
+        return { lines: [{ kind: 'foe', type: 'defence', skill: entry.skill, pc: rolled.pc, foe: rolled.foe, outcome: rolled.outcome, decisive: rolled.decisive, ...(glance ? { soaked: s } : {}), ...(damage ? { damage } : {}) }] };
     };
 
     const withUse = (base, run) => {

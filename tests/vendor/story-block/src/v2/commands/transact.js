@@ -7,6 +7,7 @@ import { DM_LIMITS } from '../data-modules/schema.js';
 import { isSeed, rng as makeRng } from '../rng.js';
 import { newRoot, occurrenceOf, receiptEvidence } from '../evidence.js';
 import { isPlainJson } from '../replay.js';
+import { ruleMarksOf } from '../turn/rule-marks.js';
 import { CAUSES, ID_STREAM, asCommandError, fail, headReply, isRecord, replyOf } from './shared.js';
 
 export function createTransact({ store, registry, resolve, internal, internalMessage, featureOff, invoke, currentState, sourceOf, originOf }) {
@@ -223,7 +224,7 @@ export function createTransact({ store, registry, resolve, internal, internalMes
         if (!isRecord(carrier) || !Number.isInteger(carrier.index)) return null;
         const swipe = Number.isInteger(carrier.swipe) ? carrier.swipe : 0;
         const key = `${carrier.index}:${swipe}`;
-        const out = { index: carrier.index, swipe, sid: typeof carrier.sid === 'string' ? carrier.sid : null, key, ...(carrier.practiceRule === 'rolls' ? { practiceRule: 'rolls' } : {}) };
+        const out = { index: carrier.index, swipe, sid: typeof carrier.sid === 'string' ? carrier.sid : null, key, ...(carrier.practiceRule === 'rolls' ? { practiceRule: 'rolls' } : {}), ...(carrier.foeCap === 20 ? { foeCap: 20 } : {}), ...(ruleMarksOf(carrier.rules).length ? { rules: Object.freeze(ruleMarksOf(carrier.rules)) } : {}) };
         Object.defineProperty(out, 'toString', { value: () => key });
         return Object.freeze(out);
     }

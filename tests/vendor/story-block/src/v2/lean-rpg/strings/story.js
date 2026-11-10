@@ -147,6 +147,7 @@ export const STORY_STRINGS = Object.freeze({
         foeHit: 'Hit',
         foeGrazed: 'Grazed',
         foeBlocked: 'Blocked',
+        foeSoaked: 'Glanced off',
         arrowBar: '{name} {bar} {word}',
         vs: '{total} vs {against}',
         down: 'Down',

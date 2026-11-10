@@ -68,7 +68,7 @@ export const draftSlots = draft => combatSlots(draft) + UTILITY_SLOTS;
 /** The combat slots a draft may fill (the level's; kept skills never lose theirs) and the utility ones it has (three, whatever the level). */
 export const combatSlots = draft => Math.max(skillSlots(draftLevel(draft)), keptSkills(draft?.skills, draft?.from));
 export const utilityCount = (draft, except = -1) => (draft?.skills ?? []).filter((skill, at) => skill.type === 'utility' && at !== except).length;
-const keptSkills = (skills, from) => Math.min(SKILL_SLOTS_MAX, (Array.isArray(skills) ? skills : []).filter(entry => isRecord(entry) && (entry.sig === true || (from && entry.type !== 'utility' && Number.isSafeInteger(entry.rank)))).length);
+const keptSkills = (skills, from) => Math.min(SKILL_SLOTS_MAX, (Array.isArray(skills) ? skills : []).filter(entry => isRecord(entry) && ((entry.sig === true && entry.type !== 'utility') || (from && entry.type !== 'utility' && Number.isSafeInteger(entry.rank)))).length);
 
 const blankSkill = type => ({ name: '', about: '', stat: STATS[0], uses: USES[0], start: 0, ...(type === 'utility' ? { type } : {}) });
 
@@ -112,7 +112,7 @@ export function readDraft(raw) {
     const room = Math.max(skillSlots(startLevel), keptSkills(wanted, from));
     let utility = 0, combat = 0;
     const skills = wanted.filter(entry => {
-        const isUtility = isRecord(entry) && entry.type === 'utility' && entry.sig !== true;
+        const isUtility = isRecord(entry) && entry.type === 'utility';
         return isUtility ? ++utility <= UTILITY_SLOTS : ++combat <= room;
     }).map(entry => {
         const skill = isRecord(entry) ? entry : {};
@@ -125,8 +125,8 @@ export function readDraft(raw) {
             // An imported skill may have no stat (''): the reader picks one, and Create waits for it.
             stat: STATS.includes(skill.stat) ? skill.stat : (ranked ? '' : STATS[0]), uses: USES.includes(skill.uses) ? skill.uses : USES[0], start: wantsAdept ? 1 : 0,
             ...(ranked ? { rank: clamp(skill.rank, 0, FILE_LIMITS.rank) } : {}), ...(skill.sig === true ? { sig: true } : {}),
-            // (a utility skill is for the story only: three of them, and a signature skill is always combat)
-            ...(skill.type === 'utility' && skill.sig !== true ? { type: 'utility' } : {}),
+            // (a utility skill is for the story only: three of them, a signature one too; a fourth is left out, as a ninth combat skill is)
+            ...(skill.type === 'utility' ? { type: 'utility' } : {}),
         };
     });
     return { name: oneLine(given.name, CREATION.name), kind: given.kind === 'companion' ? 'companion' : 'you',
@@ -154,7 +154,7 @@ export const mayStartAdept = (draft, index) => draft.skills[index]?.start === 1 
 export function withSet(draft, set) {
     // (signature skills stay in front; the set fills the slots after them)
     const signed = draft.skills.filter(skill => skill.sig === true);
-    const skills = (set?.skills ?? []).slice(0, Math.max(0, combatSlots(draft) - signed.length)).map(skill => ({
+    const skills = (set?.skills ?? []).slice(0, Math.max(0, combatSlots(draft) - signed.filter(skill => skill.type !== 'utility').length)).map(skill => ({
         name: oneLine(skill.name, CREATION.skillName), about: oneLine(skill.about, CREATION.skillAbout),
         stat: STATS.includes(skill.stat) ? skill.stat : STATS[0], uses: USES.includes(skill.uses) ? skill.uses : USES[0], start: 0,
     }));

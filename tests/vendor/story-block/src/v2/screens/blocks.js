@@ -3,6 +3,7 @@
 import { h, shell } from '../view/widgets/dom.js';
 import { editable } from '../view/widgets/editable.js';
 import { editableBlockDraft, uniqueBlockSlug } from '../data-modules/block-builder.js';
+import { hasRestButtons } from '../data-modules/recovery.js';
 import { dmNameOf } from '../data-modules/schema.js';
 import { exportBlockPack } from '../data-modules/block-templates.js';
 import { saveTextFile } from '../view/download.js';
@@ -185,7 +186,7 @@ export function createBlockWidgets({ templates, directorOn = () => true, leanRpg
             }
             const actions = h(doc, 'div', 'ss-block-actions'); root.appendChild(actions);
             // Only kinds that need no labels become buttons here; a kind that asks for values is used from the pack's own screens.
-            for (const [kind, def] of Object.entries(definition.kinds).filter(([, value]) => value.ui && !Object.keys(value.labels ?? {}).length)) {
+            for (const [kind, def] of Object.entries(definition.kinds).filter(([key, value]) => value.ui && !Object.keys(value.labels ?? {}).length && !(hasRestButtons(definition) && ['button-rest', 'button-full-rest'].includes(key)))) {
                 button(doc, actions, def.title ?? kind, async () => {
                     const result = await api.command?.('dm.act', { module: row.module, kind, ...(who === null ? {} : { who }) });
                     if (!result?.ok) status.textContent = refusalText(result, STRINGS.editable.failed);

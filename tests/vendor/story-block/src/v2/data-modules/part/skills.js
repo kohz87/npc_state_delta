@@ -10,7 +10,7 @@ import { SKILL_SLOTS_BASE, SKILL_SLOTS_EVERY, SKILL_SLOTS_MAX, SKILL_FIELDS_MAX,
 import { J, rpg, rawDefinition, instancePath } from './shared.js';
 
 const skillCapacity = definition => Math.min(SKILL_SLOTS_MAX, Object.keys(definition?.state ?? {}).filter(key => /^skill\d+$/u.test(key)).length);
-const skillRow = (fields, n) => ({ name: fields[`skill${n}`], about: typeof fields[`about${n}`] === 'string' ? fields[`about${n}`] : '', stat: fields[`stat${n}`], uses: fields[`uses${n}`] ?? 'stamina', rank: Number.isSafeInteger(fields[`rank${n}`]) ? fields[`rank${n}`] : 0 });
+const skillRow = (fields, n) => ({ name: fields[`skill${n}`], about: typeof fields[`about${n}`] === 'string' ? fields[`about${n}`] : '', stat: fields[`stat${n}`], uses: fields[`uses${n}`] ?? 'stamina', rank: Number.isSafeInteger(fields[`rank${n}`]) ? fields[`rank${n}`] : 0, ...(fields[`type${n}`] === 'utility' ? { type: 'utility' } : {}) });
 // A skill name or a reason as the matcher compares it: NFKC, lower case, runs of spaces and dashes as one space.
 const words = value => ` ${String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s\-‐‑–—_]+/gu, ' ').replace(/[^\p{L}\p{N} ]/gu, '').replace(/ +/gu, ' ').trim()} `;
 // The one skill a reason names (whole words; of two names inside it, the longer one if the shorter is part of it), else null.

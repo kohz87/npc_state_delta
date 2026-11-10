@@ -110,7 +110,7 @@ function lineOf(raw, soulOf = () => null, lv = false, divisor = null, members = 
         && (member ? true : movement(raw.damage, 'health', words(raw.damage.name, 40)));
     const recordedCost = members && cost && movement(raw.cost, cost, words(raw.cost?.name ?? raw.pc.who, 40));
     const base = { outcome, total: raw.pc.total, vs: against, skill, breakdown: gear && breakdown ? `${breakdown} · ${gear}` : breakdown, arrows, ...(cost ? { cost } : {}),
-        ...(recordedCost ? { recordedCost: cost } : {}), ...(recordedHealth ? { recordedHealth: true } : {}), ...(raw.decisive === true ? { decisive: true } : {}), ...(raw.area === true ? { area: true } : {}), ...(raw.reduced === true ? { reduced: true } : {}),
+        ...(recordedCost ? { recordedCost: cost } : {}), ...(recordedHealth ? { recordedHealth: true } : {}), ...(raw.decisive === true ? { decisive: true } : {}), ...(raw.kind === 'foe' && Number.isInteger(raw.soaked) && raw.soaked >= 0 ? { soaked: true } : {}), ...(raw.area === true ? { area: true } : {}), ...(raw.reduced === true ? { reduced: true } : {}),
         ...(raw.aoe === true ? { aoe: true, aoeGroup: raw.aoeGroup, aoeName: words(raw.aoeName, 80), ...(raw.aoeFollowup ? { aoeFollowup: true } : {}), ...(raw.aoeNoTarget ? { aoeNoTarget: true } : {}) } : {}), ...(gear ? { gear } : {}) };
     // A support action (a heal or a buff, a `check` line that names the one helped) reads like an act on that character.
     if (raw.kind === 'check' && raw.support === true && words(raw.target, 40)) return { ...base, who: words(raw.pc.who, 40), target: words(raw.target, 40), stat: words(raw.pc.stat, 12).toUpperCase(), foe: false, support: true, heals: isRecord(raw.damage) && raw.damage.blocks < 0 };

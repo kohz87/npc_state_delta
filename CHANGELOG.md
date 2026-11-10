@@ -1,3 +1,12 @@
+## 1.15.0
+
+- **People are written the way the pack's cast is written.** Speech includes a short line in their own words, personality names the tension under the surface, behaviour says what they actually do, and appearance reads as one description (kind, age, build, hair, eyes, marks; then clothes and their state). Everything still needs evidence from the story. Existing dossiers change when next updated.
+- **Missing looks are filled in.** When someone new is met, or you press Refresh, hair, eyes, build and clothes the story never described are filled in to fit what it did say, and a partial description gets its missing features added without changing what is written. A detail the story states later replaces the filled one; you can edit any of it. Looks only: personality and the rest still need evidence.
+- **A Level custom field for fights.** While Story Block's RPG is on, a Level field appears in every dossier by itself (with the RPG off it is hidden, and stored values are kept). The scanner may fill it only from a stated level or rank ("probably rank C or D" becomes C-D) or a direct comparison with your character's strength, never from dramatic description, and only with a quote from the story.
+- **World, Here shows the cards for everyone the scene lists,** even when Delta's own presence flag disagreed (it could show plain name chips instead).
+- Long appearance texts reach the prompts whole (up to 800 characters; some hints cut them at 500).
+- Requires Story Block 2.25.0 or later (unchanged); Story Block testkit re-synced from Story Block main (the 2.28.0 code, before its version bump).
+
 ## 1.14.0
 
 - **Relationships move at a steadier pace.** A relationship now takes a set number of events each story day, for each person.

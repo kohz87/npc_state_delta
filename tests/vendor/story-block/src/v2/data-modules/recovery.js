@@ -19,6 +19,9 @@ export const SET_KINDS = Object.freeze({ 'set-health': 'health', 'set-stamina': 
 export const isMarkedCharacter = definition => definition?.role === 'character'
     && BAR_FIELDS.every(bar => definition.state?.[bar]?.scale === 2);
 
+/** The two reader buttons an earlier marked Character was pinned with: never drawn now; their recorded lines still replay (part/act.js). */
+export const hasRestButtons = definition => isMarkedCharacter(definition) && ['button-rest', 'button-full-rest'].every(kind => definition.kinds?.[kind]?.ui);
+
 const NAME = { health: 'Health', stamina: 'Stamina', mana: 'Mana' };
 /** The notes (Problems lines), named for the character. */
 export const recoveryNote = {

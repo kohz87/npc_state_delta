@@ -17,11 +17,13 @@ import { within, TIMED_OUT } from './text.js';
 import { occurrenceOf, operationKey } from '../evidence.js';
 import { hash, readRecord } from '../persist.js';
 import { LEAN_RPG_FEATURE, practiceFromRollsOnly } from '../lean-rpg/names.js';
+import { allRuleNames, createMarkHistory, foeLine, ruleMarksFor, ruleMarksOf } from './rule-marks.js';
 import { boardFailure, boardStep } from './held-board.js';
 import { earlierReceipts, moneyWarning } from './money-guard.js';
 
 export function createCaptureFlow(s, deps) {
     const { ctx, store, bus, registry, settings, events, hostSettings, view, viewReader, lateReader, problem, isCarrier, boardError, PRACTICE_LINE, HOOK_TIMEOUT_MS } = deps;
+    const markHistory = createMarkHistory();
     const holdBoard = message => Object.assign(new Error(`${boardFailure('The fight could not be saved:', message)} Once restored, this reply can finish; after discarding, regenerate it.`), { code: 'BOARD_PRELUDE' });
 
     // Runs the reply's change lines; returns { receipts, problems }.
@@ -125,6 +127,7 @@ export function createCaptureFlow(s, deps) {
         const found = [];
         const lines = capped(index, all, found);
         const extra = assistRoom(index, [...late.map(line => ({ line, mark: LATE })), ...assist.map(line => ({ line, mark: NOW }))], used + lines.length, found);
+        const blocked = markHistory(ctx?.chat?.[index], store.carrierSid?.(index), type, before, changeHeads(), type === 'continue' || type === 'late' ? lateLines(index) : []);
         const shown = typeof before === 'string' ? shownIn(before) : new Map();
         // One write of the reply's record for all its lines and its afterCapture steps (store.batch).
         let off = [];
@@ -133,10 +136,10 @@ export function createCaptureFlow(s, deps) {
             // The seeded pre-roll precedes this reply's story lines, as it did in the prompt.
             // Its Source is now this reply's; the previous reply is never changed.
             const prepared = prechecks.length ? await afterCapture(index, { type, problems: found, prechecks, onlyPrechecks: true }) : [];
-            ({ off } = await captureEach(index, lines, receipts, found, null, null, shown));
+            ({ off } = await captureEach(index, lines, receipts, found, null, null, shown, null, null, blocked));
             for (const mark of [LATE, NOW]) {
                 const group = extra.filter(item => item.mark === mark).map(item => item.line);
-                if (group.length) off = [...new Set([...off, ...(await captureEach(index, group, receipts, found, null, null, shown, mark)).off])];
+                if (group.length) off = [...new Set([...off, ...(await captureEach(index, group, receipts, found, null, null, shown, mark, null, blocked)).off])];
             }
             // A pre-roll is part of this reply even when its narration has no Changes block.
             if (receipts.length || prepared.length) steps = [...prepared, ...await afterCapture(index, { type, problems: found })];
@@ -271,7 +274,7 @@ export function createCaptureFlow(s, deps) {
         return always || Object.keys(caps).length ? markCaps(mes, caps, from) : mes;
     };
 
-    async function captureEach(index, lines, receipts, found, base = null, seeds = null, shown = new Map(), assist = null, plan = null) {
+    async function captureEach(index, lines, receipts, found, base = null, seeds = null, shown = new Map(), assist = null, plan = null, blocked = { foe: false, rules: [] }) {
         const collected = [];
         const firstProblem = found.length;
         lines = linesInOrder(lines);
@@ -289,6 +292,16 @@ export function createCaptureFlow(s, deps) {
         else if (base === null && lines.some(line => PRACTICE_LINE.test(line.raw ?? '')) && practiceFromRollsOnly(registry.featureOn?.(LEAN_RPG_FEATURE) === true, settings?.('story-block'))) {
             try { store.setPracticeRule?.(index); carrier.practiceRule = 'rolls'; } catch { /* an unmarked reply is judged as before */ }
         }
+        // The foe level cap recorded with the reply: a new foe's guessed level may reach the party's highest + 20 (data-modules/part/act.js). A first live capture
+        // marks the reply even without a foe line; a Re-read or an edit goes by the mark the reply has, so an older reply keeps its +10 cap.
+        if (readRecord(message)?.foeCap === 20) carrier.foeCap = 20;
+        else if (base === null && (blocked.first || (!blocked.foe && lines.some(line => foeLine(line, state)))) && typeof store.setFoeCap === 'function') {
+            try { store.setFoeCap(index); carrier.foeCap = 20; } catch { /* an unmarked reply keeps the old cap */ }
+        }
+        // Rule marks (rule-marks.js): the first live capture gets all current marks; a Re-read goes by those it has (a module reads `ctx.carrier.rules`).
+        const marks = ruleMarksOf(readRecord(message)?.rules), fresh = base === null ? (blocked.first ? allRuleNames() : ruleMarksFor(lines)).filter(name => !marks.includes(name) && !blocked.rules.includes(name)) : [];
+        if (fresh.length && typeof store.setRuleMarks === 'function') { try { store.setRuleMarks(index, fresh); marks.push(...fresh); } catch { /* an unmarked reply keeps the old rule */ } }
+        if (marks.length) carrier.rules = marks;
         // The message right before the reply (system messages aside), and only when it is the reader's: a reply that
         // follows another reply has no message of the reader's to quote (proof, EVIDENCE.md).
         const before = (ctx?.chat ?? []).slice(0, index).findLast(item => !item?.is_system);

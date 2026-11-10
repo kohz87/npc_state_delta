@@ -19,7 +19,7 @@
 //   module whose handler made this ctx.call (null at the top), `ctx.rev` the meta.rev this receipt will
 //   have, `ctx.id(prefix)` a new `<prefix>_<8 base36>` drawn from the receipt's seed (so the same seed
 //   gives the same IDs, and ctx.rng() is not disturbed), and, for capture runs, `ctx.carrier`
-//   ({ index, swipe, key, practiceRule? }) and `ctx.chat` ({ lastUser, reply }); both are null for other commands.
+//   ({ index, swipe, key, practiceRule?, foeCap?, rules? }) and `ctx.chat` ({ lastUser, reply }); both are null for other commands.
 //   `ctx.reply` ({ index, sid }) is the reply the command's changes are stored on, for every command:
 //   the capture's carrier, else the head carrier (the last reply, where store.append puts a click's
 //   ops, SPEC §2.2); null when the chat has no reply yet. Queries get the same as `tools.reply`, so

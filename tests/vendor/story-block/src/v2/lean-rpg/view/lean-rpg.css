@@ -33,11 +33,16 @@
 .rpg-stats { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; font-size: 11px; text-align: center; font-variant-numeric: tabular-nums; }
 .rpg-stat { display: grid; gap: 2px; padding: 4px 0; border-radius: 8px; background: var(--ss-tile); }
 .rpg-stat b { font-size: 14px; }
+/* Gear on a stat: the stat a roll uses in a theme colour, the gear's +N under it; the row's cells stretch to one height. */
+.rpg-stat-gear { align-content: start; }
+.rpg-stat-up { color: var(--ss-good); }
+.rpg-stat-down { color: var(--ss-warn); }
+/* (the +N takes the colour of the number above it) */
+.rpg-stat-up ~ .rpg-stat-add { color: var(--ss-good); }
+.rpg-stat-down ~ .rpg-stat-add { color: var(--ss-warn); }
+.rpg-stat-add { font-size: 10.5px; line-height: 1.1; font-weight: 600; }
 .rpg-skills { font-size: 12.5px; color: var(--ss-muted); overflow-wrap: anywhere; }
 .rpg-card-actions, .rpg-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.rpg-rest-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.rpg-rest-hint, .rpg-rest-status { margin: 0; color: var(--ss-muted); font-size: 12px; }
-.rpg-rest-status:empty { display: none; }
 
 /* ---- Fight tab (mockup section 5): a grid on a wide screen, a stack on a phone ---- */
 .ss-w-rpg-fight { display: grid; gap: 14px; align-content: start; min-width: 0; container-type: inline-size; }
