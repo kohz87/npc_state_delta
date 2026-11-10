@@ -59,7 +59,8 @@ function levelQuoteInText(reason, configured, source) {
     let tail = text.slice(at + 5);
     for (const other of configured) {
         if (other.toLowerCase() === 'level') continue;
-        const cut = tail.toLowerCase().indexOf(other.toLowerCase());
+        // A field marker is the name followed by a colon; a bare substring ("age" in "damage") must not cut a quote.
+        const cut = tail.search(new RegExp(`(?<![\\p{L}\\p{N}])${other.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`, 'iu'));
         if (cut >= 0) tail = tail.slice(0, cut);
     }
     const quoted = [...tail.matchAll(/["\u201c]([^"\u201d]+)["\u201d]/g)].map(match => match[1]);
