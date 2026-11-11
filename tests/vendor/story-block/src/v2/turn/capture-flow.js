@@ -32,11 +32,11 @@ export function createCaptureFlow(s, deps) {
     // A reply holds at most maxChangeLines change lines; the rest are one Problem (pushed to `found`).
     const lineCap = () => (Number.isInteger(hostSettings()?.maxChangeLines) && hostSettings().maxChangeLines > 0 ? hostSettings().maxChangeLines : MAX_CHANGE_LINES);
 
-    // A block's lines read, at most maxChangeLines of them, change lines or not; the rest are one Problem.
-    function readBlock(index, text) {
+    // A block's lines read, at most maxChangeLines, the rest one Problem. `fresh` (first live capture) or the reply's `caretWords` mark: drop a preset's ^ before each word.
+    function readBlock(index, text, { fresh = false } = {}) {
         const cap = lineCap();
-        const parsed = parseChanges(text, { max: cap });
-        const problems = parsed.problems.map(line => problem({ index, code: 'UNREADABLE', message: line }));
+        const caret = fresh || ruleMarksOf(readRecord(ctx?.chat?.[index])?.rules).includes('caretWords');
+        const parsed = parseChanges(text, { max: cap, caret }), problems = parsed.problems.map(line => problem({ index, code: 'UNREADABLE', message: line }));
         if (parsed.over) {
             const { count, total, first } = parsed.over;
             problems.push(problem({ index, code: 'TOO_MANY', message: `The reply has ${total} change lines; only the first ${cap} were read, so ${count} ${count === 1 ? 'line was' : 'lines were'} not used (from "${cutAt(first, 60)}").` }));
@@ -374,7 +374,7 @@ export function createCaptureFlow(s, deps) {
             }
             state = result.state ?? (base ? state : store.head());
             // The money guard (warns only; the line is applied): a repeated payment or one far above the purse.
-            const warned = line.op === '+' ? moneyWarning(result.receipt, [...earlierReceipts(ctx?.chat, index), ...receipts]) : null;
+            const warned = line.op === '+' ? moneyWarning(result.receipt, [...earlierReceipts(ctx?.chat, index), ...receipts], earlierReceipts(ctx?.chat, index, 1)) : null;
             if (warned) found.push(problem({ module: entry.moduleId, index, line: line.raw, code: 'LIMITED', message: warned }));
             receipts.push(result.receipt);
             // Used, but not all of it (a clamp): the owner says why, and that goes to the Problems list.

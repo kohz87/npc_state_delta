@@ -47,3 +47,16 @@ export function writeRecord(message, record, { mirror = true } = {}) {
     if (mirror) mirrorCopy(message);
     return stored;
 }
+
+// Whether this chat is under a rule mark (turn/rule-marks.js) for static prompt text, which is one text for the whole chat: the first reply to the reader that has a
+// record of its own decides (the greeting's record never carries marks; a chat begun before the rule has a first reply without the mark and keeps the earlier text
+// for good), and a chat with no such reply yet is a new one. Later replies of an old chat carry every mark; they never change which text it is sent.
+export function chatMarked(messages, name) {
+    let asked = false;
+    for (const message of Array.isArray(messages) ? messages : []) {
+        if (message?.is_user) { asked = true; continue; }
+        const record = asked ? readRecord(message) : null;
+        if (record) return Array.isArray(record.rules) && record.rules.includes(name);
+    }
+    return true;
+}

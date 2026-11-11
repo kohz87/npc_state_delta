@@ -1,7 +1,7 @@
 // The only functions a condition can call. Each reads the beforeGenerate view (`{ state, query }`,
 // SPEC §6) and returns plain data; none writes, waits or reaches outside the view.
 //
-// `quest`, `has`, `time` and `actor` read the head state's domains directly (layouts in SPEC §7 and
+// `quest`, `has`, `time`, `actor` and `region` read the head state's domains directly (layouts in SPEC §7 and
 // MODULES B1/C1), so they work the same whether or not the owning module registered a query for it,
 // and give null / false when that module is not installed. `query` is the open door to every other
 // module's read-only queries, except this part's own (`events.*`), which would read itself.
@@ -9,11 +9,15 @@
 import { aliasKey } from '../domains/names.js';
 
 /** The allow-list, in the order error messages name it. */
-export const CALLS = Object.freeze(['query', 'quest', 'has', 'time', 'actor', 'count']);
+export const CALLS = Object.freeze(['query', 'quest', 'has', 'time', 'actor', 'count', 'region']);
+
+/** Most regions one `region(...)` call may name (one more than the record limit; a longer list is two calls with ||). */
+export const MAX_REGIONS = 16;
 
 /** [fewest, most] values each call takes. */
 export const ARITY = Object.freeze({
     query: [1, 2], quest: [1, 1], has: [1, 2], time: [0, 0], actor: [1, 1], count: [1, 1],
+    region: [1, MAX_REGIONS],
 });
 
 const MAX_QUERY_NAME = 80;
@@ -117,6 +121,17 @@ const FUNCTIONS = {
             if (isRecord(actor) && typeof actor.name === 'string' && lower(actor.name) === wanted) return actor;
         }
         return null;
+    },
+
+    /** region(name, ...): is the scene's place in any of these regions? Exact names (as `query('scene.place').region ==`); false with no place. */
+    region(env, names, fail) {
+        for (const name of names) word(name, fail, 'region()');
+        // The same place `query('scene.place')` gives; the head state is the fallback when no query is wired.
+        let place;
+        try { place = typeof env?.query === 'function' ? env.query('scene.place') : undefined; } catch { place = undefined; }
+        if (!isRecord(place)) place = own(domain(env, 'scene'), 'place');
+        const region = own(place, 'region');
+        return typeof region === 'string' && names.includes(region);
     },
 
     /** count(list): items of a list, keys of a record, 0 for nothing. */

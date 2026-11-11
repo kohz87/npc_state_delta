@@ -67,6 +67,9 @@ export function createBlocks(deps) {
                 reads: [['fields'], ['timers'], ['offers'], ['settled']], decision: { previous: old.hash }, bound: true });
             delete draft.active[module];
             delete draft.instances[module];
+            // The removed block's pin goes with it unless another active block still uses that definition (the redefine path below does the same): a pin left behind
+            // would fill the retained pins until blocks were refused. Only a removal made now saves this op; a removal saved earlier replays as it was (its ops are kept).
+            if (!Object.values(draft.active).some(entry => entry.hash === old.hash)) delete draft.pins[old.hash];
             const answer = finish(ctx, prefix, draft, recorded, { pin: true, result: { module }, summary: fill(B.removed, { name: previous.name }) });
             answer.data.edit = true;
             // A Character who is gone leaves nothing filed under their actor (a block made later under the same name would inherit it): their pieces go to the

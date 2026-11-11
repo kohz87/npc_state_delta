@@ -40,7 +40,7 @@ export const SCREEN_STRINGS = {
         empty: 'Nothing carried yet.',
         noMatch: 'Nothing matches the filter.',
         wornBy: 'Worn by {name}',
-        wornWho: '{name} \u00b7 {n} pieces', wornWhoOne: '{name} \u00b7 1 piece',
+        wornWho: '{n} pieces', wornWhoOne: '1 piece',
         // The Grid view: the List | Grid switch, the tile list, the item sheet.
         viewLabel: 'View', viewList: 'List', viewGrid: 'Grid', tilesLabel: 'Items',
         sheetLabel: 'Item details', sheetClose: 'Close', weight: 'Weight', editLabel: 'Edit',
@@ -66,7 +66,7 @@ export const SCREEN_STRINGS = {
             editSlot: 'Slot', editBy: 'Equipped by', none: 'None', left: 'Left the party',
             // The bag list and the folded Worn row: pieces nobody wears are listed; worn ones are under "Worn (N)", by wearer.
             bagTitle: 'Equipment \u00b7 in the bag', equip: 'Equip', equipWho: 'Who wears it?', equipWhoTitle: 'Put {name} on {who}',
-            wornFold: 'Worn ({n})', wornFoldTitle: 'Show or hide the pieces being worn', signature: 'Signature', signatureTitle: '{name}\'s signature piece: it stays on them',
+            wornTitle: 'Worn', wornFold: 'Worn ({n})', wornFoldTitle: 'Show or hide the pieces being worn', signature: 'Signature', signatureTitle: '{name}\'s signature piece: it stays on them',
             unequipTitle: 'Take {name} off: back to the bag',
             // The hand-set gear form (view/gear-form.js): "+ Add item" and the Edit of a piece the reader added.
             form: {

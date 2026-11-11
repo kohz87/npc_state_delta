@@ -1,6 +1,7 @@
 // The Standard formula's preparation: prepareStandard and its helpers turn a plan and sheet into acts, foe sides, checks,
 // refusals and the witness. It reads the bars from roster.js; the roll itself is roll.js.
 import { edgeWithLuck, levelBonus, luckWindow, statPart } from '../formula.js';
+import { FOE_LEVEL } from '../foes.js';
 import { FORMULA, LIMITS, STAGES } from '../names.js';
 import { matchCharacter, matchFoe, matchSkill } from '../read.js';
 import { classTerm, hasLevels } from '../rules.js';
@@ -54,13 +55,13 @@ function sideStd(character, type, skill, { fit = null, edge = 0, againstMagic = 
  * The plan against the sheet under Standard `rules`: what can be rolled, what is refused, the witness (every sheet number the roll
  * depends on, which the replay guard asks again) and the roster (the bars). → { acts, foes, checks, refused, plainRefused, witness, roster }
  */
-export function prepareStandard(plan, sheet, rules, { maxOf = () => Infinity, lv = false, fix = false, then = false, memberRolls = null } = {}) {
-    // (`then`: the mark of the follow-up skill, plan.js; without it an act's `then:` is not read.) (`fix`: the stage-65 fallback of a spent skill, see FIX_VERSION in open.js; a roll made before keeps the plain roll it had: the plan's own type, the skill's area, no `else:`)
+export function prepareStandard(plan, sheet, rules, { maxOf = () => Infinity, lv = false, fix = false, then = false, memberRolls = null, hard = false } = {}) {
+    // (`hard`: the harder-foes rule: a foe's roll term uses level / 4, foes only; heroes and the order keep the numbers' divisor.) (`then`: the mark of the follow-up skill, plan.js; without it an act's `then:` is not read.) (`fix`: the stage-65 fallback of a spent skill, see FIX_VERSION in open.js; a roll made before keeps the plain roll it had: the plan's own type, the skill's area, no `else:`)
     const out = { acts: [], foes: [], checks: [], refused: [], plainRefused: [] };
     const roster = rosterOf(sheet, maxOf);
     // A foe's side of the roll: from a roll of the Levels rules (`lv`) the foe adds floor(level / divisor), else foeClassWeight × class, as it did.
     const foeSide = foe => (lv
-        ? { slot: foe.slot, name: foe.name, base: rules.foeBase, classValue: foe.level, classBonus: levelBonus(foe.level, rules.levelDivisor) }
+        ? { slot: foe.slot, name: foe.name, base: rules.foeBase, classValue: foe.level, classBonus: levelBonus(foe.level, hard ? FOE_LEVEL.hardDivisor : rules.levelDivisor), ...(hard ? { divisor: FOE_LEVEL.hardDivisor } : {}) }
         : { slot: foe.slot, name: foe.name, base: rules.foeBase, classValue: foe.class, classBonus: rules.foeClassWeight * foe.class });
     if (lv) for (const bar of roster.foes) bar.initiative = levelBonus(bar.foe.level, rules.levelDivisor);
     const refuse = (who, text, plain = text) => { out.refused.push({ who, text }); out.plainRefused.push(plain); };

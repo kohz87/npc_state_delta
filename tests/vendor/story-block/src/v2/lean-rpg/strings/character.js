@@ -33,6 +33,7 @@ export const CHARACTER_STRINGS = Object.freeze({
             'no-resource': '{who} does not act: the skill\'s resource is Empty.',
         }),
         foeNote: 'Foe Health grows with class: 4 + class/3 blocks. A plain hit takes 1 block, a Decisive hit 2.',
+        foeNoteHard: 'Foe Health grows with level: 12 + level/30 blocks. A foe\'s hit takes 2 blocks, a Decisive hit 4; a lone foe strikes more often against a bigger party.',
         foeNoteLevel: 'Foe Health grows with level: 4 + level/30 blocks. A plain hit takes 1 block, a Decisive hit 2.',
     }),
     party: Object.freeze({
@@ -118,7 +119,6 @@ export const CHARACTER_STRINGS = Object.freeze({
         summaryLabel: 'Your character',
         you: 'You',
         companion: 'Companion',
-        soulOne: 'Lv 1',
         statsHead: 'Stats',
         skillsHead: 'Skills',
         noSkills: '—',

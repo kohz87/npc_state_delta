@@ -187,12 +187,13 @@ const TEMPLATE = `
     <div class="filter" role="search" aria-label="${html(S.filterLabel)}" data-if="len(q.items) > 0">
       <input type="search" class="find" data-draft="find" placeholder="${html(S.find)}" title="${html(S.findTitle)}"
              aria-label="${html(S.findTitle)}" autocomplete="off">
-      <label>${html(S.show)}
-        <select data-draft="kind">
+      <label><span class="ss-visually-hidden">${html(S.show)}</span>
+        <select data-draft="kind" aria-label="${html(S.show)}">
           <option value="">${html(S.everything)}</option>
 ${KIND_ORDER.map(kind => `          <option value="${kind}">${html(KIND_TITLES[kind])}</option>`).join('\n')}
         </select>
       </label>
+      <span class="filter-more">
       <label>${html(S.rarity)}
         <select data-draft="rarity">
           <option value="">${html(S.any)}</option>
@@ -200,6 +201,7 @@ ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[
         </select>
       </label>
       <label class="check"><input type="checkbox" data-draft="equippedOnly"> ${html(S.equippedOnly)}</label>
+      </span>
     </div>
   </header>${CARRY}
   <section class="loot" data-if="len(q.loot) > 0">
@@ -224,9 +226,11 @@ ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[
 
 const CSS = `${BASE_CSS}
 ${GRID_CSS}
-.inv { display: grid; gap: var(--sb-gap); position: relative; }
+.inv { display: grid; gap: var(--sb-gap); position: relative; container-type: inline-size; }   /* the narrow layouts below follow the screen's own width (a 300px panel on a wide window is as narrow as a phone) */
 .top { display: flex; flex-wrap: wrap; gap: var(--sb-gap); align-items: center; }
-.wallet-and-add { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.wallet-and-add { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+/* the mockup's header: purse, Add item, then List / Grid at the right of the same row; the filters are the row under it */
+.wallet-and-add > ss-widget { margin-left: auto; }
 .wallet { display: inline-flex; gap: 6px; align-items: center; font-size: 1.05em; }
 .wallet i { color: var(--sb-accent); }
 .inv-add-form { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -241,12 +245,14 @@ ${GRID_CSS}
 }
 .ss-w-inventory-add:has(.inv-add-gear), .inv-add-gear, .inv-add-gear > .ss-w-editable { display: block; width: 100%; min-width: 0; }
 .inv.gear .item:has(.ss-w-editable-gear) > .body > .actions { display: none; }
-@media (max-width: 600px) {
+@container (max-width: 600px) {
   .inv.gear .item:has(.ss-w-editable-gear) > .ss-tile-box { display: none; }
   .inv.gear .item.grow:has(.ss-w-editable-gear) { grid-template-columns: minmax(0, 1fr); }
 }
-.filter { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-left: auto; font-size: 0.85em; }
+.filter { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 6px 12px; align-items: center; min-width: 0; font-size: 0.85em; }
 .filter label { display: inline-flex; gap: 4px; align-items: center; }
+/* the mockup's one slim row is the name box and the kind; Rarity and Equipped only follow as a group, on the same row where there is room, under it where not */
+.filter-more { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; min-width: 0; }
 .filter select, .filter .find { font: inherit; color: var(--sb-fg); background: var(--sb-surface); border: 1px solid var(--sb-border);
                  border-radius: 6px; padding: 1px 4px; margin: 0; box-shadow: none; transition: border-color 0.15s ease; }
 .filter .find { flex: 1 1 9em; min-width: 7em; max-width: 100%; width: auto; height: auto; padding: 2px 8px; box-sizing: border-box; }
@@ -328,7 +334,7 @@ ${GRID_CSS}
 .loot .pick input { width: 1em; height: 1em; min-width: 0; margin: 0; accent-color: var(--sb-accent); }
 .loot .take { justify-self: start; }
 .cond { font-size: 0.8em; font-variant-numeric: tabular-nums; }
-@media (max-width: 480px) { .filter { width: 100%; } }
+@container (max-width: 480px) { .filter { width: 100%; } }
 /* Every action is a 44px target (Equip on…, Use on…, Unequip, Drop, and the fold rows' buttons). */
 .actions .ss-button { min-height: 44px; }
 /* ---- Gear in fights (the .gear class is on only while it is on) ---- */
@@ -377,7 +383,10 @@ ${GRID_CSS}
 .inv.gear .item.grow .actions .ss-button { min-height: 32px; height: 32px; padding: 0 10px; font-size: 12px; }
 .inv.gear .g-l1 > .name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .inv.gear .g-l1 > :not(.name) { flex: none; }
-.inv.gear .g-l1 .item-edit .ss-w-editable-pencil { height: 18px; min-height: 0; min-width: 0; padding: 0 2px; margin: 0; }
+/* The pencil is drawn 18px in the 20px line, with an unclipped 44px tap area (::after) like the compact pills (size.css): the line clips only along the row, never across it. */
+.inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > .g-l1 { overflow-x: clip; overflow-y: visible; }
+.inv.gear .g-l1 .item-edit .ss-w-editable-pencil { position: relative; height: 18px; min-height: 0 !important; min-width: 0 !important; padding: 0 2px; margin: 0; }
+.inv.gear .g-l1 .item-edit .ss-w-editable-pencil::after { content: ""; position: absolute; left: 50%; top: 50%; width: calc(44px / var(--ss-zoomed, 1)); height: calc(44px / var(--ss-zoomed, 1)); transform: translate(-50%, -50%); }
 .inv.gear .g-l1 .rarity { font-size: 9px; }
 .inv.gear .g-l2 .chip.eq { display: inline-flex; align-items: center; }
 .inv.gear .item.grow .g-l3 { font-size: 1em; --l-gap: 14px; }
@@ -393,14 +402,14 @@ ${GRID_CSS}
 .bound > .bound-lock .ss-w-badge-icon { color: inherit; display: inline-flex; }
 .bound > .bound-lock .ss-icon-svg { width: 9px; height: 9px; }
 /* On a phone the buttons leave the right-hand column and sit on their own line under the item, so the name, the pill and the condition line keep the full width. */
-@media (max-width: 480px) {
+@container (max-width: 480px) {
   .inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 20px 16px 16px auto; }
   .inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > .actions { grid-column: 1; grid-row: 4; justify-self: start; }
   .inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > .fold { grid-row: 5; }
   .inv.gear .g-l3 .cpart, .inv.gear .g-l3 .cword { flex: none; overflow: visible; }
 }
 /* The rarity word is for desktop widths: on a phone the name's colour already says it. */
-@media (max-width: 500px) { .inv.gear .g-l1 { gap: 4px; } .inv.gear .g-l1 .rarity { display: none; } .inv.gear .g-l1 .chip.slot { padding: 0 4px; } }
+@container (max-width: 500px) { .inv.gear .g-l1 { gap: 4px; } .inv.gear .g-l1 .rarity { display: none; } .inv.gear .g-l1 .chip.slot { padding: 0 4px; } }
 `;
 
 export const inventoryScreen = Object.freeze({

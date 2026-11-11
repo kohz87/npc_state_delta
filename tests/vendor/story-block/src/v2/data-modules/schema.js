@@ -38,6 +38,8 @@ export const DM_LIMITS = freeze({
     // The same for a character's bar that carries `scale: 2` (the doubled sizes, lean-rpg/templates-bars.js): the most it holds is 2 x (4 + 20/5) = 16 at the stat
     // maximum 20, so 17 stages (0 to 16); a test holds this to the template's own maximum.
     scaledStages: 17,
+    // The same for a foe's health that carries `blocks: "foe"` (the harder-foes rule: 12 + level/30 blocks, at most 15, so 16 stages; lean-rpg/foes.js hardMax).
+    foeStages: 16,
     // A List of entries field (`type: "entries"`): the sub-fields of one entry, the entries a story may add (default and most), and the longest `at` a line may write.
     entrySubs: 8, entriesDefault: 30, entriesMax: 50, entryAt: 60,
     // A block with a List of entries says more in the tail (its open entries by number and title): 250 tokens instead of 100.

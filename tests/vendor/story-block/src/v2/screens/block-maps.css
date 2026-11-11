@@ -19,6 +19,8 @@
 .ss-b-map .ss-b-name { font-size: 14px; font-weight: 600; }
 .ss-b-map .ss-b-val { font-size: 15px; font-weight: 700; }
 .ss-b-map .ss-b-row > .ss-bar-track { height: 8px; border-radius: 4px; }
+/* the centre line of a signed bar is 6px taller than the track (the mockup): the track must not clip it */
+.ss-b-map .ss-b-track-c { overflow: visible; }
 
 /* 2. A signed range: the bar leaves a centre line, red below 0, green above; the value takes the same colour. */
 .ss-b-map .ss-b-val.ss-rm-neg { color: var(--ss-bad, #e06464); }
@@ -48,12 +50,16 @@
 .ss-b-map:not(.ss-rm-editing) .ss-b-row { grid-template-columns: minmax(0, 1fr) auto; }
 .ss-b-map:not(.ss-rm-editing) .ss-b-row-plain { grid-template-columns: minmax(0, 1fr); }
 .ss-b-map.ss-rm-editing .ss-b-row-plain { grid-template-columns: minmax(0, 1fr) var(--ss-b-pen); }
-.ss-rm-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ss-rm-head > .ss-section-label { flex: 1 1 auto; min-width: 0; margin: 0; }
+.ss-rm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+/* The label takes its one-line width and the Edit button drops to its own line (right) only when both cannot share one: the label never breaks in two.
+   The hairline is off here (the mockup's heading with Edit has none), so it no longer counts in the label's width and Edit stays beside the text where they fit. */
+.ss-rm-head > .ss-section-label { flex: 1 1 max-content; max-width: 100%; min-width: 0; margin: 0; }
+.ss-rm-head > .ss-section-label::after { display: none; }
+.ss-rm-head > .ss-rm-edit-btn { margin-left: auto; }
 .ss-rm-edit-btn {
     flex: none;
-    min-height: 36px;
-    padding: 0 12px;
+    min-height: 0;
+    padding: 3px 10px;
     border: 1px solid var(--ss-border);
     border-radius: 9px;
     background: transparent;
@@ -111,7 +117,8 @@
 }
 .ss-b-card.ss-rm-tiles .ss-rm-warn { color: var(--ss-warn, #e8a33c); }
 
-/* 6. Enable all: the button above the list, and one confirm box that lists only the block names. */
+/* 6. Enable all: the button above the list, and one confirm box that lists only the block names. The list under it has no bullet indent (the mockup's rows start at the card's edge). */
+.ss-dm-list-rows { list-style: none; margin: 0; padding: 0; }
 .ss-rm-enable-all {
     display: flex;
     align-items: center;

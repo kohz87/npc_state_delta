@@ -27,6 +27,7 @@
 .rpg-board-log > summary { cursor: pointer; color: var(--ss-muted); min-height: 24px; }
 .rpg-board-log-content { display: block; margin-top: 4px; }
 .rpg-board-log p { margin: 2px 0; }
+.rpg-board-excerpt { display: none; }   /* wide boards only (below) */
 .rpg-board-round { font-weight: 700; margin-top: 8px !important; }
 .rpg-board-controls { min-width: 0; padding: 8px; border: 1px solid var(--ss-border); border-radius: 10px; background: var(--ss-panel-opaque); }
 .rpg-board-step-row { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
@@ -69,6 +70,9 @@
     .rpg-board-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr; align-items: start; gap: 8px 12px; }   /* the empty third row takes the extra height, so the log sits right under the status */
     .rpg-board-status { grid-column: 1; }
     .rpg-board-log { grid-column: 1; }
+    /* the last exchange as a two-line excerpt box; the summary under it is the "full log" link, and an open log shows everything instead */
+    .rpg-board-excerpt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; grid-column: 1; margin: 0; padding: 8px 10px; font-size: calc(13px / var(--ss-zoomed, 1)); border: 1px solid var(--ss-border); border-radius: 8px; background: var(--ss-tile); overflow-wrap: anywhere; }
+    .rpg-board-body:has(> .rpg-board-log[open]) > .rpg-board-excerpt { display: none; }
     .rpg-board-controls { grid-column: 2; grid-row: 1 / span 3; }
     .rpg-chip { max-width: none; }
     .rpg-chips-foes .rpg-chip { flex: 0 0 calc((100% - 10px) / 3); }

@@ -170,7 +170,9 @@ export function addDecision(inv, payload, defId) {
     return { resolution: resolveDef(inv, name), def: def ? { id: def.id, stack: def.stack } : null,
         destination: editCompatibility(inv, destination) };
 }
-export function renameDecision(inv, stack, payload) {
+// `withStory` (a rename saved now carries `decision.story: 1`): the witness also holds whether the stack merged into is the story's, since the merge sets the
+// result's "from the story" flag from both stacks. A rename saved before has no such mark and is witnessed as it was.
+export function renameDecision(inv, stack, payload, withStory = false) {
     const name = cleanName(payload.name), original = inv.defs[stack.def], found = resolveDef(inv, name);
     const note = payload.note === undefined ? stack.note : payload.note == null ? '' : trimText(payload.note, MAX_NOTE);
     const source = { ...editCompatibility(inv, stack), note };
@@ -181,7 +183,7 @@ export function renameDecision(inv, stack, payload) {
             && source.key === (other.key === true));
         return { resolution: found, original: { name: original.name, stack: original.stack }, source,
             sourceQty: stack.qty, sourceStory: stack.story === true, targetStackable: targetDef.stack,
-            destination: editCompatibility(inv, target) };
+            destination: editCompatibility(inv, target), ...(withStory ? { destinationStory: target?.story === true } : {}) };
     }
     if (name === original.name) return { resolution: found, original: { name: original.name, stack: original.stack } };
     const shared = Object.values(inv.stacks).some(other => other.id !== stack.id && other.def === original.id);
@@ -218,9 +220,9 @@ export function inventoryEditGuard({ state, hash }, { guard, source, operation }
         let witness;
         if (p.action === 'inventory.add' && Object.keys(d).length === 2 && typeof d.def === 'string') {
             witness = addDecision(inventory, payload, d.def);
-        } else if (p.action === 'inventory.edit' && Object.keys(d).length === 1 && inventory.stacks?.[payload.stack]
+        } else if (p.action === 'inventory.edit' && (Object.keys(d).length === 1 || (Object.keys(d).length === 2 && d.story === 1)) && inventory.stacks?.[payload.stack]
             && inventory.defs?.[inventory.stacks[payload.stack].def]) {
-            witness = renameDecision(inventory, inventory.stacks[payload.stack], payload);
+            witness = renameDecision(inventory, inventory.stacks[payload.stack], payload, d.story === 1);
         } else return bad;
         if (hash(witness) !== d.witness) return { ok: false, reason: E.itemDecisionChanged };
     }

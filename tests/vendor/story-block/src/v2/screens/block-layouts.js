@@ -245,7 +245,7 @@ export function drawNumberMap(env, parent, { title, rows, memoryKey }) {
     if (rows.some(row => row.payload)) {
         const head = h(doc, 'div', 'ss-rm-head'); section.appendChild(head);
         if (title) head.appendChild(h(doc, 'h4', 'ss-section-label', title));
-        const edit = h(doc, 'button', 'ss-rm-edit-btn', V.edited);
+        const edit = h(doc, 'button', 'ss-rm-edit-btn ss-tap-pill', V.edited);   // a slim pill (the mockup's), a 44px tap area (size.css)
         edit.setAttribute('type', 'button');
         const reflect = on => { section.classList.toggle('ss-rm-editing', on); edit.setAttribute('aria-pressed', String(on)); };
         reflect(env.memory.get(editKey) === true);
