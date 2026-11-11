@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.16.1
+
+Update Story Block, Story Director and NPC State Delta together. Replies already written replay and Re-read exactly as before. For the harder foes, start a new chat (or re-add the Foes block).
+
 ## 1.16.0
 
 Update Story Block, Story Director and NPC State Delta together. The new features (anti-lever gate, mood and pull, dossier notes) apply to new replies; start a new chat to see them all. Replies already written replay and Re-read exactly as before.

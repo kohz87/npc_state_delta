@@ -3,12 +3,12 @@
 // It reads no DOM and writes no state; the board and the committed roll both use it.
 
 import { fold } from '../read.js';
-import { packAttacks } from './members.js';
+import { attackList } from './members.js';
 import { bestDefence } from './rules.js';
 import { healingSkill, skillFlags, skillKey } from './flags.js';
 
 const find = (entries, name, field) => entries.find(entry => fold(entry[field]) === fold(name));
-const standing = character => character.alive !== false && character.health !== 0;
+export const standing = character => character.alive !== false && character.health !== 0;
 const up = foe => foe.filled && foe.hurt > 0;
 const groupOf = foe => (Number.isInteger(foe?.group) ? foe.group : foe?.slot);
 const isEmpty = (name) => `${name} is Empty`;
@@ -29,8 +29,9 @@ export function actionSkills(actor, flags = {}, { bars = false } = {}) {
 }
 
 /** Build a Standard plan from one choice for each standing member, or one flee choice. */
+// `hard`: the harder-foes rule (setup.foesHard === 1): a foe that is the only one standing in its group attacks ceil(standing party / 2) times, and the foes' attacks in all are at most 2 x the standing party (members.js capAttackers).
 // `aoe`: the area rule (setup.aoe === 1): an area skill hits every standing group, the picked group is its main target. `areaAll` (setup.areaAll === 1, newer): no main group; an area skill needs no group and strikes every standing group alike. `bars`: the doubled bars (setup.bars === 2): an area skill needs 2 of its resource.
-export function exchangePlan(sheet, actions, flags = {}, number = 1, { members = false, aoe = false, areaAll = false, bars = false } = {}) {
+export function exchangePlan(sheet, actions, flags = {}, number = 1, { members = false, aoe = false, areaAll = false, bars = false, hard = false } = {}) {
     const actors = (sheet?.characters ?? []).filter(standing), foes = (sheet?.foes ?? []).filter(up);
     if (!actors.length || !foes.length) return { error: 'The fight has already ended.' };
     const grouped = members;
@@ -83,7 +84,7 @@ export function exchangePlan(sheet, actions, flags = {}, number = 1, { members =
     }
     // Every member attacks once and a pack attacks as its thinning bar allows. The flattened attacker index rotates targets.
     // A new-board defence is charged on its first executed attack, so Standard decides `paid` at the table, not here.
-    const attackers = foes.flatMap(foe => Array.from({ length: foe.pack === true ? packAttacks(foe.count, foe.hurt, foe.size, foe.full) : 1 }, () => foe));
+    const attackers = attackList(foes, actors.length, { hard, round: number });
     const guards = actors.map(target => {
         const skill = bestDefence(target, item => flagsFor(flags, target, item));
         return { target: target.who, ...(skill ? { skill: skill.name } : {}) };

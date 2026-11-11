@@ -160,8 +160,8 @@ export function rpgReplyLines({ state, before = null, record = null, problems = 
         const gained = character.points - old.points;
         const base = character.xp === 0 ? fill(bonus > 0 ? C.classNote : C.levelNote, { xp: character.xp, bonus }) : (bonus > 0 ? fill(C.classNoteShort, { bonus }) : '');
         out.push(line({ icon: 'fa-arrow-up', tone: 'good', text: fill(C.classUp, { who: character.name, label: character.soulLabel, from: old.soulName, to: character.soulName }),
-            summary: fill(gained > 0 ? C.classSummaryPoints : C.classSummary, { label: character.soulLabel, to: character.soulName, n: gained }),
-            note: gained > 0 ? [base, fill(C.classPoints, { n: gained })].filter(Boolean).join(' · ') : base }));
+            summary: fill(gained > 1 ? C.classSummaryPoints : gained > 0 ? C.classSummaryPointOne : C.classSummary, { label: character.soulLabel, to: character.soulName, n: gained }),
+            note: gained > 0 ? [base, fill(gained > 1 ? C.classPoints : C.classPointOne, { n: gained })].filter(Boolean).join(' · ') : base }));
     }
     const skillsThen = new Map(rpgBlocks(before, { roleOf }).filter(block => block.role === 'skills').map(block => [`${block.module}|${block.subject}`, block]));
     const skillBlocks = rpgBlocks(state, { roleOf }).filter(block => block.role === 'skills');

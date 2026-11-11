@@ -11,6 +11,7 @@ import { STANDARD_NUMBERS, levelOfClass } from '../formula.js';
 import { barOf, characterBars, growthOf, scaleOf, sizeOf, spreadWord, statsOfFields, wordsOf } from '../blocks.js';
 import { activeDefinition, actorsOf, instanceOf } from '../../data-modules/adapters.js';
 import { LEVEL } from '../names.js';
+import { isHardBar } from '../foes.js';
 import { soakGrowth } from '../soak.js';
 import { skillFieldSlots, isTypedSkills, signatureAt, skillTypeOf } from '../../skill-slots.js';
 import { levelLabel, playerRankValue } from '../levels.js';
@@ -153,7 +154,7 @@ export function foesOf(block, { ranks = [] } = {}) {
         // `level{n}` (Levels); a chat made before them keeps its `class{n}`, whose level is the one the older rules stood for (formula.js levelOfClass).
         const level = Object.hasOwn(block.fields, `level${slot}`) ? levelOf(block.fields[`level${slot}`]) : levelOfClass(whole(block.fields[`class${slot}`], 1));
         out.push({ slot, name, count, level, levelled: Object.hasOwn(block.fields, `level${slot}`), levelText: levelText(level, { ranks, foe: true }), hurt,
-            word: blocks ? blocks.word : stageWord('health', schema ?? block.definition.state?.health, hurt), ...(blocks ? { max: blocks.max, text: blocks.text, blocks: true } : {}) });
+            word: blocks ? blocks.word : stageWord('health', schema ?? block.definition.state?.health, hurt), ...(blocks ? { max: blocks.max, text: blocks.text, blocks: true } : {}), ...(blocks && isHardBar(schema) ? { hard: true } : {}) });
     }
     return out;
 }

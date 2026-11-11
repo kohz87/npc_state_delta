@@ -33,7 +33,9 @@ export const FIGHT_STRINGS = Object.freeze({
         classNote: 'XP reached 100 · back to {xp} · +{bonus} to every roll',
         classNoteShort: '+{bonus} to every roll',
         classPoints: '+{n} points to spend',
+        classPointOne: '+{n} point to spend',
         classSummaryPoints: '{label} {to} (+{n} points)',
+        classSummaryPointOne: '{label} {to} (+{n} point)',
         rankUp: '{skill}: {from} → {to}',
         rankSummary: '{skill}: {to}',
         rankNote: 'practice reached 100',
@@ -92,7 +94,7 @@ export const FIGHT_STRINGS = Object.freeze({
         ]),
         formulaNums: Object.freeze({ start: 'Stats start at', points: 'Points at creation', perSoul: 'Stat points', foe: 'Foe\'s base' }),
         formulaPoints: '1 per {n} levels',
-        formulaFoe: '{base} + level ÷ {divisor}',   // (the foe's roll term, like a party member's; its Health is 4 + level ÷ 30 blocks, said under Health)
+        formulaFoe: '{base} + level ÷ {divisor} (÷ 4 on a new Foes block)',   // (the foe's roll term, like a party member's; a new Foes block, the harder-foes rule, uses ÷ 4 for foes; its Health is 4 + level ÷ 30 blocks, 12 + level ÷ 30 on a new block)
         formulaFootStandard: 'Level ÷ 5 (rounded down) stands where class stood. LUK is a window on the edge (−2..+3 at LUK 5 and 6, 0..+3 at 11 and 12, +3..+5 at 19 and 20): the edge a situation gives is held inside it, and a best case reaches its top. New character bars: Health 2 × (4 + VIT/5), Stamina 2 × (4 + AGI/5), Mana 2 × (4 + INT/5), with each division rounded down. Earlier characters keep Health 4 + VIT/5, Stamina 3 + AGI/5, Mana 3 + INT/5.',
         difficulty: 'Difficulty',
         gentle: 'Gentle',
@@ -118,7 +120,7 @@ export const FIGHT_STRINGS = Object.freeze({
         statMax: 'Highest a stat can be',
         statMaxHelp: '10 to 20',
         levelDivisor: 'Level divisor',
-        levelDivisorHelp: 'a roll adds level ÷ this (3 to 8, 5 unset), both sides',
+        levelDivisorHelp: 'a roll adds level ÷ this (3 to 8, 5 unset); foes on a new Foes block (harder foes) always use ÷ 4',
         costMargin: '"At a cost" when short by',
         costMarginHelp: '0 turns it off',
         decisiveMargin: 'Decisive at a margin of',

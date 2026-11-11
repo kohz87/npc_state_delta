@@ -3,6 +3,7 @@
 
 import { headReply } from '../commands.js';
 import { entriesWithCue } from '../lean-rpg/cue.js';
+import { chatMarked } from '../persist/records.js';
 
 /**
  * Runs a registered query on `state`; the answer is a plain copy. Throws for an unknown query.
@@ -62,6 +63,8 @@ export function makeView({ store, registry, settings, chat = [], active = null, 
         query: (name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [], reply, pendingProofs }),
         settings,
         feature: id => featureOn(registry, id),
+        // Whether the chat is under rule mark `name` (persist/records.js chatMarked): what a static prompt text that follows a rule asks.
+        rule: name => chatMarked(messages, name),
         chat: Object.freeze({ length: messages.length, lastUser: String(lastUser?.mes ?? ''), readers: seen.filter(message => message?.is_user).length }),
         // The state before the reply this view stands for (the one its lines start from), or null: asked by a step that compares the reply with it (the RPG's fight XP).
         before: () => { try { return Number.isInteger(reply?.index) ? store.before?.(reply.index) ?? null : null; } catch { return null; } },

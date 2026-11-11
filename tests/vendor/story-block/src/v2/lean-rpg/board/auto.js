@@ -71,11 +71,11 @@ function healTarget(characters) {
 }
 
 // The prepared side of one action, built by the board's own action and Standard preparation code.
-function attackEntry(sheet, actor, foe, action, flags, exchangeNumber, members, rules, bars = false) {
+function attackEntry(sheet, actor, foe, action, flags, exchangeNumber, members, rules, bars = false, hard = false) {
     const one = { ...sheet, characters: [actor], foes: [foe] };
-    const built = exchangePlan(one, [action], flags, exchangeNumber, { members, bars });
+    const built = exchangePlan(one, [action], flags, exchangeNumber, { members, bars, hard });
     if (built.error) return null;
-    const prepared = prepareStandard(built.plan, one, rules, { lv: hasLevels(rules), fix: true, then: true });
+    const prepared = prepareStandard(built.plan, one, rules, { lv: hasLevels(rules), fix: true, then: true, hard });
     return prepared.acts[0] ?? null;
 }
 
@@ -135,7 +135,7 @@ export function autoPicks(boardState, rules) {
             continue;
         }
         const plainAction = attackChoice(actor, target);
-        const plainEntry = attackEntry(sheet, actor, target, plainAction, flags, exchangeNumber, Boolean(members), rules, bars);
+        const plainEntry = attackEntry(sheet, actor, target, plainAction, flags, exchangeNumber, Boolean(members), rules, bars, setup.foesHard === 1);
         const plainOdds = oddsOf(plainEntry, actor, setup.weapons?.[actor.key], rules, true);
         let best = null;
         for (const option of actionSkills(actor, flags, { bars })) {
@@ -145,7 +145,7 @@ export function autoPicks(boardState, rules) {
             // (an area use the actor cannot pay for, 2 in a fight with the doubled bars, is never picked)
             for (const area of [scope.target ? false : null, scope.area && !option.areaReason ? true : null].filter(value => value !== null)) {
                 const action = attackChoice(actor, target, option.skill, area, members ? target.group : null);
-                const entry = attackEntry(sheet, actor, target, action, flags, exchangeNumber, Boolean(members), rules, bars);
+                const entry = attackEntry(sheet, actor, target, action, flags, exchangeNumber, Boolean(members), rules, bars, setup.foesHard === 1);
                 const odds = oddsOf(entry, actor, null, rules);
                 if (odds > plainOdds && (!best || odds > best.odds)) best = { action, odds };
             }

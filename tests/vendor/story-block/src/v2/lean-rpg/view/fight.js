@@ -104,7 +104,7 @@ export function createFightWidget({ headState = () => null, readerName = () => '
                 const head = h(doc, 'div', 'rpg-head');
                 const title = h(doc, 'div', 'rpg-fight-title');
                 title.appendChild(h(doc, 'h3', '', place ? fill(F.titleAt, { place }) : F.title));
-                title.appendChild(h(doc, 'p', 'rpg-fight-note', foes.some(foe => foe.blocks) ? (foes.some(foe => foe.levelled) ? RPG_STRINGS.blocks.foeNoteLevel : RPG_STRINGS.blocks.foeNote) : F.note));
+                title.appendChild(h(doc, 'p', 'rpg-fight-note', foes.some(foe => foe.blocks) ? (foes.every(foe => foe.hard) ? RPG_STRINGS.blocks.foeNoteHard : foes.some(foe => foe.levelled) ? RPG_STRINGS.blocks.foeNoteLevel : RPG_STRINGS.blocks.foeNote) : F.note));
                 const pills = h(doc, 'div', 'rpg-pills');
                 const rounds = shown?.model?.rounds ?? [];
                 if (rounds.length) pills.appendChild(h(doc, 'span', 'ss-pill rpg-exchange', fill(F.exchange, { n: rounds.at(-1).n })));

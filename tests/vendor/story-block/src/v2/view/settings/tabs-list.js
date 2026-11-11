@@ -153,11 +153,14 @@ export function renderTabsCard(parent, { doc, tabs, onChange = null }) {
             place.el.classList.add('ss-tabrow-place');
             place.el.title = row.fixed ? T.homeTitle : fill(T.placeTitle, { name: row.title });
             // A tab shown only while active has no switch: its note says when it shows (the screen's own, or the default).
+            // Up, Down, the place and the switch are one group, so when the row is too narrow for them beside the name they drop under it together.
+            const controls = h(doc, 'span', 'ss-tabrow-controls');
             if (row.activeNote) {
-                const note = h(doc, 'small', 'ss-tabrow-note', row.activeNote);
-                item.append(glyph, name, up, down, place.el, note);
+                controls.append(up, down, place.el);
+                item.append(glyph, name, controls, h(doc, 'small', 'ss-tabrow-note', row.activeNote));
             } else {
-                item.append(glyph, name, up, down, place.el, toggle.el);
+                controls.append(up, down, place.el, toggle.el);
+                item.append(glyph, name, controls);
             }
             list.appendChild(item);
         });

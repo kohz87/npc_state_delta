@@ -7,7 +7,7 @@ import { activeDefinition, inputsOf, instanceOf, resolveActor } from '../adapter
 import { hashJson } from '../../replay.js';
 import { fold, readSheet } from '../../lean-rpg/read.js';
 import { LEAN_RPG_FEATURE } from '../../lean-rpg/names.js';
-import { XP_RATE, scaleXp, xpRateFrom } from '../../lean-rpg/levels.js';
+import { XP_RATE, scaleXp, xpRateFrom, xpRateOf } from '../../lean-rpg/levels.js';
 import { FOE_LEVEL, averageLevel, bandOfRank, foeRandom, foeLevelCap, levelOf, partyLevels, pickLevel } from '../../lean-rpg/foes.js';
 import { SKILL_SLOTS_MAX, SLOT_NUMBER, isTypedSkills } from '../../skill-slots.js';
 import { RESTED_FIELD, RESTED_KNOWN, SET_KINDS, fullRestTooSoon, isMarkedCharacter, recoveryNote } from '../recovery.js';
@@ -98,12 +98,18 @@ export function createAct(deps) {
         if (definition.role === 'skills' && isTypedSkills(definition.state) && LEARN_KIND.test(labels.kind) && kind.labels?.type && args.type === undefined) args.type = 'combat';
         // The XP rate (lean-rpg/levels.js): the narrator's XP line for a character is multiplied by the rate in force (the RPG on), which the line's record keeps
         // (`xpRate`, only when it is not 100) so a later change of the setting never moves it; a line recorded without it is 100.
-        let xpRate = XP_RATE.default;
+        let xpRate = XP_RATE.default, xpKept = null;
+        const xpEffect = effect => effect?.op === 'add' && Array.isArray(effect.path) && effect.path[0] === 'xp' && Array.isArray(effect.value) && effect.value[0] === 'arg' && Number.isSafeInteger(args[effect.value[1]]);
         if (ctx.cause === 'story' && definition.role === 'character' && ctx.feature?.(LEAN_RPG_FEATURE) === true) {
             try { xpRate = xpRateFrom(settings()); } catch { xpRate = XP_RATE.default; }
-            if (xpRate !== XP_RATE.default) for (const effect of kind.effects ?? []) {
-                if (effect?.op === 'add' && Array.isArray(effect.path) && effect.path[0] === 'xp' && Array.isArray(effect.value) && effect.value[0] === 'arg' && Number.isSafeInteger(args[effect.value[1]])) args[effect.value[1]] = scaleXp(args[effect.value[1]], xpRate);
+            // A reply marked `xpKept` (turn/rule-marks.js) pays a Re-read at the rate its earlier run recorded in its receipt (`xpRate` beside the line's kind), so
+            // changing the setting later never moves it; a line the earlier run did not have takes the rate in force. An unmarked reply is paid at the rate in force, as before.
+            if (ctx.carrier?.rules?.includes('xpKept') && (kind.effects ?? []).some(xpEffect)) {
+                const earlier = (ctx.standingReceipts ?? []).map(receipt => receipt?.data?.v2?.result).find(result => result?.kind === labels.kind && xpRateOf(result.xpRate) !== null);
+                if (earlier) xpRate = earlier.xpRate;
+                xpKept = xpRate;
             }
+            if (xpRate !== XP_RATE.default) for (const effect of kind.effects ?? []) if (xpEffect(effect)) args[effect.value[1]] = scaleXp(args[effect.value[1]], xpRate);
         }
         const subject = definition.scope === 'chat' ? 'chat' : resolveActor(prefix, labels.who, subjectsOf(prefix, module));
         const active = prefix.domains.dataModules.active[module], draft = draftOf(ctx);
@@ -149,7 +155,7 @@ export function createAct(deps) {
             reads: result.reads.map(read => read.path), imports: prefixImports(definition), clock: restKind,
             actor: subject !== 'chat', decision: { args, inputs, decisions: result.decisions.map(({ source: _source, cursor: _cursor, ...rest }) => rest), conds: grown ? [] : result.conds, ...(clock !== null ? { clock } : {}), ...(xpRate !== XP_RATE.default ? { xpRate } : {}), ...(grown ? { grown: dataModuleHash(grown) } : {}) } });
         // The concrete outcome kept beside the inputs (and past the receipts' display data): which line, for whom, what was frozen, what was limited.
-        const outcome = { kind: labels.kind, ...(route ? { skill: { slot: route.slot, name: route.update ? route.name : instance.fields[`skill${route.slot}`] } } : {}), subject, decisions: result.decisions.map(({ source: _source, cursor: _cursor, ...rest }) => rest), notes: result.notes, ...(result.fired.length ? { rules: result.fired } : {}) };
+        const outcome = { kind: labels.kind, ...(route ? { skill: { slot: route.slot, name: route.update ? route.name : instance.fields[`skill${route.slot}`] } } : {}), subject, ...(xpKept !== null ? { xpRate: xpKept } : {}), decisions: result.decisions.map(({ source: _source, cursor: _cursor, ...rest }) => rest), notes: result.notes, ...(result.fired.length ? { rules: result.fired } : {}) };
         // A story line that writes a character's XP: what the character had before it is kept for the reply (see finish), so that a won fight, whose XP is
         // given by code, can put back what the narrator added in that reply.
         const xpFrom = ctx.cause === 'story' && definition.role === 'character' && kind.effects.some(effect => Array.isArray(effect?.path) && effect.path[0] === 'xp')

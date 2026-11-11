@@ -139,14 +139,14 @@ export function readDisplayLine(entry, line, counts, caps = null) {
  * What a reply's display lines show, read from its text as SillyTavern holds it (the hidden comment
  * the reply's block was kept in): { [kind]: value[] } in reply order, only for kinds that are display
  * kinds and on now. `entryOf(word)` → the registry's capture entry (registry.capture); `max`: the
- * host's maxChangeLines (the same lines the capture read).
+ * host's maxChangeLines (the same lines the capture read); `caret`: the reply carries the caretWords mark (a preset's ^ before each word is dropped, as at capture).
  */
-export function displayLines(mes, { entryOf, max = Infinity } = {}) {
+export function displayLines(mes, { entryOf, max = Infinity, caret = false } = {}) {
     const out = {};
     // (A line its hidden comment marks as read while its feature was off is left out, B-a1-5.)
     const block = extractBlock(String(mes ?? ''), 'Changes', null, { display: true });
     if (block === null || typeof entryOf !== 'function') return out;
-    const lines = parseChanges(block, { max }).lines.slice(0, Number.isFinite(max) ? max : undefined);
+    const lines = parseChanges(block, { max, caret }).lines.slice(0, Number.isFinite(max) ? max : undefined);
     const counts = new Map();
     // The cap the reply was read with: the mark in its comment, else what every reply had before the setting (3).
     const caps = { chatter: CHATTER_MAX, ...capsOf(mes) };

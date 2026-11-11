@@ -20,6 +20,7 @@ const shape = board => isObject(board) && isObject(board.setup) && Array.isArray
     && board.groups.every(slot => Number.isInteger(slot) && slot >= 1 && slot <= 64)
     && (board.setup.bars === undefined || board.setup.bars === 2)
     && (board.setup.foesSix === undefined || (board.setup.foesSix === 1 && board.setup.members === 1))
+    && (board.setup.foesHard === undefined || (board.setup.foesHard === 1 && board.setup.members === 1 && board.setup.bars === 2))
     && (board.setup.areaAll === undefined || (board.setup.areaAll === 1 && board.setup.aoe === 1))
     && (board.setup.soak === undefined || (board.setup.soak === 1 && board.setup.bars === 2))
     && (board.setup.witness === undefined ? board.exchanges.length === 0
