@@ -11,7 +11,8 @@ const ARC_RADIUS = 100;
 const TRACK_RADII = Object.freeze([104, 96]);
 
 // One quadrant per axis, clockwise from 12 o'clock: trust, affection, desire, tension (the mockup's order).
-// A full-scale value (±100) fills its quadrant (90°); the sign shows as a solid (+) or dashed (−) arc.
+// A full-scale value (±100) fills its quadrant (90°); the sign shows as a solid (+) or dashed (−) arc. The sweep follows the square root of the
+// value, so the small numbers a story starts with are visible (+11 draws about a third of its quadrant, as the mockup's arcs do) and 100 still fills it.
 // Each label sits in the quadrant's outer corner (the mockup's spots): value centred over the axis name.
 const DIAL_AXES = Object.freeze([
     { axis: 'trust', label: 'TRUST', start: 0, colour: '#8fb4d9', anchor: 'middle', x: 212, valueY: 20, keyY: 28 },
@@ -31,12 +32,12 @@ function roundPoint([x, y]) {
 }
 
 // The arcs for the four meters: one per axis, with its clamped value, signed label and SVG path (empty at 0).
-// Sweep is |value| / 100 of the quadrant, so 50 draws half the quadrant and -100 a full one (dashed).
+// Sweep is sqrt(|value| / 100) of the quadrant, so 25 draws half the quadrant and -100 a full one (dashed).
 export function dialArcs(relationship = {}) {
     const rel = relationship && typeof relationship === 'object' ? relationship : {};
     return DIAL_AXES.map(meter => {
         const value = relationshipValue(rel[meter.axis]);
-        const sweep = (Math.abs(value) / 100) * 90;
+        const sweep = Math.sqrt(Math.abs(value) / 100) * 90;
         const path = sweep
             ? `M${roundPoint(pointAt(ARC_RADIUS, meter.start))} A${ARC_RADIUS} ${ARC_RADIUS} 0 0 1 ${roundPoint(pointAt(ARC_RADIUS, meter.start + sweep))}`
             : '';

@@ -228,8 +228,8 @@ test('dossier UI places gender between species and role and makes it searchable'
     const projected = projectDossierState({ npcs: [npc] }, { chatKey: 'chat-1', hydrationStatus: 'ready' });
     assert.equal(projected.index[0].gender, 'female');
 
-    assert.match(dossierUiText, /npc\?\.species,\s*\n\s*npc\?\.gender,\s*\n\s*npc\?\.role/);
-    assert.match(boardHtml(projected.npcs[0]), /Human · female · Barmaid/, 'the board names species, gender, role in that order');
+    assert.match(dossierUiText, /capFirst\(npc\?\.species\),\s*\n\s*capFirst\(npc\?\.gender\),\s*\n\s*capFirst\(npc\?\.role\)/);
+    assert.match(boardHtml(projected.npcs[0]), /Human · Female · Barmaid/, 'the board names species, gender, role in that order');
     assert.match(runtimeText, /id="npc_state_delta_edit_gender"/);
     assert.match(runtimeText, /Gender<select/);
 });
