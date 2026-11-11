@@ -2,7 +2,7 @@
    cache, revision checks, decoded-payload getters and pointer adoption. Moved out of storage.js as a
    factory so each separately imported storage instance keeps its own read slots and cache. Never
    imports storage.js. */
-export function createStorageInspection({ dataFileExists, decodeStateFilePayload, makeNpcStateDataFileName }) {
+export function createStorageInspection({ dataFileExists, decodeStateFilePayload, decodeStateFileHead = () => null, makeNpcStateDataFileName }) {
     const READ_CONCURRENCY_LIMIT = 4;
     let activeReads = 0;
     const readWaiters = [];
@@ -113,8 +113,10 @@ export function createStorageInspection({ dataFileExists, decodeStateFilePayload
             text = typeof response.text === 'function' ? await response.text() : '';
             if (writtenText !== null && writtenMeta && text === writtenText) meta = { ...writtenMeta };
             else {
-                payload = decodeStateFilePayload(text);
-                meta = fileMeta(payload);
+                // The head alone answers a boundary check; the whole file is decoded only when a caller reads `payload` (once per result).
+                const head = decodeStateFileHead(text);
+                if (head) meta = fileMeta(head);
+                else { payload = decodeStateFilePayload(text); meta = fileMeta(payload); }
             }
             if (etag) rememberInspectedFile(path, { etag, lastModified, text, meta });
             else inspectedFiles.delete(path);

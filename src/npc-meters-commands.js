@@ -210,6 +210,35 @@ export function createNpcCommands({
             return cue ? { ...done, summary: sentence([cue]), narrate: true } : done;
         },
         /**
+         * npc.meet { name, personality?, about?, reply? }: Delta's own scan admitted a person the slice has no record for (or one with no mood
+         * and drives yet). They get an entry the way a cast meeting gives one: the dossier's numbers as the first meters, a resting
+         * mood from their temperament (feature mood-pull) and their drives (feature notes). Recorded on the reply like any change, so a
+         * swipe takes it back; chats that never send it replay unchanged. Refused when there is nothing to add.
+         */
+        'npc.meet'(ctx, payload = {}) {
+            if (!ownOrModule(ctx, 'npc.meet', payload)) ctx.fail('REFUSED', 'A meeting is noted only by NPC State Delta\'s own scan.');
+            const have = ctx.read(NPC_DOMAIN);
+            const named = identify(have?.npcs ?? {}, payload?.name);
+            if (!named) ctx.fail('INVALID', 'It names no one.');
+            const before = have?.npcs?.[named.key];
+            const needsMood = featureOn(FEATURE_MOOD_PULL, ctx) && !(before && before.mood);
+            const needsDrives = featureOn(FEATURE_NOTES, ctx) && !(before && before.drives);
+            if (before && !needsMood && !needsDrives) ctx.fail('REFUSED', 'Nothing to update.');
+            // `reply`: the reply the scan read (as npc.adjust's), so a scan of an older reply does not record the meeting on the head.
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            const out = run(ctx, { label: payload.name, changes: [], problems: [], limit: false, reply: commandReply(ctx, at), at, allowEmpty: true });
+            const record = ctx.draft(NPC_DOMAIN).npcs?.[named.key];
+            if (!record) return out;
+            let minutes = null;
+            try { minutes = ctx.time(); } catch { minutes = null; }
+            if (needsMood && isInt(minutes)) {
+                const rest = restingMood(payload?.personality, payload?.about);
+                if (rest.v || rest.a || rest.d) record.mood = restMood(rest, minutes);
+            }
+            if (needsDrives) Object.assign(record, seedNotes({ personality: payload?.personality, about: payload?.about }));
+            return out;
+        },
+        /**
          * npc.milestone { name, add?: [words], remove?: [words or keys] }: the reader's own milestones
          * for one NPC (the dossier editor). Each is kept under its words' key, so the same milestone
          * written twice is one; a new one may promote on the ladder at once.
