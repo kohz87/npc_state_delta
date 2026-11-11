@@ -815,31 +815,33 @@ test('mood and pull cores: the 3x3 word table, the bars, decay that never passes
 
 // ---- the new defaults (anti-lever gate, mood and pull, notes are on) against replies already written ----
 
-test('defaults on: a chat written with the three features off replays unchanged after they are switched on; a Re-read of a reply with no new-feature line is identical, one with a trust drop adds only the mood', async () => {
+test('defaults on: a chat written with the three features off (a ladder ticking every reply) replays unchanged after they are switched on, and every old reply, a trust drop included, is read again identically', async () => {
     const off = { [FEATURE_GATE]: false, [FEATURE_MOOD_PULL]: false, 'npc-state-delta.notes': false };
-    const s = await suite({ allowance: null, features: off });
+    const s = await suite({ allowance: null, features: off, settings: { ladder: [{ name: 'Friend', needs: 'trust 2' }] } });
     const bare = x => JSON.stringify(x.host.head().domains.npc).replace(/sw_[a-z0-9]+/g, 'sw');
     await s.setDay(1);
-    await s.say(['~ npc Oren | trust: +2 | impact: meaningful']);
+    const first = await s.say(['~ npc Oren | trust: +2 | impact: meaningful']);
     const dropAt = await s.say(['~ npc Oren | trust: -3 | impact: major | reason: a broken oath']);
     const calmAt = await s.say(['~ npc Sister Temiwa | affection: +1']);
-    const last = await s.say(['~ npc Oren | affection: +1']);
+    const last = await s.say(['~ npc Oren | trust: +4 | impact: major']);
     const written = bare(s);
+    assert.ok(JSON.parse(written).npcs.oren.rank, 'the old chat has a ladder rank (its ticks ran)');
     for (const id of Object.keys(off)) s.host.features.set(id, true);
     s.host.store.rebuild();
     assert.equal(bare(s), written, 'rebuild under the new defaults: the stored ops give the same state');
     await s.host.st.loadChat(s.host.ctx.chat);
     await s.adapter.ticked();
     assert.equal(bare(s), written, 'a cold reload under the new defaults: the same state');
-    assert.equal((await s.host.sdk.reread(calmAt)).ok, true);
-    assert.equal(bare(s), written, 'a Re-read of an old reply with no via, no note line and no trust drop: byte-identical');
-    assert.equal((await s.host.sdk.reread(last)).ok, true);
-    assert.equal(bare(s), written, 'a Re-read of the newest old reply (a rise): byte-identical');
-    const before = JSON.parse(written).npcs.oren;
-    assert.equal((await s.host.sdk.reread(dropAt)).ok, true);
-    const after = JSON.parse(bare(s)).npcs.oren;
-    assert.deepEqual(Object.keys(after).filter(key => !Object.keys(before).includes(key)), ['mood'], 'the one new field a Re-read of an old trust drop can add');
-    const { mood, ...rest } = after;
-    assert.deepEqual(rest, before, 'meters, stages, notes, the day\'s count and the last event are as they were');
+    for (const index of [first, dropAt, calmAt, last]) {
+        assert.equal((await s.host.sdk.reread(index)).ok, true);
+        assert.equal(bare(s), written, `a Re-read of old reply ${index}: byte-identical`);
+    }
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    // A reply written with the feature on keeps its mood on a Re-read (the reply as it stood had one).
+    await s.say(['~ npc Oren | trust: -3 | impact: major | reason: a second oath']);
+    const fresh = await s.say(['~ npc Oren | trust: -3 | impact: major | reason: a third oath']);
+    assert.ok(JSON.parse(bare(s)).npcs.oren.mood, 'a new reply gets its mood');
+    const moody = bare(s);
+    assert.equal((await s.host.sdk.reread(fresh)).ok, true);
+    assert.equal(bare(s), moody, 'and a Re-read of that reply keeps it, as it was');
 });

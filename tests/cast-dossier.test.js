@@ -1512,3 +1512,20 @@ test('mood: a person met from the cast starts at the resting mood their pack per
     await plain.say(['~ meet Fenna']);
     assert.equal(Object.values(plain.host.head().domains.npc.npcs).find(record => record.name === 'Fenna')?.mood, undefined, 'no temperament words: no mood until an event');
 });
+
+test('defaults on: a meeting written with gate, mood and pull, and notes off is read again identically after they are switched on (the tick is kept, no tastes, drives or mood are added)', async () => {
+    const s = await suite({ features: OLD_DEFAULTS });
+    await s.world([castRow()]);
+    await s.say();
+    await s.say(['~ meet Fenna']);
+    const meeting = s.host.store.headIndex();
+    await s.say(['~ npc Fenna | trust: -3 | impact: major']);
+    const bare = () => JSON.stringify(s.host.head().domains.npc).replace(/sw_[a-z0-9]+/g, 'sw');
+    const written = bare();
+    for (const id of Object.keys(OLD_DEFAULTS)) s.host.features.set(id, true);
+    s.host.store.rebuild();
+    assert.equal(bare(), written, 'rebuild under the new defaults');
+    const again = await s.host.sdk.reread(meeting);
+    assert.equal(again.ok, true, JSON.stringify(again));
+    assert.equal(bare(), written, 'the meeting reply read again: the same state (no mood, tastes, drives, track or pull added)');
+});

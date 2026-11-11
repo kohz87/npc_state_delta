@@ -67,7 +67,7 @@ import {
     socialSkill,
 } from './social-check.js';
 import { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, CUSTOM_RANGE, MAX_NPCS, MAX_STAGES_PER_METER, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, MILESTONE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURES, FEATURE_DEFAULTS, NAME_MAX, DISPOSITION_MAX, TRACK_MAX, REASON_LABELS, IMPACT_TIERS, tierOf, isObject, isInt, isReplyId, replyKey, sameReply, clamp, clean, own, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, intOr, bandWord, needMet, rung, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
-import { initialNpcSlice, observeKeyAway, CAST_QUERY, observeCast, validateNpcSlice, findNpcKey, meterValue, moveMeters, rungMet, conflictOn, settle, sentence, result } from './npc-meters-slice.js';
+import { initialNpcSlice, observeKeyAway, CAST_QUERY, observeCast, validateNpcSlice, findNpcKey, meterValue, moveMeters, rungMet, conflictOn, settle, sentence, result, moodStands } from './npc-meters-slice.js';
 import { applyEvents, eventsFromMoves } from '../npc-mood.js';
 import { SETTINGS_DEFAULTS, SETTINGS_SCHEMA } from './npc-meters-schema.js';
 import { createNpcCommands } from './npc-meters-commands.js';
@@ -357,7 +357,7 @@ export function createNpcPart(hooks = {}) {
         else if (spent?.used && spent.used !== asked) stepped = cutToTier(mine, spent.used, normalizeRelationshipCaps(tierCaps() ?? {}), id => meterValue(record, defs.find(def => def.id === id)));
         const moved = moveMeters(record, stepped, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup), story });
         // Mood (npc-mood.js; feature mood-pull): the trust this line moved, as code reads it, is a trust drop or a betrayal.
-        if (limit && moved.length && featureOn(FEATURE_MOOD_PULL, ctx)) {
+        if (limit && moved.length && featureOn(FEATURE_MOOD_PULL, ctx) && moodStands(ctx, who.key)) {
             const day = clockMinutes(at) ?? timeMinutes(ctx);
             const events = day === null ? [] : eventsFromMoves(moved.map(item => ({ meter: item.meter, change: item.after - item.before })), { reason, impact: spent?.used ?? asked });
             if (events.length) record.mood = applyEvents(record.mood, day, events);

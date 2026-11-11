@@ -363,6 +363,11 @@ export function settle(record, { defs, stages, rules, name, rungs = [], conflict
     return { stages: moves, ranks, held, unlocked: opened };
 }
 
+// A Re-read of a reply (the host gives ctx.standing: the story as it stood after that reply's earlier read) gives the reply's mood only where that
+// state already had one on this person: a reply written before the feature was on is read again as it was; a reply written with it on keeps
+// its mood. A first read (no standing) always may.
+export const moodStands = (ctx, key) => !ctx.standing || isObject(ctx.standing.domains?.npc?.npcs?.[key]?.mood);
+
 export const sentence = parts => parts.filter(Boolean).map(part => (/[.!?]$/.test(part) ? part : `${part}.`)).join(' ');
 
 // `pace`: the reader's words when pacing held the event (src/relationship-pacing.js pacingNote), else ''.
