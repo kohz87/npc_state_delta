@@ -460,5 +460,26 @@ test('the dial\'s no-portrait fallback is small initials in the suite font stack
   const css = dossierUiSource();
   assert.doesNotMatch(css.match(/dossier-dial-portrait \.delta-portrait-placeholder \{[^}]*\}/)?.[0] || '', /Georgia|serif;|font-size:48px/);
   assert.match(css, /\.delta-board \{ grid-template-columns:clamp\(250px,32%,340px\)/);
-  assert.match(css, /@media \(min-width: 651px\) \{\s*#\$\{ROOT_ID\} \.delta-panel \{ height:auto;/);
+  assert.match(css, /@media \(min-width: 1101px\) \{\s*#\$\{ROOT_ID\} \.delta-panel \{ height:auto;/);
+});
+
+test('the dossier layout follows its own container width: container queries, one switch line, no window query, bar in the flow', async () => {
+  const css = dossierUiSource();
+  const screens = await import('../dossier-ui-screens.js');
+  assert.match(css, /container:dsr \/ inline-size/);
+  assert.match(css, new RegExp(`@container dsr \\(min-width: ${screens.TWO_PANE_MIN}px\\)`));
+  assert.match(css, new RegExp(`@container dsr \\(max-width: ${screens.TWO_PANE_MIN - 0.02}px\\)`));
+  assert.match(css, new RegExp(`@container dsr \\(min-width: ${screens.TWO_PANE_MIN}px\\) and \\(max-width: 939.98px\\)`));
+  assert.doesNotMatch(css, /@media \((min|max)-width: 65[01]px\)\s*\{\s*#\$\{ROOT_ID\} \.delta-(board|panes|profile|brand|topbar)/);
+  assert.doesNotMatch(css, /position:sticky; bottom:0; display:block;/, 'the library bar sits in the flow under the scroll area');
+  // the switch reads the panel width, not the window: a 500 px panel in a 2000 px window is narrow, a 700 px one is not
+  const panel = width => ({ clientWidth: width });
+  assert.equal(screens.isNarrow(panel(500), { innerWidth: 2000 }), true);
+  assert.equal(screens.isNarrow(panel(700), { innerWidth: 400 }), false);
+  assert.equal(screens.isNarrow(null, { innerWidth: 400 }), true);
+  // the name has its own class with resets, so a host theme's heading rules cannot restyle it
+  assert.match(boardHtml({ id: 'm', name: 'Marrit' }, {}), /<h3 class="delta-board-title">Marrit<\/h3>/);
+  assert.match(css, /\.delta-board-title \{[^}]*border-left:0 !important[^}]*text-align:center !important/);
+  assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}) }, { layout: 'phone' }), /<h2 class="delta-profile-title">Rika<\/h2>/);
+  assert.match(css, /\.delta-header-menu > summary\.delta-btn \{ display:inline-flex; align-items:center; justify-content:center;/);
 });

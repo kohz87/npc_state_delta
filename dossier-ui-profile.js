@@ -83,8 +83,8 @@ function portraitBlock(npc, portraitRefs, desktop) {
 function headBlock(npc, desktop) {
     const line = `<p class="delta-profile-line">${escapeHtml(identityLine(npc))}</p>`;
     return desktop
-        ? `<header class="delta-profile-head"><h2>Profile</h2>${line}</header>`
-        : `<header class="delta-profile-head"><h2>${escapeHtml(plain(npc.name, 'Unnamed NPC'))}</h2>${line}</header>`;
+        ? `<header class="delta-profile-head"><h2 class="delta-profile-title">Profile</h2>${line}</header>`
+        : `<header class="delta-profile-head"><h2 class="delta-profile-title">${escapeHtml(plain(npc.name, 'Unnamed NPC'))}</h2>${line}</header>`;
 }
 
 // The profile screen for one NPC. `layout` is 'phone' (full screen, one column) or 'desktop' (portrait left, the

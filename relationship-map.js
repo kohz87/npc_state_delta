@@ -12,13 +12,13 @@ import {
 } from './relationship-map-core.js';
 import { buildFocusModel, focusStyles, mapCardHtml, mapKeyLine, mapNodeHtml, mapSvgHtml } from './relationship-map-focus.js';
 import { escapeHtml } from './src/util/html.js';
+import { isNarrow } from './dossier-ui-screens.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 const DOSSIER_ROOT_ID = 'npc_state_delta_dossier_root';
 const SETTINGS_ID = 'npc_state_delta_settings';
 const SETTINGS_ROOT_ID = 'npc_state_delta_relationship_map_settings';
 const STYLE_ID = 'npc_state_delta_relationship_map_style';
-const PHONE_QUERY = '(max-width: 650px)';
 
 // Session-only view state: the last mode and the map's own buttons last until the page reloads.
 const view = { mode: 'dossier', lens: '', allBonds: true, focus: '', signature: '' };
@@ -40,8 +40,26 @@ function personaName() {
     catch { return 'You'; }
 }
 
+// The map's one-column layout follows the dossier's own width (its panel), not the window; a ResizeObserver redraws it when the width crosses the line.
+let sizeObserver = null;
+let observedPanel = null;
+let lastNarrow = null;
 function isPhone() {
-    return typeof globalThis.matchMedia === 'function' && globalThis.matchMedia(PHONE_QUERY).matches;
+    return isNarrow(document.getElementById(DOSSIER_ROOT_ID)?.querySelector('.delta-panel'));
+}
+function watchPanelWidth(ui) {
+    const panel = ui?.root?.querySelector?.('.delta-panel');
+    if (!panel || panel === observedPanel || typeof ResizeObserver !== 'function') return;
+    sizeObserver?.disconnect();
+    observedPanel = panel;
+    lastNarrow = isNarrow(panel);
+    sizeObserver = new ResizeObserver(() => {
+        const narrow = isNarrow(panel);
+        if (narrow === lastNarrow) return;
+        lastNarrow = narrow;
+        renderMap(dossierUi(), { force: true });
+    });
+    sizeObserver.observe(panel);
 }
 
 function dossierUi() {
@@ -98,6 +116,7 @@ function focusKey() {
 function renderMap(ui, { force = false } = {}) {
     const pane = ui?.root?.querySelector('.delta-map-pane');
     if (!pane || view.mode !== 'map') return;
+    watchPanelWidth(ui);
     const settings = readMapSettings();
     const phone = isPhone();
     const persona = personaName();
@@ -311,7 +330,7 @@ const STYLES = `
   #${DOSSIER_ROOT_ID} .delta-map-label small:not(.delta-map-word) { display:none; }
   #${DOSSIER_ROOT_ID} .delta-map-label .delta-map-short { display:block; }
 }
-@media (max-width: 900px) {
+@container dsr (max-width: 899.98px) {
   #${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode { display:block; overflow:auto; }
   #${DOSSIER_ROOT_ID} .delta-map-pane { overflow:visible; }
   #${DOSSIER_ROOT_ID} .delta-map-body { display:grid; grid-template-columns:minmax(0,520px) minmax(0,1fr); align-items:start; gap:14px; }
@@ -321,7 +340,7 @@ const STYLES = `
   #${DOSSIER_ROOT_ID} .delta-map-bars { grid-template-columns:1fr; }
   #${DOSSIER_ROOT_ID} .delta-map-open, #${DOSSIER_ROOT_ID} .delta-map-actions { grid-row:auto; grid-column:auto; }
 }
-@media (max-width: 650px) {
+@container dsr (max-width: 619.98px) {
   #${DOSSIER_ROOT_ID} .delta-map-switch button { padding:0 10px; }
   #${DOSSIER_ROOT_ID} .delta-map-pane { padding:10px; }
   #${DOSSIER_ROOT_ID} .delta-map-toggles { margin-left:0; }
@@ -344,7 +363,6 @@ function start() {
     document.addEventListener('npc-state-delta:dossier-rendered', onDossierRendered);
     document.addEventListener('npc-state-delta:settings-mounted', mountRelationshipMapSettings);
     mountRelationshipMapSettings();
-    globalThis.matchMedia?.(PHONE_QUERY)?.addEventListener?.('change', () => renderMap(dossierUi(), { force: true }));
     onDossierRendered();
 }
 

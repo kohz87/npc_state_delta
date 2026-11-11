@@ -27,6 +27,8 @@ export const STYLES = `
 #${ROOT_ID} *, #${ROOT_ID} *::before, #${ROOT_ID} *::after { box-sizing: border-box; text-shadow: none; }
 #${ROOT_ID} [hidden] { display: none !important; }
 #${ROOT_ID} button, #${ROOT_ID} input { font: inherit; }
+/* a host theme's heading rules (a coloured bar, an indent, an alignment) must not restyle the dossier's own headings */
+#${ROOT_ID} :is(h1,h2,h3,h4) { border:0; border-image:none; background:none; box-shadow:none; }
 #${ROOT_ID} button { color: inherit; }
 #${ROOT_ID} :is(button,input):focus-visible { outline: 2px solid var(--delta-accent); outline-offset: 2px; }
 #${ROOT_ID} .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
@@ -41,7 +43,7 @@ export const STYLES = `
 #${ROOT_ID} .delta-launcher-mark { display:grid; place-items:center; width:25px; height:25px; border-radius:8px; border:1px solid #a9bdd9; font:700 13px/1 Georgia,serif; }
 #${ROOT_ID} .delta-panel {
   position: fixed; z-index: 2147483500; left:50%; top:50%; transform:translate(-50%,-50%);
-  width:min(1320px,97vw); height:min(940px,96dvh); overflow:hidden;
+  width:min(1320px,97vw); height:min(940px,96dvh); overflow:hidden; container:dsr / inline-size;
   display:flex; flex-direction:column; border:1px solid var(--delta-line); border-radius:var(--ss-radius-xl, 15px);
   color:var(--delta-text); background-color:var(--delta-floor); background-image:linear-gradient(var(--delta-bg),var(--delta-bg)); backdrop-filter:var(--ss-blur, none); -webkit-backdrop-filter:var(--ss-blur, none);
   box-shadow:0 0 0 100vmax rgba(0,0,0,.72),0 20px 70px rgba(0,0,0,.55);
@@ -187,28 +189,28 @@ export const STYLES = `
 @media (max-width: 900px) {
   #${ROOT_ID} .delta-panel { width:calc(100vw / var(--ss-zoomed, 1)); height:calc(100dvh / var(--ss-zoomed, 1)); border-radius:0; border-left:0; border-right:0; }
 }
-/* Desktop (above the phone breakpoint): the panel sizes to its screen, up to its old height, so the board's tiles are not left above an empty pane.
-   The document is the one scroller (a column that fills the stage); the library bar sits at its foot. */
-@media (min-width: 651px) {
+/* The floating window (the host forces the panel to the whole screen up to 1100px, launcher-ui.js): it sizes to its screen, up to its old height. */
+@media (min-width: 1101px) {
   #${ROOT_ID} .delta-panel { height:auto; max-height:min(940px,96dvh); min-height:min(520px,96dvh); }
-  #${ROOT_ID} .delta-panel-body, #${ROOT_ID} .delta-stage, #${ROOT_ID} .delta-spread { display:flex; flex-direction:column; height:auto; }
-  #${ROOT_ID} .delta-stage, #${ROOT_ID} .delta-spread { flex:1 1 auto; }
-  #${ROOT_ID} .delta-document { flex:1 1 auto; display:flex; flex-direction:column; }
-  #${ROOT_ID} .delta-document > .delta-panes { flex:1 0 auto; height:auto; }
-  #${ROOT_ID} .delta-document > .delta-library-foot { margin-top:auto; flex:none; }
-  /* the relationship map sizes its circle from the stage, so a map screen keeps the panel's full height and a grid spread */
+  /* the relationship map sizes its circle from the stage, so a map screen keeps the panel's full height */
   #${ROOT_ID} .delta-panel:has(.delta-spread.delta-map-mode) { height:min(940px,96dvh); }
-  #${ROOT_ID} .delta-spread.delta-map-mode { display:grid; flex:1 1 auto; height:auto; }
-  /* Where the panel is forced to the whole screen (launcher-ui.js, up to 1100px) a short board sits in the middle of it, not at the top
-     above a void; a section or profile page fills the height with its panes. */
-  #${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="board"] { align-content:center; }
-  #${ROOT_ID} .delta-panes[data-layout="desktop"]:is([data-screen="section"], [data-screen="profile"]) { align-content:stretch; }
 }
-@media (min-width: 651px) and (max-width: 900px) {
-  #${ROOT_ID} .delta-panel { max-height:calc(100dvh / var(--ss-zoomed, 1)); }
-}
+/* The panel is the dossier's container: every layout below follows its OWN width (container queries), never the window's.
+   The document is a column: the screen scrolls inside it and the library bar sits under it in the flow (never over the last tile). */
+#${ROOT_ID} .delta-panel-body, #${ROOT_ID} .delta-stage, #${ROOT_ID} .delta-spread { display:flex; flex-direction:column; height:auto; }
+#${ROOT_ID} .delta-panel-body { flex:1 1 auto; }
+#${ROOT_ID} .delta-stage, #${ROOT_ID} .delta-spread { flex:1 1 auto; }
+#${ROOT_ID} .delta-document { flex:1 1 auto; display:flex; flex-direction:column; overflow:hidden; }
+#${ROOT_ID} .delta-document > .delta-panes { flex:1 1 auto; height:auto; overflow:auto; overscroll-behavior:contain; scrollbar-color:rgba(218,193,148,.35) transparent; }
+#${ROOT_ID} .delta-document > .delta-library-foot { flex:none; }
+#${ROOT_ID} .delta-spread.delta-map-mode { display:grid; flex:1 1 auto; height:auto; }
+/* Where the panel is taller than a short board, the board sits in the middle of it, not at the top above a void; a section or profile page fills the height. */
+#${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="board"] { align-content:center; }
+#${ROOT_ID} .delta-panes[data-layout="desktop"]:is([data-screen="section"], [data-screen="profile"]) { align-content:stretch; }
 @media (max-width: 650px) {
   #${ROOT_ID} .delta-launcher { right:10px; bottom:66px; }
+}
+@container dsr (max-width: 619.98px) {
   #${ROOT_ID} .delta-brand .delta-kicker, #${ROOT_ID} .delta-chat-state { display:none; }
   #${ROOT_ID} .delta-topbar { padding-left:10px; }
   #${ROOT_ID} .delta-current-grid, #${ROOT_ID} .delta-prose-grid, #${ROOT_ID} .delta-two-column, #${ROOT_ID} .delta-rel-grid { grid-template-columns:1fr; }

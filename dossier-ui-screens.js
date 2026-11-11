@@ -1,7 +1,11 @@
 /* NPC State Delta dossier screens: the pure screen state machine (library | board | profile | section:n), back and Esc order,
-   sideways swipe steps, the one shared phone query (650px) and the desktop pane layout. No markup here; the screen renderers draw each screen. */
+   sideways swipe steps, the dossier's own width switch (one column, or two panes) and the desktop pane layout. No markup here; the screen renderers draw each screen. */
 
-export const PHONE_QUERY = '(max-width: 650px)';
+// The layout follows the dossier's OWN width (its panel, not the window). Two panes appear only when both fit their minimum
+// content: the dial pane (250) beside the tiles / a section (about 370). Derived from content, not from any device. Keep the
+// CSS @container lines in dossier-ui-styles*.js at the same number.
+export const TWO_PANE_MIN = 620;
+// (Three panes, dial + tiles + a section, appear from 940 in the CSS: 230 + 290 + 420 and the rules.)
 export const SWIPE_MIN_PX = 48;
 export const SECTION_KEYS = Object.freeze(['now', 'with', 'ties', 'past', 'secrets']);
 const SCREEN_NAMES = Object.freeze(['library', 'board', 'profile', 'section']);
@@ -111,21 +115,20 @@ export function screenSignature(state) {
     return `${state.npcId || ''}|${formatScreen(state)}`;
 }
 
-// One MediaQueryList per window, shared by every dossier surface.
-const phoneQueries = new WeakMap();
-export function phoneQuery(win = globalThis) {
-    if (!win || typeof win.matchMedia !== 'function') return null;
-    let query = phoneQueries.get(win);
-    if (!query) {
-        query = win.matchMedia(PHONE_QUERY);
-        phoneQueries.set(win, query);
-    }
-    return query;
+// The dossier's width in CSS px: its panel when it is shown, else the window (nothing is drawn while it is hidden anyway).
+export function panelWidth(panel, win = globalThis) {
+    if (!panel || !(panel.clientWidth > 0)) return win?.innerWidth || 0;
+    // The container the CSS queries see is the panel's content box, in fractional px (clientWidth rounds, and a zoomed host gives fractional borders).
+    const style = typeof win?.getComputedStyle === 'function' ? win.getComputedStyle(panel) : null;
+    const px = value => parseFloat(value) || 0;
+    const box = style && style.boxSizing === 'border-box' ? px(style.width) - px(style.borderLeftWidth) - px(style.borderRightWidth) - px(style.paddingLeft) - px(style.paddingRight) : 0;
+    return box > 0 ? box : panel.clientWidth;
 }
 
-export function isPhone(win = globalThis) {
-    const query = phoneQuery(win);
-    return Boolean(query && query.matches);
+// One column (the narrow layout) while the dossier is narrower than two panes need.
+export function isNarrow(panel, win = globalThis) {
+    const width = panelWidth(panel, win);
+    return width > 0 && width < TWO_PANE_MIN; // an unknown width (nothing measured yet) draws the two-pane layout
 }
 
 // Wires touch swipes on one element; onStep receives +1 or -1. Returns the unbind function.

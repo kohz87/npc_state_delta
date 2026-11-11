@@ -2,7 +2,7 @@
    Ties, Past), the profile screen and the desktop pane layout. Colours and surfaces read the --delta-* tokens only,
    so a skin (dossier-ui-styles-board.js, set on [data-skin] of the panel root) and the Story Suite theme both reach
    this sheet. Desktop is one pane (library, board) or two (section beside dial + board; profile beside portrait).
-   The phone breakpoint is the shared 650px query (dossier-ui-screens.js PHONE_QUERY). Class names are the contract
+   The one-column / two-pane switch is the panel's own width (dossier-ui-screens.js TWO_PANE_MIN, the @container dsr lines here). Class names are the contract
    with the section and profile renderers: see the report, section "Class contract". Secrets keep their existing
    rules in dossier-ui-styles.js. */
 
@@ -17,6 +17,8 @@ export const SECTIONS_STYLES = `
 /* header menu: the ⋯ <details> opens a list over the panel; the Edit / Refresh / More buttons keep their own classes */
 #${ROOT_ID} .delta-header-menu { position:relative; display:inline-block; }
 #${ROOT_ID} .delta-header-menu > summary, #${ROOT_ID} .delta-dossier-more > summary { list-style:none; cursor:pointer; }
+/* the dots glyph sits in the middle of its button, not at the top */
+#${ROOT_ID} .delta-header-menu > summary.delta-btn { display:inline-flex; align-items:center; justify-content:center; min-width:35px; line-height:1; padding-top:0; padding-bottom:0; }
 #${ROOT_ID} .delta-header-menu > summary::-webkit-details-marker, #${ROOT_ID} .delta-dossier-more > summary::-webkit-details-marker { display:none; }
 #${ROOT_ID} .delta-header-menu-list { position:absolute; right:0; top:calc(100% + 6px); z-index:4; display:grid; gap:4px; min-width:200px; padding:6px; border:1px solid var(--delta-line); border-radius:12px; background:var(--delta-floor); box-shadow:0 10px 30px rgba(0,0,0,.45); }
 #${ROOT_ID} .delta-header-menu-list > .delta-btn, #${ROOT_ID} .delta-dossier-more-menu > .delta-btn { width:100%; min-height:38px; justify-content:flex-start; text-align:left; }
@@ -30,8 +32,8 @@ export const SECTIONS_STYLES = `
 
 /* section screen: the title bar with arrows, "N of 5" and the dots (the sections.js classes) */
 #${ROOT_ID} .delta-section-screen { display:grid; align-content:start; min-width:0; }
-#${ROOT_ID} .delta-section-head { display:grid; grid-template-columns:34px minmax(0,1fr) 34px; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--delta-line); }
-#${ROOT_ID} .delta-section-arrow { width:34px; height:34px; min-height:34px; display:grid; place-items:center; padding:0; border:1px solid var(--delta-line); border-radius:10px; background:transparent; color:var(--delta-text); font-size:20px; line-height:1; cursor:pointer; }
+#${ROOT_ID} .delta-section-head { display:grid; grid-template-columns:40px minmax(0,1fr) 40px; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--delta-line); }
+#${ROOT_ID} .delta-section-arrow { box-sizing:border-box; width:40px; height:40px; min-width:0 !important; min-height:0 !important; display:grid; place-items:center; padding:0; border:1px solid var(--delta-line); border-radius:10px; background:transparent; color:var(--delta-text); font-size:20px; line-height:1; cursor:pointer; }
 #${ROOT_ID} .delta-section-arrow:disabled { opacity:.3; cursor:default; }
 #${ROOT_ID} .delta-section-title { min-width:0; text-align:center; }
 #${ROOT_ID} .delta-section-title b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; color:var(--delta-accent-soft); }
@@ -100,14 +102,14 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-profile-block h4 { margin:4px 0 0; font-size:12px; color:var(--delta-muted); }
 #${ROOT_ID} .delta-profile-block p { margin:0; overflow-wrap:anywhere; }
 
-@media (min-width: 651px) {
-  #${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="section"] { grid-template-columns:minmax(0,1fr) 380px; }
+@container dsr (min-width: 620px) {
+  #${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="section"] { grid-template-columns:minmax(0,1fr) clamp(300px,44%,420px); }
   #${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="section"] > [data-pane="section"] { border-left:1px solid var(--delta-line); }
   #${ROOT_ID} .delta-profile { grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); }
   #${ROOT_ID} .delta-profile-cols { grid-template-columns:repeat(2,minmax(0,1fr)); }
   #${ROOT_ID} .delta-profile-portrait { position:sticky; top:0; max-height:none; height:100%; aspect-ratio:auto; }
 }
-@media (max-width: 650px) {
+@container dsr (max-width: 619.98px) {
   #${ROOT_ID} .delta-brand { flex:1 1 auto; }
   #${ROOT_ID} .delta-brand strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
   #${ROOT_ID} .delta-top-actions { flex:0 0 auto; gap:6px; }
@@ -149,7 +151,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-bond-word { grid-column:1; grid-row:1; text-align:left; font-size:11px; letter-spacing:.06em; text-transform:uppercase; }
 #${ROOT_ID} .delta-bond > b { grid-column:2; grid-row:1; font-size:15px; }
 #${ROOT_ID} .delta-bond > p { color:var(--delta-text); }
-@media (max-width: 650px) { #${ROOT_ID} .delta-section-screen::before { content:""; display:block; width:36px; height:4px; margin:8px auto 0; border-radius:2px; background:var(--dial); } }
+@container dsr (max-width: 619.98px) { #${ROOT_ID} .delta-section-screen::before { content:""; display:block; width:36px; height:4px; margin:8px auto 0; border-radius:2px; background:var(--dial); } }
 
 /* profile as the mockup draws it: flat label/value rows, small coloured headings */
 #${ROOT_ID} .delta-profile-block { border-top:0; padding-top:0; }
@@ -158,9 +160,9 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-profile .delta-current-card { display:grid; grid-template-columns:82px minmax(0,1fr); gap:12px; padding:0; border:0; background:none; }
 #${ROOT_ID} .delta-profile .delta-current-card b { margin:0; font-size:11.5px; font-weight:400; letter-spacing:0; text-transform:none; }
 #${ROOT_ID} .delta-profile-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px; }
-#${ROOT_ID} .delta-profile-head h2 { font-size:30px; line-height:1.05; }
+#${ROOT_ID} .delta-profile-head .delta-profile-title { margin:0; padding:0; border:0; text-align:inherit; text-transform:none; letter-spacing:0; font-size:clamp(22px,2.4cqw + 14px,32px); line-height:1.05; }
 #${ROOT_ID} .delta-profile-line { margin:0; }
-#${ROOT_ID} .delta-profile-desktop .delta-profile-head h2 { font-size:18px; }
+#${ROOT_ID} .delta-profile-desktop .delta-profile-head .delta-profile-title { font-size:clamp(17px,.8cqw + 11px,22px); }
 
 /* the Fantasy look frames the profile portrait; Neutral and Modern keep it plain */
 #${ROOT_ID}[data-skin="fantasy"] .delta-profile-portrait { border-radius:4px; box-shadow:0 0 0 1px var(--delta-line), 0 0 0 4px var(--delta-floor), 0 0 0 5px var(--delta-line); }

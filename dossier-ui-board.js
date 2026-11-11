@@ -121,7 +121,7 @@ export function boardHtml(npc = {}, { refs = null, userName = 'you', peers = nul
     const identity = [model.species, model.gender, model.role].filter(Boolean).map(part => `${[...part][0].toUpperCase()}${[...part].slice(1).join('')}`).join(' · ');
     const tiles = boardTiles(model, { userName, facesHtml: tieFacesHtml(model.tiles?.ties?.faces, { peers, refs }) }).map(boardTileHtml).join('');
     const profile = `<div class="delta-board-dial" role="button" tabindex="0" data-delta-screen="profile" aria-label="${esc(name)} profile">${dialHtml(npc, { refs })}</div>`;
-    const nameBlock = `<div class="delta-board-name"><h3>${esc(name)}</h3>`
+    const nameBlock = `<div class="delta-board-name"><h3 class="delta-board-title">${esc(name)}</h3>`
         + (pills.length ? `<div class="delta-board-pills">${pills.map(pill => `<span class="delta-pill delta-pill-${pill.kind}">${esc(pill.text)}</span>`).join('')}</div>` : '')
         + (identity ? `<p class="delta-muted">${esc(identity)}</p>` : '')
         + (model.status ? `<p class="delta-board-status">${esc(model.status)}</p>` : '')
