@@ -1,10 +1,11 @@
 /* NPC State Delta dossier surface: the Board screen (dial, name and status, tiles). Pure markup from boardModel and dialHtml; no DOM access and no listeners. The dial and the tiles carry data-delta-screen / data-delta-section for the screens module's delegated click handler. */
 import { escapeHtml } from './src/util/html.js';
+import { portraitHtml } from './dossier-ui-html.js';
 import { dialHtml } from './dossier-ui-dial.js';
 import { boardModel } from './dossier-ui-view-model.js';
 
 // Tone keys → the --delta-* tokens the skins define. Anything else gets no tone, so a model value can never inject CSS.
-const TONES = { good: 'var(--delta-good)', bad: 'var(--delta-danger)' };
+const TONES = { good: 'var(--delta-good)', bad: 'var(--delta-danger)', ten: 'var(--dsk-ten)', aff: 'var(--aff)', des: 'var(--des)', held: 'var(--held)' };
 const esc = value => escapeHtml(String(value ?? ''));
 const toneVar = key => TONES[key] || 'var(--delta-muted)';
 const percent = value => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
@@ -14,9 +15,15 @@ const signed = value => `${value > 0 ? '+' : ''}${value}`;
 // A tile without a section is not tappable.
 export function boardTileHtml(tile = {}) {
     const head = `<span class="delta-tile-k" style="--c:${toneVar(tile.tone)}">${esc(tile.title)}${tile.section ? ' <span class="delta-tile-arrow">›</span>' : ''}</span>`;
+    const raw = (Array.isArray(tile.lines) ? tile.lines.filter(Boolean) : []).map(String);
+    // A lead (the toned bold start of the first line) joins that line with " · ", as the mockup's last-change tile reads;
+    // any further line is the small muted one.
+    const first = tile.lead ? [`<span><b class="delta-tile-lead" style="color:${toneVar(tile.tone)}">${esc(tile.lead)}</b>${raw.length ? ` · ${esc(raw.shift())}` : ''}</span>`] : [];
+    const lines = [...first, ...raw.map(line => `<span${tile.lead || tile.small ? ' class="delta-tile-small"' : ''}>${esc(line)}</span>`)];
     const body = [
-        tile.big ? `<span class="delta-tile-big">${esc(tile.big)}</span>` : '',
-        ...(Array.isArray(tile.lines) ? tile.lines.filter(Boolean).map(line => `<span>${esc(line)}</span>`) : []),
+        tile.big ? `<span class="delta-tile-big${tile.bigClass ? ` ${tile.bigClass}` : ''}">${esc(tile.big)}</span>` : '',
+        tile.faces || '',
+        ...lines,
         tile.ring ? `<span class="delta-tile-row"><span class="delta-tile-ring" style="--v:${percent(tile.ring.value)}"><span>${esc(tile.ring.text)}</span></span>${tile.note ? `<span class="delta-muted">${esc(tile.note)}</span>` : ''}</span>` : (tile.note ? `<span class="delta-muted">${esc(tile.note)}</span>` : ''),
     ].join('');
     const classes = `delta-tile${tile.wide ? ' delta-tile-wide' : ''}`;
@@ -28,55 +35,74 @@ export function boardTileHtml(tile = {}) {
 
 // The tiles, in mockup order, from the boardModel tiles object. Pull is null until phase-2 data exists: no tile.
 // `userName` replaces the literal "{{user}}" in the With {{user}} title.
-export function boardTiles(model = {}, { userName = 'you' } = {}) {
+export function boardTiles(model = {}, { userName = 'you', facesHtml = '' } = {}) {
     const tiles = model.tiles || {};
     const last = tiles.lastChange || {};
     const moved = Array.isArray(last.moved) ? last.moved : [];
     const secrets = tiles.secrets || {};
+    const now = tiles.rightNow || {};
+    const ties = tiles.ties || {};
+    const past = tiles.past || {};
+    const next = String(secrets.next || '').replace(/^opens\s*/i, '');
     const sets = [
         {
             title: `${(last.title || 'With {{user}}').replace('{{user}}', userName)} · ${last.heading || 'Last change'}`,
             section: 'with',
             wide: true,
             tone: moved.some(item => item.value < 0) ? 'bad' : (moved.length ? 'good' : ''),
-            big: moved.length ? moved.map(item => `${item.label} ${signed(item.value)}`).join(' · ') : (last.hasChange ? '' : 'No change yet'),
+            lead: moved.length ? moved.map(item => `${item.label} ${signed(item.value)}`).join(' · ') : '',
+            big: moved.length ? '' : (last.hasChange ? '' : 'No change yet'),
             lines: [last.reason, last.when],
         },
-        { title: tiles.mood?.title || 'Mood', wide: !tiles.pull, big: tiles.mood?.text || 'Unknown' },
+        { title: tiles.mood?.title || 'Mood', wide: !tiles.pull, tone: 'ten', big: tiles.mood?.text || 'Unknown', bigClass: 'delta-tile-mood' },
         tiles.pull ? { title: tiles.pull.title || 'Pull', big: tiles.pull.text } : null,
         {
-            title: tiles.rightNow?.title || 'Right now',
+            // The place joins the title when the body is what she is doing, as the mockup reads: RIGHT NOW · NORTHERN RIDGE.
+            title: `${now.title || 'Right now'}${now.doing && now.place ? ` · ${now.place}` : ''}`,
             section: 'now',
+            tone: 'ten',
             wide: true,
-            lines: [tiles.rightNow?.summary || 'Nothing recorded yet'],
+            lines: [now.summary || 'Nothing recorded yet'],
         },
         {
-            title: tiles.ties?.title || 'Ties',
+            title: ties.title || 'Ties',
             section: 'ties',
-            big: String(tiles.ties?.count ?? 0),
-            lines: [Array.isArray(tiles.ties?.names) && tiles.ties.names.length ? tiles.ties.names.join(', ') : 'None established yet'],
+            tone: 'aff',
+            faces: facesHtml,
+            small: true,
+            lines: [ties.count ? `${ties.count} · ${(ties.names || []).join(', ')}` : 'None established yet'],
         },
         {
-            title: tiles.past?.title || 'Past',
+            title: `${past.title || 'Past'}${past.count ? ` · ${past.count}` : ''}`,
             section: 'past',
-            big: String(tiles.past?.count ?? 0),
-            lines: [tiles.past?.latest || 'Nothing remembered yet'],
+            tone: 'des',
+            small: true,
+            lines: [past.latest || 'Nothing remembered yet'],
         },
         {
             title: secrets.title || 'Secrets',
             section: 'secrets',
+            tone: 'held',
             wide: true,
             ring: { value: secrets.total ? (secrets.open / secrets.total) * 100 : 0, text: `${secrets.open ?? 0}/${secrets.total ?? 0}` },
-            note: secrets.next ? `Next opens ${secrets.next}` : (secrets.total ? 'All open' : 'None yet'),
+            note: [secrets.lastOpen ? `${secrets.lastOpen} opened` : '', next ? `the next opens ${next}` : (secrets.total ? (secrets.open === secrets.total ? 'all open' : '') : 'None yet')].filter(Boolean).join(' · '),
         },
     ];
     return sets.filter(Boolean);
 }
 
+// The faces of the Ties tile: up to three people ringed by the bond tone, with their portrait when they have a dossier of their own
+// (`peers`: lower-cased name -> portrait). A person with no portrait shows the plain disc.
+function tieFacesHtml(faces = [], { peers = null, refs = null } = {}) {
+    if (!faces.length) return '';
+    const ring = { good: 'var(--good)', bad: 'var(--bad)', gold: 'var(--held)' };
+    return `<span class="delta-tile-faces">${faces.map(face => `<span class="delta-tile-face-ring" style="--r:${ring[face.tone] || 'var(--dial)'}" title="${esc(face.name)}">${portraitHtml({ name: face.name, portrait: peers?.get(String(face.name).toLowerCase()) || '' }, 'delta-tile-face', { alt: false, refs })}</span>`).join('')}</span>`;
+}
+
 // The Board screen for one NPC: the dial (portrait inside; a tap opens the profile), the name, identity
 // and status, the pills (key person, mood), then the tiles. `refs` is the panel's createPortraitRefs()
 // (refs.fill is the caller's job, after the markup is in the DOM).
-export function boardHtml(npc = {}, { refs = null, userName = 'you' } = {}) {
+export function boardHtml(npc = {}, { refs = null, userName = 'you', peers = null } = {}) {
     const model = boardModel(npc) || {};
     const name = model.name || 'Unnamed NPC';
     const pills = [
@@ -84,14 +110,14 @@ export function boardHtml(npc = {}, { refs = null, userName = 'you' } = {}) {
         model.tiles?.mood?.text ? { text: model.tiles.mood.text, kind: 'mood' } : null,
     ].filter(Boolean);
     const identity = [model.species, model.gender, model.role].filter(Boolean).join(' · ');
-    const tiles = boardTiles(model, { userName }).map(boardTileHtml).join('');
-    return `<section class="delta-board" data-delta-board="${esc(model.id)}">`
-        + `<div class="delta-board-dial" role="button" tabindex="0" data-delta-screen="profile" aria-label="${esc(name)} profile">${dialHtml(npc, { refs })}</div>`
-        + `<div class="delta-board-name"><h3>${esc(name)}</h3>`
+    const tiles = boardTiles(model, { userName, facesHtml: tieFacesHtml(model.tiles?.ties?.faces, { peers, refs }) }).map(boardTileHtml).join('');
+    const profile = `<div class="delta-board-dial" role="button" tabindex="0" data-delta-screen="profile" aria-label="${esc(name)} profile">${dialHtml(npc, { refs })}</div>`;
+    const nameBlock = `<div class="delta-board-name"><h3>${esc(name)}</h3>`
         + (pills.length ? `<div class="delta-board-pills">${pills.map(pill => `<span class="delta-pill delta-pill-${pill.kind}">${esc(pill.text)}</span>`).join('')}</div>` : '')
         + (identity ? `<p class="delta-muted">${esc(identity)}</p>` : '')
         + (model.status ? `<p class="delta-board-status">${esc(model.status)}</p>` : '')
-        + '</div>'
-        + `<div class="delta-board-tiles">${tiles}</div>`
-        + '</section>';
+        + '</div>';
+    // Desktop puts the dial and name in a pane of their own beside the tiles (the mockup's left pane); phone stacks them.
+    return `<section class="delta-board" data-delta-board="${esc(model.id)}"><div class="delta-board-hero">${profile}${nameBlock}</div>`
+        + `<div class="delta-board-tiles">${tiles}</div></section>`;
 }

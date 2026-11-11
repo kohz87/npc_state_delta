@@ -92,7 +92,8 @@ function tiesModel(npc) {
             dynamic: parsed?.dynamic ?? '',
         };
     });
-    return { count: entries.length, names: entries.slice(0, 3).map(entry => entry.name), entries };
+    const faces = entries.slice(0, 3).map(entry => ({ name: entry.name, tone: bondTone(entry.relation) }));
+    return { count: entries.length, names: faces.map(face => face.name), faces, entries };
 }
 
 function pastModel(npc) {
@@ -115,6 +116,7 @@ function secretsModel(npc) {
         open,
         hidden: hidden.length,
         next: hidden.length ? plain(hidden[0].opens) || null : null,
+        lastOpen: open ? plain(notes.filter(note => note?.state === 'open').pop().title) : '',
         notes,
     };
 }
@@ -141,10 +143,10 @@ export function boardModel(npc = {}) {
             lastChange: { title: SECTION_TITLES.with, heading: 'Last change', hasChange: last.hasChange, moved: last.moved, reason: last.reason, when: last.when },
             mood: { title: 'Mood', text: plain(source.mood) },
             pull: null,
-            rightNow: { title: SECTION_TITLES.now, summary: rightNowModel(source).summary },
-            ties: { title: 'Ties', count: ties.count, names: ties.names },
+            rightNow: { title: SECTION_TITLES.now, ...(({ place, doing, summary }) => ({ place, doing, summary }))(rightNowModel(source)) },
+            ties: { title: 'Ties', count: ties.count, names: ties.names, faces: ties.faces },
             past: { title: 'Past', count: past.count, latest: past.latest },
-            secrets: { title: 'Secrets', total: secrets.total, open: secrets.open, next: secrets.next },
+            secrets: { title: 'Secrets', total: secrets.total, open: secrets.open, next: secrets.next, lastOpen: secrets.lastOpen },
         },
     };
 }

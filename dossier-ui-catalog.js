@@ -176,6 +176,7 @@ export function projectDossierState(state = {}, status = {}) {
             lifeState: npc.lifeState,
             bucket: npc.bucket,
             statusLabel: npc.statusLabel,
+            mood: npc.mood,
             portrait: npc.portrait,
             updatedAt: npc.updatedAt,
             ...(libraryTone(npc.relationship) ? { tone: libraryTone(npc.relationship) } : {}),

@@ -10,26 +10,27 @@ ${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"] {
   --good: #9cc49a; --bad: #d98a83; --held: #d4b56e;
   --dial: color-mix(in srgb, var(--delta-text) 22%, var(--delta-floor));
   --tick: color-mix(in srgb, var(--delta-text) 32%, var(--delta-floor));
-  --dsk-ten: #d9a273;
-  --dsk-tile: color-mix(in srgb, var(--delta-floor) 92%, var(--delta-text) 8%);
+  --dsk-ten: #d9a273; --aff: #d99aaa; --des: #b7a3cf; --trust: #8fb4d9;
+  --dsk-tile: color-mix(in srgb, var(--delta-floor) 95%, var(--delta-text) 5%);
   --dsk-tile-bg: var(--dsk-tile);
   --dsk-tile-shadow: none; --dsk-tile-radius: 12px; --dsk-face-radius: 50%; --dsk-glow: none;
 }
-${PANEL}[data-skin="fantasy"] {
+${PANEL} { --face-flat: color-mix(in srgb, var(--delta-text) 16%, var(--delta-floor)); }
+${PANEL}[data-skin="fantasy"], ${PANEL}[data-skin="fantasy"] .delta-panel.ss-cards {
   --delta-bg: #18130d; --delta-floor: #18130d; --delta-text: #efe5cf; --delta-muted: #b3a37f; --delta-warn: #e0bf63;
   --delta-surface: #221b12; --delta-surface-strong: #2a2116; --delta-line: #5a4a2c; --delta-line-strong: #9a7c42;
   --delta-accent: #d9b56a; --delta-accent-soft: #e8d6a6; --delta-good: #8fbf7f; --delta-danger: #d07f6f;
-  --good: #8fbf7f; --bad: #d07f6f; --held: #e0bf63; --dial: #6a5530; --tick: #9a7c42; --dsk-ten: #d9945a;
+  --good: #8fbf7f; --bad: #d07f6f; --held: #e0bf63; --dial: #6a5530; --tick: #9a7c42; --dsk-ten: #d9945a; --aff: #d78a9b; --des: #a98fc9; --trust: #7fa9cf;
   --dsk-tile: #221b12; --dsk-tile-bg: linear-gradient(180deg, #2a2116, #221b12);
   --dsk-tile-shadow: inset 0 0 0 3px #221b12, inset 0 0 0 4px rgba(90,74,44,.7);
   --dsk-tile-radius: 4px; --dsk-face-radius: 50% / 46%;
   --dsk-glow: 0 0 0 1px #9a7c42, 0 0 0 4px #18130d, 0 0 0 5px #6a5530;
 }
-${PANEL}[data-skin="modern"] {
+${PANEL}[data-skin="modern"], ${PANEL}[data-skin="modern"] .delta-panel.ss-cards {
   --delta-bg: #101116; --delta-floor: #101116; --delta-text: #ecebef; --delta-muted: #9b9fae; --delta-warn: #e8c46a;
   --delta-surface: #15161c; --delta-surface-strong: #1b1c24; --delta-line: #2c2f3d; --delta-line-strong: #3d4152;
   --delta-accent: #8b7cf6; --delta-accent-soft: #c9c3ff; --delta-good: #5fcf8c; --delta-danger: #ef7a7a;
-  --good: #5fcf8c; --bad: #ef7a7a; --held: #e8c46a; --dial: #22252f; --tick: #2f3240; --dsk-ten: #ff9f5a;
+  --good: #5fcf8c; --bad: #ef7a7a; --held: #e8c46a; --dial: #22252f; --tick: #2f3240; --dsk-ten: #ff9f5a; --aff: #f28cb1; --des: #c58cff; --trust: #6fb3ff;
   --dsk-tile: #15161c; --dsk-tile-bg: var(--dsk-tile);
   --dsk-tile-shadow: none; --dsk-tile-radius: 12px; --dsk-face-radius: 50%;
   --dsk-glow: 0 0 40px rgba(255,159,90,.35);
@@ -41,24 +42,29 @@ ${PANEL} .delta-library-search input { flex:1 1 auto; min-width:0; padding:0; bo
 ${PANEL} .delta-library-faces { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; padding:12px; }
 ${PANEL} .delta-library-face { --rc:var(--dial); display:grid; justify-items:center; align-content:start; gap:4px; width:100%; min-width:0; padding:14px 8px 12px; border:1px solid var(--delta-line); border-radius:14px; background:var(--dsk-tile); color:var(--delta-text); font:inherit; text-align:center; cursor:pointer; }
 ${PANEL} .delta-library-face.selected { outline:2px solid var(--delta-accent); outline-offset:-1px; }
-${PANEL} .delta-library-portrait { display:block; width:72px; height:72px; margin-bottom:10px; border-radius:50%; object-fit:cover; box-shadow:0 0 0 2px var(--dsk-tile), 0 0 0 3.5px var(--rc); }
-${PANEL} .delta-library-portrait.delta-portrait-placeholder { display:grid; place-items:center; font-size:26px; color:var(--delta-accent); }
+${PANEL} .delta-library-av { display:block; width:72px; height:72px; margin-bottom:10px; overflow:hidden; border-radius:var(--dsk-face-radius); box-shadow:0 0 0 2px var(--dsk-tile), 0 0 0 3.5px var(--rc); }
+${PANEL} .delta-library-portrait { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 4%; }
+${PANEL} .delta-library-portrait.delta-portrait-placeholder, ${PANEL} .delta-tile-face.delta-portrait-placeholder { background:var(--face-flat); font-size:0; }
 ${PANEL} .delta-library-face > b { max-width:100%; color:var(--delta-accent-soft); overflow-wrap:anywhere; }
 ${PANEL} .delta-library-meta { max-width:100%; font-size:11px; color:var(--delta-muted); overflow-wrap:anywhere; }
 
 /* Dial: the portrait <img> sits centred under the SVG ring. The SVG fills the box; its arcs take their colour from the attributes, the tracks and ticks from the skin. */
 ${PANEL} .dossier-dial { position:relative; width:min(300px,100%); aspect-ratio:1; margin:0 auto; }
 ${PANEL} .dossier-dial-portrait { position:absolute; top:50%; left:50%; width:66.6%; aspect-ratio:1; transform:translate(-50%,-50%); overflow:hidden; border-radius:var(--dsk-face-radius); box-shadow:var(--dsk-glow); }
-${PANEL} .dossier-dial-img, ${PANEL} .dossier-dial-portrait .delta-portrait-placeholder { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 10%; }
-${PANEL} .dossier-dial-portrait .delta-portrait-placeholder { display:grid; place-items:center; font-size:48px; color:var(--delta-accent); background:var(--dsk-tile); }
+${PANEL} .dossier-dial-img, ${PANEL} .dossier-dial-portrait .delta-portrait-placeholder { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 4%; }
+/* head and shoulders: the picture is shown at 150% from the top, as in the mockup */
+${PANEL} .dossier-dial-img, ${PANEL} .delta-library-portrait:not(.delta-portrait-placeholder), ${PANEL} .delta-tile-face:not(.delta-portrait-placeholder) { transform:scale(1.5); transform-origin:50% 4%; }
+${PANEL} .dossier-dial-portrait::after { content:"Profile ›"; position:absolute; left:50%; bottom:10px; transform:translateX(-50%); padding:1px 9px; border-radius:999px; background:rgba(0,0,0,.55); color:#fff; font-size:10.5px; font-weight:700; white-space:nowrap; }
+${PANEL} .dossier-dial-portrait .delta-portrait-placeholder { display:grid; place-items:center; font-size:48px; color:var(--delta-accent); background:var(--face-flat); }
 ${PANEL} .dossier-dial-svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
 ${PANEL} .dossier-dial-svg path:not(.dial-arc), ${PANEL} .dossier-dial-svg circle { stroke:var(--dial); }
 ${PANEL} .dossier-dial-svg g { stroke:var(--tick); }
-${PANEL} .dial-value { font-family:inherit; font-size:15px; font-weight:700; }
-${PANEL} .dial-key { font-family:inherit; font-size:8.5px; font-weight:700; letter-spacing:.1em; opacity:.85; }
+${PANEL} .dial-value { font-family:inherit; font-size:9.6px; font-weight:700; }
+${PANEL} .dial-key { font-family:inherit; font-size:7.2px; font-weight:700; letter-spacing:.1em; fill:var(--delta-muted); }
 
 /* Board: the dial, then the name and identity, the pills, the status, then the tiles (two columns on phone and desktop). */
 ${PANEL} .delta-board { display:grid; color:var(--delta-text); }
+${PANEL} .delta-board-hero { display:grid; align-content:start; min-width:0; }
 ${PANEL} .delta-board-dial { display:grid; padding:18px 0 6px; border-radius:12px; cursor:pointer; }
 ${PANEL} .delta-board-name { padding:0 14px 6px; text-align:center; min-width:0; }
 ${PANEL} .delta-board-name h3 { margin:0; font-size:30px; line-height:1.05; font-weight:700; color:var(--delta-accent-soft); overflow-wrap:anywhere; }
@@ -76,11 +82,31 @@ ${PANEL} button.delta-tile { cursor:pointer; }
 ${PANEL} .delta-tile-wide { grid-column:span 2; }
 ${PANEL} .delta-tile-k { display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:10px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--c); }
 ${PANEL} .delta-tile-arrow { font-size:12px; letter-spacing:0; color:var(--delta-muted); }
+${PANEL} .delta-tile-mood::first-letter { text-transform:uppercase; }
+${PANEL} .delta-tile-lead { font-weight:700; }
+${PANEL} .delta-tile-small { font-size:11.5px; color:var(--delta-muted); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+${PANEL} .delta-tile-faces { display:flex; }
+${PANEL} .delta-tile-face-ring { width:24px; height:24px; margin-left:-6px; overflow:hidden; border:2px solid var(--dsk-tile); border-radius:50%; box-shadow:0 0 0 1.5px var(--r); background:var(--face-flat); }
+${PANEL} .delta-tile-face-ring:first-child { margin-left:0; }
+${PANEL} .delta-tile-face { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 4%; }
 ${PANEL} .delta-tile-big { font-size:18px; font-weight:700; line-height:1.15; color:var(--delta-accent-soft); overflow-wrap:anywhere; }
 ${PANEL} .delta-tile-row { display:flex; align-items:center; gap:8px; }
 ${PANEL} .delta-tile-ring { --v:0; position:relative; display:grid; place-items:center; flex:none; width:40px; height:40px; border-radius:50%; background:conic-gradient(var(--c) calc(var(--v) * 1%), var(--dial) 0); }
 ${PANEL} .delta-tile-ring::after { content:""; position:absolute; inset:5px; border-radius:50%; background:var(--dsk-tile); }
 ${PANEL} .delta-tile-ring > span { position:relative; z-index:1; font-size:10px; font-weight:700; }
+
+/* the library bar under every other screen */
+${PANEL} .delta-library-foot { position:sticky; bottom:0; display:block; width:100%; padding:8px 12px; border:0; border-top:1px solid var(--delta-line); background:var(--delta-floor); color:var(--delta-muted); font:inherit; font-size:10.5px; font-weight:700; letter-spacing:.12em; text-align:left; text-transform:uppercase; cursor:pointer; }
+
+/* Desktop: the dial and name are a pane of their own beside the tiles. */
+@media (min-width: 651px) {
+  ${PANEL} .delta-board { grid-template-columns:340px minmax(0,1fr); align-items:start; }
+  ${PANEL} .delta-panes[data-screen="section"] .delta-board { grid-template-columns:300px minmax(0,1fr); }
+  ${PANEL} .delta-board-hero { border-right:1px solid var(--delta-line); padding-bottom:14px; }
+  ${PANEL} .delta-board-tiles { padding:12px; }
+  ${PANEL} .delta-library-faces { grid-template-columns:repeat(5,minmax(0,1fr)); gap:14px; padding:16px; }
+  ${PANEL} .delta-library-search { max-width:380px; margin:16px 16px 0; }
+}
 
 /* Phone: the library faces stay two across by their minimum width; the tiles keep two columns. Nothing else changes by width. */
 `;

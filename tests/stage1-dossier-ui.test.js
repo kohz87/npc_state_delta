@@ -15,7 +15,8 @@ import {
 } from '../dossier-ui.js';
 import { dossierUiSource } from './helpers/dossier-ui-source.js';
 import { DeltaDossierUi } from '../dossier-ui.js';
-import { boardHtml } from '../dossier-ui-board.js';
+import { boardHtml, boardTiles } from '../dossier-ui-board.js';
+import { libraryFaceHtml, libraryFootHtml, librarySearchHtml } from '../dossier-ui-library.js';
 import { createPortraitRefs } from '../dossier-ui-html.js';
 import { dialArcs, dialSvg } from '../dossier-ui-dial.js';
 import { dossierMenuHtml } from '../dossier-ui-header.js';
@@ -366,4 +367,32 @@ test('the panel walks library, board, section and profile from one projection; a
     globalThis.document = saved.document;
     globalThis.CSS = saved.CSS;
   }
+});
+
+test('the board matches the approved tiles: lead move, place in the title, faces by bond tone, secrets ring with its note', () => {
+  const npc = {
+    id: 'rika', name: 'Rika', mood: 'alarmed', location: 'Northern Ridge', cast: { doing: 'Crouched at the lip' },
+    relationship: { trust: 5, affection: 0, desire: 0, tension: 2 },
+    lastRelationshipChange: { impact: 'meaningful', delta: { tension: 2, trust: 0, affection: 0, desire: 0 }, reason: 'praise backfired', turn: 3 },
+    keyRelationships: ['Temiwa: friend | kind', 'Bregje: rival | loud'], memories: ['a', 'the basilisk fell'],
+    v2Meters: { secrets: [{ state: 'open', title: 'Winter Gate Debt', text: 't', pill: 'Opened' }, { state: 'hidden', opens: 'Opens at Trust 25', width: 55 }] },
+  };
+  const tiles = boardTiles(boardModel(npc), { userName: 'Astra' });
+  const by = title => tiles.find(tile => tile.title.startsWith(title));
+  assert.equal(by('With Astra').lead, 'Tension +2');
+  assert.equal(by('Right now').title, 'Right now · Northern Ridge', 'the place joins the title when the body is what she is doing');
+  assert.equal(by('Past').title, 'Past · 2');
+  assert.equal(by('Secrets').note, 'Winter Gate Debt opened · the next opens at Trust 25', 'no doubled "opens"');
+  const html = boardHtml(npc, { userName: 'Astra', peers: new Map([['temiwa', 'data:image/png;base64,AAAA']]) });
+  assert.match(html, /delta-tile-face-ring" style="--r:var\(--good\)"/);
+  assert.match(html, /delta-tile-face-ring" style="--r:var\(--bad\)"/);
+  assert.match(html, /delta-board-hero/);
+});
+
+test('the library face shows the mood (the dossier status when archived), the foot goes back to the library, the search counts people', () => {
+  const face = libraryFaceHtml({ id: 'a', name: 'Aster', bucket: 'active', mood: 'steady', statusLabel: 'In chat', key: true });
+  assert.match(face, /★ key · steady/);
+  assert.match(libraryFaceHtml({ id: 'b', name: 'Bryn', bucket: 'archived', mood: 'calm', statusLabel: 'Archived' }), /Archived/);
+  assert.match(libraryFootHtml(10), /data-delta-screen="library"[^>]*>▸ Dossier library · 10 NPCs/);
+  assert.match(librarySearchHtml('', 10), /placeholder="Search 10 people…"/);
 });

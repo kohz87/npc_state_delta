@@ -12,12 +12,12 @@ const TRACK_RADII = Object.freeze([104, 96]);
 
 // One quadrant per axis, clockwise from 12 o'clock: trust, affection, desire, tension (the mockup's order).
 // A full-scale value (±100) fills its quadrant (90°); the sign shows as a solid (+) or dashed (−) arc.
-// Each label sits in the quadrant's outer corner: value on the first line, axis name under it.
+// Each label sits in the quadrant's outer corner (the mockup's spots): value centred over the axis name.
 const DIAL_AXES = Object.freeze([
-    { axis: 'trust', label: 'TRUST', start: 0, colour: '#8fb4d9', anchor: 'end', x: 224, valueY: 22, keyY: 34 },
-    { axis: 'affection', label: 'AFFECTION', start: 90, colour: '#d99aaa', anchor: 'end', x: 224, valueY: 196, keyY: 210 },
-    { axis: 'desire', label: 'DESIRE', start: 180, colour: '#b7a3cf', anchor: 'start', x: 16, valueY: 214, keyY: 228 },
-    { axis: 'tension', label: 'TENSION', start: 270, colour: '#d9a273', anchor: 'start', x: 16, valueY: 22, keyY: 34 },
+    { axis: 'trust', label: 'TRUST', start: 0, colour: '#8fb4d9', anchor: 'middle', x: 212, valueY: 20, keyY: 28 },
+    { axis: 'affection', label: 'AFFECTION', start: 90, colour: '#d99aaa', anchor: 'middle', x: 212, valueY: 207, keyY: 215 },
+    { axis: 'desire', label: 'DESIRE', start: 180, colour: '#b7a3cf', anchor: 'middle', x: 51, valueY: 231, keyY: 239 },
+    { axis: 'tension', label: 'TENSION', start: 270, colour: '#d9a273', anchor: 'middle', x: 21, valueY: 36, keyY: 44 },
 ]);
 
 // Point on a circle of radius r at an angle measured clockwise from 12 o'clock.

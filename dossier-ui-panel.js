@@ -105,7 +105,7 @@ export class DossierUiPanel {
             const index = SECTION_KEYS.indexOf(target.dataset.deltaSection);
             return this.setScreen(openSection(this.screen, index < 0 ? 0 : index));
         }
-        if (name === 'profile' || name === 'board') this.setScreen(showScreen(this.screen, name));
+        if (name === 'profile' || name === 'board' || name === 'library') this.setScreen(showScreen(this.screen, name));
     }
 
     // Esc order: the lightbox, then a blocking editor or tools overlay (they keep Esc), then back a screen, then close.

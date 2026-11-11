@@ -5,7 +5,7 @@ import { portraitMark } from './dossier-ui-html.js';
 import { replyHeaderLabel } from './dossier-ui-model.js';
 import { DossierUiPanel } from './dossier-ui-panel.js';
 import { boardHtml } from './dossier-ui-board.js';
-import { libraryHtml, libraryRows, librarySearchHtml, librarySignature } from './dossier-ui-library.js';
+import { libraryFootHtml, libraryHtml, libraryRows, librarySearchHtml, librarySignature } from './dossier-ui-library.js';
 import { dossierProfileHtml } from './dossier-ui-profile.js';
 import { SECTION_KEYS, createScreenState, isPhone, layoutFor, screenSignature } from './dossier-ui-screens.js';
 import { sectionScreenHtml } from './dossier-ui-sections.js';
@@ -60,8 +60,17 @@ export class DossierUiRender extends DossierUiPanel {
             this.screen = createScreenState();
         }
         const shown = this.renderScreen({ force: force || forceRail || forceDetail });
+        this.setHeaderTitle();
         panel?.setAttribute('data-has-results', shown ? 'true' : 'false');
         this.root.dispatchEvent?.(new CustomEvent('npc-state-delta:dossier-rendered', { bubbles: true }));
+    }
+
+    // The header names the screen as the mockup does: "Dossiers" in the library, the person's name everywhere else.
+    setHeaderTitle() {
+        const title = this.root.querySelector('.delta-brand strong');
+        const npc = this.screen.name === 'library' ? null : this.projection.npcs.find(item => item.id === this.screen.npcId);
+        const text = npc ? npc.name : 'Dossiers';
+        if (title && title.textContent !== text) title.textContent = text;
     }
 
     // The ⋯ menu sits outside the redrawn pane: with no chat, or while one loads, the last chat's buttons must not stay live.
@@ -80,7 +89,7 @@ export class DossierUiRender extends DossierUiPanel {
         if (!force && signature === this.lastScreenSignature) return rows.length;
         this.lastScreenSignature = signature;
         if (doc.dataset.screen !== 'library' || !doc.querySelector('[data-delta-library-list]')) {
-            doc.innerHTML = `<div class="delta-panes" data-layout="${isPhone() ? 'phone' : 'desktop'}" data-screen="library"><div data-pane="library" class="delta-library-screen">${librarySearchHtml(this.query)}<div data-delta-library-list></div></div></div>`;
+            doc.innerHTML = `<div class="delta-panes" data-layout="${isPhone() ? 'phone' : 'desktop'}" data-screen="library"><div data-pane="library" class="delta-library-screen">${librarySearchHtml(this.query, this.projection.index.length)}<div data-delta-library-list></div></div></div>`;
             doc.dataset.screen = 'library';
             doc.scrollTop = 0;
         }
@@ -109,20 +118,22 @@ export class DossierUiRender extends DossierUiPanel {
         const userName = this.userName = this.personaName();
         const refs = this.portraitRefs;
         const formPortraits = Object.fromEntries(Object.entries(npc.formPortraits || {}).map(([name, src]) => [name, portraitMark(src, refs)]));
-        const signature = `${screenSignature(screen)}|${phone}|${userName}|${JSON.stringify({ ...npc, portrait: portraitMark(npc.portrait, refs), formPortraits, updatedAt: undefined, reply: this.projection.reply })}`;
+        const signature = `${screenSignature(screen)}|${phone}|${userName}|${this.projection.index.length}|${JSON.stringify({ ...npc, portrait: portraitMark(npc.portrait, refs), formPortraits, updatedAt: undefined, reply: this.projection.reply })}`;
         if (!force && signature === this.lastScreenSignature) return 1;
         this.lastScreenSignature = signature;
         const key = `${screen.npcId}|${screen.name}`;
         const scroll = doc.dataset.screenKey === key ? doc.scrollTop : 0;
         const layout = layoutFor(screen, { phone });
-        const board = pane('board', boardHtml(npc, { refs, userName: userName || 'you' }));
+        // Faces in the Ties tile come from the people who have a dossier of their own.
+        const peers = new Map(this.projection.index.filter(row => row.portrait).map(row => [String(row.name).toLowerCase(), row.portrait]));
+        const board = pane('board', boardHtml(npc, { refs, userName: userName || 'you', peers }));
         const section = () => pane('section', sectionScreenHtml(SECTION_KEYS[screen.section], npc, { userName }));
         let html;
         if (screen.name === 'profile') html = pane('profile', dossierProfileHtml(npc, { layout: phone ? 'phone' : 'desktop', portraitRefs: refs }));
         else if (screen.name === 'section') html = phone ? section() : board + section();
         else html = board;
         this.root.querySelector('.delta-lightbox')?.remove();
-        doc.innerHTML = `<div class="delta-panes" data-layout="${layout.mode}" data-screen="${screen.name}">${html}</div>`;
+        doc.innerHTML = `<div class="delta-panes" data-layout="${layout.mode}" data-screen="${screen.name}">${html}</div>${libraryFootHtml(this.projection.index.length)}`;
         doc.dataset.screen = screen.name;
         doc.dataset.screenKey = key;
         refs.fill(doc);

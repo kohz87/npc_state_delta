@@ -29,20 +29,26 @@ export function libraryRows(index = [], { query = '', filter = 'all', keepId = '
 export function librarySignature(rows = [], { selectedId = '', refs = null } = {}) {
     return JSON.stringify((Array.isArray(rows) ? rows : []).map(row => [
         row.id, row.name, row.statusLabel, row.role, row.species, row.gender, row.bucket,
-        row.key === true, row.tone || '', portraitMark(row.portrait, refs), row.id === selectedId,
+        row.key === true, row.mood || '', row.tone || '', portraitMark(row.portrait, refs), row.id === selectedId,
     ]));
 }
 
-export function librarySearchHtml(query = '') {
-    return `<label class="delta-library-search"><span aria-hidden="true">⌕</span><input type="search" data-delta-library-search placeholder="Search people" aria-label="Search dossiers" autocomplete="off" value="${escapeHtml(String(query || ''))}"></label>`;
+// The bar under every other screen: it goes back to the library ("▸ DOSSIER LIBRARY · 10 NPCs").
+export function libraryFootHtml(count = 0) {
+    return `<button type="button" class="delta-library-foot" data-delta-screen="library">▸ Dossier library · ${Number(count) || 0} NPC${Number(count) === 1 ? '' : 's'}</button>`;
+}
+
+export function librarySearchHtml(query = '', count = 0) {
+    return `<label class="delta-library-search"><span aria-hidden="true">⌕</span><input type="search" data-delta-library-search placeholder="Search ${Number(count) > 0 ? `${Number(count)} people` : 'people'}…" aria-label="Search dossiers" autocomplete="off" value="${escapeHtml(String(query || ''))}"></label>`;
 }
 
 export function libraryFaceHtml(npc, { selected = false, refs = null } = {}) {
     const id = escapeHtml(npc.id);
     const line = [npc.role || npc.species].filter(Boolean).join(' · ') || 'Details pending';
-    const state = [npc.key === true ? '★ key' : '', npc.statusLabel].filter(Boolean).join(' · ');
+    // The mood is what the person is like right now; an archived or dead dossier shows that instead.
+    const state = [npc.key === true ? '★ key' : '', npc.bucket === 'active' && npc.mood ? npc.mood : npc.statusLabel].filter(Boolean).join(' · ');
     return `<button type="button" class="delta-library-face${selected ? ' selected' : ''}" role="option" aria-selected="${selected}" data-npc-id="${id}" data-bucket="${escapeHtml(npc.bucket || '')}" data-tone="${escapeHtml(npc.tone || '')}" style="--rc:${faceRingVar(npc.tone)}">
-        ${portraitHtml(npc, 'delta-library-portrait', { alt: false, refs })}
+        <span class="delta-library-av">${portraitHtml(npc, 'delta-library-portrait', { alt: false, refs })}</span>
         <b>${escapeHtml(npc.name || 'Unnamed')}</b><span class="delta-library-meta">${escapeHtml(line)}</span><span class="delta-library-meta delta-library-state">${escapeHtml(state)}</span>
     </button>`;
 }
