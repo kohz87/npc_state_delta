@@ -6,10 +6,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { styleSource } from './helpers/shipped-modules.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = fs.readFileSync(path.join(root, 'src/adapter/cast-ui/cast-render.js'), 'utf8');
-const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
+const css = styleSource();
 
 test('World → Here draws the present card without meters, and no side copy under it', () => {
     assert.match(source, /const world = track === false;/);

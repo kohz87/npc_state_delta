@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { styleSource } from './helpers/shipped-modules.js';
 
 test('portrait prompt workflow uses a footer Copy Prompt action and preserves non-empty combined text', () => {
     const source = fs.readFileSync(new URL('../portrait-tools.js', import.meta.url), 'utf8');
@@ -29,7 +30,7 @@ test('portrait copying lazy-loads SillyTavern host utility and exposes a selecte
 
 test('settings booleans use CSS-only row status pills with grey and green dots', () => {
     const script = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
-    const source = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    const source = styleSource();
     assert.doesNotMatch(script, /function enhanceSettingsToggles\(/, 'startup must not mutate checkbox sibling DOM');
     assert.doesNotMatch(script, /insertAdjacentElement\('afterend'/, 'startup must not inject toggle siblings from the global observer');
     assert.doesNotMatch(script + source, /delta-toggle-native|delta-toggle-pill|delta-toggle-label/, 'runtime toggle enhancer classes must remain absent');

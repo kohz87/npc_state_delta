@@ -4,12 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { styleSource } from './helpers/shipped-modules.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const index = runtimeSource();
 const core = fs.readFileSync(path.join(root, 'core.js'), 'utf8');
-const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
+const css = styleSource();
 
 function functionBody(source, signature, nextSignature) {
     const start = source.indexOf(signature);
