@@ -414,6 +414,22 @@ test('notes host: npc.meet gives a scan-admitted person an entry with the dossie
     assert.deepEqual(s.host.store.problems(), []);
 });
 
+test('notes host: npc.meet gives a scan-admitted person with no temperament words a mood at rest (0/0/0) and a pull entry, once', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.adapter.meet({ name: 'Corren', personality: 'quiet', about: 'a clerk' });
+    const slice = () => s.host.head().domains.npc;
+    const mood = slice().npcs.corren.mood;
+    assert.ok(mood && mood.v === 0 && mood.a === 0 && mood.d === 0, 'a mood with all three fields at rest');
+    assert.deepEqual(validateNpcSlice(slice()), []);
+    await s.say(['~ npc Oren | trust: +1']);
+    assert.ok(slice().npcs.corren.mood, 'the tick keeps stepping it');
+    const live = JSON.stringify(slice());
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(slice()), live, 'rebuild equals live');
+});
+
 test('notes host: npc.meet takes the reply the scan read (as npc.adjust does); rebuild equals live', async () => {
     const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
     await s.setDay(1);
