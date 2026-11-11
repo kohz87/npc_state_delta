@@ -80,11 +80,10 @@ test('mobile and tablet dossier is top-anchored to the full dynamic viewport wit
     assert.match(source, /#\$\{ROOT_ID\} \.delta-close\s*\{[\s\S]*min-width:\s*44px;[\s\S]*min-height:\s*44px;/);
 });
 
-test('settings stay under Extensions and the duplicate document-header Edit button is removed', () => {
+test('settings stay under Extensions and the old document-header Edit button is gone with the document header', () => {
     assert.match(source, /querySelectorAll\('\.delta-open-settings'\)/);
-    assert.match(source, /querySelectorAll\('\.delta-document-head > \.delta-edit'\)/);
+    assert.doesNotMatch(source, /delta-document-head/, 'the one-page document header no longer exists; Edit lives in the header menu');
     assert.match(source, /\.delta-open-settings \{ display: none !important; \}/);
-    assert.match(source, /\.delta-document-head > \.delta-edit \{ display: none !important; \}/);
     assert.doesNotMatch(source, /openSettings\s*\(/);
 });
 

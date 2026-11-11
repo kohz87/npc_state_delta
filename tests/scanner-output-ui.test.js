@@ -85,7 +85,6 @@ test('scanner output UI mounts into the Scanning slot, leaves panel styling to s
     assert.match(css, /\.delta-settings-maintenance-actions \{ display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
     assert.match(css, /\.npc-state-delta-tuning-actions \{ display: flex; flex-wrap: wrap;/);
     assert.match(css, /@container npc-delta-settings \(max-width: 500px\)/);
-    assert.match(source, /delta-cast-card[^}]*height:168px/s);
-    assert.match(source, /@media\(max-width:620px\)[\s\S]*height:150px/);
+    assert.doesNotMatch(source, /delta-cast-card|delta-library|injectStyles/, 'the cast rail is gone, so is its card sizing');
     assert.match(source, /roleplay or image-generation limits/);
 });

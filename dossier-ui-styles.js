@@ -51,34 +51,20 @@ export const STYLES = `
 #${ROOT_ID} .delta-brand strong { font-size:1.03rem; white-space:nowrap; }
 #${ROOT_ID} .delta-kicker { font-size:.67rem; line-height:1.2; letter-spacing:.14em; text-transform:uppercase; color:var(--delta-accent); opacity:.82; }
 #${ROOT_ID} .delta-chat-state { display:inline-flex; padding:4px 9px; border:1px solid rgba(255,255,255,.1); border-radius:999px; color:var(--delta-muted); background:rgba(0,0,0,.16); font-size:.74rem; }
-#${ROOT_ID} .delta-btn, #${ROOT_ID} .delta-filter {
+#${ROOT_ID} .delta-btn {
   appearance:none; min-height:35px; padding:6px 11px; border:1px solid var(--delta-line); border-radius:8px;
   color:var(--delta-text); background:rgba(255,255,255,.055); box-shadow:none; cursor:pointer;
 }
-#${ROOT_ID} .delta-btn:hover, #${ROOT_ID} .delta-filter:hover { background:rgba(216,188,120,.12); border-color:var(--delta-line-strong); }
+#${ROOT_ID} .delta-btn:hover { background:rgba(216,188,120,.12); border-color:var(--delta-line-strong); }
 #${ROOT_ID} .delta-primary { color:#201a0f; background:var(--delta-accent); border-color:var(--delta-accent); font-weight:700; }
 #${ROOT_ID} .delta-primary:hover { color:#151109; background:var(--delta-accent-soft); border-color:var(--delta-accent-soft); }
 #${ROOT_ID} .delta-notice { flex:0 0 auto; padding:8px 14px; border-bottom:1px solid var(--delta-line); background:rgba(115,86,35,.26); }
 #${ROOT_ID} .delta-panel-body { flex:1 1 auto; min-height:0; overflow:hidden; }
-#${ROOT_ID} .delta-library { height:100%; min-height:0; display:grid; grid-template-rows:minmax(0,1fr) 158px; overflow:hidden; }
 #${ROOT_ID} .delta-stage, #${ROOT_ID} .delta-spread { min-height:0; overflow:hidden; }
-#${ROOT_ID} .delta-spread { height:100%; display:grid; grid-template-columns:minmax(310px,36%) minmax(0,1fr); }
-#${ROOT_ID} .delta-hero { min-width:0; min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto; overflow:hidden; border-right:1px solid rgba(218,193,148,.16); background:rgba(0,0,0,.24); }
-#${ROOT_ID} .delta-hero-media { position:relative; min-height:0; overflow:hidden; background:rgba(0,0,0,.28); }
-#${ROOT_ID} .delta-hero-portrait { position:absolute; inset:0; width:100%; height:100%; display:block; object-fit:cover; object-position:center 18%; }
+#${ROOT_ID} .delta-stage { height:100%; }
+#${ROOT_ID} .delta-spread { height:100%; display:grid; grid-template-columns:minmax(0,1fr); }
 #${ROOT_ID} .delta-portrait-placeholder { display:grid; place-items:center; background:radial-gradient(circle at 50% 30%,rgba(216,188,120,.17),rgba(0,0,0,.22)); color:var(--delta-accent); font-family:Georgia,"Times New Roman",serif; }
-#${ROOT_ID} .delta-hero-portrait.delta-portrait-placeholder { position:absolute; inset:0; width:100%; height:100%; }
-#${ROOT_ID} .delta-hero-portrait.delta-portrait-placeholder span { font-size:clamp(4rem,8vw,7rem); opacity:.68; }
-#${ROOT_ID} .delta-hero-caption { position:absolute; z-index:2; left:0; right:0; bottom:0; padding:100px 24px 22px; background:linear-gradient(to bottom,rgba(5,6,8,0),rgba(5,6,8,.62) 43%,rgba(5,6,8,.94) 100%); color:#f4f1e9; }
-#${ROOT_ID} .delta-hero-caption h2 { margin:6px 0 5px; color:#fff4d7; font:700 clamp(1.7rem,2.4vw,2.2rem)/1.12 Georgia,"Times New Roman",serif; }
-#${ROOT_ID} .delta-hero-caption p { margin:0; max-width:40ch; color:rgba(244,241,233,.84); }
-#${ROOT_ID} .delta-hero-actions { display:grid; padding:9px; border-top:1px solid rgba(218,193,148,.12); background:color-mix(in srgb,var(--delta-bg) 90%,black 10%); }
-#${ROOT_ID} .delta-hero-empty { height:100%; min-height:250px; display:grid; place-items:center; align-content:center; gap:8px; color:var(--delta-muted); }
-#${ROOT_ID} .delta-hero-empty span { font-size:3rem; color:var(--delta-accent); }
-#${ROOT_ID} .delta-document { min-width:0; min-height:0; overflow:auto; padding:22px clamp(18px,2.2vw,30px) 34px; scrollbar-color:rgba(218,193,148,.35) transparent; }
-#${ROOT_ID} .delta-document-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:15px; padding-bottom:12px; border-bottom:1px solid var(--delta-line); }
-#${ROOT_ID} .delta-document-head h2 { margin:3px 0 4px; font:700 1.65rem/1.15 Georgia,"Times New Roman",serif; color:var(--delta-accent-soft); }
-#${ROOT_ID} .delta-document-head p { margin:0; }
+#${ROOT_ID} .delta-document { min-width:0; min-height:0; overflow:auto; padding:0; overscroll-behavior:contain; scrollbar-color:rgba(218,193,148,.35) transparent; }
 #${ROOT_ID} .delta-section { margin:0 0 14px; padding:14px 15px; border:1px solid var(--ss-border, rgba(218,193,148,.14)); border-radius:var(--ss-radius-l, 10px); background:var(--delta-surface); }
 #${ROOT_ID} .delta-panel.ss-cards { margin:0; gap:0; }
 #${ROOT_ID} .delta-panel.ss-cards {
@@ -148,25 +134,6 @@ export const STYLES = `
 #${ROOT_ID} .delta-away ol { margin:0 0 6px; padding-left:18px; display:grid; gap:3px; }
 #${ROOT_ID} .delta-away .delta-away-note { margin:6px 0 0; font-size:.76rem; }
 #${ROOT_ID} .delta-status-dead { color:#efb8b8; background:rgba(111,54,60,.28); border-color:rgba(207,118,126,.28); }
-#${ROOT_ID} .delta-cast { min-height:0; overflow:hidden; display:grid; grid-template-rows:auto minmax(0,1fr); border-top:1px solid var(--delta-line); background:color-mix(in srgb,var(--delta-bg) 92%,black 8%); }
-#${ROOT_ID} .delta-cast-tools { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px 7px; border-bottom:1px solid rgba(218,193,148,.11); }
-#${ROOT_ID} .delta-search-label { flex:1 1 360px; max-width:470px; }
-#${ROOT_ID} .delta-search { width:100%; min-height:34px; margin:0; padding:6px 10px; color:var(--delta-text); background:rgba(0,0,0,.24); border:1px solid var(--delta-line); border-radius:8px; box-shadow:none; }
-#${ROOT_ID} .delta-search::placeholder { color:var(--delta-muted); opacity:.75; }
-#${ROOT_ID} .delta-filters { display:flex; flex-wrap:wrap; gap:5px; }
-#${ROOT_ID} .delta-filter { min-height:30px; padding:4px 8px; color:var(--delta-muted); background:transparent; border-color:transparent; font-size:.75rem; }
-#${ROOT_ID} .delta-filter.active { color:var(--delta-accent-soft); background:rgba(216,188,120,.09); border-color:var(--delta-line); }
-#${ROOT_ID} .delta-filter span { opacity:.7; }
-#${ROOT_ID} .delta-cast-list { min-width:0; min-height:0; overflow-x:auto; overflow-y:hidden; display:flex; gap:7px; padding:8px 10px 10px; scrollbar-color:rgba(218,193,148,.35) transparent; }
-#${ROOT_ID} .delta-cast-card { appearance:none; flex:0 0 220px; min-width:0; display:grid; grid-template-columns:52px minmax(0,1fr); align-items:center; gap:9px; padding:7px; text-align:left; color:var(--delta-text); background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.075); border-radius:10px; box-shadow:none; cursor:pointer; }
-#${ROOT_ID} .delta-cast-card:hover { background:rgba(216,188,120,.08); border-color:var(--delta-line); }
-#${ROOT_ID} .delta-cast-card.selected { background:rgba(216,188,120,.12); border-color:var(--delta-line-strong); }
-#${ROOT_ID} .delta-cast-portrait { width:52px; height:62px; object-fit:cover; object-position:center 20%; border-radius:8px; border:1px solid rgba(255,255,255,.1); background:rgba(0,0,0,.22); }
-#${ROOT_ID} .delta-cast-portrait.delta-portrait-placeholder span { font:700 1.55rem/1 Georgia,serif; }
-#${ROOT_ID} .delta-cast-copy { min-width:0; display:grid; gap:2px; }
-#${ROOT_ID} .delta-cast-copy b, #${ROOT_ID} .delta-cast-copy small { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#${ROOT_ID} .delta-cast-copy small { color:var(--delta-muted); font-size:.7rem; }
-#${ROOT_ID} .delta-cast-copy .delta-status { margin-top:2px; }
 #${ROOT_ID} .delta-no-results { flex:1 1 auto; min-width:260px; display:grid; place-items:center; align-content:center; gap:3px; color:var(--delta-muted); text-align:center; }
 #${ROOT_ID} .delta-no-results b { color:var(--delta-text); }
 #${ROOT_ID} .delta-empty, #${ROOT_ID} .delta-document-empty { height:100%; display:grid; place-items:center; align-content:center; gap:10px; padding:28px; text-align:center; color:var(--delta-muted); }
@@ -174,10 +141,6 @@ export const STYLES = `
 #${ROOT_ID} .delta-empty p, #${ROOT_ID} .delta-document-empty p { margin:0; max-width:54ch; }
 #${ROOT_ID} .delta-empty-mark { display:grid; place-items:center; width:64px; height:64px; border:1px solid var(--delta-line-strong); border-radius:18px; color:var(--delta-accent); font:700 2rem/1 Georgia,serif; background:rgba(216,188,120,.07); }
 #${ROOT_ID} .delta-error-copy { color:var(--delta-danger); }
-#${ROOT_ID} .delta-section-nav { position:sticky; top:-22px; z-index:3; display:flex; gap:6px; overflow-x:auto; margin:-26px 0 12px; padding:30px 0 8px; background-color:var(--delta-floor); background-image:linear-gradient(var(--delta-bg),var(--delta-bg)); scrollbar-width:none; }
-#${ROOT_ID} .delta-section-nav::-webkit-scrollbar { display:none; }
-/* The bar reaches up over the panel's padding (its negative margin), which is right as the first child but pulled it over the cast box that now comes before it: after the box the bar starts where the box ends (its 10px margin cancels the -10px; the 30px padding is the gap, and stays the cover once the bar is stuck). */
-#${ROOT_ID} .delta-cast-from + .delta-section-nav { margin-top:-10px; }
 #${ROOT_ID} .delta-section .delta-rel-grid + p { margin-top:12px; }
 #${ROOT_ID} .delta-section-jump { appearance:none; flex:0 0 auto; min-height:30px; padding:4px 10px; border:1px solid rgba(218,193,148,.18); border-radius:999px; color:var(--delta-muted); background:rgba(255,255,255,.03); font-size:.74rem; cursor:pointer; }
 #${ROOT_ID} .delta-section-jump:hover { color:var(--delta-accent-soft); border-color:var(--delta-line-strong); background:rgba(216,188,120,.09); }
@@ -209,9 +172,6 @@ export const STYLES = `
 #${ROOT_ID} .delta-form-portrait-thumb { width:64px; height:82px; border-radius:8px; object-fit:cover; object-position:center 18%; border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.25); }
 #${ROOT_ID} .delta-form-portrait-empty { display:grid; place-items:center; color:var(--delta-muted); font-size:1.4rem; border-style:dashed; }
 #${ROOT_ID} .delta-form-portrait-button { margin-top:7px; min-height:28px; padding:3px 9px; font-size:.74rem; }
-#${ROOT_ID} .delta-portrait-expand { position:absolute; z-index:3; top:10px; right:10px; display:grid; place-items:center; width:34px; height:34px; padding:0; border:1px solid rgba(255,255,255,.22); border-radius:9px; color:#fff4d7; background:rgba(5,6,8,.52); backdrop-filter:blur(3px); font-size:1.05rem; cursor:pointer; opacity:.78; }
-#${ROOT_ID} .delta-portrait-expand:hover { opacity:1; background:rgba(5,6,8,.72); }
-#${ROOT_ID} .delta-hero-media img.delta-hero-portrait { cursor:zoom-in; }
 #${ROOT_ID} .delta-lightbox { position:absolute; inset:0; z-index:40; display:grid; grid-template-rows:minmax(0,1fr); place-items:center; padding:18px 18px 64px; background:rgba(3,4,6,.93); cursor:zoom-out; }
 #${ROOT_ID} .delta-lightbox img { min-height:0; max-width:100%; max-height:100%; object-fit:contain; border-radius:8px; box-shadow:0 18px 60px rgba(0,0,0,.6); cursor:default; }
 #${ROOT_ID} .delta-lightbox-close { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); }
@@ -221,22 +181,12 @@ export const STYLES = `
 }
 @media (max-width: 900px) {
   #${ROOT_ID} .delta-panel { width:calc(100vw / var(--ss-zoomed, 1)); height:calc(100dvh / var(--ss-zoomed, 1)); border-radius:0; border-left:0; border-right:0; }
-  #${ROOT_ID} .delta-library { grid-template-rows:minmax(0,1fr) 172px; }
-  #${ROOT_ID} .delta-spread { grid-template-columns:minmax(250px,38%) minmax(0,1fr); }
-  #${ROOT_ID} .delta-cast-tools { align-items:stretch; flex-direction:column; }
-  #${ROOT_ID} .delta-search-label { flex:0 0 auto; max-width:none; }
 }
 @media (max-width: 650px) {
   #${ROOT_ID} .delta-launcher { right:10px; bottom:66px; }
   #${ROOT_ID} .delta-brand .delta-kicker, #${ROOT_ID} .delta-chat-state { display:none; }
   #${ROOT_ID} .delta-topbar { padding-left:10px; }
-  #${ROOT_ID} .delta-spread { display:block; overflow:auto; }
-  #${ROOT_ID} .delta-hero { min-height:max(330px,min(62dvh,540px)); border-right:0; border-bottom:1px solid rgba(218,193,148,.16); }
-  #${ROOT_ID} .delta-document { overflow:visible; }
-  #${ROOT_ID} .delta-section-nav { top:0; margin-top:-4px; padding-top:8px; }
-  #${ROOT_ID} .delta-cast-from + .delta-section-nav { margin-top:-4px; }
   #${ROOT_ID} .delta-current-grid, #${ROOT_ID} .delta-prose-grid, #${ROOT_ID} .delta-two-column, #${ROOT_ID} .delta-rel-grid { grid-template-columns:1fr; }
   #${ROOT_ID} .delta-prose-grid .delta-wide { grid-column:auto; }
-  #${ROOT_ID} .delta-cast-card { flex-basis:190px; }
 }
 `;

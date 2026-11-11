@@ -966,9 +966,9 @@ test('secrets: the scanner prompt asks for layered notes and watches story event
 
 test('secrets: the dossier\'s Secrets section follows Background / History, with a Secrets chip, and only for a dossier with notes', () => {
     const ui = dossierUiSource();
-    assert.match(ui, /<h3>Background \/ History\$\{changedMark\(selected, 'background'\)\}<\/h3>[^`]*?<\/section>\s*\$\{v2SecretsHtml\(selected\.v2Meters\)\}/, 'right after History');
-    assert.match(ui, /\$\{sectionNavHtml\(Boolean\(selected\.v2Meters\?\.secrets\?\.length\)\)\}/);
-    assert.match(ui, /secrets \? \[\.\.\.DOSSIER_SECTIONS, \['secrets', 'Secrets'\]\] : DOSSIER_SECTIONS/, 'the chip comes after History');
+    assert.match(ui, /SECTION_KEYS = Object\.freeze\(\['now', 'with', 'ties', 'past', 'secrets'\]\)/, 'Secrets is the fifth and last section');
+    assert.match(ui, /\['secrets', secretsSectionHtml\]/);
+    assert.match(ui, /ring: \{ value: secrets\.total/, 'the board\'s Secrets tile shows opened / total');
     const notes = [{ state: 'open', title: 'Her past', text: SECRET, pill: 'Opened · Trust 20' }, { state: 'hidden', opens: 'Opens with the story', width: 61 }, { state: 'bogus' }, null];
     const state = { npcs: [{ id: 'npc_a', name: 'Ada' }, { id: 'npc_b', name: 'Bo' }], meterViews: { npc_a: { bars: [], secrets: notes }, npc_b: { bars: [] } } };
     const [ada, bo] = projectDossierState(state).npcs;

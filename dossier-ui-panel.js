@@ -3,6 +3,9 @@ import { escapeHtml } from './src/util/html.js';
 import { OBSERVER_RETRY_LIMIT, OBSERVER_RETRY_MS, ROOT_ID, SETTINGS_ID, STYLE_ID } from './dossier-ui-constants.js';
 import { createPortraitRefs } from './dossier-ui-html.js';
 import { STYLES } from './dossier-ui-styles.js';
+import { BOARD_STYLES } from './dossier-ui-styles-board.js';
+import { SECTIONS_STYLES } from './dossier-ui-styles-sections.js';
+import { bindSwipe, createScreenState, phoneQuery, escapeAction, goBack, normalizeSection, openNpc, openSection, SECTION_KEYS, setSection, showScreen, stepSection } from './dossier-ui-screens.js';
 
 export class DossierUiPanel {
     constructor(api) {
@@ -12,12 +15,12 @@ export class DossierUiPanel {
         this.query = '';
         this.filter = 'all';
         this.selectedNpcId = '';
+        this.screen = createScreenState();
+        this.userName = '';
         this.pendingNpcId = '';
         this.projection = null;
         this.lastChatKey = '';
-        this.lastRailSignature = '';
-        this.lastDetailSignature = '';
-        this.lastHeroSignature = '';
+        this.lastScreenSignature = '';
         this.dirtyWhileClosed = true;
         this.refreshQueued = false;
         this.legacyObserver = null;
@@ -53,7 +56,10 @@ export class DossierUiPanel {
         if (this.observerRetryTimer) clearInterval(this.observerRetryTimer);
         this.observerRetryTimer = null;
         document.removeEventListener?.('keydown', this.boundEscape);
+        document.removeEventListener?.('click', this.boundOutside);
+        phoneQuery(window)?.removeEventListener?.('change', this.boundPhoneChange);
         window.removeEventListener?.('focus', this.boundFocus);
+        this.unbindSwipe?.();
         this.portraitRefs.release();
         this.root?.remove?.();
         this.root = null;
@@ -69,31 +75,47 @@ export class DossierUiPanel {
                     <div class="delta-brand"><span class="delta-kicker">NPC DOSSIER</span><strong>NPC State Delta</strong><span class="delta-chat-state"></span></div>
                     <div class="delta-top-actions">
                         <button type="button" class="delta-btn delta-open-settings">Settings</button>
+                        <span class="delta-header-slot"></span>
                         <button type="button" class="delta-btn delta-close" aria-label="Close NPC dossiers">Close</button>
                     </div>
                 </header>
                 <div class="delta-notice" hidden></div>
                 <div class="delta-panel-body">
                     <div class="delta-empty" hidden></div>
-                    <div class="delta-library" hidden>
-                        <div class="delta-stage">
-                            <div class="delta-spread">
-                                <aside class="delta-hero"></aside>
-                                <main class="delta-document" tabindex="-1"></main>
-                            </div>
+                    <div class="delta-stage" hidden>
+                        <div class="delta-spread">
+                            <main class="delta-document" tabindex="-1" aria-label="NPC dossiers"></main>
                         </div>
-                        <section class="delta-cast" aria-label="NPC cast">
-                            <div class="delta-cast-tools">
-                                <label class="delta-search-label"><span class="sr-only">Search NPC dossiers</span><input type="search" class="delta-search" placeholder="Search cast, role, species, gender, location…" autocomplete="off"></label>
-                                <div class="delta-filters" role="group" aria-label="Dossier filters">
-                                    ${['all', 'active', 'archived'].map(key => `<button type="button" class="delta-filter${key === 'all' ? ' active' : ''}" data-filter="${key}" aria-pressed="${key === 'all'}">${key.charAt(0).toUpperCase() + key.slice(1)} <span data-count="${key}">0</span></button>`).join('')}
-                                </div>
-                            </div>
-                            <div class="delta-cast-list" role="listbox" aria-label="NPC dossiers"></div>
-                        </section>
                     </div>
                 </div>
             </section>`;
+    }
+
+    // Moves to another screen (the state machine is dossier-ui-screens.js) and draws it from the projection.
+    setScreen(next) {
+        if (!next || next === this.screen) return;
+        this.screen = next;
+        this.selectedNpcId = next.npcId || '';
+        this.renderFromProjection({ force: true });
+    }
+
+    onScreenClick(target) {
+        const name = target.dataset.deltaScreen;
+        if (name === 'section') {
+            const index = SECTION_KEYS.indexOf(target.dataset.deltaSection);
+            return this.setScreen(openSection(this.screen, index < 0 ? 0 : index));
+        }
+        if (name === 'profile' || name === 'board') this.setScreen(showScreen(this.screen, name));
+    }
+
+    // Esc order: the lightbox, then a blocking editor or tools overlay (they keep Esc), then back a screen, then close.
+    goBackOrClose() {
+        const uiStatus = this.safeUiStatus();
+        const blocked = Boolean(uiStatus?.editorMounted || uiStatus?.portraitGeneratorOpen || document.getElementById('npc_state_delta_tools_overlay'));
+        const action = escapeAction(this.screen, { blocked });
+        if (action === 'back') this.setScreen(goBack(this.screen));
+        else if (action === 'close') this.close();
+        return action;
     }
 
     bindEvents() {
@@ -102,40 +124,45 @@ export class DossierUiPanel {
             if (launcher) return void this.open();
             if (event.target.closest('.delta-close')) return void this.close();
             if (event.target.closest('.delta-open-settings')) return void this.openSettings();
-            const filter = event.target.closest('.delta-filter')?.dataset?.filter;
-            if (filter) {
-                this.filter = filter;
-                this.renderFromProjection({ forceRail: true, forceDetail: true });
-                return;
-            }
-            const cast = event.target.closest('.delta-cast-card');
-            if (cast?.dataset?.npcId) {
-                this.selectedNpcId = cast.dataset.npcId;
-                this.renderFromProjection({ forceRail: true, forceDetail: true });
-                return;
-            }
             if (event.target.closest('.delta-lightbox-close') || event.target.classList?.contains('delta-lightbox')) return void this.closeLightbox();
-            if (event.target.closest('.delta-portrait-expand') || event.target.closest('.delta-hero-media img.delta-hero-portrait')) return void this.openLightbox();
-            const jump = event.target.closest('.delta-section-jump')?.dataset?.deltaJump;
-            if (jump) {
-                // UI 4c: the document is the only thing that moves (a phone never scrolls the window or the page behind it).
-                const scroller = this.root.querySelector('.delta-document');
-                const target = scroller?.querySelector(`[data-delta-section="${CSS.escape(jump)}"]`);
-                if (scroller && target) {
-                    const cover = scroller.querySelector('.delta-section-nav')?.getBoundingClientRect().height ?? 0;
-                    scroller.scrollTop += target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - cover;
-                }
-                return;
-            }
+            if (event.target.closest('img.delta-profile-image')) return void this.openLightbox();
+            const face = event.target.closest('.delta-library-face')?.dataset?.npcId;
+            if (face) return void this.setScreen(openNpc(this.screen, face));
+            const screen = event.target.closest('[data-delta-screen]');
+            if (screen) return void this.onScreenClick(screen);
+            const step = event.target.closest('[data-delta-section-step]');
+            if (step) return void this.setScreen(stepSection(this.screen, Number(step.dataset.deltaSectionStep) || 0));
+            const go = event.target.closest('[data-delta-section-go]')?.dataset?.deltaSectionGo;
+            if (go) return void this.setScreen(setSection(this.screen, normalizeSection(SECTION_KEYS.indexOf(go))));
             const pin = event.target.closest('.delta-cast-pin');
             if (pin) { void this.pinKeyPerson(pin); return; }
             const edit = event.target.closest('.delta-edit');
-            if (edit) this.openEditor(edit.dataset.npcId || this.selectedNpcId);
+            if (edit) {
+                edit.closest('details.delta-header-menu')?.removeAttribute('open');
+                this.openEditor(edit.dataset.npcId || this.selectedNpcId);
+            }
         });
-        this.root.querySelector('.delta-search')?.addEventListener('input', event => {
-            this.query = event.currentTarget.value || '';
-            this.renderFromProjection({ forceRail: true, forceDetail: true });
+        // The dial is a button made of a div: Enter and Space open the profile like a tap.
+        this.root.addEventListener('keydown', event => {
+            const target = event.target.closest?.('[data-delta-screen][role="button"]');
+            if (target && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); this.onScreenClick(target); }
         });
+        this.root.addEventListener('input', event => {
+            if (!event.target.matches?.('[data-delta-library-search]')) return;
+            this.query = event.target.value || '';
+            this.renderFromProjection({ force: true });
+        });
+        // A sideways swipe on a section screen goes to the next or previous section.
+        this.unbindSwipe = bindSwipe(this.root.querySelector('.delta-document'), step => this.setScreen(stepSection(this.screen, step)));
+        // The ⋯ menu closes on a tap outside it.
+        this.boundOutside = event => {
+            if (event.target.closest?.('.delta-header-menu')) return;
+            this.root?.querySelector('details.delta-header-menu[open]')?.removeAttribute('open');
+        };
+        document.addEventListener('click', this.boundOutside);
+        // One shared phone query: crossing the 650px line redraws the screen in the other layout.
+        this.boundPhoneChange = () => { if (this.panelOpen) this.renderFromProjection({ force: true }); };
+        phoneQuery(window)?.addEventListener?.('change', this.boundPhoneChange);
         document.addEventListener('keydown', this.boundEscape);
         window.addEventListener('focus', this.boundFocus);
     }
@@ -144,7 +171,7 @@ export class DossierUiPanel {
         if (document.getElementById(STYLE_ID)) return;
         const style = document.createElement('style');
         style.id = STYLE_ID;
-        style.textContent = STYLES;
+        style.textContent = STYLES + BOARD_STYLES + SECTIONS_STYLES;
         document.head.appendChild(style);
     }
 
@@ -228,7 +255,7 @@ export class DossierUiPanel {
         const overlay = this.root?.querySelector('.delta-lightbox');
         if (!overlay) return false;
         overlay.remove();
-        this.root.querySelector('.delta-portrait-expand')?.focus?.({ preventScroll: true });
+        this.root.querySelector('.delta-profile-back')?.focus?.({ preventScroll: true });
         return true;
     }
 
@@ -238,11 +265,7 @@ export class DossierUiPanel {
             this.closeLightbox();
             return;
         }
-        if (!this.panelOpen || event.key !== 'Escape' || event.defaultPrevented
-            || document.getElementById('npc_state_delta_tools_overlay')) return;
-        const uiStatus = this.safeUiStatus();
-        if (uiStatus?.editorMounted || uiStatus?.portraitGeneratorOpen) return;
-        event.preventDefault();
-        this.close();
+        if (!this.panelOpen || event.key !== 'Escape' || event.defaultPrevented) return;
+        if (this.goBackOrClose() !== 'none') event.preventDefault();
     }
 }

@@ -6,6 +6,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { normalizeScannerMaxOutputTokens } from './scanner-routing.js';
 import { normalizeRelationshipMapSettings } from './relationship-map-core.js';
+import { DOSSIER_SKIN_DEFAULT, normalizeDossierSkin } from './dossier-skin.js';
 import { DEFAULT_ALLOWANCE, normalizeAllowance, pacingDefaults } from './src/relationship-pacing.js';
 import { DEFAULT_RELATIONSHIP, DEFAULT_RELATIONSHIP_CAPS, DEFAULT_RELATIONSHIP_CRITERIA, DEFAULT_IMPACT_CRITERIA, DEFAULT_MEMORY_CRITERIA, DEFAULT_BEHAVIOR_CRITERIA, normalizeRelationshipBaseline, normalizeNpcAdmissionMode, DEFAULT_PORTRAIT_STYLE_POSITIVE, DEFAULT_PORTRAIT_STYLE_NEGATIVE, DEFAULT_PORTRAIT_COMPOSITION, PORTRAIT_STYLE_PROMPT_LIMIT, PORTRAIT_COMPOSITION_PROMPT_LIMIT, normalizePortraitPromptFormat, normalizeCustomFieldNames } from './core.js';
 import { normalizeSourceOfTruth } from './suite-handshake.js';
@@ -186,6 +187,7 @@ const DEFAULTS = Object.freeze({
     fullCastScanEveryTurn: false,
     scannerMaxOutputTokens: 0,
     relationshipMap: normalizeRelationshipMapSettings(),
+    dossierStyle: DOSSIER_SKIN_DEFAULT,
 });
 
 // Settings changes the reader or a recovery step makes are saved at once (ST's own 1 s debounce). The sidecar pointer that follows
@@ -338,6 +340,7 @@ export function getSettings() {
     assign('fullCastScanEveryTurn', settings.fullCastScanEveryTurn === true);
     assign('scannerMaxOutputTokens', normalizeScannerMaxOutputTokens(settings.scannerMaxOutputTokens));
     assign('relationshipMap', normalizeRelationshipMapSettings(settings.relationshipMap), sameJson);
+    assign('dossierStyle', normalizeDossierSkin(settings.dossierStyle));
     // The fantasy calendar (calendar-settings.js) is optional: absent means none; only a stored
     // object is a calendar.
     if (settings.calendarConfig !== undefined && (!settings.calendarConfig || typeof settings.calendarConfig !== 'object' || Array.isArray(settings.calendarConfig))) {

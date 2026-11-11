@@ -1,0 +1,91 @@
+/* NPC State Delta dossier surface: the profile screen (portrait with the four meter numbers, identity, appearance forms,
+   character, background). Markup only, built from the detail projection; the screens module draws it and fills portraits. */
+import { escapeHtml } from './src/util/html.js';
+import { plain } from './dossier-ui-model.js';
+import { appearanceFormsHtml, birthdayCard, changedMark, currentCard, identityLine, listHtml, portraitHtml, proseHtml } from './dossier-ui-html.js';
+
+const METER_LABELS = Object.freeze([['trust', 'T'], ['affection', 'A'], ['desire', 'D'], ['tension', 'Te']]);
+
+function signed(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '';
+    return `${number > 0 ? '+' : ''}${number}`;
+}
+
+// The four axes as short numbers under the name ("T +11 · A +10 · D +6 · Te +13"); empty when none is stored.
+export function profileMeterLine(npc = {}) {
+    const rel = npc?.relationship && typeof npc.relationship === 'object' ? npc.relationship : {};
+    return METER_LABELS
+        .map(([axis, short]) => (signed(rel[axis]) ? `${short} ${signed(rel[axis])}` : ''))
+        .filter(Boolean)
+        .join(' · ');
+}
+
+function block(key, title, body) {
+    return `<section class="delta-profile-block" data-delta-profile="${key}"><h3>${escapeHtml(title)}</h3>${body}</section>`;
+}
+
+function identityBody(npc) {
+    const aliases = Array.isArray(npc.aliases) ? npc.aliases.join(', ') : plain(npc.aliases);
+    const custom = (Array.isArray(npc.customFields) ? npc.customFields : [])
+        .map(([name, value]) => currentCard(name, value))
+        .join('');
+    return `<div class="delta-current-grid">`
+        + currentCard('Age', npc.age, 'Unknown', changedMark(npc, 'age'))
+        + currentCard('Looks', npc.apparentAge, 'Unknown', changedMark(npc, 'apparentAge'))
+        + currentCard('Home base', npc.homeBase, 'Unknown', changedMark(npc, 'homeBase'))
+        + currentCard('Known as', aliases)
+        + birthdayCard(npc)
+        + custom
+        + `</div>`;
+}
+
+function appearanceBody(npc, portraitRefs) {
+    if (!npc.appearanceModel || typeof npc.appearanceModel !== 'object') {
+        return '<p class="delta-muted">No appearance established yet.</p>';
+    }
+    return appearanceFormsHtml(npc, { portraitRefs });
+}
+
+function characterBody(npc) {
+    return `<h4>Personality${changedMark(npc, 'personality')}</h4>${proseHtml(npc.personality)}`
+        + `<h4>Speech${changedMark(npc, 'speech')}</h4>${proseHtml(npc.speech)}`
+        + `<h4>Behavioural levers${changedMark(npc, 'behaviorProfile')}</h4>${listHtml(npc.behaviorProfile)}`
+        + `<h4>Mannerisms${changedMark(npc, 'mannerisms')}</h4>${listHtml(npc.mannerisms)}`;
+}
+
+// The portrait fills the top (phone) or the left column (desktop). The back control goes to the board; the
+// screens module handles the click. Pictures travel by reference (portraitRefs.fill runs after the markup is in the page).
+function portraitBlock(npc, portraitRefs, desktop) {
+    const back = `<button type="button" class="delta-profile-back" data-delta-screen="board">‹ ${desktop ? 'Back' : 'Board'}</button>`;
+    const caption = desktop
+        ? `<div class="delta-profile-caption"><b>${escapeHtml(plain(npc.name, 'Unnamed NPC'))}</b>${profileMeterLine(npc) ? `<span>${escapeHtml(profileMeterLine(npc))}</span>` : ''}</div>`
+        : '';
+    const form = plain(npc.portraitForm);
+    const stale = npc.portraitAppearanceChanged
+        ? `<span class="delta-portrait-stale" title="The dossier appearance changed after this portrait was attached. Generate or upload a new portrait to match.">${escapeHtml(form && form !== npc.appearanceModel?.currentForm ? `Portrait shows the ${form} form` : 'Appearance changed since portrait')}</span>` : '';
+    return `<div class="delta-profile-portrait">${portraitHtml(npc, 'delta-profile-image', { refs: portraitRefs })}${stale}${back}${caption}</div>`;
+}
+
+function headBlock(npc, desktop) {
+    const line = `<p class="delta-profile-line">${escapeHtml(identityLine(npc))}</p>`;
+    return desktop
+        ? `<header class="delta-profile-head"><h2>Profile</h2>${line}</header>`
+        : `<header class="delta-profile-head"><h2>${escapeHtml(plain(npc.name, 'Unnamed NPC'))}</h2>${line}</header>`;
+}
+
+// The profile screen for one NPC. `layout` is 'phone' (full screen, one column) or 'desktop' (portrait left, the
+// details in two columns on the right). `portraitRefs` is the view's createPortraitRefs() instance.
+export function dossierProfileHtml(npc = {}, { layout = 'phone', portraitRefs = null } = {}) {
+    const desktop = layout === 'desktop';
+    const identity = block('identity', 'Identity', identityBody(npc));
+    const appearance = block('appearance', 'Appearance', appearanceBody(npc, portraitRefs));
+    const character = block('character', 'Character', characterBody(npc));
+    const background = block('background', 'Background', proseHtml(npc.background));
+    const body = desktop
+        ? `<div class="delta-profile-cols"><div class="delta-profile-col">${identity}${appearance}</div>`
+            + `<div class="delta-profile-col">${character}${background}</div></div>`
+        : `${identity}${appearance}${character}${background}`;
+    return `<div class="delta-profile delta-profile-${desktop ? 'desktop' : 'phone'}" data-delta-screen-body="profile">`
+        + `${portraitBlock(npc, portraitRefs, desktop)}<div class="delta-profile-sheet">${headBlock(npc, desktop)}${body}</div></div>`;
+}
