@@ -183,7 +183,7 @@ export function createCastSyncPart(rt, deps) {
             working.npcs = working.npcs.map(npc => (npc.id === next.id ? next : npc));
             given.push(next.id);
         }
-        if (!made.length && !given.length) return false;
+        if (!made.length && !given.length) { if (pictures.size) renderDossier(); return false; } // a same-file repair changes no state, but the blank picture is drawn again
         if (messageId >= 0 && made.length) commitBranchCheckpoint(working, messageId, 'cast-dossier');
         else if (messageId >= 0) commitBranchCheckpoint(working, messageId, 'cast-portrait');
         setChatState(key, working);

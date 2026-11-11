@@ -3573,3 +3573,125 @@ test('v0.2.12 hidden social graph affects salience but never leaks graph machine
     assert.match(injection, /Brina/);
     assert.doesNotMatch(injection, /socialGraph|unresolved|groupId|slot_|family_brina/i);
 });
+
+// ---- Dossiers that matter are archived, never auto-deleted by the stale pass ----
+import { applyStaleLifecycleAfterScan as staleAfterScan } from '../runtime-scan-stale.js';
+
+const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const awayNpc = (name, extra = {}) => ({ ...createNpcRecord(name), id: `npc_${name.toLowerCase()}`, lastSeenTurn: 1, ...extra });
+const staleRun = (npcs, options = {}) => applyStaleNpcLifecycle({ turn: 100, npcs }, { turn: 100, archiveAfter: 30, deleteAfter: 50, ...options });
+
+test('stale pass: a dossier that matters, away past the delete age, is archived with its portrait; an incidental one is deleted as before', () => {
+    const cases = {
+        portrait: awayNpc('Pia', { portrait: { dataUrl: PNG_1PX } }),
+        cast: awayNpc('Cas', { castFrom: { key: 'pack:cas' } }),
+        meter: awayNpc('Mel', { relationship: { ...createNpcRecord('x').relationship, trust: 2 } }),
+        director: awayNpc('Dir'),
+    };
+    const incidental = awayNpc('Inc');
+    const result = staleRun([...Object.values(cases), incidental], { keepIds: [cases.director.id] });
+    assert.deepEqual(result.removed.map(item => item.id), [incidental.id], 'only the incidental dossier is deleted');
+    for (const [label, npc] of Object.entries(cases)) {
+        const kept = result.state.npcs.find(item => item.id === npc.id);
+        assert.ok(kept, `${label}: kept`);
+        assert.equal(kept.archived, true, `${label}: archived`);
+        assert.equal(kept.archiveReason, 'stale');
+    }
+    assert.equal(result.state.npcs.find(item => item.id === cases.portrait.id).portrait.dataUrl, PNG_1PX, 'the portrait stays');
+    // An already stale-archived one that matters stays through later passes (no timed delete).
+    const again = staleRun(result.state.npcs.filter(npc => npc.id !== cases.director.id));
+    assert.equal(again.removed.length, 0, 'matter-bearing archives stay on later passes');
+});
+
+test('stale pass: a stale archive that matters is never timed out, and the director criterion needs the id', () => {
+    const kept = setNpcArchived(awayNpc('Cas', { castFrom: { key: 'pack:cas' } }), true, { reason: 'stale' });
+    assert.equal(staleRun([kept]).removed.length, 0);
+    const plain = setNpcArchived(awayNpc('Dir'), true, { reason: 'stale' });
+    assert.equal(staleRun([plain], { keepIds: [plain.id] }).removed.length, 0, 'key person / away: kept');
+    assert.equal(staleRun([plain]).removed.length, 1, 'not named by the director: deleted as before');
+});
+
+test('stale pass at the roster cap: archives what matters, deletes the incidental one first, and never deletes a protected dossier', () => {
+    const settings = { autoPruneStale: true, maxNpcs: 2, staleArchiveAfter: 30, staleDeleteAfter: 50 };
+    const heldA = awayNpc('Cas', { castFrom: { key: 'pack:cas' } });
+    const heldB = awayNpc('Pia', { portrait: { dataUrl: PNG_1PX } });
+    const onlyProtected = staleAfterScan({ turn: 100, npcs: [heldA, heldB] }, {}, '', settings, { onlyWhenAtCap: true });
+    assert.equal(onlyProtected.removed.length, 0);
+    assert.equal(onlyProtected.state.npcs.length, 2, 'the cap is never met by deleting a protected dossier');
+    assert.ok(onlyProtected.state.npcs.every(npc => npc.archived), 'they are archived, which frees the active slots for a new candidate');
+    const incidental = awayNpc('Inc');
+    const mixed = staleAfterScan({ turn: 100, npcs: [heldA, incidental] }, {}, '', settings, { onlyWhenAtCap: true });
+    assert.deepEqual(mixed.removed.map(item => item.id), [incidental.id]);
+    const recent = awayNpc('Rec', { lastSeenTurn: 99, castFrom: { key: 'pack:rec' } });
+    const nonStale = staleAfterScan({ turn: 100, npcs: [recent, { ...heldA, lastSeenTurn: 99 }] }, {}, '', settings, { onlyWhenAtCap: true });
+    assert.equal(nonStale.state.npcs.length, 2, 'only protected and recent: nothing is deleted, the cap simply holds (a new candidate waits)');
+});
+
+// ---- Keep dossiers, second round: form portraits, fail safe, starting-value meters, replay clock, snapshot size ----
+import { snapshotBranchState as snapshotOf } from '../branch-core.js';
+import { utf8Bytes as bytesOf } from '../branch-util.js';
+import { BRANCH_SNAPSHOT_MAX_BYTES as SNAPSHOT_MAX } from '../branch-constants.js';
+
+test('stale pass: a dossier with only a form portrait is archived, and its form image stays', () => {
+    const formOnly = awayNpc('Fay');
+    const state = { turn: 100, npcs: [formOnly, awayNpc('Inc')], formPortraitAssets: { [formOnly.id]: { wolf: { dataUrl: PNG_1PX } } } };
+    const result = applyStaleNpcLifecycle(state, { turn: 100, archiveAfter: 30, deleteAfter: 50 });
+    assert.deepEqual(result.removed.map(item => item.name), ['Inc']);
+    assert.equal(result.state.npcs.find(npc => npc.id === formOnly.id).archived, true);
+    assert.equal(result.state.formPortraitAssets[formOnly.id].wolf.dataUrl, PNG_1PX);
+});
+
+test('stale pass: with the host unreadable (noDelete) nothing is deleted, the stale ones are archived', () => {
+    const inc = awayNpc('Inc');
+    const archivedBefore = setNpcArchived(awayNpc('Old'), true, { reason: 'stale' });
+    const result = staleRun([inc, archivedBefore], { noDelete: true });
+    assert.equal(result.removed.length, 0);
+    assert.equal(result.state.npcs.length, 2);
+    assert.equal(result.state.npcs.find(npc => npc.id === inc.id).archived, true);
+    const viaScan = staleAfterScan({ turn: 100, npcs: [inc] }, {}, '', { autoPruneStale: true, maxNpcs: 40, staleArchiveAfter: 30, staleDeleteAfter: 50 }, { noDelete: true });
+    assert.equal(viaScan.removed.length, 0);
+});
+
+test('stale pass: a meter equal to a non-zero starting value does not protect; one off it does', () => {
+    const baseline = { trust: 10, affection: 5, desire: 0, tension: 0 };
+    const rel = { ...createNpcRecord('x').relationship, trust: 10, affection: 5 };
+    const fresh = awayNpc('Fre', { relationship: rel });
+    const moved = awayNpc('Mov', { relationship: { ...rel, trust: 11 } });
+    const result = staleRun([fresh, moved], { baseline });
+    assert.deepEqual(result.removed.map(item => item.name), ['Fre']);
+    assert.equal(result.state.npcs.find(npc => npc.id === moved.id).archived, true);
+});
+
+test('stale pass: the archive timestamps are the supplied clock, so a replay stores the same bytes as the live scan', () => {
+    const npcs = [awayNpc('Cas', { castFrom: { key: 'pack:cas' } }), awayNpc('Mid', { portrait: { dataUrl: PNG_1PX }, lastSeenTurn: 60 })];
+    const run = () => staleRun(npcs, { now: 1234567 });
+    const first = run();
+    assert.equal(JSON.stringify(first.state), JSON.stringify(run().state));
+    assert.ok(first.state.npcs.every(npc => npc.archivedAt === 1234567 && npc.updatedAt === 1234567));
+    assert.equal(setNpcArchived(awayNpc('Z'), true, { reason: 'stale', now: 9 }).archivedAt, 9);
+});
+
+test('stale pass: stored memories alone do not protect a dossier', () => {
+    const talky = awayNpc('Tal', { memories: ['Shared a secret.', 'Owes a favour.'] });
+    const result = staleRun([talky, awayNpc('Cas', { castFrom: { key: 'pack:cas' } })]);
+    assert.deepEqual(result.removed.map(item => item.id), [talky.id]);
+});
+
+test('stale pass: there is no bound, a 200th protected archive is not deleted, and the snapshot size is measured', () => {
+    const many = Array.from({ length: 200 }, (_, i) => awayNpc(`N${i}`, { castFrom: { key: `pack:n${i}` }, lastSeenTurn: i % 20 }));
+    const kept = staleRun(many).state.npcs;
+    assert.equal(kept.length, 200, 'all 200 stay');
+    assert.ok(kept.every(npc => npc.archived));
+    assert.equal(staleRun(kept).removed.length, 0, 'later passes keep them too');
+    const bytes = bytesOf(snapshotOf({ npcs: kept }));
+    assert.ok(bytes > 0 && SNAPSHOT_MAX > 0, `200 small archived records: ${bytes} of ${SNAPSHOT_MAX} bytes`);
+});
+
+test('stale pass: with Story Director absent (no key list) incidental dossiers are deleted; a real read failure deletes nothing', () => {
+    const inc = awayNpc('Inc');
+    const cas = awayNpc('Cas', { castFrom: { key: 'pack:cas' } });
+    const absent = staleAfterScan({ turn: 100, npcs: [inc, cas] }, {}, '', { autoPruneStale: true, maxNpcs: 40, staleArchiveAfter: 30, staleDeleteAfter: 50 }, { keepIds: [], noDelete: false });
+    assert.deepEqual(absent.removed.map(item => item.id), [inc.id]);
+    const failed = staleAfterScan({ turn: 100, npcs: [inc, cas] }, {}, '', { autoPruneStale: true, maxNpcs: 40, staleArchiveAfter: 30, staleDeleteAfter: 50 }, { keepIds: [], noDelete: true });
+    assert.equal(failed.removed.length, 0);
+});

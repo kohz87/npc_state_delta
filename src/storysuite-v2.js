@@ -203,7 +203,7 @@ export function createStorySuiteV2Adapter({
     const editorPart = createEditorPart(session, deps);
     Object.assign(deps, editorPart);
     const { watchers, pinKeyPerson, pageApi, offerPage } = castUiPart;
-    const { dossierOf, part, sliceEntries, entryFor, keyPeopleAnswer, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView } = queriesPart;
+    const { dossierOf, part, sliceEntries, entryFor, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView } = queriesPart;
     const { ownPrompt, storyClock, calendarLink, definition, scenePresentNames } = timelinePart;
     const { poll, unhost, check } = connectPart;
     const { editorHtml, readEditor, dossierMeters, eventWatch } = editorPart;
@@ -237,6 +237,9 @@ export function createStorySuiteV2Adapter({
         },
         /** While hosted: Story Director's key people (`director.keyPeople`) as it answers, or null when it cannot. */
         keyPeopleAnswer,
+        keyPeopleReadable,
+        /** While hosted: the slice's entries (npc.meters) at the head, or null when the host cannot answer. */
+        meterEntries: sliceEntries,
         /** While hosted: the memory of key people's last absences (npc.keyAway), {} without one. */
         keyAwayMemory,
         /** The same, cleaned (normalizeKeyPeople), without dates written. */

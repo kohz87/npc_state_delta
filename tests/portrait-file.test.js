@@ -278,3 +278,18 @@ test('a scan or a Refresh that updates a dossier keeps its file-form portrait as
     assert.deepEqual(after.portrait, fenna.portrait, 'the record is untouched by the scan');
     assert.equal(out.state.portraitAssets === undefined || Object.keys(out.state.portraitAssets).length === 0, true, 'and no second copy is made');
 });
+
+test('a failed image load alone does not blank a cast portrait; a file known gone lets cast sync refill it, a present one does not', async () => {
+    const { castPortraitWanted } = await import('../src/cast-dossier.js');
+    const { portraitFileKnownGone } = await import('../src/portrait-file.js');
+    const record = { path: `/user/files/${PORTRAIT_FILE_PREFIX}${hashOf(PNG).slice(0, 40)}.png`, type: 'image/png', hash: hashOf(PNG) };
+    const npc = castNpc('Brecht', record, { castFrom: { key: 'pack:brecht' } });
+    assert.equal(portraitSrc(npc.portrait), record.path, 'nothing marks it missing without a fresh check');
+    assert.equal(castPortraitWanted(npc), false);
+    markPortraitFileMissing(record.path); // what index.js does only after dataFileExists said false
+    assert.equal(portraitFileKnownGone(npc.portrait), true);
+    assert.equal(castPortraitWanted(npc), true, 'a known-missing file is refilled by cast sync');
+    assert.equal(castPortraitWanted({ ...npc, castFrom: { key: 'pack:brecht', portraitRemoved: true } }), false, 'a portrait the reader removed stays removed');
+    markPortraitFilePresent(record.path);
+    assert.equal(castPortraitWanted(npc), false);
+});

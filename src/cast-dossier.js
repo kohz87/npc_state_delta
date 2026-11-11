@@ -32,7 +32,7 @@
 // they were met, the starting goal and routine as the pack gave them). Delta's later scans treat the dossier as any other:
 // they add and change as they do for anyone, and every change is marked in the dossier as today.
 
-import { portraitHasImage } from './portrait-file.js';
+import { portraitFileKnownGone, portraitHasImage } from './portrait-file.js';
 import { isBehaviorLever, normalizeBehaviorProfile } from '../core-behavior.js';
 import { normalizeMannerisms } from '../core-durable.js';
 import { DURABLE_PROFILE_LIMITS } from '../core-relationship.js';
@@ -372,7 +372,7 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
  */
 export function castPortraitWanted(npc) {
     return isObject(npc) && isObject(npc.castFrom) && Boolean(npc.castFrom.key)
-        && npc.castFrom.portraitRemoved !== true && !portraitHasImage(npc.portrait);
+        && npc.castFrom.portraitRemoved !== true && (!portraitHasImage(npc.portrait) || portraitFileKnownGone(npc.portrait));
 }
 
 /** The dossier with the pack's portrait record set on it (a new object; the dossier unchanged without a usable record or when it may not be filled). */
