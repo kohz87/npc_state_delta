@@ -429,7 +429,35 @@ test('opening the dossier never focuses the search box (no phone/tablet keyboard
     assert.doesNotMatch(dossierUi, /focusSearch/);
 });
 
-test('switched off, Delta renders no in-chat cards, and the Enable switch redraws them (BH2, 12 Nov)', () => {
-    assert.match(index, /if \(getSettings\(\)\.enabled === false \|\| inChatCastMode\(\) === 'off'\) return \[\];/);
+test('switched off, Delta renders no in-chat cards, and the Enable switch redraws them (BH2, 12 Nov)', async () => {
     assert.match(index, /function afterEnabledChange\(\) \{[\s\S]*renderDossier\(\);[\s\S]*globalThis\.NPCStateDelta\?\.renderInline\?\.\(\);/);
+    // The real part, beside a stub of the host's extensions.js (as the other runtime-copy tests do).
+    const os = await import('node:os');
+    const { pathToFileURL } = await import('node:url');
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-enabled-cards-'));
+    const ext = path.join(temp, 'a', 'b', 'ext');
+    fs.mkdirSync(ext, { recursive: true });
+    for (const file of fs.readdirSync(root).filter(name => name.endsWith('.js'))) fs.copyFileSync(path.join(root, file), path.join(ext, file));
+    fs.cpSync(path.join(root, 'src'), path.join(ext, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(temp, 'extensions.js'), 'export const getContext = () => ({ chat: [] });\nexport const extension_settings = {};\n');
+    const savedDocument = globalThis.document;
+    globalThis.document = { documentElement: { dataset: {} } };
+    try {
+        const { createInlineCardsModePart } = await import(pathToFileURL(path.join(ext, 'runtime-inline-cards-mode.js')).href);
+        const { extension_settings } = await import(pathToFileURL(path.join(temp, 'extensions.js')).href);
+        const state = { npcs: [{ id: 'n1', name: 'Mira', present: true, archived: false }] };
+        const part = createInlineCardsModePart({
+            chatHydrationStatus: () => 'ready', getChatKey: () => 'k', getChatState: () => state, latestMessageId: () => 4,
+            scenePresenceView: npcs => npcs, storyBlockV2Hosted: () => false,
+        }, () => '');
+        extension_settings.npc_state_delta = { enabled: true };
+        assert.equal(part.inlineEntriesForRender(state).length, 1, 'on: the latest reply gets the live present grid');
+        extension_settings.npc_state_delta.enabled = false;
+        assert.deepEqual(part.inlineEntriesForRender(state), [], 'off: no cards');
+        extension_settings.npc_state_delta.enabled = true;
+        assert.equal(part.inlineEntriesForRender(state).length, 1, 'on again: they come back');
+    } finally {
+        if (savedDocument === undefined) delete globalThis.document; else globalThis.document = savedDocument;
+        fs.rmSync(temp, { recursive: true, force: true });
+    }
 });

@@ -18,17 +18,24 @@ ${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"], ${PANEL}:not([data-ski
   --dsk-tile-shadow: none; --dsk-tile-radius: 12px; --dsk-face-radius: 50%; --dsk-glow: none;
 }
 /* Neutral on a LIGHT theme: the pastel tones above are made for a dark panel (about 1.5:1 on white). Where relative colours exist, each tone
-   keeps its own hue and chroma and takes its lightness from the panel floor (1.2 - floor lightness, never lighter than the pastel, never darker
-   than .46): a dark floor gives the pastel back, a light one a readable (>= 4.5:1) tone. Fantasy and Modern are dark looks and keep theirs. */
+   keeps its own hue and chroma and takes its lightness from the panel's TEXT colour (text lightness + .1, never lighter than the pastel, never
+   darker than .46): light text (a dark theme) gives the pastel back, dark text (a light theme) a readable (>= 4.5:1) tone. The text colour is
+   used, not the floor: --ss-sheet-floor is set by Story Block's Glass style only, while the text follows every style and SillyTavern's own
+   body colour. Fantasy and Modern are dark looks and keep theirs. */
 @supports (color: oklch(from white l c h)) {
 ${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"], ${PANEL}:not([data-skin]) .delta-panel.ss-cards, ${PANEL}[data-skin="neutral"] .delta-panel.ss-cards {
-  --good: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .78) .073 143);
-  --bad: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .713) .098 25);
-  --held: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .785) .097 86);
-  --dsk-ten: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .753) .09 61);
-  --aff: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .751) .078 2);
-  --des: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .748) .066 305);
-  --trust: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .756) .067 248);
+  --good: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .78) .073 143);
+  --bad: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .713) .098 25);
+  --held: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .785) .097 86);
+  --dsk-ten: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .753) .09 61);
+  --aff: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .751) .078 2);
+  --des: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .748) .066 305);
+  --trust: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .756) .067 248);
+  /* the panel's own fallbacks for the same tones, used when Story Block's tokens are not there (SillyTavern's own light theme) */
+  --delta-accent-soft: var(--ss-text, oklch(from var(--delta-text) clamp(.4, calc(l + .1), .9) .07 90));
+  --delta-warn: var(--ss-warn-text, oklch(from var(--delta-text) clamp(.4, calc(l + .1), .84) .08 85));
+  --delta-good: var(--ss-good, oklch(from var(--delta-text) clamp(.4, calc(l + .1), .83) .077 156));
+  --delta-danger: var(--ss-bad-text, oklch(from var(--delta-text) clamp(.4, calc(l + .1), .785) .086 19));
 }
 }
 ${PANEL}, ${PANEL} .delta-panel.ss-cards { --face-flat: color-mix(in srgb, var(--delta-text) 16%, var(--delta-floor)); }
