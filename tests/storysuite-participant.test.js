@@ -196,6 +196,33 @@ test('prepare refuses what it cannot stand behind: gone bytes, other bytes, anot
     assert.equal((await participant.prepare({ return: 'rt_c', checkpoint: 'nk_future01', hash: hashJson(future.doc) })).code, 'SNAPSHOT_UNAVAILABLE');
 });
 
+test('The checkpoint is hashed once when verified; a tampered document is refused with the same codes', async () => {
+    const { participant, vault, hydrate } = setup();
+    await hydrate();
+    const saved = await participant.checkpoint({ cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) });
+    const good = await vault.get(saved.checkpoint);
+    // Spy: the document's `cursor` is a getter, read once per hashJson of the document.
+    let reads = 0;
+    const spied = doc => { const copy = { ...doc }; Object.defineProperty(copy, 'cursor', { enumerable: true, get: () => { reads += 1; return doc.cursor; } }); return copy; };
+    const realGet = vault.get;
+    vault.get = async id => { const doc = await realGet(id); return doc ? spied(doc) : doc; };
+    assert.equal((await participant.prepare({ return: 'rt_a', checkpoint: saved.checkpoint, hash: saved.hash })).ok, true);
+    assert.equal(reads, 1, 'one hash of the document per verification');
+    // checkpointProblem still hashes by itself without a precomputed hash, and trusts one it is given.
+    assert.equal(checkpointProblem(good, saved.hash), '');
+    assert.equal(checkpointProblem(good, saved.hash, saved.hash), '');
+    assert.match(checkpointProblem(good, saved.hash, 'f'.repeat(64)), /do not hash/);
+    // Tampered bytes under the same id: refused as before (CONFLICT), and a newer schema as SNAPSHOT_UNAVAILABLE.
+    const altered = structuredClone(good);
+    altered.state.npcs[0].trust = 99;
+    vault.get = async () => altered;
+    assert.equal((await participant.prepare({ return: 'rt_b', checkpoint: saved.checkpoint, hash: saved.hash })).code, 'CONFLICT');
+    vault.get = async () => ({ ...good, schema: 9 });
+    assert.equal((await participant.prepare({ return: 'rt_c', checkpoint: saved.checkpoint, hash: saved.hash })).code, 'SNAPSHOT_UNAVAILABLE');
+    vault.get = async () => null;
+    assert.equal((await participant.prepare({ return: 'rt_d', checkpoint: saved.checkpoint, hash: saved.hash })).code, 'SNAPSHOT_UNAVAILABLE');
+});
+
 test('a committed return is not aborted; activate fails whole when the bytes are gone or the install throws, and can be tried again', async () => {
     const { participant, vault, hydrate, live, port } = setup();
     await hydrate();
