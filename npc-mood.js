@@ -1,13 +1,18 @@
-// NPC mood (VAD): the per-NPC mood state, its clamp, the event -> delta rules, the decay per story day, the fixed
-// 3x3 word table and the cause text. Pure: no DOM, no host, no clock, no randomness. The story day is given in, and
+// NPC mood (VAD): the per-NPC mood state, its clamp, the event -> delta rules, the settling toward a resting mood
+// over story time, the fixed 3x3 word table and the cause text. Pure: no DOM, no host, no clock, no randomness. The story minute is given in, and
 // the state is plain data on the NPC record (`mood`), written in the same change as the move that caused it, so a
 // replay, a rebuild, a swipe or a Re-read gives the live values. Nothing here reads story text.
 //
-//   mood = { v, a, d, day, cause }
+//   mood = { v, a, d, day, cause, at?, from?, rest? }
 //   v      valence: -3 unpleasant .. 3 pleasant          (whole numbers, code-set only)
 //   a      arousal: -3 slack .. 3 keyed up               (Energy bar)
 //   d      dominance: -3 cornered .. 3 in control        (Control bar)
-//   day    the story day the axes were last settled to; decay runs from here
+//   day    the story day the axes were last settled to
+//   at     the story minute of the last event; from = the axes at that minute; rest = this person's resting mood (their
+//          temperament, -2..2 per axis, default 0,0,0). The axes now are always eased from `from` over (now - at), so the
+//          result does not depend on how often it is read: the same minute twice gives the same axes. Old records (no
+//          at/from/rest) read as at = day start, from = their axes, rest = 0.
+//   All three axes are always kept, also at rest (they settle at `rest`, never removed or nulled).
 //   cause  the last cause text, e.g. "trust dropped: Astra lied" (plain text; the UI escapes it)
 //
 // Events come from code: a trust drop or betrayal from the reply's own trust move (eventsFromMoves), rest and safety
@@ -25,7 +30,12 @@ export const TRUST_DROP_MIN = 2; // a trust change of -2 or worse in one reply i
 export const BETRAYAL_TRUST = 6; // a trust change of -6 or worse is a betrayal; so is -3 or worse at a major/extreme impact
 export const SEVERE_DROP_MIN = 3;
 
-// One step per event on each axis. Decay is one step per story day, toward 0.
+// One step per event on each axis. Between events each axis eases toward the resting mood: the further away, the bigger the
+// step back (halves every HALF_LIFE minutes, integer, never past rest). Arousal about half every 3.5 story hours, valence
+// about gone in 1-2 days, dominance about 3 days. New events add on top of whatever is left.
+export const DAY_MIN = 1440;
+export const HALF_LIFE = Object.freeze({ a: 210, v: 720, d: 1620 });
+export const REST_LIMIT = 2;
 export const EVENT_DELTAS = Object.freeze({
   'trust-drop': Object.freeze({ v: -1, a: 1, d: -1 }),
   betrayal: Object.freeze({ v: -2, a: 2, d: -1 }),
@@ -96,40 +106,78 @@ export function neutralMood(day = 0) {
  */
 export function normalizeMood(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const axes = value => (value && typeof value === 'object' && !Array.isArray(value) ? { v: clampAxis(value.v), a: clampAxis(value.a), d: clampAxis(value.d) } : null);
+  const from = axes(raw.from);
+  const rest = axes(raw.rest);
   return {
     v: clampAxis(raw.v),
     a: clampAxis(raw.a),
     d: clampAxis(raw.d),
     day: dayOf(raw.day),
     cause: cleanReason(raw.cause),
+    ...(isFiniteNumber(raw.at) ? { at: dayOf(raw.at) } : {}),
+    ...(from ? { from } : {}),
+    ...(rest ? { rest } : {}),
   };
 }
 
+/** One axis eased from `from` toward `rest` over `minutes`: magnitude x 2^-(minutes/half) in integers (linear between halvings, rounded half up), never past rest. */
+export function easeAxis(from, rest, minutes, half) {
+  const dist = from - rest;
+  if (!dist || !(minutes > 0)) return from;
+  const mag = Math.abs(dist);
+  const whole = Math.min(40, Math.floor(minutes / half));
+  const den = 2 * half * 2 ** whole;
+  const left = Math.min(mag, Math.floor((2 * mag * (2 * half - (minutes - whole * half)) + den) / (2 * den)));
+  return rest + (dist < 0 ? -left : left);
+}
+
+/** A person's resting mood from their temperament words (pack personality / first description): -2..2 per axis, 0,0,0 when no word is known. */
+const TEMPER = Object.freeze({
+  v: [[/\b(cheerful|warm|kind|gentle|joyful|optimistic|sunny|genial|easygoing|affectionate)\b/g, 1], [/\b(bitter|gloomy|sullen|cold|morose|pessimistic|cynical|brooding|grim|melancholy)\b/g, -1]],
+  a: [[/\b(energetic|excitable|restless|fiery|hot-headed|jumpy|nervous|eager|hyper|volatile)\b/g, 1], [/\b(calm|serene|placid|lethargic|stoic|unhurried|sleepy|relaxed|composed)\b/g, -1]],
+  d: [[/\b(confident|commanding|bold|assertive|authoritative|proud|fearless|domineering)\b/g, 1], [/\b(timid|meek|anxious|shy|submissive|fearful|insecure|hesitant|nervous)\b/g, -1]],
+});
+export function restingMood(...texts) {
+  const text = texts.filter(item => typeof item === 'string').join(' ').toLowerCase();
+  const out = { v: 0, a: 0, d: 0 };
+  for (const axis of Object.keys(TEMPER)) {
+    const sum = TEMPER[axis].reduce((total, [word, sign]) => total + sign * (text.match(word)?.length ?? 0), 0);
+    out[axis] = Math.max(-REST_LIMIT, Math.min(REST_LIMIT, sum));
+  }
+  return out;
+}
+
+/** A fresh mood sitting at a resting mood at story minute `at` (axes = rest, no cause). */
+export function restMood(rest, at = 0) {
+  const r = { v: clampAxis(rest?.v), a: clampAxis(rest?.a), d: clampAxis(rest?.d) };
+  const minute = dayOf(at);
+  return { v: r.v, a: r.a, d: r.d, day: Math.floor(minute / DAY_MIN), cause: '', at: minute, from: { v: r.v, a: r.a, d: r.d }, rest: { v: r.v, a: r.a, d: r.d } };
+}
+
 /**
- * The axes at `day`: each axis moves one step toward 0 per story day since the stored day, never past 0. The stored
- * day never moves backwards (an older day is read as no days passed). The cause is kept. Pure: the input is not changed.
+ * The mood settled to story minute `minutes`: each axis eased from the anchor (`from` at `at`) toward the resting mood by its
+ * own speed, so it does not matter how often this runs. Never past rest; the cause, anchor and rest are kept. Pure.
  */
-export function decayMood(mood, day) {
-  const base = normalizeMood(mood) ?? neutralMood(day);
-  const today = dayOf(day);
-  const days = Math.max(0, today - base.day);
-  const pull = axis => (axis > 0 ? Math.max(0, axis - days) : Math.min(0, axis + days));
-  return {
-    v: pull(base.v),
-    a: pull(base.a),
-    d: pull(base.d),
-    day: Math.max(base.day, today),
-    cause: base.cause,
-  };
+export function decayMood(mood, minutes) {
+  const base = normalizeMood(mood) ?? neutralMood(Math.floor(dayOf(minutes) / DAY_MIN));
+  const now = dayOf(minutes);
+  const at = base.at ?? base.day * DAY_MIN;
+  const from = base.from ?? { v: base.v, a: base.a, d: base.d };
+  const rest = base.rest ?? { v: 0, a: 0, d: 0 };
+  const elapsed = Math.max(0, now - at);
+  const ease = axis => clampAxis(easeAxis(from[axis], rest[axis], elapsed, HALF_LIFE[axis]));
+  return { v: ease('v'), a: ease('a'), d: ease('d'), day: Math.max(base.day, Math.floor(now / DAY_MIN)), cause: base.cause, at, from, rest };
 }
 
 /**
- * The mood after `events` at `day`: decay from the stored day first, then each known event's delta in order, clamped
- * after each step. events: [{ kind: 'trust-drop' | 'betrayal' | 'rest' | 'safe', reason? }]; unknown kinds are skipped.
+ * The mood after `events` at story minute `minutes`: settle toward rest first, then each known event's delta in order, clamped
+ * after each step; an event re-anchors the easing (from = the new axes, at = now). events: [{ kind: 'trust-drop' | 'betrayal' | 'rest' | 'safe', reason? }]; unknown kinds are skipped.
  * The cause becomes the last known event's cause text; with no known event the stored cause stays.
  */
-export function applyEvents(mood, day, events) {
-  let next = decayMood(mood, day);
+export function applyEvents(mood, minutes, events) {
+  let next = decayMood(mood, minutes);
+  let hit = false;
   let cause = next.cause;
   for (const event of Array.isArray(events) ? events : []) {
     const kind = event?.kind;
@@ -142,8 +190,9 @@ export function applyEvents(mood, day, events) {
       d: clampAxis(next.d + delta.d),
     };
     cause = causeText(kind, event.reason);
+    hit = true;
   }
-  return { ...next, cause };
+  return hit ? { ...next, cause, at: dayOf(minutes), from: { v: next.v, a: next.a, d: next.d } } : { ...next, cause };
 }
 
 /**

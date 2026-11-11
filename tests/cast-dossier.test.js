@@ -1496,3 +1496,16 @@ test('the adapter reads Story Block\'s party.levels as it answers, and null when
     assert.equal((await suite({ modules: [party(null)] })).adapter.partyLevelsAnswer(), null, 'RPG off: null');
     assert.equal((await suite({ modules: [director()] })).adapter.partyLevelsAnswer(), null, 'no such query: as today');
 });
+
+test('mood: a person met from the cast starts at the resting mood their pack personality gives (temperament, not 0), stored with the record', async () => {
+    const calm = await suite({ features: { 'npc-state-delta.mood-pull': true } });
+    await calm.world([castRow({ entry: { ...structuredClone(FENNA_ENTRY), personality: 'Calm, confident and unhurried.' } })]);
+    await calm.say(['~ meet Fenna']);
+    const mood = Object.values(calm.host.head().domains.npc.npcs).find(record => record.name === 'Fenna')?.mood;
+    assert.deepEqual([mood?.v, mood?.a, mood?.d, mood?.rest], [0, -2, 1, { v: 0, a: -2, d: 1 }]);
+    assert.deepEqual(validateNpcSlice(calm.host.head().domains.npc), []);
+    const plain = await suite({ features: { 'npc-state-delta.mood-pull': true } });
+    await plain.world([castRow({ entry: { ...structuredClone(FENNA_ENTRY), personality: 'Likes ferries.' } })]);
+    await plain.say(['~ meet Fenna']);
+    assert.equal(Object.values(plain.host.head().domains.npc.npcs).find(record => record.name === 'Fenna')?.mood, undefined, 'no temperament words: no mood until an event');
+});

@@ -9,7 +9,7 @@ import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
 import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent, spendFlatEvent } from '../src/relationship-pacing.js';
 import { cutToTier, pacingNote } from '../src/npc-meters-pacing.js';
 import { createNpcPart, FEATURE_MOOD_PULL, CONTEXT_BUDGET } from '../src/npc-meters.js';
-import { applyEvents, eventsFromMoves, moodBars, moodWord } from '../npc-mood.js';
+import { applyEvents, easeAxis, eventsFromMoves, moodBars, moodWord, restMood, restingMood } from '../npc-mood.js';
 import { stepPull } from '../npc-instincts.js';
 import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-suite.js';
 
@@ -420,6 +420,9 @@ const worldModule = {
 const moodSuite = (extra = {}) => suite({ allowance: null, features: MOOD_ON, modules: [worldModule], ...extra });
 const world = async (s, patch) => { const out = await s.host.sdk.command('zz.world', patch); assert.equal(out.ok, true, JSON.stringify(out)); };
 const recordOf = (s, key = 'oren') => s.host.head().domains.npc.npcs[key];
+const plain = ({ v, a, d, day, cause }) => ({ v, a, d, day, cause });
+const clockTo = (s, minutes) => s.host.sdk.command('zz.clock', { minutes });
+const axes = s => { const m = recordOf(s).mood; return [m.v, m.a, m.d]; };
 const tailOf = s => JSON.stringify(s.host.sdk.context ? s.host.sdk.context() : null);
 
 test('mood: a trust drop and a betrayal move the axes by the rules and keep the reason as the cause; a rise does nothing', async () => {
@@ -428,9 +431,9 @@ test('mood: a trust drop and a betrayal move the axes by the rules and keep the 
     await s.say(['~ npc Oren | trust: +3']);
     assert.equal(recordOf(s).mood, undefined, 'a rise moves no mood');
     await s.say(['~ npc Oren | trust: -2 | impact: meaningful | reason: Astra lied']);
-    assert.deepEqual(recordOf(s).mood, { v: -1, a: 1, d: -1, day: 2, cause: 'trust dropped: Astra lied' });
+    assert.deepEqual(plain(recordOf(s).mood), { v: -1, a: 1, d: -1, day: 2, cause: 'trust dropped: Astra lied' });
     await s.say(['~ npc Oren | trust: -3 | impact: major | why: the vault']);
-    assert.deepEqual(recordOf(s).mood, { v: -3, a: 3, d: -2, day: 2, cause: 'betrayed: the vault' });
+    assert.deepEqual(plain(recordOf(s).mood), { v: -3, a: 3, d: -2, day: 2, cause: 'betrayed: the vault' });
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
     const row = (await s.host.sdk.query('npc.cast', {})).find(item => item.key === 'oren');
     assert.equal(row.mood.word, 'Alarmed');
@@ -440,18 +443,87 @@ test('mood: a trust drop and a betrayal move the axes by the rules and keep the 
     assert.equal(shown.npc_oren.mood.word, 'Alarmed', 'the dossier view model carries the mood');
 });
 
-test('mood decays one step per story day toward 0 in the tick, and the dossier row carries it', async () => {
+test('mood eases toward rest over story time: per-axis speed, proportional, same minute = no extra easing, always all three fields', async () => {
     const s = await moodSuite();
     await s.setDay(2);
     await s.say(['~ npc Oren | trust: -3 | impact: major']);
-    assert.deepEqual([recordOf(s).mood.v, recordOf(s).mood.a, recordOf(s).mood.d], [-2, 2, -1]);
-    await s.setDay(3);
+    assert.deepEqual(axes(s), [-2, 2, -1]);
+    const at = recordOf(s).mood.at;
+    await clockTo(s, at + 5);
     await s.say([]);
-    assert.deepEqual([recordOf(s).mood.v, recordOf(s).mood.a, recordOf(s).mood.d, recordOf(s).mood.day], [-1, 1, 0, 3]);
-    await s.setDay(6);
+    assert.deepEqual(axes(s), [-2, 2, -1], 'five minutes later: nothing moves yet');
+    await clockTo(s, at + 5);
     await s.say([]);
-    assert.deepEqual([recordOf(s).mood.v, recordOf(s).mood.a, recordOf(s).mood.d], [0, 0, 0]);
+    assert.deepEqual(axes(s), [-2, 2, -1], 'a Continue or swipe in the same minute: no extra easing');
+    await clockTo(s, at + 240);
+    await s.say([]);
+    assert.deepEqual(axes(s), [-2, 1, -1], 'about 4 hours: arousal about halved, valence and dominance barely moved');
+    await clockTo(s, at + 600);
+    await s.say([]);
+    assert.deepEqual(axes(s), [-1, 0, -1], 'ten hours: arousal gone, valence about half, dominance slowest');
+    await clockTo(s, at + DAY + 120);
+    await s.say([]);
+    assert.deepEqual(axes(s), [0, 0, -1], 'a day and a bit: valence gone, dominance still there');
+    await clockTo(s, at + 5 * DAY);
+    await s.say([]);
+    assert.deepEqual(axes(s), [0, 0, 0], 'days later: at rest, and the three fields are still on the record');
+    assert.deepEqual(Object.keys(recordOf(s).mood).filter(key => ['v', 'a', 'd'].includes(key)), ['v', 'a', 'd']);
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('mood: new events add on top of what is left; ongoing stress keeps it raised', async () => {
+    const s = await moodSuite();
+    await s.setDay(2);
+    await s.say(['~ npc Oren | trust: -2 | impact: meaningful']);
+    const at = recordOf(s).mood.at;
+    await clockTo(s, at + 120);
+    await s.say(['~ npc Oren | trust: -2 | impact: meaningful']);
+    assert.equal(recordOf(s).mood.a, 2, 'arousal 1 eased to 1 after two hours, plus the new drop');
+    assert.equal(recordOf(s).mood.v, -2);
+    await clockTo(s, at + 180);
+    await s.say(['~ npc Oren | trust: -2 | impact: meaningful']);
+    assert.equal(recordOf(s).mood.a, 3, 'stacks under ongoing stress');
+});
+
+test('mood: a person with a temperament settles there, not at 0, and the record is stored with it', async () => {
+    const rest = restingMood('A calm, confident old sailor.');
+    assert.deepEqual(rest, { v: 0, a: -1, d: 1 });
+    assert.deepEqual(restingMood('plain person', null), { v: 0, a: 0, d: 0 });
+    assert.deepEqual(restingMood('cheerful warm kind gentle joyful'), { v: 2, a: 0, d: 0 }, 'at most 2 either way');
+    const m = restMood(rest, 5000);
+    assert.deepEqual([m.v, m.a, m.d, m.rest, m.at], [0, -1, 1, rest, 5000]);
+    const hit = applyEvents(m, 5000, [{ kind: 'betrayal' }]);
+    assert.deepEqual([hit.v, hit.a, hit.d], [-2, 1, 0]);
+    const later = applyEvents(hit, 5000 + 20 * DAY, []);
+    assert.deepEqual([later.v, later.a, later.d], [0, -1, 1], 'after many days: back at the temperament, not at 0,0,0');
+    assert.deepEqual(validateNpcSlice({ ...JSON.parse(JSON.stringify({ npcs: {} })) }).filter(line => /mood/.test(line)), []);
+});
+
+test('mood easing core: proportional, integer, never overshooting, per-axis speed, replay == rebuild', () => {
+    const steps = [0, 30, 60, 120, 240, 480, 960, 1920, 5000, 50000];
+    for (const half of [210, 720, 1620]) {
+        for (const [from, rest] of [[3, 0], [-3, 0], [3, -1], [-3, 2], [1, 1], [0, 2]]) {
+            let last = Math.abs(from - rest);
+            for (const m of steps) {
+                const v = easeAxis(from, rest, m, half);
+                assert.ok(Number.isInteger(v));
+                const mag = Math.abs(v - rest);
+                assert.ok(mag <= last, 'never moves away');
+                assert.ok(Math.sign(v - rest) === 0 || Math.sign(v - rest) === Math.sign(from - rest), 'never overshoots rest');
+                last = mag;
+            }
+            assert.equal(easeAxis(from, rest, 5000000, half), rest);
+        }
+    }
+    const far = 3 - easeAxis(3, 0, 300, 210), near = 1 - easeAxis(1, 0, 300, 210);
+    assert.ok(far >= near, 'the further away, the bigger the step');
+    assert.equal(easeAxis(3, 0, 210, 210), 2, 'about half after one half-life (3 -> 1.5 -> 2)');
+    assert.ok(easeAxis(3, 0, 720, 210) <= 0, 'arousal is gone in 12 hours');
+    assert.ok(easeAxis(3, 0, 1440, 1620) > easeAxis(3, 0, 1440, 720), 'dominance is slower than valence');
+    const mood = applyEvents(null, 1000, [{ kind: 'betrayal', reason: 'x' }]);
+    const once = applyEvents(mood, 1000 + 400, []);
+    assert.deepEqual(applyEvents(once, 1000 + 400, []), once, 'reading twice at one minute is the same');
+    assert.deepEqual(applyEvents(applyEvents(mood, 1100, []), 1400, []), applyEvents(mood, 1400, []), 'any read cadence gives the same axes');
 });
 
 test('pull: closure from an open thread that names them, after the days it waited; belonging when benched', async () => {
@@ -503,7 +575,7 @@ test('pull: a person away (key people) feels left behind; a failing or missing q
     await broken.setDay(6);
     await broken.say([]);
     assert.equal(recordOf(broken).pull, undefined);
-    assert.equal(recordOf(broken).mood.day, 6, 'the tick ran (the mood eased to day 6)');
+    assert.equal(recordOf(broken).mood.day, 6, 'the tick ran (the mood settled to day 6)');
     assert.deepEqual(validateNpcSlice(broken.host.head().domains.npc), []);
     const bare = await suite({ allowance: null, features: MOOD_ON });
     await bare.setDay(3);
@@ -581,8 +653,8 @@ test('validator: a malformed mood, instinct, pull or memory is refused; every ol
 test('mood and pull cores: the 3x3 word table, the bars, decay that never passes 0, bad input is no signal', () => {
     assert.deepEqual([moodWord({ v: -3, a: 3, d: 0, day: 0, cause: '' }), moodWord({ v: 0, a: 0, d: 0, day: 0, cause: '' }), moodWord({ v: 3, a: -3, d: 0, day: 0, cause: '' })], ['Alarmed', 'Steady', 'Calm']);
     assert.deepEqual(moodBars({ v: 0, a: 3, d: -3, day: 0, cause: '' }), { energy: 6, control: 0, max: 6 });
-    assert.deepEqual(applyEvents({ v: -1, a: 1, d: 0, day: 2, cause: 'x' }, 9, []), { v: 0, a: 0, d: 0, day: 9, cause: 'x' });
-    assert.deepEqual(applyEvents(null, 1, [{ kind: 'nonsense' }]), { v: 0, a: 0, d: 0, day: 1, cause: '' });
+    assert.deepEqual(plain(applyEvents({ v: -1, a: 1, d: 0, day: 2, cause: 'x' }, 9 * DAY, [])), { v: 0, a: 0, d: 0, day: 9, cause: 'x' });
+    assert.deepEqual(plain(applyEvents(null, DAY, [{ kind: 'nonsense' }])), { v: 0, a: 0, d: 0, day: 1, cause: '' });
     assert.deepEqual(eventsFromMoves([{ meter: 'trust', change: -1 }]), [], 'one point is no drop');
     assert.equal(eventsFromMoves([{ meter: 'trust', change: -3 }], { impact: 'major' })[0].kind, 'betrayal');
     assert.equal(eventsFromMoves([{ meter: 'trust', change: -3 }], { impact: 'meaningful' })[0].kind, 'trust-drop');

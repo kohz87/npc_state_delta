@@ -5,7 +5,7 @@ import { isAway, labelKey, labelsOf, normalizeKeyPeople } from './key-people.js'
 import { normalizeCast } from './cast-dossier.js';
 import { NPC_DOMAIN, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_MOOD_PULL, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
-import { applyEvents } from '../npc-mood.js';
+import { applyEvents, restMood, restingMood } from '../npc-mood.js';
 import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence } from './npc-meters-slice.js';
 
 export function createNpcCommands({
@@ -79,7 +79,7 @@ export function createNpcCommands({
     }
 
     // One record's mood decay and pull for this tick (feature mood-pull). `rawPeople`: Story Director's key people as answered.
-    function moodPullStep(record, day, world, rawPeople) {
+    function moodPullStep(record, day, world, rawPeople, minutes) {
         const labels = new Set([record.name, ...(resolve(record.name)?.aliases ?? [])].map(labelKey).filter(Boolean));
         const has = list => list.some(label => labels.has(label));
         const gone = (Array.isArray(rawPeople) ? rawPeople : []).find(person => isObject(person?.away) && !person.removed && has([person.name, ...(Array.isArray(person.aliases) ? person.aliases : [])].map(labelKey)));
@@ -88,7 +88,7 @@ export function createNpcCommands({
             awayDay: isInt(gone?.away?.since) ? Math.floor(gone.away.since / DAY_MINUTES) : null,
             threads: world.threads.filter(thread => has(thread.names)),
         });
-        if (isObject(record.mood)) record.mood = applyEvents(record.mood, day, []);
+        if (isObject(record.mood) && isInt(minutes)) record.mood = applyEvents(record.mood, minutes, []);
         const set = (field, value, empty) => { if (empty) delete record[field]; else record[field] = value; };
         set('track', out.track, !Object.keys(out.track).length);
         set('inst', out.inst, !Object.values(out.inst).some(Boolean));
@@ -219,6 +219,9 @@ export function createNpcCommands({
                     else unknown.push(`${person.name}: "${clean(name, 40)}" is not a meter here (meters: ${defs.map(item => item.id).join(', ')}).`);
                 }
                 try { ensure(ctx, slice.npcs, who, defs, seed); } catch { continue; }
+                // Temperament (feature mood-pull): a person whose pack words give a resting mood starts at it, so it is stored with the record.
+                const rest = moodPull && isInt(minutes) && slice.npcs[who.key] ? restingMood(person.entry.personality, person.entry.about) : null;
+                if (rest && (rest.v || rest.a || rest.d)) slice.npcs[who.key].mood = restMood(rest, minutes);
                 note(slice, ctx.rev, unknown);
             }
             if (castSeen.fresh.length) slice.cast = castSeen.cast;
@@ -254,7 +257,7 @@ export function createNpcCommands({
                         drift.push({ meter: def.id, before: value, after: next });
                     }
                 }
-                if (world) moodPullStep(record, day, world, rawPeople);
+                if (world) moodPullStep(record, day, world, rawPeople, minutes);
                 const settled = settleRecord(record, [record.name], settings, defs, featureOn(FEATURE_STAGES, ctx) && !away);
                 if (JSON.stringify(record) === was) continue;
                 changed = true;

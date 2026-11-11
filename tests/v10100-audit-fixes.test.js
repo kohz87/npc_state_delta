@@ -30,7 +30,7 @@ test('2/3: no unused imports or uncalled functions remain in shipped modules', (
     // Exported only so the test suite can drive them.
     const testHooks = new Set(['cancelScannerRequests', 'estimateInjectionTokens', 'sameChatOwnerScope', 'pendingNpcStateDurabilityKeys', 'modalTopLayerSupported',
         // Called from src/ (the hosted adapter, which the shipped-module list does not hold).
-        'applyEvents', 'moodWord', 'moodBars', 'stepPull']);
+        'applyEvents', 'moodWord', 'moodBars', 'stepPull', 'restingMood', 'restMood']);
     const problems = [];
     for (const [path, source] of Object.entries(sources)) {
         for (const match of source.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*\(/gm)) {

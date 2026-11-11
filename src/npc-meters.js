@@ -127,14 +127,11 @@ export function createNpcPart(hooks = {}) {
         const value = call(hooks.allowance, null);
         return isObject(value) ? normalizeAllowance(value) : null;
     };
-    const clockDay = at => {
-        if (call(hooks.calendarOwn, false) === true) return null;
-        const minutes = call(hooks.startTime, null, at);
-        return isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
-    };
-    // The story day by the host's clock now (a scan's change names no reply); null without a clock.
-    const timeDay = ctx => {
-        try { const minutes = ctx.time(); return isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null; } catch { return null; }
+    const clockMinutes = at => (call(hooks.calendarOwn, false) === true ? null : (m => (isInt(m) ? m : null))(call(hooks.startTime, null, at)));
+    const clockDay = at => { const minutes = clockMinutes(at); return minutes === null ? null : Math.floor(minutes / DAY_MINUTES); };
+    // The story minute by the host's clock now (a scan's change names no reply); null without a clock.
+    const timeMinutes = ctx => {
+        try { const minutes = ctx.time(); return isInt(minutes) ? minutes : null; } catch { return null; }
     };
     const rulesFor = (name, aliases = []) => {
         const value = call(hooks.secretRules, [], name, aliases);
@@ -353,7 +350,7 @@ export function createNpcPart(hooks = {}) {
         const moved = moveMeters(record, stepped, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup), story });
         // Mood (npc-mood.js; feature mood-pull): the trust this line moved, as code reads it, is a trust drop or a betrayal.
         if (limit && moved.length && featureOn(FEATURE_MOOD_PULL, ctx)) {
-            const day = clockDay(at) ?? timeDay(ctx);
+            const day = clockMinutes(at) ?? timeMinutes(ctx);
             const events = day === null ? [] : eventsFromMoves(moved.map(item => ({ meter: item.meter, change: item.after - item.before })), { reason, impact: spent?.used ?? asked });
             if (events.length) record.mood = applyEvents(record.mood, day, events);
         }

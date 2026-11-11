@@ -117,7 +117,7 @@ const shortText = (value, max) => typeof value === 'string' && value.length <= m
 export function moodPullProblems(record) {
     const out = [];
     const { mood, inst, pull, track } = record;
-    if (mood !== undefined && (!isObject(mood) || JSON.stringify(normalizeMood(mood)) !== JSON.stringify({ v: mood.v, a: mood.a, d: mood.d, day: mood.day, cause: mood.cause }))) out.push('has an unusable mood');
+    if (mood !== undefined && (!isObject(mood) || JSON.stringify(normalizeMood(mood)) !== JSON.stringify(Object.fromEntries(Object.keys(normalizeMood(mood)).map(key => [key, mood[key]]))))) out.push('has an unusable mood');
     if (inst !== undefined && (!isObject(inst) || Object.keys(inst).some(key => !['belo', 'clos', 'awe'].includes(key)) || Object.values(inst).some(value => !isInt(value) || value < 0 || value > 3))) out.push('has unusable instincts');
     if (pull !== undefined && (!isObject(pull) || !INSTINCT_KINDS.includes(pull.kind) || !shortText(pull.cause, 120) || !isInt(pull.since) || pull.since < 0 || Object.keys(pull).length !== 3)) out.push('has an unusable pull');
     if (track !== undefined) {
