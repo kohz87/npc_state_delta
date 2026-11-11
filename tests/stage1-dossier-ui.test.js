@@ -454,22 +454,30 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /Tastes|Drives|look was set/);
 });
 
-test('the dial\'s no-portrait fallback is small initials in the suite font stack, and the desktop layout fits a narrow panel and sizes to its content', () => {
+// The dossier's stylesheets as the page gets them (the template numbers filled in), plus the source for the pins that read it.
+async function builtCss() {
+  const [a, b, c] = await Promise.all([import('../dossier-ui-styles.js'), import('../dossier-ui-styles-board.js'), import('../dossier-ui-styles-sections.js')]);
+  return `${dossierUiSource()}\n${a.STYLES}\n${b.BOARD_STYLES}\n${c.SECTIONS_STYLES}`;
+}
+
+test('the dial\'s no-portrait fallback is small initials in the suite font stack, and the desktop layout fits a narrow panel and sizes to its content', async () => {
   const html = boardHtml({ id: 'm', name: 'Marrit' }, {});
   assert.match(html, /delta-portrait-placeholder[^>]*><span>M<\/span>/);
-  const css = dossierUiSource();
+  const css = await builtCss();
   assert.doesNotMatch(css.match(/dossier-dial-portrait \.delta-portrait-placeholder \{[^}]*\}/)?.[0] || '', /Georgia|serif;|font-size:48px/);
-  assert.match(css, /\.delta-board \{ grid-template-columns:clamp\(250px,32%,340px\)/);
+  assert.match(css, /\.delta-board \{ grid-template-columns:clamp\(250px,32%,460px\)/);
   assert.match(css, /@media \(min-width: 1101px\) \{\s*#\$\{ROOT_ID\} \.delta-panel \{ height:auto;/);
 });
 
 test('the dossier layout follows its own container width: container queries, one switch line, no window query, bar in the flow', async () => {
-  const css = dossierUiSource();
+  const css = await builtCss();
   const screens = await import('../dossier-ui-screens.js');
   assert.match(css, /container:dsr \/ inline-size/);
   assert.match(css, new RegExp(`@container dsr \\(min-width: ${screens.TWO_PANE_MIN}px\\)`));
   assert.match(css, new RegExp(`@container dsr \\(max-width: ${screens.TWO_PANE_MIN - 0.02}px\\)`));
-  assert.match(css, new RegExp(`@container dsr \\(min-width: ${screens.TWO_PANE_MIN}px\\) and \\(max-width: 939.98px\\)`));
+  assert.equal(screens.THREE_PANE_MIN, screens.PANE_HERO_SLIM_MIN + screens.PANE_TILES_MIN + screens.PANE_SECTION_WIDE_MIN, 'the three-pane line is a sum of the pane minimums');
+  assert.equal(screens.TWO_PANE_MIN, screens.PANE_HERO_MIN + screens.PANE_SECTION_MIN);
+  assert.match(css, new RegExp(`@container dsr \\(min-width: ${screens.TWO_PANE_MIN}px\\) and \\(max-width: ${screens.THREE_PANE_MIN - 0.02}px\\)`));
   assert.doesNotMatch(css, /@media \((min|max)-width: 65[01]px\)\s*\{\s*#\$\{ROOT_ID\} \.delta-(board|panes|profile|brand|topbar)/);
   assert.doesNotMatch(css, /position:sticky; bottom:0; display:block;/, 'the library bar sits in the flow under the scroll area');
   // the switch reads the panel width, not the window: a 500 px panel in a 2000 px window is narrow, a 700 px one is not
@@ -482,4 +490,27 @@ test('the dossier layout follows its own container width: container queries, one
   assert.match(css, /\.delta-board-title \{[^}]*border-left:0 !important[^}]*text-align:center !important/);
   assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}) }, { layout: 'phone' }), /<h2 class="delta-profile-title">Rika<\/h2>/);
   assert.match(css, /\.delta-header-menu > summary\.delta-btn \{ display:inline-flex; align-items:center; justify-content:center;/);
+});
+
+test('fix 3: two-letter initials, mood bars in Right now, flat profile rows in the mockup order, count bar on the library, no debug wording', async () => {
+  const { initialsOf, portraitHtml } = await import('../dossier-ui-html.js');
+  assert.equal(initialsOf('The inspector'), 'TI');
+  assert.equal(initialsOf('Marrit'), 'M');
+  assert.match(portraitHtml({ name: 'Sister Temiwa' }, 'x'), /<span>ST<\/span>/);
+  const now = sectionScreenHtml('now', { id: 'n', name: 'Marrit', mood: 'Cautious' });
+  assert.match(now, /Cautious<span class="delta-tile-bars">[\s\S]*Energy[\s\S]*Control/, 'Mood: the word and both bars, at rest as well');
+  assert.match(sectionScreenHtml('now', { id: 'n', name: 'Marrit' }), /<dt>Mood<\/dt><dd>[^<]+<span class="delta-tile-bars">/, 'also with no mood word at all');
+  const npc = { ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), appearanceModel: { overallAppearance: 'Freckled', appearanceForms: [{ name: 'Mage', appearance: 'Singed coat' }], currentForm: 'Mage' }, mannerisms: ['Ties off bandages'], personality: 'Proud', background: 'Frostbite', birthdaySource: 'generated' };
+  const html = dossierProfileHtml(npc, { layout: 'desktop' });
+  assert.match(html, /<dt>Look<\/dt><dd>Freckled<\/dd><dt>Wearing<\/dt><dd>Singed coat<\/dd><dt>Habits<\/dt><dd>Ties off bandages<\/dd>/);
+  assert.ok(html.indexOf('data-delta-profile="identity"') < html.indexOf('data-delta-profile="appearance"') && html.indexOf('data-delta-profile="appearance"') < html.indexOf('data-delta-profile="character"') && html.indexOf('data-delta-profile="character"') < html.indexOf('data-delta-profile="background"'), 'Identity, Appearance, Character, ..., Background');
+  assert.doesNotMatch(html, /delta-profile-col"|Deterministic fallback|Physical features/);
+  const { libraryCountHtml } = await import('../dossier-ui-library.js');
+  assert.match(libraryCountHtml(10), /data-static="true">▸ Dossier library · 10 NPCs</);
+  assert.doesNotMatch(libraryCountHtml(10), /data-delta-screen/, 'on the library the bar is a count, not a link');
+  const header = await import('../dossier-ui-header.js');
+  assert.match(header.dossierMenuHtml('a'), /delta-header-menu-toggle ss-tap-pill/);
+  const css = await builtCss();
+  assert.match(css, /--dt-meta:clamp\(/, 'type flows with the panel width');
+  assert.doesNotMatch(css.match(/@media \(max-width: 900px\)/)?.[0] || '', /./, 'the sheet and the launcher agree on the full-screen line (1100)');
 });

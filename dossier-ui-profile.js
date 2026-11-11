@@ -51,20 +51,28 @@ function drivesBody(notes) {
     return block('drives', 'Drives', `<div class="delta-drives">${notes.drives.map(row => `<div class="delta-drive"><span>${escapeHtml(row.label)}</span><i title="${escapeHtml(row.word)}"><b style="width:${Math.round((row.strength / 3) * 100)}%"></b></i></div>`).join('')}</div>`);
 }
 
+// Flat rows as the mockup has them: Look (the enduring body), Wearing (what the current form or presentation is), Habits (mannerisms).
+// Named forms (each can take its own portrait) stay one tap away in a folded list, so no portrait control is lost.
 function appearanceBody(npc, portraitRefs) {
-    if (!npc.appearanceModel || typeof npc.appearanceModel !== 'object') {
-        return '<p class="delta-muted">No appearance established yet.</p>';
-    }
+    const model = npc.appearanceModel;
+    if (!model || typeof model !== 'object') return '<p class="delta-muted">No appearance established yet.</p>';
     const locked = npc.v2Meters?.notes?.look;
+    const forms = Array.isArray(model.appearanceForms) ? model.appearanceForms : [];
+    const wearing = forms.find(form => form.name === model.currentForm)?.appearance || plain(model.unclassifiedAppearance) || plain(npc.currentPresentation);
+    const habits = Array.isArray(npc.mannerisms) ? npc.mannerisms.filter(Boolean).join('; ') : plain(npc.mannerisms);
+    const row = (label, text, mark = '') => (plain(text) ? `<dt>${label}${mark}</dt><dd>${escapeHtml(plain(text))}</dd>` : '');
     const note = locked ? `<p class="delta-muted delta-look-lock">🔒 The look was set ${Number.isInteger(locked.day) ? `on day ${locked.day}` : 'when first seen'} and stays as it was; changes need an edit or a story event.</p>` : '';
-    return note + appearanceFormsHtml(npc, { portraitRefs });
+    const rows = row('Look', model.overallAppearance)
+        + row('Wearing', wearing, changedMark(npc, 'currentPresentation')) + row('Habits', habits, changedMark(npc, 'mannerisms'));
+    const more = forms.length ? `<details class="delta-profile-forms"><summary>Forms and portraits · ${forms.length}</summary>${appearanceFormsHtml(npc, { portraitRefs })}</details>` : '';
+    return `${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : '<p class="delta-muted">No appearance established yet.</p>'}${note}${more}`;
 }
 
 function characterBody(npc) {
     return `<h4>Personality${changedMark(npc, 'personality')}</h4>${proseHtml(npc.personality)}`
         + `<h4>Speech${changedMark(npc, 'speech')}</h4>${proseHtml(npc.speech)}`
         + `<h4>Behavioural levers${changedMark(npc, 'behaviorProfile')}</h4>${listHtml(npc.behaviorProfile)}`
-        + `<h4>Mannerisms${changedMark(npc, 'mannerisms')}</h4>${listHtml(npc.mannerisms)}`;
+;
 }
 
 // The portrait fills the top (phone) or the left column (desktop). The back control goes to the board; the
@@ -97,10 +105,8 @@ export function dossierProfileHtml(npc = {}, { layout = 'phone', portraitRefs = 
     const notes = npc.v2Meters?.notes;
     const tastes = tastesBody(notes) + drivesBody(notes);
     const background = block('background', 'Background', proseHtml(npc.background));
-    const body = desktop
-        ? `<div class="delta-profile-cols"><div class="delta-profile-col">${identity}${appearance}</div>`
-            + `<div class="delta-profile-col">${character}${tastes}${background}</div></div>`
-        : `${identity}${appearance}${character}${tastes}${background}`;
+    // The blocks run in the mockup's order: Identity | Appearance, Character | Tastes, Drives | Background (a block with no data is left out).
+    const body = `<div class="delta-profile-cols">${identity}${appearance}${character}${tastes}${background}</div>`;
     return `<div class="delta-profile delta-profile-${desktop ? 'desktop' : 'phone'}" data-delta-screen-body="profile">`
         + `${portraitBlock(npc, portraitRefs, desktop)}<div class="delta-profile-sheet">${headBlock(npc, desktop)}${body}</div></div>`;
 }

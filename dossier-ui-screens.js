@@ -1,11 +1,17 @@
 /* NPC State Delta dossier screens: the pure screen state machine (library | board | profile | section:n), back and Esc order,
    sideways swipe steps, the dossier's own width switch (one column, or two panes) and the desktop pane layout. No markup here; the screen renderers draw each screen. */
 
-// The layout follows the dossier's OWN width (its panel, not the window). Two panes appear only when both fit their minimum
-// content: the dial pane (250) beside the tiles / a section (about 370). Derived from content, not from any device. Keep the
-// CSS @container lines in dossier-ui-styles*.js at the same number.
-export const TWO_PANE_MIN = 620;
-// (Three panes, dial + tiles + a section, appear from 940 in the CSS: 230 + 290 + 420 and the rules.)
+// The layout follows the dossier's OWN width (its panel, not the window). Every switch line is a sum of the minimum content widths
+// that must fit side by side, never a device width. The CSS @container lines in dossier-ui-styles*.js import these same numbers.
+export const PANE_HERO_MIN = 250; // the dial pane: the dial (210 at least) with its labels and padding
+export const PANE_HERO_SLIM_MIN = 230; // the same pane with a section open beside it
+export const PANE_TILES_MIN = 290; // the tiles: two columns of 140 and the gap and padding
+export const PANE_SECTION_MIN = 370; // a section pane, narrowest (its clamp tops out at 420)
+export const PANE_SECTION_WIDE_MIN = 420; // a section pane at the width three panes are given
+// Two panes (dial pane beside the tiles or a section): 250 + 370.
+export const TWO_PANE_MIN = PANE_HERO_MIN + PANE_SECTION_MIN;
+// Three panes (dial pane, tiles and a section): 230 + 290 + 420.
+export const THREE_PANE_MIN = PANE_HERO_SLIM_MIN + PANE_TILES_MIN + PANE_SECTION_WIDE_MIN;
 export const SWIPE_MIN_PX = 48;
 export const SECTION_KEYS = Object.freeze(['now', 'with', 'ties', 'past', 'secrets']);
 const SCREEN_NAMES = Object.freeze(['library', 'board', 'profile', 'section']);
@@ -126,9 +132,18 @@ export function panelWidth(panel, win = globalThis) {
 }
 
 // One column (the narrow layout) while the dossier is narrower than two panes need.
-export function isNarrow(panel, win = globalThis) {
-    const width = panelWidth(panel, win);
+export function isNarrowWidth(width) {
     return width > 0 && width < TWO_PANE_MIN; // an unknown width (nothing measured yet) draws the two-pane layout
+}
+export function isNarrow(panel, win = globalThis) {
+    return isNarrowWidth(panelWidth(panel, win));
+}
+
+// The width a ResizeObserver entry reports: the panel's content box, the very box the CSS @container lines measure, so the redraw
+// and the stylesheet agree on the same frame. Falls back to measuring the panel for a host without contentBoxSize.
+export function observedWidth(entry, panel, win = globalThis) {
+    const box = Array.isArray(entry?.contentBoxSize) ? entry.contentBoxSize[0] : entry?.contentBoxSize;
+    return box && box.inlineSize > 0 ? box.inlineSize : panelWidth(panel, win);
 }
 
 // Wires touch swipes on one element; onStep receives +1 or -1. Returns the unbind function.

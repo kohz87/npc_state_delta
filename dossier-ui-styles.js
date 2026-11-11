@@ -1,5 +1,6 @@
 /* NPC State Delta dossier surface: the panel's scoped stylesheet. */
 import { ROOT_ID, SETTINGS_ID } from './dossier-ui-constants.js';
+import { TWO_PANE_MIN } from './dossier-ui-screens.js';
 
 export const STYLES = `
 #${ROOT_ID} {
@@ -45,6 +46,8 @@ export const STYLES = `
   position: fixed; z-index: 2147483500; left:50%; top:50%; transform:translate(-50%,-50%);
   width:min(1320px,97vw); height:min(940px,96dvh); overflow:hidden; container:dsr / inline-size;
   display:flex; flex-direction:column; border:1px solid var(--delta-line); border-radius:var(--ss-radius-xl, 15px);
+  /* the dossier's type scale flows with the panel's own width (cqw reads where it is used, so each child sees the panel) */
+  --dt-kick:clamp(9.5px,.25cqw + 8px,11.5px); --dt-pill:clamp(10px,.3cqw + 8.6px,12px); --dt-meta:clamp(11px,.3cqw + 9.6px,13px); --dt-body:clamp(12px,.35cqw + 10.4px,14.5px);
   color:var(--delta-text); background-color:var(--delta-floor); background-image:linear-gradient(var(--delta-bg),var(--delta-bg)); backdrop-filter:var(--ss-blur, none); -webkit-backdrop-filter:var(--ss-blur, none);
   box-shadow:0 0 0 100vmax rgba(0,0,0,.72),0 20px 70px rgba(0,0,0,.55);
 }
@@ -186,7 +189,7 @@ export const STYLES = `
 @supports (color: rgb(from red r g b)) {
   #${ROOT_ID} .delta-panel, #${ROOT_ID} .delta-panel.ss-cards { --delta-floor: var(--ss-sheet-floor, rgb(from var(--delta-bg) r g b / 1)); }
 }
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   #${ROOT_ID} .delta-panel { width:calc(100vw / var(--ss-zoomed, 1)); height:calc(100dvh / var(--ss-zoomed, 1)); border-radius:0; border-left:0; border-right:0; }
 }
 /* The floating window (the host forces the panel to the whole screen up to 1100px, launcher-ui.js): it sizes to its screen, up to its old height. */
@@ -204,13 +207,12 @@ export const STYLES = `
 #${ROOT_ID} .delta-document > .delta-panes { flex:1 1 auto; height:auto; overflow:auto; overscroll-behavior:contain; scrollbar-color:rgba(218,193,148,.35) transparent; }
 #${ROOT_ID} .delta-document > .delta-library-foot { flex:none; }
 #${ROOT_ID} .delta-spread.delta-map-mode { display:grid; flex:1 1 auto; height:auto; }
-/* Where the panel is taller than a short board, the board sits in the middle of it, not at the top above a void; a section or profile page fills the height. */
-#${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="board"] { align-content:center; }
-#${ROOT_ID} .delta-panes[data-layout="desktop"]:is([data-screen="section"], [data-screen="profile"]) { align-content:stretch; }
+/* Where the panel is taller than a short board, every screen fills the height (the dial pane centres its content, the tiles spread): no void under the tiles. */
+#${ROOT_ID} .delta-panes[data-layout="desktop"]:is([data-screen="board"], [data-screen="section"], [data-screen="profile"]) { align-content:stretch; }
 @media (max-width: 650px) {
   #${ROOT_ID} .delta-launcher { right:10px; bottom:66px; }
 }
-@container dsr (max-width: 619.98px) {
+@container dsr (max-width: ${TWO_PANE_MIN - 0.02}px) {
   #${ROOT_ID} .delta-brand .delta-kicker, #${ROOT_ID} .delta-chat-state { display:none; }
   #${ROOT_ID} .delta-topbar { padding-left:10px; }
   #${ROOT_ID} .delta-current-grid, #${ROOT_ID} .delta-prose-grid, #${ROOT_ID} .delta-two-column, #${ROOT_ID} .delta-rel-grid { grid-template-columns:1fr; }

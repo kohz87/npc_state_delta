@@ -5,7 +5,7 @@ import { portraitMark } from './dossier-ui-html.js';
 import { replyHeaderLabel } from './dossier-ui-model.js';
 import { DossierUiPanel } from './dossier-ui-panel.js';
 import { boardHtml } from './dossier-ui-board.js';
-import { libraryFootHtml, libraryHtml, libraryRows, librarySearchHtml, librarySignature } from './dossier-ui-library.js';
+import { libraryCountHtml, libraryFootHtml, libraryHtml, libraryRows, librarySearchHtml, librarySignature } from './dossier-ui-library.js';
 import { dossierProfileHtml } from './dossier-ui-profile.js';
 import { SECTION_KEYS, createScreenState, isNarrow, layoutFor, screenSignature } from './dossier-ui-screens.js';
 import { sectionScreenHtml } from './dossier-ui-sections.js';
@@ -89,10 +89,14 @@ export class DossierUiRender extends DossierUiPanel {
         if (!force && signature === this.lastScreenSignature) return rows.length;
         this.lastScreenSignature = signature;
         if (doc.dataset.screen !== 'library' || !doc.querySelector('[data-delta-library-list]')) {
-            doc.innerHTML = `<div class="delta-panes" data-layout="${isNarrow(this.root.querySelector('.delta-panel')) ? 'phone' : 'desktop'}" data-screen="library"><div data-pane="library" class="delta-library-screen">${librarySearchHtml(this.query, this.projection.index.length)}<div data-delta-library-list></div></div></div>`;
+            doc.innerHTML = `<div class="delta-panes" data-screen="library"><div data-pane="library" class="delta-library-screen">${librarySearchHtml(this.query, this.projection.index.length)}<div data-delta-library-list></div></div></div>${libraryCountHtml(this.projection.index.length)}`;
             doc.dataset.screen = 'library';
             if (doc.firstElementChild) doc.firstElementChild.scrollTop = 0;
         }
+        // the layout mark follows the panel's width on every draw (the panes are kept when only the width crossed the line)
+        doc.querySelector('.delta-panes')?.setAttribute('data-layout', isNarrow(this.root.querySelector('.delta-panel')) ? 'phone' : 'desktop');
+        const count = doc.querySelector('.delta-library-foot[data-static]');
+        if (count) count.outerHTML = libraryCountHtml(this.projection.index.length);
         const list = doc.querySelector('[data-delta-library-list]');
         const focusedId = document.activeElement?.closest?.('.delta-library-face')?.dataset?.npcId || '';
         const deadHidden = !this.query && this.projection.index.some(row => row.bucket === 'dead');

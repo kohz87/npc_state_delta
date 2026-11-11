@@ -135,7 +135,7 @@ function secretsModel(npc) {
 
 // Mood: the word with the Energy and Control bars, always (all three mood fields are kept). The meters' mood gives the word and the
 // bar steps; a person with none yet shows the scanner's word (or the resting word) with both bars at the middle step.
-function moodTile(npc) {
+export function moodTile(npc) {
     const mood = object(npc.v2Meters).mood;
     if (mood) return { title: 'Mood', text: mood.word, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause };
     const rest = moodBars(null);

@@ -7,6 +7,7 @@
    rules in dossier-ui-styles.js. */
 
 import { ROOT_ID } from './dossier-ui-constants.js';
+import { TWO_PANE_MIN } from './dossier-ui-screens.js';
 
 export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-header-slot { display:inline-flex; align-items:center; }
@@ -36,8 +37,8 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-section-arrow { box-sizing:border-box; width:40px; height:40px; min-width:0 !important; min-height:0 !important; display:grid; place-items:center; padding:0; border:1px solid var(--delta-line); border-radius:10px; background:transparent; color:var(--delta-text); font-size:20px; line-height:1; cursor:pointer; }
 #${ROOT_ID} .delta-section-arrow:disabled { opacity:.3; cursor:default; }
 #${ROOT_ID} .delta-section-title { min-width:0; text-align:center; }
-#${ROOT_ID} .delta-section-title b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; color:var(--delta-accent-soft); }
-#${ROOT_ID} .delta-section-title > span { display:block; font-size:11px; color:var(--delta-muted); }
+#${ROOT_ID} .delta-section-title b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:clamp(14px,.4cqw + 12px,18px); color:var(--delta-accent-soft); }
+#${ROOT_ID} .delta-section-title > span { display:block; font-size:var(--dt-pill); color:var(--delta-muted); }
 #${ROOT_ID} .delta-section-dots { display:flex; justify-content:center; gap:4px; margin-top:3px; }
 #${ROOT_ID} .delta-section-dot { width:6px; height:6px; min-height:0; padding:0; border:0; border-radius:3px; background:var(--delta-line); cursor:pointer; transition:width .18s ease, background-color .18s ease; }
 #${ROOT_ID} .delta-section-dot.on { width:16px; background:var(--delta-accent); }
@@ -46,12 +47,13 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet h4 { margin:0; }
 #${ROOT_ID} .delta-sheet-prose { margin:0; line-height:1.55; overflow-wrap:anywhere; }
 #${ROOT_ID} .delta-kv { display:grid; grid-template-columns:82px minmax(0,1fr); gap:5px 12px; margin:0; }
-#${ROOT_ID} .delta-kv dt { font-size:11.5px; color:var(--delta-muted); }
+#${ROOT_ID} .delta-kv dt { font-size:var(--dt-meta); color:var(--delta-muted); }
 #${ROOT_ID} .delta-kv dd { min-width:0; margin:0; overflow-wrap:anywhere; }
+#${ROOT_ID} .delta-kv dd > .delta-tile-bars { margin-top:6px; }
 
 /* With {{user}}: the four meters grow from the centre; the recent changes follow the last-change card */
 #${ROOT_ID} .delta-sheet-meters { display:grid; gap:6px; }
-#${ROOT_ID} .delta-sheet-meter { display:grid; grid-template-columns:78px minmax(0,1fr) 38px; align-items:center; gap:8px; font-size:12px; }
+#${ROOT_ID} .delta-sheet-meter { display:grid; grid-template-columns:78px minmax(0,1fr) 38px; align-items:center; gap:8px; font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-sheet-meter > span { color:var(--delta-muted); }
 #${ROOT_ID} .delta-sheet-meter > strong { text-align:right; font-variant-numeric:tabular-nums; }
 #${ROOT_ID} .delta-sheet-track { position:relative; height:8px; border-radius:4px; background:var(--dial); }
@@ -62,7 +64,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-desire .delta-sheet-track b { background:#b7a3cf; }
 #${ROOT_ID} .delta-sheet-tension .delta-sheet-track b { background:var(--dsk-ten, #d9a273); }
 #${ROOT_ID} .delta-sheet-recent .delta-list { margin:4px 0 0; padding:0; list-style:none; display:grid; gap:6px; }
-#${ROOT_ID} .delta-sheet-recent li { display:flex; flex-wrap:wrap; gap:4px 8px; padding-top:6px; border-top:1px solid var(--delta-line); font-size:12.5px; overflow-wrap:anywhere; }
+#${ROOT_ID} .delta-sheet-recent li { display:flex; flex-wrap:wrap; gap:4px 8px; padding-top:6px; border-top:1px solid var(--delta-line); font-size:var(--dt-body); overflow-wrap:anywhere; }
 #${ROOT_ID} .delta-sheet-when { font-size:11px; color:var(--delta-muted); }
 #${ROOT_ID} .delta-sheet-impact { font-size:10.5px; font-weight:700; text-transform:uppercase; color:var(--delta-accent); }
 
@@ -76,8 +78,8 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-bond[data-tone="bad"] { --c:var(--bad, var(--delta-danger)); }
 #${ROOT_ID} .delta-bond[data-tone="gold"] { --c:var(--held, var(--delta-warn)); }
 #${ROOT_ID} .delta-bond > b { min-width:0; overflow-wrap:anywhere; }
-#${ROOT_ID} .delta-bond-word { grid-column:2; grid-row:1; font-size:12px; font-weight:700; color:var(--c); text-align:right; }
-#${ROOT_ID} .delta-bond > p { grid-column:1 / -1; margin:0; font-size:12.5px; color:var(--delta-muted); overflow-wrap:anywhere; }
+#${ROOT_ID} .delta-bond-word { grid-column:2; grid-row:1; font-size:var(--dt-meta); font-weight:700; color:var(--c); text-align:right; }
+#${ROOT_ID} .delta-bond > p { grid-column:1 / -1; margin:0; font-size:var(--dt-body); color:var(--delta-muted); overflow-wrap:anywhere; }
 
 /* Past: the memories, one per row */
 #${ROOT_ID} .delta-past { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
@@ -94,22 +96,28 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-profile-caption span { font-size:12px; opacity:.85; }
 #${ROOT_ID} .delta-profile-sheet { display:grid; gap:12px; min-width:0; }
 #${ROOT_ID} .delta-profile-head h2 { margin:0; font-size:20px; color:var(--delta-accent-soft); }
-#${ROOT_ID} .delta-profile-line { margin:2px 0 0; font-size:12.5px; color:var(--delta-muted); }
-#${ROOT_ID} .delta-profile-cols { display:grid; gap:12px 22px; min-width:0; }
+#${ROOT_ID} .delta-profile-line { margin:2px 0 0; font-size:var(--dt-meta); color:var(--delta-muted); }
+#${ROOT_ID} .delta-profile-cols { display:grid; gap:12px 22px; min-width:0; align-items:start; }
+#${ROOT_ID} .delta-profile-kv { grid-template-columns:clamp(56px,6cqw,82px) minmax(0,1fr); }
+#${ROOT_ID} .delta-profile-forms { margin-top:6px; font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-profile-forms > summary { cursor:pointer; color:var(--delta-muted); }
 #${ROOT_ID} .delta-profile-col { display:grid; gap:12px; min-width:0; align-content:start; }
 #${ROOT_ID} .delta-profile-block { display:grid; gap:6px; min-width:0; padding-top:10px; border-top:1px solid var(--delta-line); }
-#${ROOT_ID} .delta-profile-block h3 { margin:0; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--delta-accent-soft); }
+#${ROOT_ID} .delta-profile-block h3 { margin:0; font-size:var(--dt-meta); letter-spacing:.08em; text-transform:uppercase; color:var(--delta-accent-soft); }
 #${ROOT_ID} .delta-profile-block h4 { margin:4px 0 0; font-size:12px; color:var(--delta-muted); }
 #${ROOT_ID} .delta-profile-block p { margin:0; overflow-wrap:anywhere; }
 
-@container dsr (min-width: 620px) {
+@container dsr (min-width: ${TWO_PANE_MIN}px) {
   #${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="section"] { grid-template-columns:minmax(0,1fr) clamp(300px,44%,420px); }
   #${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="section"] > [data-pane="section"] { border-left:1px solid var(--delta-line); }
-  #${ROOT_ID} .delta-profile { grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); }
+  /* the portrait runs full-bleed to the pane edges (no inset, no rounding), the sheet takes the rest */
+  #${ROOT_ID} .delta-profile { grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); gap:0; padding:0; align-items:stretch; }
+  #${ROOT_ID} .delta-profile-portrait { border-radius:0; }
+  #${ROOT_ID} .delta-profile-sheet { align-content:start; padding:clamp(14px,2.2cqw,26px); }
   #${ROOT_ID} .delta-profile-cols { grid-template-columns:repeat(2,minmax(0,1fr)); }
   #${ROOT_ID} .delta-profile-portrait { position:sticky; top:0; max-height:none; height:100%; aspect-ratio:auto; }
 }
-@container dsr (max-width: 619.98px) {
+@container dsr (max-width: ${TWO_PANE_MIN - 0.02}px) {
   #${ROOT_ID} .delta-brand { flex:1 1 auto; }
   #${ROOT_ID} .delta-brand strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
   #${ROOT_ID} .delta-top-actions { flex:0 0 auto; gap:6px; }
@@ -151,7 +159,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-bond-word { grid-column:1; grid-row:1; text-align:left; font-size:11px; letter-spacing:.06em; text-transform:uppercase; }
 #${ROOT_ID} .delta-bond > b { grid-column:2; grid-row:1; font-size:15px; }
 #${ROOT_ID} .delta-bond > p { color:var(--delta-text); }
-@container dsr (max-width: 619.98px) { #${ROOT_ID} .delta-section-screen::before { content:""; display:block; width:36px; height:4px; margin:8px auto 0; border-radius:2px; background:var(--dial); } }
+@container dsr (max-width: ${TWO_PANE_MIN - 0.02}px) { #${ROOT_ID} .delta-section-screen::before { content:""; display:block; width:36px; height:4px; margin:8px auto 0; border-radius:2px; background:var(--dial); } }
 
 /* profile as the mockup draws it: flat label/value rows, small coloured headings */
 #${ROOT_ID} .delta-profile-block { border-top:0; padding-top:0; }

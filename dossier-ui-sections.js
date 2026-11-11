@@ -4,7 +4,8 @@ import { changeStamp, plain, relationshipValue, RELATIONSHIP_AXES } from './doss
 import { lastRelationshipChangeHtml } from './dossier-ui-relationship.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
 import { castFromHtml, keyAwayHtml } from './dossier-ui-catalog.js';
-import { bondTone, boardTone, pullTile } from './dossier-ui-view-model.js';
+import { bondTone, boardTone, moodTile, pullTile } from './dossier-ui-view-model.js';
+import { barsHtml, moodBarList } from './dossier-ui-board.js';
 import { tieTone } from './dossier-ui-bond-tone.js';
 import { SECTION_KEYS } from './dossier-ui-screens.js';
 
@@ -57,7 +58,7 @@ export function sectionHeaderHtml(id, { npcName = '', userName = '' } = {}) {
 export function nowSectionHtml(npc = {}) {
     const cast = npc.cast && typeof npc.cast === 'object' ? npc.cast : {};
     const rows = [
-        ['Mood', plain(npc.v2Meters?.mood?.word) || plain(npc.mood)],
+        ['Mood', moodTile(npc).text],
         ['Where', plain(cast.where) || plain(npc.location)],
         ['Doing', plain(cast.doing)],
         ['Goal', plain(cast.goal) || plain(npc.goal)],
@@ -70,7 +71,9 @@ export function nowSectionHtml(npc = {}) {
     if (pull) rows.splice(mood?.cause ? 2 : 1, 0, ['Pull', `${pull.text} · ${pull.note}${pull.cause ? ` · ${pull.cause}` : ''}`]);
     const blocks = `${npc.key ? keyAwayHtml(npc.key) : ''}${npc.cast ? castFromHtml(npc.cast, npc.id) : ''}`;
     if (!rows.length) return blocks || '<p class="delta-muted">Nothing about this moment is known yet.</p>';
-    return `${blocks}<dl class="delta-sheet delta-kv">${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}</dl>`;
+    // Mood always shows the word and both bars (Energy, Control), at rest as well, like the board tile.
+    const bars = moodBarList(moodTile(npc));
+    return `${blocks}<dl class="delta-sheet delta-kv">${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}${label === 'Mood' && bars ? barsHtml(bars) : ''}</dd>`).join('')}</dl>`;
 }
 
 // With {{user}}: the four meters as bars that run from the centre (−100..100), the dynamic between them,
