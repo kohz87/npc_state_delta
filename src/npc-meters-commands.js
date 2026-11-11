@@ -281,7 +281,9 @@ export function createNpcCommands({
                 note(slice, ctx.rev, unknown);
             }
             if (castSeen.fresh.length) slice.cast = castSeen.cast;
-            const world = moodPull && day !== null ? readWorld(ctx) : null;
+            // The world (four reads) is read once for this tick, and only when a person's record is there to use it.
+            let world = null;
+            const worldNow = () => { if (!world) world = readWorld(ctx); return world; };
             const texts = [];
             const data = [];
             let narrate = false;
@@ -313,7 +315,7 @@ export function createNpcCommands({
                         drift.push({ meter: def.id, before: value, after: next });
                     }
                 }
-                if (world) moodPullStep(record, day, world, rawPeople, minutes);
+                if (moodPull && day !== null) moodPullStep(record, day, worldNow(), rawPeople, minutes);
                 const settled = settleRecord(record, [record.name], settings, defs, featureOn(FEATURE_STAGES, ctx) && !away);
                 if (JSON.stringify(record) === was) continue;
                 changed = true;
