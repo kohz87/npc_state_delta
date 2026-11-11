@@ -164,7 +164,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-now-bars .delta-tile-bar { grid-template-columns:clamp(54px,7cqw,84px) minmax(0,1fr); font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-now-bars .delta-tile-bar i { height:clamp(5px,.5cqw,7px); }
 #${ROOT_ID} .delta-now-moved { margin:0; font-size:var(--dt-body); }
-#${ROOT_ID} .delta-panel .delta-section-body p.delta-secrets-intro.delta-muted { margin:0 0 8px; font-size:var(--dt-meta); color:color-mix(in srgb, var(--delta-text) 62%, transparent); line-height:1.5; }
+#${ROOT_ID} .delta-panel .delta-section-body p.delta-secrets-intro.delta-muted { margin:0 0 8px; font-size:var(--dt-meta); line-height:1.5; }
 #${ROOT_ID} .delta-now-updated { margin:0; font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-new-badge { display:inline-block; padding:0 .45em; border-radius:4px; font-size:var(--dt-kick); font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--good, var(--delta-good)); background:color-mix(in srgb, var(--good, var(--delta-good)) 18%, transparent); }
 

@@ -10,7 +10,7 @@ export const STYLES = `
   /* the same tint with its alpha dropped: the opaque floor under the panel and the section bar (the chat must not read through them) */
   --delta-floor: var(--ss-sheet-floor, #18191d);
   --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
-  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-muted: color-mix(in srgb, var(--delta-text) 62%, transparent);
   --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
   --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
   --delta-line: var(--ss-border, rgba(218,193,148,.24));
@@ -82,7 +82,7 @@ export const STYLES = `
   /* the same tint with its alpha dropped: the opaque floor under the panel and the section bar (the chat must not read through them) */
   --delta-floor: var(--ss-sheet-floor, #18191d);
   --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
-  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-muted: color-mix(in srgb, var(--delta-text) 62%, transparent);
   --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
   --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
   --delta-line: var(--ss-border, rgba(218,193,148,.24));

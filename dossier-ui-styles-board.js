@@ -107,8 +107,9 @@ ${PANEL} .delta-tile-bar i { height:5px; border-radius:3px; background:var(--dia
 ${PANEL} .delta-tile-bar b { display:block; height:100%; border-radius:3px; background:var(--dsk-ten, var(--delta-accent)); }
 ${PANEL} .delta-tile-ring { --c:var(--held, var(--delta-warn)); }
 ${PANEL} .delta-tile-faces .delta-tile-face.delta-tile-initials { display:grid; place-items:center; font-size:clamp(7px,.2cqw + 6px,9px); line-height:1; letter-spacing:-.04em; overflow:hidden; font-weight:700; background:var(--face-flat); color:var(--delta-text); transform:none; }
-${PANEL} .delta-tile-dots { display:flex; align-items:center; gap:0; margin:2px 0; }
-${PANEL} .delta-tile-dots i, ${PANEL} .delta-timeline i { flex:none; width:9px; height:9px; border-radius:50%; background:var(--des, #b7a3cf); }
+${PANEL} .delta-tile-dots { display:flex; align-items:center; gap:0; margin:2px 0; position:relative; }
+${PANEL} .delta-tile-dots::before { content:""; position:absolute; left:4px; right:4px; top:50%; height:1px; background:var(--delta-line); }
+${PANEL} .delta-tile-dots i, ${PANEL} .delta-timeline i { flex:none; position:relative; width:9px; height:9px; border-radius:50%; background:var(--des, #b7a3cf); }
 ${PANEL} .delta-tile-dots i + i { margin-left:14px; }
 ${PANEL} .delta-tile-dots i.delta-dot-lie, ${PANEL} .delta-timeline i.delta-dot-lie { background:var(--held, #d9b85c); }
 ${PANEL} .delta-tile-dots i.delta-dot-know { background:var(--trust, #8fb4d9); }

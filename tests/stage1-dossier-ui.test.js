@@ -583,5 +583,7 @@ test('round 3 fix 2-6: no tier line under a change row, a muted secrets intro, L
   const mapCss = fs.readFileSync(new URL('../relationship-map-focus.js', import.meta.url), 'utf8');
   assert.match(mapCss, /\.delta-map-card-dial \.dial-label \{ display:none; \}/);
   assert.match(mapCss, /\.delta-map-ties-focus \.delta-map-ties-head \{ font-size:var\(--dt-kick\); letter-spacing:\.12em; text-transform:uppercase/);
-  assert.match(css, /\.delta-section-body p\.delta-secrets-intro\.delta-muted \{[^}]*color:color-mix\(in srgb, var\(--delta-text\) 62%/);
+  assert.match(css, /\.delta-section-body p\.delta-secrets-intro\.delta-muted \{[^}]*font-size:var\(--dt-meta\)/);
+  assert.match(css, /--delta-muted: color-mix\(in srgb, var\(--delta-text\) 62%, transparent\);/);
+  assert.match(fs.readFileSync(new URL("../dossier-ui-styles-board.js", import.meta.url), "utf8"), /\.delta-tile-dots::before \{ content:""; position:absolute/);
 });
