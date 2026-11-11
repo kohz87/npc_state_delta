@@ -14,7 +14,7 @@ import { tiesText } from '../src/npc-notes-ties.js';
 import { suite } from './helpers/pacing-suite.js';
 import { MODULE_ID } from '../src/storysuite-v2.js';
 import { validateNpcSlice } from '../src/npc-meters.js';
-import { FEATURE_NOTES, RECORD_FIELDS } from '../src/npc-meters-config.js';
+import { FEATURE_NOTES, RECORD_FIELDS, readLeaf } from '../src/npc-meters-config.js';
 import { seedNotes, driveScale, foldTies, aliasCanon, tieRows, dossierNotes } from '../src/npc-notes-kinds.js';
 import { stepPull } from '../npc-instincts.js';
 import { setDrives } from '../src/npc-notes-drives.js';
@@ -189,7 +189,7 @@ test('notes host: only a story line catches a lie: six trust, in the day\'s allo
     await s.say(['~ lie Oren | to: Astra | said: I never sold the spell']);
     await s.say(['~ lie Oren | to: Astra | caught: yes']);
     assert.equal(s.npc('Oren').meters.trust, -5, 'trust 1 - 6');
-    assert.match(oren(s).mood.cause, /caught lying to Astra/);
+    assert.match(readLeaf(oren(s).mood).cause, /caught lying to Astra/);
     assert.ok(JSON.parse(oren(s).lies)[0].caught);
     assert.equal((await cast(s)).notes.lies[0].said, 'I never sold the spell', 'a caught lie is shown');
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
