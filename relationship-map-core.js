@@ -5,6 +5,14 @@ import { parseKeyRelationshipEntry, resolveNpcReference } from './social.js';
 // The radius formula is drawn for a 780-unit map; the SVG and node positions scale with it.
 export const MAP_SPAN = 780;
 export const MAP_CENTER = MAP_SPAN / 2;
+// The card goes beside the map (not under it) when both fit: the map at its smallest readable size, the card at its narrowest and the
+// room around them. Derived from content, never from a device. relationship-map.js's @container line imports it.
+export const MAP_CIRCLE_MIN = 380;
+export const MAP_CARD_MIN = 240;
+export const MAP_ROOM = 2 * 18 + 14; // side padding of the map pane and the gap between map and card
+export const MAP_CARD_BESIDE_MIN = MAP_CIRCLE_MIN + MAP_CARD_MIN + MAP_ROOM;
+// Below this width of the circle itself a face shows its short name and no number (the labels would meet): about 5 labels around the ring (64px each).
+export const MAP_LABELS_SHORT_MAX = 520;
 export const DESKTOP_NODE_CAP = 24;
 export const PHONE_NODE_CAP = 16;
 
@@ -162,7 +170,7 @@ export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth
     const lines = resolveMapBonds(npcs, new Set(positions.keys()))
         .map(bond => ({ ...bond, touches: bond.a === selectedId || bond.b === selectedId }))
         .filter(bond => bond.touches || allBonds)
-        .map(bond => ({ touches: bond.touches, a: bond.a, b: bond.b, relation: bond.relation, from: positions.get(bond.a), to: positions.get(bond.b) }));
+        .map(bond => ({ touches: bond.touches, a: bond.a, b: bond.b, relation: bond.relation, tags: bond.tags, from: positions.get(bond.a), to: positions.get(bond.b) }));
     const change = selected?.lastRelationshipChange || {};
     return {
         turn,

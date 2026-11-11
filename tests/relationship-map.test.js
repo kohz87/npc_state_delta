@@ -207,10 +207,37 @@ test('map mode hides the dossier hero and gives the map the full width; meters g
     const { mapNodeHtml, buildFocusModel } = await import('../relationship-map-focus.js');
     const adapter = fs.readFileSync(new URL('../relationship-map.js', import.meta.url), 'utf8');
     assert.match(adapter, /delta-map-mode > \.delta-hero \{ display:none; \}/);
-    assert.match(adapter, /\.delta-spread\.delta-map-mode \{ grid-template-columns:minmax\(0,1fr\); \}/);
+    assert.match(adapter, /\.delta-spread\.delta-map-mode \{ grid-template-columns:minmax\(0,1fr\); grid-template-rows:minmax\(0,1fr\); \}/);
     assert.doesNotMatch(adapter, /delta-map-mode \.delta-hero-media/);
-    assert.match(adapter, /\.delta-map-bars \{ display:grid; grid-template-columns:repeat\(4,minmax\(0,1fr\)\); gap:8px 28px; \}/);
+    // the card stands beside the map from a width derived from content (map minimum + card minimum + room), under it below; no bare 899 / 520 lines
+    const core = await import('../relationship-map-core.js');
+    assert.equal(core.MAP_CARD_BESIDE_MIN, core.MAP_CIRCLE_MIN + core.MAP_CARD_MIN + core.MAP_ROOM);
+    assert.match(adapter, /@container dsr \(min-width: \$\{MAP_CARD_BESIDE_MIN\}px\)/);
+    assert.match(adapter, /@container dmap \(max-width: \$\{MAP_LABELS_SHORT_MAX\}px\)/);
+    assert.doesNotMatch(adapter, /899\.98|@container \(max-width/);
+    assert.doesNotMatch(adapter, /delta-map-strip|delta-map-bars/);
     const map = buildMapModel({ npcs: [npc('rika', { portrait: 'data:image/png;base64,AAAA' }), npc('vane')] }, {});
     const face = mapNodeHtml(map.nodes.find(n => n.id === 'vane'), buildFocusModel({}, map, ''), {});
     assert.match(face, /delta-map-face delta-portrait-placeholder[\s\S]*<span>V<\/span>/, 'initials when there is no portrait');
+});
+
+test('the map card: ties without Focus, the numbers line, a portrait or initials, the library bar and compact tap pills', async () => {
+    const { buildFocusModel, mapCardHtml, selectedTies, cardNumbersLine, mapNodeHtml } = await import('../relationship-map-focus.js');
+    const npcs = [
+        npc('rika', { name: 'Rika', relationship: { trust: 11, affection: 11, desire: 6, tension: 13 }, keyRelationships: ['Temiwa: friend', 'Bregje: rival'], v2Meters: { ties: { bregje: ['rival'] } } }),
+        npc('temiwa', { name: 'Temiwa' }), npc('bregje', { name: 'Bregje' }),
+    ];
+    const map = buildMapModel({ npcs, turn: 1 }, { selectedId: 'rika' });
+    assert.deepEqual(selectedTies(map).map(t => [t.name, t.word, t.tone]), [['Bregje', 'rival', 'bad'], ['Temiwa', 'friend', 'good']], 'the ties of the selected person need no focus');
+    assert.equal(cardNumbersLine(map.selected), 'Warmth +11 · Trust +11 · Affection +11 · Desire +6 · Tension +13');
+    const card = mapCardHtml(map, buildFocusModel({ npcs }, map, ''), 'Astra');
+    assert.match(card, /<aside class="delta-map-card"[\s\S]*delta-map-card-face[\s\S]*<h3 class="delta-map-card-name">Rika<\/h3>[\s\S]*Rika&#039;s ties<\/b>[\s\S]*rival<\/span> Bregje[\s\S]*data-map-focus="rika"[\s\S]*Open dossier ›/);
+    assert.match(card, /delta-portrait-placeholder[^>]*><span>R<\/span>/, 'initials when she has no portrait');
+    assert.match(card, /delta-map-focus ss-tap-pill/);
+    const face = mapNodeHtml({ ...map.nodes[0], name: 'Captain Vane', short: 'Vane', portrait: '' }, buildFocusModel({}, map, ''), {});
+    assert.match(face, /<span>CV<\/span>/, 'two initials for a two-word name');
+    const adapter = fs.readFileSync(new URL('../relationship-map.js', import.meta.url), 'utf8');
+    assert.match(adapter, /libraryFootHtml\(count\)/, 'the map ends in the same Dossier library bar');
+    assert.match(adapter, /closest\('\.delta-library-foot'\)\) return void setMode\(ui, 'dossier'\)/);
+    assert.match(adapter, /class="ss-tap-pill" data-map-mode="map"/);
 });

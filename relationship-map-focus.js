@@ -78,7 +78,7 @@ export function focusChip(npcId = '', name = '') {
         label,
         clearLabel,
         html: `<span class="delta-map-focus-chip" data-map-focus-id="${escapeHtml(id)}">${escapeHtml(label)}`
-            + ` <button type="button" class="delta-map-focus-clear" data-map-focus-clear="${escapeHtml(id)}"`
+            + ` <button type="button" class="delta-map-focus-clear ss-tap-pill" data-map-focus-clear="${escapeHtml(id)}"`
             + ` aria-label="${escapeHtml(clearLabel)}" title="${escapeHtml(clearLabel)}">✕</button></span>`,
     };
 }
@@ -162,23 +162,51 @@ export function mapNodeHtml(node, focus, { refs = null, bondTone, ties = new Map
     const under = tie ? `<small class="delta-map-word" data-tone="${tie.tone}">${escapeHtml(tie.word)}</small>` : `<small>${escapeHtml(signed(node.value))}</small>`;
     const label = `<span class="delta-map-label"><b class="delta-map-name">${escapeHtml(node.name)}</b><b class="delta-map-short">${escapeHtml(node.short)}</b>${under}</span>`;
     const said = `${node.name}, ${signed(node.value)}${tie ? `, ${tie.word}` : ''}`;
-    return `<button type="button" class="delta-map-node" data-npc-id="${escapeHtml(node.id)}" data-status="${node.status}" data-tone="${tone}" data-focus="${state}" aria-pressed="${node.selected}" aria-label="${escapeHtml(said)}" style="left:${node.x.toFixed(2)}%;top:${node.y.toFixed(2)}%"><span class="delta-map-avatar">${portraitHtml({ name: node.short, portrait: node.portrait }, 'delta-map-face', { alt: false, refs })}</span>${delta}${label}</button>`;
+    return `<button type="button" class="delta-map-node" data-npc-id="${escapeHtml(node.id)}" data-status="${node.status}" data-tone="${tone}" data-focus="${state}" aria-pressed="${node.selected}" aria-label="${escapeHtml(said)}" style="left:${node.x.toFixed(2)}%;top:${node.y.toFixed(2)}%"><span class="delta-map-avatar">${portraitHtml({ name: node.name, portrait: node.portrait }, 'delta-map-face', { alt: false, refs })}</span>${delta}${label}</button>`;
 }
 
-// The card under the map: who is selected, the Focus button, and in focus the ties as "word Name".
-export function mapCardHtml(model, focus, persona, barsHtml = '') {
+// The people the selected one is tied to on the map, with the relation word and tone (from the model's bond lines, so it needs no focus).
+export function selectedTies(model) {
+    const id = model?.selected?.id;
+    if (!id) return [];
+    const names = new Map((model.nodes || []).map(node => [node.id, node.name]));
+    return (model.lines || []).filter(line => line.a === id || line.b === id).map(line => {
+        const other = line.a === id ? line.b : line.a;
+        const { word, tone } = bondLine(line, { prefer: id });
+        const relation = plain(line.relation?.[id]) || plain(line.relation?.[other]);
+        return { id: other, name: names.get(other) || '', word, tone, relation };
+    }).sort((a, b) => a.name.localeCompare(b.name) || String(a.id).localeCompare(String(b.id)));
+}
+
+// "Warmth +11 · Trust +11 · Affection +10 · Desire +6 · Tension +13": the selected person's numbers toward the player.
+export function cardNumbersLine(selected) {
+    const by = Object.fromEntries((selected?.axes || []).map(axis => [axis.key, axis.value]));
+    const warmth = Math.round(((by.trust || 0) + (by.affection || 0)) / 2);
+    const parts = [['Warmth', warmth], ...(selected?.axes || []).map(axis => [axis.label, axis.value])];
+    return parts.map(([label, value]) => `${label} ${signed(value)}`).join(' · ');
+}
+
+// The card: on desktop it stands beside the map (portrait, name, the numbers, her ties, Open dossier); on phone it is the full-width
+// "Rika's ties" block under the map. Ties are listed with or without Focus; Focus lights them on the map.
+export function mapCardHtml(model, focus, persona, { refs = null } = {}) {
     const sel = model.selected;
-    if (!sel) return '<section class="delta-map-strip"><p class="delta-map-last">Pick an NPC on the map.</p></section>';
+    if (!sel) return '<aside class="delta-map-card delta-map-card-empty"><p class="delta-map-last">Pick an NPC on the map.</p></aside>';
     const id = escapeHtml(sel.id);
     const focused = focus.active && focus.focusId === sel.id;
-    const ties = focused ? `<p class="delta-map-ties"><b>${escapeHtml(`${sel.name}'s ties`)}</b> ${focus.ties.length ? focus.ties.map(t => `<span data-tone="${t.tone}">${escapeHtml(t.word || 'tied')}</span> ${escapeHtml(t.name)}`.trim()).join(' · ') : 'No ties to anyone else on the map.'}</p>` : '';
-    const focusBtn = focused ? '' : `<button type="button" class="delta-btn delta-map-focus" data-map-focus="${id}">Focus</button>`;
-    return `<section class="delta-map-strip" aria-label="${escapeHtml(`${sel.name} toward ${persona}`)}">
-        <div class="delta-map-strip-head"><b>${escapeHtml(sel.name)}</b><small>toward ${escapeHtml(persona)}</small></div>
-        ${barsHtml}${ties}
+    const node = (model.nodes || []).find(item => item.id === sel.id);
+    const ties = selectedTies(model);
+    const tieRows = ties.length
+        ? ties.map(t => `<span class="delta-map-tie"><span data-tone="${t.tone}">${escapeHtml(t.word || 'tied')}</span> ${escapeHtml(t.name)}${t.relation && t.relation.toLocaleLowerCase() !== (t.word || '').toLocaleLowerCase() ? `<em> · ${escapeHtml(t.relation)}</em>` : ''}</span>`).join('<i class="delta-map-tie-sep"> · </i>')
+        : 'No ties to anyone else on the map.';
+    const focusBtn = focused ? '' : `<button type="button" class="delta-btn delta-map-focus ss-tap-pill" data-map-focus="${id}">Focus</button>`;
+    return `<aside class="delta-map-card" aria-label="${escapeHtml(`${sel.name} toward ${persona}`)}">
+        <div class="delta-map-card-face">${portraitHtml({ name: sel.name, portrait: node?.portrait || '' }, 'delta-map-card-img', { alt: false, refs })}</div>
+        <h3 class="delta-map-card-name">${escapeHtml(sel.name)}</h3>
+        <p class="delta-map-card-line">${escapeHtml(cardNumbersLine(sel))}</p>
+        <p class="delta-map-ties"><b>${escapeHtml(`${sel.name}'s ties`)}</b> ${tieRows}</p>
         <p class="delta-map-last">${sel.lastReason ? `${sel.lastWhen ? `<b>${escapeHtml(sel.lastWhen)}</b> ` : ''}${escapeHtml(sel.lastReason)}` : 'No relationship change recorded yet.'}</p>
-        <div class="delta-map-actions">${focusBtn}<button type="button" class="delta-btn delta-primary delta-map-open" data-npc-id="${id}">Open dossier ›</button></div>
-    </section>`;
+        <div class="delta-map-actions">${focusBtn}<button type="button" class="delta-btn delta-primary delta-map-open ss-tap-pill" data-npc-id="${id}">Open dossier ›</button></div>
+    </aside>`;
 }
 
 // The key line under the lens switch: closer = higher on the chosen lens.
@@ -200,10 +228,11 @@ ${root} .delta-map-node[data-focus="focus"] .delta-map-avatar { box-shadow:0 0 0
 ${root} .delta-map-word { color:var(--tone); font-size:.68rem; font-weight:700; line-height:1.2; }
 ${root} .delta-map-focus-chip { display:inline-flex; align-items:center; gap:6px; min-height:34px; padding:0 4px 0 12px; border:1px solid var(--delta-accent); border-radius:999px; color:var(--delta-text); font-size:.8rem; }
 ${root} .delta-map-focus-clear { min-width:30px; min-height:30px; border:0; border-radius:50%; color:var(--delta-text); background:transparent; cursor:pointer; }
-${root} .delta-map-ties { grid-column:1/-1; margin:0; font-size:.8rem; color:var(--delta-muted); }
+${root} .delta-map-ties { margin:0; font-size:var(--dt-meta); color:var(--delta-muted); }
 ${root} .delta-map-ties b { color:var(--delta-text); margin-right:6px; }
-${root} .delta-map-ties span { color:var(--tone); font-weight:700; }
-${root} .delta-map-actions { display:flex; gap:8px; }
+${root} .delta-map-tie > [data-tone] { color:var(--tone); font-weight:700; }
+${root} .delta-map-tie em { font-style:normal; }
+${root} .delta-map-actions { display:flex; flex-wrap:wrap; gap:8px; }
 ${root} .delta-map-key-line { margin:0; color:var(--delta-muted); font-size:.78rem; }
 `;
 }
