@@ -251,15 +251,14 @@ export function createNpcRecord(name, existingIds = [], baseline = DEFAULT_RELAT
 }
 
 
-// A dossier that matters is archived by the stale pass, never deleted: it holds a portrait image (the main one or a form's, in
-// `formIds`), comes from the cast pack, has a relationship meter off the configured starting value or a stored memory, or its id is in
-// options.keepIds (Story Director's key people and away list).
-export const RETAINED_STALE_ARCHIVE_MAX = 120; // matters-only archives kept past the delete age (a branch snapshot carries them all)
+// A dossier that matters is archived by the stale pass, never deleted, with no count bound: it holds a portrait image (the main one or
+// a form's, in `formIds`), comes from the cast pack, has a relationship meter off the configured starting value, or its id is in
+// options.keepIds (Story Director's key people and away list). Stored memories alone do not count.
 export function npcMattersForRetention(npc, keepIds = new Set(), formIds = new Set(), baseline = null) {
     const start = normalizeRelationshipBaseline(baseline || {});
     const moved = RELATIONSHIP_KEYS.some(key => Number.isFinite(Number(npc?.relationship?.[key])) && Number(npc.relationship[key]) !== Number(start[key] ?? 0));
     return portraitHasImage(npc?.portrait) || formIds.has(npc?.id) || Boolean(npc?.castFrom && typeof npc.castFrom === 'object') || moved
-        || (Array.isArray(npc?.memories) && npc.memories.length > 0) || keepIds.has(npc?.id);
+        || keepIds.has(npc?.id);
 }
 
 export function applyStaleNpcLifecycle(state = {}, options = {}) {
@@ -278,15 +277,6 @@ export function applyStaleNpcLifecycle(state = {}, options = {}) {
     const removedIds = new Set();
     next.npcs = [];
 
-    // Past the cap, the matters-only archives with the oldest activity lose that protection (key people never do).
-    const overCap = new Set();
-    const heavy = (Array.isArray(state?.npcs) ? state.npcs : []).map(normalizeNpcRecord).filter(npc => !keepIds.has(npc.id) && !protectedIds.has(npc.id)
-        && !npc.present && !npc.worldActive && !npc.retentionProtected && !isTerminalNpcDeath(npc) && (!npc.archived || npc.archiveReason === 'stale')
-        && turn - Math.max(Number(npc.lastSeenTurn || 0), Number(npc.lastWorldActiveTurn || 0)) >= deleteAfter
-        && npcMattersForRetention(npc, keepIds, formIds, options.baseline))
-        .sort((a, b) => Math.max(b.lastSeenTurn || 0, b.lastWorldActiveTurn || 0) - Math.max(a.lastSeenTurn || 0, a.lastWorldActiveTurn || 0));
-    for (const npc of heavy.slice(RETAINED_STALE_ARCHIVE_MAX)) overCap.add(npc.id);
-
     for (const raw of (Array.isArray(state?.npcs) ? state.npcs : [])) {
         let npc = normalizeNpcRecord(raw);
         if (isTerminalNpcDeath(npc) || npc.present || npc.worldActive || npc.retentionProtected || protectedIds.has(npc.id)) {
@@ -298,7 +288,7 @@ export function applyStaleNpcLifecycle(state = {}, options = {}) {
 
         // Only stale-auto-archives participate in timed deletion. Manual and death archives are
         // durable records and remain until the player explicitly removes them.
-        const matters = noDelete || (npcMattersForRetention(npc, keepIds, formIds, options.baseline) && !overCap.has(npc.id));
+        const matters = noDelete || npcMattersForRetention(npc, keepIds, formIds, options.baseline);
         if (npc.archived) {
             if (npc.archiveReason === 'stale' && age >= deleteAfter && !matters) {
                 removed.push({ id: npc.id, name: npc.name, age, activityTurn, archiveReason: 'stale' });

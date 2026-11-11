@@ -199,11 +199,12 @@ export function createHostedPart(rt, deps) {
         const list = keyPeopleList();
         return list?.length ? (state?.npcs || []).filter(npc => isKey(findKeyEntry(list, npc))).map(npc => npc.id) : [];
     }
-    // True while hosted and the host cannot answer the key list or the meter read (error, null, not a list): the stale pass then only archives.
+    // True while hosted and a read really failed: the key list (a present query that errors or answers a non-list; Story Director absent or
+    // off is no key list, not a failure) or the meter read. The stale pass then only archives.
     function hostedReadsFailed() {
         const adapter = storySuiteV2Meters();
         if (!adapter) return false;
-        try { return !Array.isArray(adapter.keyPeopleAnswer?.()) || !Array.isArray(adapter.meterEntries?.()); } catch { return true; }
+        try { return adapter.keyPeopleReadable?.() === false || !Array.isArray(adapter.meterEntries?.()); } catch { return true; }
     }
     function keyAwayScanOptions(state) {
         const list = keyPeopleList();

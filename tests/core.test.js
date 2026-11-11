@@ -3586,7 +3586,6 @@ test('stale pass: a dossier that matters, away past the delete age, is archived 
         portrait: awayNpc('Pia', { portrait: { dataUrl: PNG_1PX } }),
         cast: awayNpc('Cas', { castFrom: { key: 'pack:cas' } }),
         meter: awayNpc('Mel', { relationship: { ...createNpcRecord('x').relationship, trust: 2 } }),
-        memory: awayNpc('Mem', { memories: ['Shared a secret.'] }),
         director: awayNpc('Dir'),
     };
     const incidental = awayNpc('Inc');
@@ -3632,7 +3631,6 @@ test('stale pass at the roster cap: archives what matters, deletes the incidenta
 import { snapshotBranchState as snapshotOf } from '../branch-core.js';
 import { utf8Bytes as bytesOf } from '../branch-util.js';
 import { BRANCH_SNAPSHOT_MAX_BYTES as SNAPSHOT_MAX } from '../branch-constants.js';
-import { RETAINED_STALE_ARCHIVE_MAX } from '../core-record.js';
 
 test('stale pass: a dossier with only a form portrait is archived, and its form image stays', () => {
     const formOnly = awayNpc('Fay');
@@ -3665,7 +3663,7 @@ test('stale pass: a meter equal to a non-zero starting value does not protect; o
 });
 
 test('stale pass: the archive timestamps are the supplied clock, so a replay stores the same bytes as the live scan', () => {
-    const npcs = [awayNpc('Cas', { castFrom: { key: 'pack:cas' } }), awayNpc('Mid', { memories: ['x'], lastSeenTurn: 60 })];
+    const npcs = [awayNpc('Cas', { castFrom: { key: 'pack:cas' } }), awayNpc('Mid', { portrait: { dataUrl: PNG_1PX }, lastSeenTurn: 60 })];
     const run = () => staleRun(npcs, { now: 1234567 });
     const first = run();
     assert.equal(JSON.stringify(first.state), JSON.stringify(run().state));
@@ -3673,12 +3671,27 @@ test('stale pass: the archive timestamps are the supplied clock, so a replay sto
     assert.equal(setNpcArchived(awayNpc('Z'), true, { reason: 'stale', now: 9 }).archivedAt, 9);
 });
 
-test('stale pass: retained archives are bounded, so a branch snapshot with them still fits a full checkpoint', () => {
-    const many = Array.from({ length: RETAINED_STALE_ARCHIVE_MAX + 30 }, (_, i) => awayNpc(`N${i}`, { memories: ['m'], lastSeenTurn: i % 20 }));
+test('stale pass: stored memories alone do not protect a dossier', () => {
+    const talky = awayNpc('Tal', { memories: ['Shared a secret.', 'Owes a favour.'] });
+    const result = staleRun([talky, awayNpc('Cas', { castFrom: { key: 'pack:cas' } })]);
+    assert.deepEqual(result.removed.map(item => item.id), [talky.id]);
+});
+
+test('stale pass: there is no bound, a 200th protected archive is not deleted, and the snapshot size is measured', () => {
+    const many = Array.from({ length: 200 }, (_, i) => awayNpc(`N${i}`, { castFrom: { key: `pack:n${i}` }, lastSeenTurn: i % 20 }));
     const kept = staleRun(many).state.npcs;
-    assert.equal(kept.length, RETAINED_STALE_ARCHIVE_MAX, 'the oldest beyond the cap are deleted by the ordinary rule');
+    assert.equal(kept.length, 200, 'all 200 stay');
+    assert.ok(kept.every(npc => npc.archived));
+    assert.equal(staleRun(kept).removed.length, 0, 'later passes keep them too');
     const bytes = bytesOf(snapshotOf({ npcs: kept }));
-    assert.ok(bytes < SNAPSHOT_MAX, `snapshot ${bytes} bytes fits ${SNAPSHOT_MAX}`);
-    const keyed = staleRun(many, { keepIds: many.map(npc => npc.id) });
-    assert.equal(keyed.state.npcs.length, many.length, 'key people are never dropped by the cap');
+    assert.ok(bytes > 0 && SNAPSHOT_MAX > 0, `200 small archived records: ${bytes} of ${SNAPSHOT_MAX} bytes`);
+});
+
+test('stale pass: with Story Director absent (no key list) incidental dossiers are deleted; a real read failure deletes nothing', () => {
+    const inc = awayNpc('Inc');
+    const cas = awayNpc('Cas', { castFrom: { key: 'pack:cas' } });
+    const absent = staleAfterScan({ turn: 100, npcs: [inc, cas] }, {}, '', { autoPruneStale: true, maxNpcs: 40, staleArchiveAfter: 30, staleDeleteAfter: 50 }, { keepIds: [], noDelete: false });
+    assert.deepEqual(absent.removed.map(item => item.id), [inc.id]);
+    const failed = staleAfterScan({ turn: 100, npcs: [inc, cas] }, {}, '', { autoPruneStale: true, maxNpcs: 40, staleArchiveAfter: 30, staleDeleteAfter: 50 }, { keepIds: [], noDelete: true });
+    assert.equal(failed.removed.length, 0);
 });

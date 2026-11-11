@@ -35,6 +35,18 @@ export function createDirectorQueriesPart(session, deps, { hostFeature }) {
             return null;
         }
     }
+    // Whether the key list can be trusted: true when Story Director answers a list, or is absent (no such query: NOT_FOUND; or its
+    // feature is off and the query answers null), because then there is simply no key list; false for a real failure (any other
+    // error, an answer that is neither a list nor null) or when not hosted-capable. The stale pass deletes nothing while this is false.
+    function keyPeopleReadable() {
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return true;
+        try {
+            const answer = session.sdkRef.query(KEY_PEOPLE_QUERY, {});
+            return answer === null || answer === undefined || Array.isArray(answer);
+        } catch (error) {
+            return error?.code === 'NOT_FOUND';
+        }
+    }
     // The memory of key people's last absences (npc.keyAway; the slice's `keyAway`), {} when there is none or no host.
     function keyAwayMemory() {
         if (!session.hosted || typeof session.sdkRef?.query !== 'function') return {};
@@ -123,5 +135,5 @@ export function createDirectorQueriesPart(session, deps, { hostFeature }) {
         return answer ? normalizeKeyPeople(answer) : null;
     }
 
-    return { worldShown, keyPeopleAnswer, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople };
+    return { worldShown, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople };
 }

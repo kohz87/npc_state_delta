@@ -656,3 +656,17 @@ test('runtime: a swipe or regenerate of the first reply after a return is told t
     assert.equal(out.afterB + out.afterSwipe + out.afterRegenerate, 0, 'once a reply is written the note is not carried on');
     assert.equal(out.promptC, 0, 'the next new reply is not told');
 });
+
+// Story Director absent is "no key list", not a failure (so the stale pass still deletes incidental dossiers); only a real failure blocks deletion.
+import { createDirectorQueriesPart } from '../src/adapter/queries-director.js';
+test('keyPeopleReadable: absent (NOT_FOUND) or switched off (null) is readable; an error or a non-list answer is not', () => {
+    const readable = query => createDirectorQueriesPart({ hosted: true, sdkRef: { query } }, {}, { hostFeature: () => undefined }).keyPeopleReadable();
+    const coded = code => Object.assign(new Error('x'), { code });
+    assert.equal(readable(() => { throw coded('NOT_FOUND'); }), true, 'no module answers the query');
+    assert.equal(readable(() => null), true, 'the feature is off');
+    assert.equal(readable(() => []), true);
+    assert.equal(readable(() => { throw coded('FAILED'); }), false, 'a real error');
+    assert.equal(readable(() => { throw new Error('boom'); }), false);
+    assert.equal(readable(() => ({ not: 'a list' })), false, 'malformed answer');
+    assert.equal(createDirectorQueriesPart({ hosted: false }, {}, { hostFeature: () => undefined }).keyPeopleReadable(), true, 'not hosted: nothing to read');
+});
