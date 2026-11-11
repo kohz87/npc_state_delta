@@ -165,6 +165,7 @@
     { "path": "dossier-ui-constants.js", "role": "dossier-ui-constants", "required": true },
     { "path": "dossier-ui-controller.js", "role": "dossier-ui-controller", "required": true },
     { "path": "dossier-ui-html.js", "role": "dossier-ui-html", "required": true },
+    { "path": "dossier-ui-bond-tone.js", "role": "dossier-ui-bond-tone", "required": true },
     { "path": "dossier-ui-meters.js", "role": "dossier-ui-meters", "required": true },
     { "path": "dossier-ui-model.js", "role": "dossier-ui-model", "required": true },
     { "path": "dossier-ui-mount.js", "role": "dossier-ui-mount", "required": true },

@@ -108,6 +108,11 @@ export const STYLES = `
 #${ROOT_ID} .delta-prose-grid .delta-wide { grid-column:1/-1; }
 #${ROOT_ID} .delta-list { margin:0; padding-left:20px; }
 #${ROOT_ID} .delta-list li + li { margin-top:4px; }
+#${ROOT_ID} .delta-bond-word { display:inline-block; padding:0 7px; border-radius:999px; font-size:.78em; font-weight:700; border:1px solid currentColor; }
+#${ROOT_ID} .delta-bond-close { color:#2e9d5b; }
+#${ROOT_ID} .delta-bond-hostile { color:#d04a4a; }
+#${ROOT_ID} .delta-bond-duty { color:#c8962a; }
+#${ROOT_ID} .delta-bond-neutral { color:var(--ss-muted, #8a8f98); }
 #${ROOT_ID} .delta-two-column { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
 #${ROOT_ID} .delta-rel-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px 14px; }
 #${ROOT_ID} .delta-rel-axis { min-width:0; }

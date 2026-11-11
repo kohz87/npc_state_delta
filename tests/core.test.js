@@ -3695,3 +3695,9 @@ test('stale pass: with Story Director absent (no key list) incidental dossiers a
     const failed = staleAfterScan({ turn: 100, npcs: [inc, cas] }, {}, '', { autoPruneStale: true, maxNpcs: 40, staleArchiveAfter: 30, staleDeleteAfter: 50 }, { keepIds: [], noDelete: true });
     assert.equal(failed.removed.length, 0);
 });
+
+test('key relationship limit is eight and the editor label says so', async () => {
+    assert.equal(KEY_RELATIONSHIP_LIMIT, 8);
+    const fs = await import('node:fs');
+    assert.match(fs.readFileSync(new URL('../runtime-editor.js', import.meta.url), 'utf8'), /Max \$\{KEY_RELATIONSHIP_LIMIT\}/);
+});

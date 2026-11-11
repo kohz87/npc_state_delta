@@ -1,6 +1,7 @@
 /* NPC State Delta dossier surface: cast rail and selected-dossier rendering. */
 import { escapeHtml } from './src/util/html.js';
 import { castFromHtml, chooseDossierSelection, filterDossierIndex, keyAwayHtml } from './dossier-ui-catalog.js';
+import { bondsListHtml } from './dossier-ui-bond-tone.js';
 import { appearanceFormsHtml, birthdayCard, changeSummaryHtml, changedMark, countsFor, currentCard, identityLine, listHtml, portraitHtml, portraitMark, proseHtml, reconcileDocumentSections, sectionNavHtml } from './dossier-ui-html.js';
 import { v2MetersHtml, v2SecretsHtml } from './dossier-ui-meters.js';
 import { RELATIONSHIP_AXES, replyHeaderLabel } from './dossier-ui-model.js';
@@ -180,7 +181,7 @@ export class DossierUiRender extends DossierUiPanel {
                 ${relationshipHistoryHtml(selected.recentRelationshipChanges, selected.lastRelationshipChange)}
             </section>
             <section class="delta-section delta-two-column" data-delta-section="bonds">
-                <div><h3>Important bonds${changedMark(selected, 'keyRelationships')}</h3>${listHtml(selected.keyRelationships, 'No key relationships established yet.')}</div>
+                <div><h3>Important bonds${changedMark(selected, 'keyRelationships')}</h3>${bondsListHtml(selected.keyRelationships, 'No key relationships established yet.')}</div>
                 <div><h3>Important memories${changedMark(selected, 'memories')}</h3>${listHtml(selected.memories, 'No important memories established yet.')}</div>
             </section>
             <section class="delta-section" data-delta-section="history">
