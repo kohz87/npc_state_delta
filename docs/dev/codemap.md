@@ -149,3 +149,34 @@ Generated 2026-11-07.
 - `runtime-targeted-scope.js`: Target-row admission and single-target profile/social channel scoping split from `runtime-targeted.js`.
 - `runtime-targeted-refresh.js`: Editor-field sync and the targeted Refresh pass split from `runtime-targeted.js`.
 - `runtime-targeted-backfill.js`: History backfill and the pending-backfill queue split from `runtime-targeted.js`.
+- `core-behavior.js`: Behavior-profile levers, normalization, grounding, ordering, morality and agency masks, and refinement merging split from `core-mechanics.js`.
+- `core-birthday.js`: NPC-owned sentences, absence and birthday-claim detection, birthday grounding and rollover, field change markers and the calendar projection split from `core.js`.
+- `core-evidence.js`: Profile-development evidence normalizing, merging, claim polarity, representation checks and evolution readiness split from `core-mechanics.js`.
+- `core-identity.js`: Clamp and value normalizers, identity kind, interim and role labels, slug/id, and age and apparent-age normalization split from `core-mechanics.js`.
+- `core-keyrel.js`: Key-relationship entries and edges: compacting, merging, applying across NPCs and extracting explicit edges from text split from `core-mechanics.js`.
+- `core-merge-incoming.js`: `applyIncoming`, which folds one scanned NPC into the stored record split from `core-mechanics.js`.
+- `core-profile-finalize.js`: Applies planned Personality/Speech development to an NPC record at the end of a merge (`finalizeProfileDevelopment`) split from `core.js`.
+- `core-text.js`: Scan text and JSON helpers: evidence and UI-noise stripping, scanner JSON repair, narration-capture reading and the `clean*` helpers split from `core-mechanics.js`.
+- `destructive-settlement-core.js`: Narrative fingerprints and lineage, first divergence, settlement check and the controller primitives used by `destructive-settlement.js`.
+- `hardening-core.js`: Pure lifecycle primitives: owner-scoped settings keys, canonical ownership moves, live/deleted chat-key resolution and rename-state checks used by `hardening.js` and `runtime-chat-keys.js`.
+- `hardening.js`: Installs the host lifecycle listeners (character rename and delete, chat events) once via `prepareNpcStateHardening`, with bounded retries and recovery records.
+- `relationship-map-core.js`: Pure relationship-map layout, selection, bond and lens rules over the dossier projection (no DOM or host access).
+- `runtime-branch.js`: Branch tracking: a chat's checkpoint and lineage, host swipe state, dossiers inherited from an explicit parent, and the stale-host mark, via `createBranchPart` split from `index.js`.
+- `runtime-cast-sync.js`: Makes a dossier from a Story Director cast entry and applies its pack picture when Story Block answers, via `createCastSyncPart` split from `index.js`.
+- `runtime-catchup.js`: The quiet capture catch-up Refresh every `narrationCaptureCatchUp` replies, via `createCatchUpPart` built by `runtime-scan.js`.
+- `runtime-chat-keys.js`: Owner-qualified keys of the open chat, rename and delete candidate keys, the loaded-chat cache and the ownership epoch, via `createChatKeysPart` split from `index.js`.
+- `runtime-hosted.js`: Story Block v2 host reads and Delta sends (clock, meters, scene, Story Director cast, relationship and secret events, hidden-note options), via `createHostedPart` split from `index.js`.
+- `runtime-injection.js`: Live dossier text and the options a scan prompt is built from, the injection sent to the host and its preview, via `createInjectionPart` split from `index.js`.
+- `runtime-mutations.js`: Scoped manual dossier changes (appearance, life state, portraits, delete/archive/restore, manual add, bundle export and import), via `createMutationsPart` split from `index.js`.
+- `runtime-narration.js`: The one-pass narration-capture block: arming, holding per reply, stripping from display and swipes, taking it for the scan, via `createNarrationPart` split from `index.js`.
+- `runtime-persist.js`: The one owner of writing a chat's state to its sidecar: delayed write queue, flush with ownership and conflict handling, via `createPersistPart` split from `index.js`.
+- `runtime-portrait-settings.js`: Saving the portrait settings draft and the custom preset library, via `createPortraitSettingsPart` split from `index.js`.
+- `runtime-portrait.js`: The portrait generator dialog, its native image request and file, and the portrait settings draft, via `createPortraitPart` split from `index.js`.
+- `runtime-reconcile.js`: Swipe, regenerate, edit and delete reconciliation: settlement, merged requests, rollback to checkpoint or journal, and rescan, via `createReconcilePart` split from `index.js`.
+- `runtime-scan-helpers.js`: Stateless readers of the open chat (latest message and reply positions, lineage, scan indicators, capture setting) and replay-scope helpers split from `index.js`.
+- `runtime-scan-ops.js`: Scan operation lifecycle, canonical-base check, generation gate, automatic-scan queue and drain, post-reply backfills and diagnostics, via `createScanOpsPart` split from `index.js`.
+- `runtime-settings-bind.js`: Settings panel bindings and mount retries, via `createSettingsBindPart` split from `index.js`.
+- `runtime-settings-html.js`: Settings panel markup, hints, open-group memory and control sync, via `createSettingsHtmlPart` split from `index.js`.
+- `runtime-settings.js`: Settings key, portrait theme presets and custom preset library, defaults, `getSettings`, `persistSettings` and `injectDepthOf` split from `index.js`.
+- `runtime-state.js`: `createRuntimeState()`, the one state holder `index.js` creates per module instance; initial values only.
+- `runtime-suite.js`: Story Suite connection: the `SUITE_API` object, announcement, Enable and Source-of-truth actions, and `connectStorySuite`, via `createSuitePart` split from `index.js`.
