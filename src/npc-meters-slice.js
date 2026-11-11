@@ -7,6 +7,7 @@ import { CAST_KEY, metWithEntry } from './cast-dossier.js';
 import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
 import { flatDayProblems } from './relationship-pacing.js';
 import { readEvent } from './npc-meters-pacing.js';
+import { readApproachRing } from '../npc-meters-gate.js';
 
 /** The slice of a chat with no NPC meters yet. */
 export function initialNpcSlice() {
@@ -161,6 +162,7 @@ export function validateNpcSlice(slice) {
                 || (turn.story !== undefined && (!Array.isArray(turn.story) || turn.story.some(id => typeof id !== 'string')))) errors.push(`${where} has an unusable reply window.`);
         }
         if (record.lastEvent !== undefined && !readEvent(record.lastEvent)) errors.push(`${where} has an unusable last event.`);
+        if (record.via !== undefined && !readApproachRing(record.via)) errors.push(`${where} has an unusable record of recent approaches.`);
         if (record.milestones !== undefined) {
             const list = isObject(record.milestones) ? Object.entries(record.milestones) : null;
             if (!list) errors.push(`${where} has an unusable milestones record.`);

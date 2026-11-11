@@ -60,6 +60,7 @@
     { "path": "scan-context.js", "role": "scan-context-eligibility", "required": true },
     { "path": "core.js", "role": "core-facade", "required": true },
     { "path": "core-mechanics.js", "role": "core-mechanics", "required": true },
+    { "path": "npc-meters-gate.js", "role": "npc-anti-lever-gate", "required": true },
     { "path": "core-text.js", "role": "scan-text-and-json", "required": true },
     { "path": "core-identity.js", "role": "npc-identity-age", "required": true },
     { "path": "core-portrait.js", "role": "portrait-prompt-building", "required": true },

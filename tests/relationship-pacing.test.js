@@ -7,7 +7,9 @@ import { DEFAULT_RELATIONSHIP_CAPS, normalizeNpcRecord } from '../core.js';
 import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
 import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent, spendFlatEvent } from '../src/relationship-pacing.js';
-import { cutToTier, pacingNote } from '../src/npc-meters-pacing.js';
+import { cutToTier, eventSummary, pacingNote, readEvent } from '../src/npc-meters-pacing.js';
+import { FEATURE_GATE } from '../src/npc-meters-config.js';
+import { gateApproach, readApproachRing } from '../npc-meters-gate.js';
 import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-suite.js';
 
 // Relationship pacing: points per event 1 / 2 / 3 / 6 and events per story day for each person
@@ -391,3 +393,148 @@ for (const seed of [3, 11, 29]) {
         }
     });
 }
+
+// ---- the anti-lever gate (npc-meters-gate.js; feature npc-state-delta.anti-lever, off by default) ----
+
+const shape = s => JSON.stringify(s.host.head());
+const gateOn = { [FEATURE_GATE]: true };
+const praise = (who = 'Oren', by = 3, via = 'praise') => `~ npc ${who} | affection: +${by} | via: ${via} | impact: major`;
+const record = (s, key = 'oren') => s.host.head().domains.npc.npcs[key];
+const gateOf = (s, key = 'oren') => eventSummary(readEvent(record(s, key).lastEvent))?.gate;
+const tailOf = s => s.host.registry.module(MODULE_ID).context.tail({ state: s.host.head(), chat: { length: s.host.ctx.chat.length } });
+const lowTrust = () => { const records = dossiers(); records.npc_oren.relationship.trust = -50; return records; };
+
+test('gate: the same approach to the same person gives less, the third time backfires (tension up, trust down), with the receipt words and the cue', async () => {
+    const s = await suite({ allowance: null, features: gateOn });
+    await s.setDay(1);
+    await s.say([praise()]);
+    assert.equal(s.npc('Oren').meters.affection, 3, 'the first approach gives what it asked');
+    assert.equal(gateOf(s), 'via praise');
+    await s.say([praise()]);
+    assert.equal(s.npc('Oren').meters.affection, 4, 'the second gives half (3 → 1)');
+    assert.equal(gateOf(s), 'via praise · 2nd in 1 day · less');
+    await s.say([praise()]);
+    assert.deepEqual(s.npc('Oren').meters, { trust: -1, affection: 4, desire: 0, tension: 1 }, 'the third: no affection, tension +1, trust −1');
+    assert.equal(gateOf(s), 'via praise · 3rd in 1 day · backfired');
+    assert.ok(tailOf(s).optional.includes('Oren has noticed the repeated praise; it backfires.'), JSON.stringify(tailOf(s)));
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('gate: another approach, another person and a day outside the window are not repeats', async () => {
+    const s = await suite({ allowance: null, features: gateOn });
+    await s.setDay(1);
+    await s.say([praise(), praise('Sister Temiwa'), praise('Oren', 3, 'gift')]);
+    assert.equal(s.npc('Oren').meters.affection, 6, 'a gift after praise is its own approach');
+    assert.equal(s.npc('Sister Temiwa').meters.affection, 3);
+    await s.setDay(4);
+    await s.say([praise()]);
+    assert.equal(s.npc('Oren').meters.affection, 9, 'day 1 is 3 days back: outside the window of 3 days (4, 3, 2)');
+    assert.equal(gateOf(s), 'via praise');
+});
+
+test('gate: praise or a gift from low trust reads as pressure (tension instead of affection); help does not', async () => {
+    const s = await suite({ allowance: null, features: gateOn, records: lowTrust() });
+    await s.setDay(1);
+    await s.say([praise()]);
+    assert.deepEqual(s.npc('Oren').meters, { trust: -50, affection: 0, desire: 0, tension: 3 });
+    assert.equal(gateOf(s), 'via praise · suspicion');
+    await s.say([praise('Oren', 3, 'help')]);
+    assert.equal(s.npc('Oren').meters.affection, 3, 'help from low trust is help');
+    assert.ok(tailOf(s).optional.every(line => !/pressure/.test(line)), 'the cue is only for the reply that fired it');
+});
+
+test('gate: settings: strength strong backfires the second time; a one-day window makes the next day a first', async () => {
+    const strong = await suite({ allowance: null, features: gateOn, settings: { gateStrength: 'strong' } });
+    await strong.setDay(1);
+    await strong.say([praise()]);
+    await strong.say([praise()]);
+    assert.equal(gateOf(strong), 'via praise · 2nd in 1 day · backfired');
+    const short = await suite({ allowance: null, features: gateOn, settings: { gateDays: 1 } });
+    await short.setDay(1);
+    await short.say([praise()]);
+    await short.setDay(2);
+    await short.say([praise()]);
+    assert.equal(short.npc('Oren').meters.affection, 6);
+    assert.equal(gateOf(short), 'via praise');
+});
+
+test('gate: only the story\'s own lines are gated: a scan\'s change passes through and writes no ring; no clock, no gate', async () => {
+    const scan = gateApproach({ source: 'scan', via: 'praise', day: 1, reply: 'sw_a', name: 'Oren', trust: 0, delta: { affection: 3 }, ring: [{ d: 1, r: 'sw_b', v: 'praise' }, { d: 1, r: 'sw_c', v: 'praise' }], settings: {} });
+    assert.equal(scan.mode, 'none');
+    assert.deepEqual(scan.delta, { affection: 3 });
+    assert.equal(scan.ring.length, 2, 'the ring is as it was');
+    const s = await suite({ allowance: null, features: gateOn, clock: false });
+    await s.say([praise(), praise(), praise()]);
+    assert.equal(s.npc('Oren').meters.affection, 9, 'no day: no gate, every line lands in full');
+    assert.equal(record(s).via, undefined, 'no story day: no ring');
+    assert.equal(s.npc('Oren').meters.tension, 0);
+});
+
+test('gate: feature off (the default) and old lines: byte-identical state, no ring, and the static line is unchanged', async () => {
+    const lines = [['~ npc Oren | affection: +2 | impact: meaningful'], ['~ npc Oren | trust: +1']];
+    const off = await suite({ allowance: null });
+    const on = await suite({ allowance: null, features: gateOn });
+    for (const s of [off, on]) { await s.setDay(1); for (const set of lines) await s.say(set); }
+    const bare = x => JSON.stringify(x.host.head().domains.npc).replace(/sw_[a-z0-9]+/g, 'sw');
+    assert.equal(bare(on), bare(off), 'lines without via: the feature on changes nothing');
+    assert.equal(record(on).via, undefined);
+    const withVia = await suite({ allowance: null });
+    await withVia.setDay(1);
+    await withVia.say([praise(), praise(), praise()]);
+    assert.equal(record(withVia).via, undefined, 'off: no ring');
+    assert.equal(withVia.npc('Oren').meters.affection, 9, 'off: the label gives nothing, every line lands in full (as before)');
+    const text = s => s.host.registry.module(MODULE_ID).context.static();
+    assert.doesNotMatch(text(off), /via:/);
+    assert.match(text(on), /Add \| via: praise, gift, help, flirt, threat, shared-danger/);
+    assert.equal(text(on).replace(/ Add \| via:[^.]*\./, ''), text(off), 'the only difference is the one gated sentence');
+});
+
+test('gate: replay equals live: rebuild, a swipe, a Re-read, a middle delete and a cold reload; the stored shapes validate', async () => {
+    const s = await suite({ allowance: null, features: gateOn });
+    await s.setDay(1);
+    await s.say([praise()]);
+    const middle = await s.say([praise()]);
+    await s.say([praise()]);
+    await s.swipe([praise()]);
+    await s.setDay(2);
+    const index = await s.say([praise()]);
+    assert.equal((await s.host.sdk.reread(index)).ok, true);
+    let live = shape(s);
+    s.host.store.rebuild();
+    assert.equal(shape(s), live, 'rebuild equals live');
+    await s.host.st.loadChat(s.host.ctx.chat);
+    await s.adapter.ticked();
+    assert.equal(shape(s), live, 'a cold reload equals live');
+    assert.ok(readApproachRing(record(s).via), 'the ring is stored whole as one text leaf');
+    await s.host.st.deleteMessage(middle);
+    await s.host.st.deleteMessage(middle - 1);
+    live = shape(s);
+    s.host.store.rebuild();
+    assert.equal(shape(s), live, 'rebuild equals live after the delete');
+    assert.deepEqual(s.host.store.problems(), []);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('gate: the swipe and the Re-read count a reply once (a repeat is another reply, never the same one again)', async () => {
+    const s = await suite({ allowance: null, features: gateOn });
+    await s.setDay(1);
+    const first = await s.say([praise()]);
+    await s.host.sdk.reread(first);
+    await s.host.sdk.reread(first);
+    assert.equal(s.npc('Oren').meters.affection, 3, 're-reading the same reply is still its first approach');
+    assert.equal(JSON.parse(record(s).via).length, 1);
+    await s.swipe([praise()]);
+    assert.equal(s.npc('Oren').meters.affection, 3, 'a swipe replaces the reply\'s approach');
+});
+
+test('gate: stored shapes: a bad ring, a bad kind or a gate without its approach is refused', () => {
+    const slice = via => ({ npcs: { mira: { name: 'Mira', meters: { trust: 0, affection: 0, desire: 0, tension: 0 }, stages: {}, unlocked: [], ...via } }, problems: [] });
+    assert.deepEqual(validateNpcSlice(slice({ via: JSON.stringify([{ d: 1, r: 'sw_a', v: 'praise' }]) })), []);
+    assert.ok(validateNpcSlice(slice({ via: 'not json' })).length);
+    assert.ok(validateNpcSlice(slice({ via: JSON.stringify([{ d: 1, r: 'sw_a', v: 'bribe' }]) })).length);
+    const event = extra => JSON.stringify({ at: 1, date: '', events: [{ src: 'story', ask: { affection: 3 }, tier: 'major', held: false, note: '', ...extra }] });
+    assert.ok(readEvent(event({ via: 'praise', gate: { mode: 'back', n: 3, span: 2 } })));
+    assert.equal(readEvent(event({ gate: { mode: 'back', n: 3, span: 2 } })), null, 'a gate needs its approach');
+    assert.equal(readEvent(event({ via: 'praise', gate: { mode: 'sulk', n: 3, span: 2 } })), null);
+    assert.equal(readEvent(event({ via: 'flattery' })), null);
+});

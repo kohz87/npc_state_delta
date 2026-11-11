@@ -51,6 +51,8 @@ export const FEATURE_STAGES = 'npc-state-delta.stages';
 export const FEATURE_DRIFT = 'npc-state-delta.drift';
 export const FEATURE_PRESETS = 'npc-state-delta.presets';
 export const FEATURE_SCAN_EVERY_REPLY = 'npc-state-delta.scan-every-reply';
+// The anti-lever gate (npc-meters-gate.js): off by default, so the static prompt and every old chat stay as they were.
+export const FEATURE_GATE = 'npc-state-delta.anti-lever';
 
 // "How much to track" (Story Block): the Lean preset turns this feature off; Standard is its default.
 const LEAN_OFF = Object.freeze({ lean: false });
@@ -63,6 +65,8 @@ export const FEATURES = Object.freeze([
     // Read by index.js (scanAfterEveryReply): no prompt text, no state. Off, the automatic scan runs every 3 replies (or
     // "Scan every" when larger), reading every reply since the last scan; a manual scan is never held back.
     Object.freeze({ id: FEATURE_SCAN_EVERY_REPLY, label: 'Scan after every reply', describe: 'Off: the automatic scan runs every 3 replies (or the "Scan every" setting if larger) and that scan reads every reply since the last one, so a reply in between is read, not lost. A manual scan always runs.', default: true, presets: LEAN_OFF }),
+    // A story line may say `| via: praise`; the same approach to the same person again soon gives less and then backfires (npc-meters-gate.js).
+    Object.freeze({ id: FEATURE_GATE, label: 'Anti-lever: repeated approaches give less', describe: 'A story line may name its approach (praise, gift, help, flirt, threat, shared danger); repeating it to one person within a few days gives less, then backfires. Story lines only.', default: false, prompt: true, presets: LEAN_OFF }),
 ]);
 export const FEATURE_DEFAULTS = Object.freeze(Object.fromEntries(FEATURES.map(feature => [feature.id, feature.default])));
 
@@ -81,7 +85,7 @@ export const REASON_LABELS = new Set(['reason', 'why', 'because', 'note', 'cause
 const RESERVED_IDS = new Set(['stage', 'stages', 'disposition', 'name', 'meter', 'meters', 'milestone', 'milestones', ...REASON_LABELS]);
 export const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 export const WORDS = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u;
-export const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day', 'held', 'progress', 'impactDay', 'lastEvent']);
+export const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day', 'held', 'progress', 'impactDay', 'lastEvent', 'via']);
 // The impact tiers of a story line (`| impact: major`), the scanner's own: the line's step is held to the tier's cap
 // (the reader's relationshipCaps). A missing or unknown tier is the smallest.
 export const IMPACT_TIERS = Object.freeze(['ordinary', 'meaningful', 'major', 'extreme']);

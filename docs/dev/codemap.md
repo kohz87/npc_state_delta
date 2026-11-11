@@ -150,3 +150,4 @@ Generated 2026-11-07.
 - `runtime-targeted-scope.js`: Target-row admission and single-target profile/social channel scoping split from `runtime-targeted.js`.
 - `runtime-targeted-refresh.js`: Editor-field sync and the targeted Refresh pass split from `runtime-targeted.js`.
 - `runtime-targeted-backfill.js`: History backfill and the pending-backfill queue split from `runtime-targeted.js`.
+- `npc-meters-gate.js`: Pure anti-lever gate for story-line meter moves: approach kinds, the per-NPC recent-approach ring, diminishing/backfire/low-trust rules, cue text and receipt words.
