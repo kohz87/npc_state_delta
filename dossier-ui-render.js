@@ -118,14 +118,15 @@ export class DossierUiRender extends DossierUiPanel {
         const userName = this.userName = this.personaName();
         const refs = this.portraitRefs;
         const formPortraits = Object.fromEntries(Object.entries(npc.formPortraits || {}).map(([name, src]) => [name, portraitMark(src, refs)]));
-        const signature = `${screenSignature(screen)}|${phone}|${userName}|${this.projection.index.length}|${JSON.stringify({ ...npc, portrait: portraitMark(npc.portrait, refs), formPortraits, updatedAt: undefined, reply: this.projection.reply })}`;
+        // Faces in the Ties tile come from the people who have a dossier of their own; their portrait marks are part of the signature.
+        const peers = new Map(this.projection.index.filter(row => row.portrait).map(row => [String(row.name).toLowerCase(), row.portrait]));
+        const peerMarks = [...peers].map(([name, src]) => `${name}=${portraitMark(src, refs)}`).join(',');
+        const signature = `${screenSignature(screen)}|${phone}|${userName}|${this.projection.index.length}|${peerMarks}|${JSON.stringify({ ...npc, portrait: portraitMark(npc.portrait, refs), formPortraits, updatedAt: undefined, reply: this.projection.reply })}`;
         if (!force && signature === this.lastScreenSignature) return 1;
         this.lastScreenSignature = signature;
         const key = `${screen.npcId}|${screen.name}`;
         const scroll = doc.dataset.screenKey === key ? doc.scrollTop : 0;
         const layout = layoutFor(screen, { phone });
-        // Faces in the Ties tile come from the people who have a dossier of their own.
-        const peers = new Map(this.projection.index.filter(row => row.portrait).map(row => [String(row.name).toLowerCase(), row.portrait]));
         const board = pane('board', boardHtml(npc, { refs, userName: userName || 'you', peers }));
         const section = () => pane('section', sectionScreenHtml(SECTION_KEYS[screen.section], npc, { userName }));
         let html;

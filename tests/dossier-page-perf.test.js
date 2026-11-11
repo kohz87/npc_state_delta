@@ -77,6 +77,13 @@ test('the dossier panel draws portraits by reference: no data URL in its markup 
         state.npcs = npcs.map(npc => (npc.id === 'b' ? { ...npc, portrait: null } : npc));
         await ui.refresh({ force: true });
         assert.equal(ui.portraitRefs.size, 2, 'the removed picture was forgotten');
+
+        // The board's tie faces come from the other dossiers' portraits: a new portrait there changes the board's signature.
+        ui.setScreen(openNpc(ui.screen, 'a'));
+        const boardSignature = ui.lastScreenSignature;
+        state.npcs = state.npcs.map(npc => (npc.id === 'c' ? { ...npc, portrait: { url: '/portraits/cass-2.png' } } : npc));
+        await ui.refresh();
+        assert.notEqual(ui.lastScreenSignature, boardSignature, 'a tied person\'s new portrait redraws the open board');
     } finally {
         globalThis.document = saved.document;
         globalThis.CSS = saved.CSS;
