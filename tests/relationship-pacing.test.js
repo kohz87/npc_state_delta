@@ -13,6 +13,7 @@ import { gateApproach, readApproachRing } from '../npc-meters-gate.js';
 import { createNpcPart } from '../src/npc-meters.js';
 import { applyEvents, easeAxis, eventsFromMoves, moodBars, moodWord, restMood, restingMood } from '../npc-mood.js';
 import { stepPull } from '../npc-instincts.js';
+import { diff } from './vendor/story-block/src/v2/ops/diff.js';
 import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-suite.js';
 
 // Relationship pacing: points per event 1 / 2 / 3 / 6 and events per story day for each person
@@ -383,13 +384,15 @@ for (const seed of fuzzSeeds(process.env.FUZZ_SEEDS, [3, 11, 29])) {
     test(`pacing fuzz seed ${seed}: tiers, notes kinds, via gate, look stamp and mood/pull tick over several story days, middle deletes and swipes; the slice validates and replay equals rebuild`, async t => {
         t.mock.method(console, 'warn', () => {});
         // FUZZ_OFF=mood-pull,anti-lever,notes switches those features off for a run (to look past a failure of one).
-        const s = await suite({ features: process.env.FUZZ_OFF ? Object.fromEntries(process.env.FUZZ_OFF.split(',').map(id => [`npc-state-delta.${id}`, false])) : null });
+        const s = await suite({ modules: [worldModule], features: process.env.FUZZ_OFF ? Object.fromEntries(process.env.FUZZ_OFF.split(',').map(id => [`npc-state-delta.${id}`, false])) : null });
         const r = prng(seed);
         await s.say(['~ npc Oren | trust: +1', '~ npc Sister Temiwa | trust: +1']);   // the set-up reply makes both entries and is never deleted
         const setup = s.host.store.headIndex();
         let day = 1;
         for (let step = 0; step < (Number(process.env.FUZZ_STEPS) || 16); step += 1) {
             if (r.chance(0.4)) { day += r.int(1, 2); await s.setDay(day); }
+            // The world (party, open threads, a place): inst, pull and track are written by the tick, so they get middle deletes too.
+            if (r.chance(0.5)) await world(s, { party: r.chance(0.7) ? [{ id: 'a', name: r.pick(['Oren', 'Sister Temiwa']) }] : [], threads: r.chance(0.6) ? [{ id: `th_${'abcdefgh'.slice(0, 7)}${r.int(0, 3)}`, key: r.pick(['The stolen letter', 'Old debt']), status: 'active', fields: { people: r.pick(['Oren', 'Sister Temiwa', 'Oren, Sister Temiwa']) } }] : [] });
             const lines = Array.from({ length: r.int(1, 3) }, () => fuzzLine(r, r.pick(['Oren', 'Sister Temiwa'])));
             const index = await s.say(lines);
             // The look stamp / flag (feature notes): first look set, or a refused contradiction; replayed with the reply.
@@ -877,9 +880,15 @@ test('mood, pull, inst, track are stored whole as one text leaf: a middle delete
     await s.say(['~ npc Oren | trust: -2 | impact: meaningful | reason: Astra lied again']);
     await s.setDay(3);
     await s.say(['~ npc Oren | trust: +1']);
+    await world(s, { party: [{ id: 'a', name: 'Oren' }], threads: [{ id: 'th_aaaaaaaa', key: 'The stolen letter', status: 'active', fields: { people: 'Oren' } }] });
+    await s.say([]);
+    await s.setDay(6);
+    await s.say([]);
     const raw = s.host.head().domains.npc.npcs.oren;
+    for (const field of ['mood', 'inst', 'pull', 'track']) assert.equal(typeof raw[field], 'string', `${field} is one text leaf`);
+    assert.equal(readLeaf(raw.pull).kind, 'closure');
     assert.equal(typeof raw.mood, 'string', 'the mood is one text leaf');
-    assert.ok(readLeaf(raw.mood).v < 0);
+    assert.match(readLeaf(raw.mood).cause, /Astra lied/);
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
     await s.host.st.deleteMessage(made);
     const live = JSON.stringify(s.host.head().domains.npc);
@@ -889,4 +898,62 @@ test('mood, pull, inst, track are stored whole as one text leaf: a middle delete
     assert.equal(readLeaf('{"a":1}').a, 1);
     assert.deepEqual(readLeaf({ a: 1 }), { a: 1 }, 'an old stored object reads as it is');
     assert.equal(readLeaf('not json'), undefined);
+});
+
+// A chat written under 1.16.0 stores mood, inst, pull and track as objects (per-field ops). Rewrite a chat's leaf ops that way.
+function toOld(chat) {
+    const prev = new Map();
+    const LEAF = /^\/domains\/npc\/npcs\/[^/]+\/(mood|inst|pull|track)$/;
+    for (const message of chat) {
+        const rec = message.extra?.storySuite;
+        if (!rec?.ops) continue;
+        const out = [];
+        const blockOf = [];
+        (rec.spans ?? []).forEach((span, b) => { for (let k = 0; k < span.n; k++) blockOf.push(b); });
+        const grow = new Array((rec.spans ?? []).length).fill(0);
+        for (const [i, op] of rec.ops.entries()) {
+            const at = out.length;
+            if (!LEAF.test(op.path ?? '')) { out.push(op); continue; }
+            if (op.op === 'remove') { prev.delete(op.path); out.push(op); continue; }
+            const obj = typeof op.value === 'string' ? JSON.parse(op.value) : op.value;
+            const before = prev.get(op.path);
+            if (before && typeof before === 'object') out.push(...diff(before, obj, op.path)); else out.push({ op: 'add', path: op.path, value: obj });
+            prev.set(op.path, obj);
+            if (blockOf[i] !== undefined) grow[blockOf[i]] += out.length - at - 1;
+        }
+        rec.ops = out;
+        (rec.spans ?? []).forEach((span, b) => { span.n += grow[b]; });
+        if (Array.isArray(message.swipe_info)) for (const info of message.swipe_info) if (info?.extra?.storySuite && info.extra.storySuite.sid === rec.sid) info.extra.storySuite = structuredClone(rec);
+    }
+}
+
+test('an old 1.16.0 chat (object leaves, per-field ops): a Re-read of a middle reply is ok and stores the same ops; replay equals live', async t => {
+    t.mock.method(console, 'warn', () => {});
+    const s = await moodSuite();
+    await s.setDay(2);
+    await s.say(['~ npc Oren | trust: +3']);
+    const made = await s.say(['~ npc Oren | trust: -2 | impact: meaningful | reason: Astra lied']);
+    await s.setDay(3);
+    const mid = await s.say(['~ npc Oren | trust: -3 | impact: meaningful | reason: Astra lied again']);
+    await s.setDay(5);
+    await s.say(['~ npc Oren | affection: +1']);
+    await s.setDay(7);
+    const last = await s.say(['~ npc Oren | trust: -3 | impact: meaningful | reason: a lie found out']);
+    const chat = s.host.st.ctx.chat;
+    toOld(chat);
+    s.host.store.rebuild();
+    assert.deepEqual(s.host.store.problems(), [], 'the rewritten chat is a clean old chat');
+    assert.equal(typeof s.host.head().domains.npc.npcs.oren.mood, 'object', 'the old chat holds the mood as an object');
+    const opsOf = at => JSON.stringify(chat[at].extra.storySuite.ops);
+    for (const at of [made, mid, last]) {
+        const head = JSON.stringify(s.host.head().domains.npc);
+        const ops = opsOf(at);
+        const out = await s.host.sdk.reread(at);
+        assert.equal(out.ok, true, `a Re-read of old reply ${at} is ok: ${JSON.stringify(out)}`);
+        assert.equal(opsOf(at), ops, `a Re-read of old reply ${at} stores the same ops`);
+        assert.equal(JSON.stringify(s.host.head().domains.npc), head, `and the same head (reply ${at})`);
+        s.host.store.rebuild();
+        assert.equal(JSON.stringify(s.host.head().domains.npc), head, 'replay equals live');
+        assert.deepEqual(s.host.store.problems(), []);
+    }
 });
