@@ -128,15 +128,15 @@ export function createReplayBlocks(s, deps) {
                     for (const each of stands) if (moves.has(each.rev)) remapped.set(each, { ...each, rev: moves.get(each.rev) });
                 }
             }
-            const keep = () => {
+            const keep = (applied = true) => {
                 if (!rewrites) return;
-                out.parts.push({ ops: blockOps, span });
+                out.parts.push({ ops: blockOps, span, receipts: applied ? stands.map(each => remapped.get(each) ?? each) : [] });
                 placed.set(block, out.parts.length - 1);
                 for (const [was, now] of remapped) out.gone.set(was, now);
             };
             if (skip?.has(`${index}:${block}`)) {
                 state = skipped(state, blockOps);
-                keep();
+                keep(false);
                 return;
             }
             const guarded = isGuardedBlock(span, anyGuardedReceipt ? stands : null);
@@ -168,7 +168,7 @@ export function createReplayBlocks(s, deps) {
                     ...(guarded || error?.code === 'REPLAY_PREREQUISITE' ? { code: 'REPLAY_PREREQUISITE' } : {}),
                 });
                 state = skipped(state, blockOps);
-                keep();
+                keep(false);
             }
         });
         if (!out?.changed) return { state, fields: null, running: out?.running ?? null };
@@ -188,9 +188,25 @@ export function createReplayBlocks(s, deps) {
 
     // Every rerun sees the position the accepted blocks of this plan leave, rather than the old record's offset.
     function rerunBlock(rerun, state, receipt, index, span, earlier, alloc) {
+        // A decision may read fight receipts. Give it the actual staged prefix, including only the
+        // blocks before it on this carrier, never the old suffix or later blocks on the same reply.
+        let receiptsBefore;
+        if (span.guard?.predicate?.kind === 'events.decision') {
+            receiptsBefore = [];
+            const arr = list();
+            let started = false;
+            for (const at of carrierIndexes(arr)) {
+                if (at >= index) break;
+                const entry = s.staged?.get(at) ?? readRecord(arr[at]);
+                if (entry?.checkpoint) started = true;
+                if (started) for (const item of entry?.receipts ?? []) receiptsBefore.push({ index: at, receipt: item });
+            }
+            for (const part of earlier) for (const item of part.receipts ?? []) receiptsBefore.push({ index, receipt: item });
+        }
         return rerun(deepFreeze(structuredClone(state)), receipt, {
             index, span, replan: span.replan ?? null, occurrence: occurrenceFor(span, receipt, alloc),
             opsBefore: earlier.reduce((sum, part) => sum + part.ops.length, 0),
+            ...(receiptsBefore ? { receiptsBefore } : {}),
         });
     }
 
@@ -202,6 +218,11 @@ export function createReplayBlocks(s, deps) {
     function replanned(state, record, index, span, receipt, blockOps, out, rerun) {
         const broken = intactReason(record, blockOps, span, receipt);
         if (broken) return { kept: true, why: broken };
+        // A decision whose guard still holds (the story before it is as it was) stays as it was: what the owner would pick
+        // now may differ (scoring inputs changed), and a story that did not change must not rewrite a throne already told.
+        if (span.guard?.predicate?.kind === 'events.decision') {
+            try { guardHolds(state, span, arr0(index)); return { kept: true, why: 'its decision still holds' }; } catch { /* the story before it changed: plan it again */ }
+        }
         let planned = null;
         let failure = '';
         try {
@@ -253,7 +274,7 @@ export function createReplayBlocks(s, deps) {
         }
         out.changed = true;
         out.planned += 1;
-        out.parts.push({ ops: fresh, span: newSpan });
+        out.parts.push({ ops: fresh, span: newSpan, receipts: [newReceipt] });
         out.gone.set(receipt, newReceipt);
         return { state: next };
     }

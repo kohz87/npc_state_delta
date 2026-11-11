@@ -18,12 +18,28 @@ export function createPrefixMemo(s, deps) {
     const { chain, chatId, markNow, marked, replay, replayEnv, replayRecord, spineStep } = deps;
     const cache = s.prefixes instanceof Map ? s.prefixes : (s.prefixes = new Map());
     const checkpoints = new WeakMap();
+    // The earliest replan point (s.replanFrom's kind) the replay of each kept state found. A hit or a step skips that replay, so it lowers
+    // s.replanFrom again from here; without it a witness built on a shared base would keep no replan point at all.
+    const replans = new WeakMap();
+    const lower = state => {
+        const at = state !== null && typeof state === 'object' ? replans.get(state) : undefined;
+        if (at !== undefined && at < s.replanFrom) s.replanFrom = at;
+    };
+    function replayKept(arr, index) {
+        const before = s.replanFrom;
+        s.replanFrom = Infinity;
+        let found = Infinity;
+        let state;
+        try { state = deepFreeze(replay(arr, index).state); } finally { found = s.replanFrom; s.replanFrom = Math.min(before, found); }
+        if (state !== null && typeof state === 'object') replans.set(state, found);
+        return state;
+    }
     const bump = name => {
         if (!s.counts) return;
         s.counts[name] = (Number.isFinite(s.counts[name]) ? s.counts[name] : 0) + 1;
     };
 
-    // The spine covers replay inputs, but intentionally omits later checkpoints and their trust fields. Chain those
+    // The spine covers replay inputs, but intentionally omits later checkpoints and their trust fields (`owned`, the proof owners a guard may ask, included). Chain those
     // separately for this memo: changing one can change where replay starts even when the ordinary spine is unchanged.
     // Both links are cached per immutable record, so an unchanged pass costs one lookup per carrier/checkpoint.
     function spineRun(arr) {
@@ -41,7 +57,7 @@ export function createPrefixMemo(s, deps) {
                 if (hit && hit.prev === checkpointHash) checkpointHash = hit.out;
                 else {
                     const trust = {};
-                    for (const field of ['prefix', 'covers', 'coverHash', 'guardEnv']) {
+                    for (const field of ['prefix', 'covers', 'coverHash', 'guardEnv', 'owned']) {
                         if (record[field] !== undefined) trust[field] = record[field];
                     }
                     const out = hashJson({ p: checkpointHash, checkpoint: record.checkpoint, trust });
@@ -125,7 +141,9 @@ export function createPrefixMemo(s, deps) {
         const key = keyOf(spine);
         if (cache.has(key)) {
             bump('prefixHits');
-            return touch(key);
+            const kept = touch(key);
+            lower(kept);
+            return kept;
         }
 
         const fast = !record.checkpoint && !hasMeta(record) && !chain(arr, index).history;
@@ -134,6 +152,11 @@ export function createPrefixMemo(s, deps) {
             if (prior && prior.state !== null && prior.state !== undefined) {
                 const state = deepFreeze(replayRecord(prior.state, record, index, [], null, arr[index]));
                 touch(prior.key);
+                if (state !== null && typeof state === 'object') {
+                    const at = replans.get(prior.state);
+                    if (at !== undefined) replans.set(state, at);
+                }
+                lower(state);
                 bump('prefixSteps');
                 bump('recordsRead');
                 remember(key, state);
@@ -142,7 +165,7 @@ export function createPrefixMemo(s, deps) {
         }
 
         bump('prefixReplays');
-        const state = deepFreeze(replay(arr, index).state);
+        const state = replayKept(arr, index);
         remember(key, state);
         return state;
     }

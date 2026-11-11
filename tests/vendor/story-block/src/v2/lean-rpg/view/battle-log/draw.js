@@ -62,7 +62,8 @@ function lineNode(doc, line, { check = false } = {}) {
             text.append(line.aoeNoTarget ? ' — main target Down; ' : ' — ');
             text.appendChild(el(doc, 'span', `rpg-out rpg-out-${line.soaked ? 'cost' : line.outcome}`, outcome));
         }
-        if (!line.reduced && line.total !== null && line.vs !== null) text.append(` (${fill(B.vs, { total: line.total, against: line.vs })})`);
+        // (the one contest of an area skill is told on its first line; the other groups' lines, with the same roll, do not repeat "vs" as if it were their own defence)
+        if (!line.reduced && !(line.aoe && line.aoeFollowup) && line.total !== null && line.vs !== null) text.append(` (${fill(B.vs, { total: line.total, against: line.vs })})`);
         if (line.arrows.length) text.appendChild(el(doc, 'span', 'rpg-arrow', ` → ${line.arrows.join(', ')}`));
     }
     row.append(mark, text);

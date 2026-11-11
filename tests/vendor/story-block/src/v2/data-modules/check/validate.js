@@ -105,7 +105,7 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
             reward.when ??= true;
             effects(reward.effects, rewardEnv, `${path}.effects`, add, { reward: true });
         }
-        for (const [name, kind] of named(definition.kinds, definition.role === 'skills' && isTypedSkills(definition.state) ? L.skillsKinds : L.kinds, `${at}.kinds`, add)) {
+        for (const [name, kind] of named(definition.kinds, definition.role === 'skills' && isTypedSkills(definition.state) ? L.skillsKinds : definition.role === 'foes' ? L.foesKinds : L.kinds, `${at}.kinds`, add)) {
             const path = `${at}.kinds.${name}`;
             if (!shape(kind, D.kind, path, add)) continue;
             if (kind.check !== undefined) add('DM_SCHEMA', `${path}.check`, 'SD checks inside a dm root need data-modules v1.1; this definition needs data-modules v1.1.');

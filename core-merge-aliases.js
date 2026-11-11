@@ -13,6 +13,7 @@ import { normalizeProfileEvidence } from './core-evidence.js';
 import { portraitHasImage } from './src/portrait-file.js';
 import { PORTRAIT_NPC_PROMPT_LIMIT } from './core-portrait.js';
 import { remapSocialGraphNpcId } from './social.js';
+import { identityConflict, partialNamePair } from './core-merge-names.js';
 
 function explicitAliasLink(a, b) {
     if (!a || !b || a.id === b.id) return false;
@@ -21,7 +22,9 @@ function explicitAliasLink(a, b) {
     if (!aName || !bName) return false;
     const aAliases = new Set((a.aliases || []).map(normalizeName).filter(Boolean));
     const bAliases = new Set((b.aliases || []).map(normalizeName).filter(Boolean));
-    return aAliases.has(bName) || bAliases.has(aName);
+    if (!(aAliases.has(bName) || bAliases.has(aName))) return false;
+    // An alias that is only a surname or a title-less name does not join people of different gender or role.
+    return !(partialNamePair(a.name, b.name) && identityConflict(a, b));
 }
 
 function duplicateRelationshipWeight(npc) {

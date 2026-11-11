@@ -206,6 +206,8 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
                 reason: plain(event?.reason),
                 turn: Number.isFinite(Number(event?.turn)) ? Number(event.turn) : null,
                 message: wholeNumber(event?.message),
+                // The axes the event had evidence for: the stored history keeps the tier, the evidence and the reason, no signed numbers.
+                axes: RELATIONSHIP_AXES.filter(([axis]) => plain(event?.evidence?.[axis])).map(([, label]) => label),
             }))
             .filter(event => event.reason),
         relationship: {

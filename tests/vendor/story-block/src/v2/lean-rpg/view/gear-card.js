@@ -1,6 +1,8 @@
 // The slot card (Party -> Inventory, only while Gear in fights is on): a character's eight places and what is worn in each, in two columns
 // (Head, Body, Cloak, Feet; Weapon, Off-hand, Accessory 1, Accessory 2), every tile the same size. A tile shows the place, the piece's name in its rarity
 // colour and its stat bonus ("+2 DEX"); a thin line along its bottom is the condition (yellow Worn, orange Torn, red Broken; none when Good).
+// A worn tile has Unequip (the piece goes back to the bag; a cast member's signature piece keeps its lock and has none); an empty tile has "Equip from bag",
+// which lists the bag pieces that fit that place (item.equip for this member; a piece they or a companion carry is handed over with it).
 // No carry and no list of carried things here: those are the Inventory tab's. Every node is built with createElement and textContent.
 
 import { h, iconNode } from '../../view/widgets/dom.js';
@@ -24,7 +26,7 @@ export const newGearSession = character => ({ module: character.module, subject:
  * Draws `character`'s slot card into `parent`. `view` is the answer of `gear.view` for them ({ slots }); `onBack()` closes the card.
  * → { el, destroy() }
  */
-export function renderGearCard(parent, { character, view, onBack = () => {}, doc = parent.ownerDocument ?? globalThis.document } = {}) {
+export function renderGearCard(parent, { character, view, onBack = () => {}, api = null, onChanged = () => {}, doc = parent.ownerDocument ?? globalThis.document } = {}) {
     const root = h(doc, 'section', 'rpg-sheet rpg-gear ss-glass');
     root.setAttribute('aria-label', fill(G.title, { name: character.name }));
     parent.appendChild(root);
@@ -33,6 +35,26 @@ export function renderGearCard(parent, { character, view, onBack = () => {}, doc
     head.appendChild(h(doc, 'span', 'ss-pill rpg-level-pill', character.levelText));
     root.appendChild(head);
     const slots = h(doc, 'div', 'rpg-slots');
+    const problem = h(doc, 'p', 'rpg-gear-error');
+    problem.setAttribute('role', 'alert');
+    const baseOf = key => String(key).replace(/-\d+$/, '');
+    // One command from a tile; a refusal shows its sentence under the tiles, success redraws the card.
+    const run = async (button, type, payload) => {
+        if (typeof api?.command !== 'function') return;
+        button.disabled = true;
+        let result;
+        try { result = await api.command(type, payload); } catch (failure) { result = { ok: false, message: String(failure?.message ?? failure) }; }
+        button.disabled = false;
+        if (result?.ok) onChanged(); else problem.textContent = String(result?.message ?? '') || G.failed;
+    };
+    const act = (body, text, label, fn) => {
+        const button = h(doc, 'button', 'ss-button rpg-slot-act', text);
+        button.setAttribute('type', 'button');
+        button.setAttribute('aria-label', label);
+        button.addEventListener('click', fn);
+        body.appendChild(button);
+        return button;
+    };
     for (const place of SLOT_ORDER) {
         const piece = view?.slots?.[place] ?? null;
         const tile = h(doc, 'div', `rpg-slot${piece ? ` r-${piece.rarity}${piece.word === 'good' ? '' : ` w-${piece.word}`}` : ' rpg-slot-empty'}`);
@@ -44,6 +66,7 @@ export function renderGearCard(parent, { character, view, onBack = () => {}, doc
             body.appendChild(h(doc, 'span', 'rpg-slot-place', G.slots[place]));
             body.appendChild(h(doc, 'span', 'rpg-slot-name', piece.name));
             if (piece.bonus) body.appendChild(h(doc, 'span', 'rpg-slot-bonus', piece.bonus));
+            if (api && !piece.bound) { const off = act(body, G.unequip, fill(G.unequipLabel, { name: piece.name }), () => run(off, 'inventory.unequip', { stack: piece.stack })); }
             const who = typeof piece.bound?.who === 'string' && piece.bound.who ? piece.bound.who : '';
             tile.setAttribute('title', `${piece.name}: ${G.words[piece.word] ?? piece.word}${piece.broken ? ` — ${G.noBonus}` : ''}${who ? ` · ${fill(G.boundTile, { name: who })}` : ''}`);
             tile.appendChild(icon);
@@ -58,10 +81,26 @@ export function renderGearCard(parent, { character, view, onBack = () => {}, doc
             body.appendChild(h(doc, 'span', 'rpg-slot-place', `${G.slots[place]} — ${G.empty}`));
             tile.appendChild(icon);
             tile.appendChild(body);
+            const fits = (view?.bag ?? []).filter(entry => baseOf(entry.fits) === baseOf(place));
+            if (api && view?.owner) {
+                const list = h(doc, 'span', 'rpg-slot-bag');
+                list.hidden = true;
+                const open = act(body, G.equipFrom, `${G.equipFrom}: ${G.slots[place]}`, () => { list.hidden = !list.hidden; open.setAttribute('aria-expanded', String(!list.hidden)); });
+                open.setAttribute('aria-expanded', 'false');
+                if (!fits.length) list.appendChild(h(doc, 'span', 'rpg-slot-bonus', G.bagNone));
+                for (const entry of fits) {
+                    const pick = h(doc, 'button', `ss-button rpg-slot-pick r-${entry.rarity}`, entry.bonus ? `${entry.name} · ${entry.bonus}` : entry.name);
+                    pick.setAttribute('type', 'button');
+                    pick.setAttribute('aria-label', fill(G.equipLabel, { name: entry.name }));
+                    pick.addEventListener('click', () => run(pick, 'item.equip', { stack: entry.stack, owner: view.owner, slot: place, transfer: true }));
+                    list.appendChild(pick);
+                }
+                body.appendChild(list);
+            }
         }
         slots.appendChild(tile);
     }
-    root.appendChild(slots);
+    root.append(slots, problem);
     const foot = h(doc, 'div', 'rpg-actions');
     const back = h(doc, 'button', 'ss-button ss-button-primary rpg-gear-back', G.back);
     back.setAttribute('type', 'button');

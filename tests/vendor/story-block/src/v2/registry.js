@@ -66,6 +66,12 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         /** Every definition, sorted by id. */
         modules: sorted,
         domainOwner: name => owners.domain.get(name) ?? null,
+        /** The replay rules now registered, as text: each domain with its owner, the owner's version, whether it validates, its scratch fields and counters. It changes when a module registers or goes (the store keys what it kept on it). */
+        rulesSignature: () => [...owners.domain].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([name, id]) => {
+            const def = defs.get(id)?.domains?.[name] ?? {};
+            const list = value => (Array.isArray(value) ? value.join('+') : '');
+            return `${name}@${id}@${defs.get(id)?.version ?? ''}:${typeof def.validate === 'function' ? 'v' : ''}:${list(def.scratch)}:${list(def.counters)}`;
+        }).join(';'),
         commandOwner,
         captureOwner: kind => captureEntry(kind)?.moduleId ?? null,
         queryOwner: name => owners.query.get(name) ?? null,
@@ -157,6 +163,9 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         /** [{ moduleId, id: "<module>/<card>", fn }] for the cards under replies (reply-cards.js), in module-id order; a card off is left out. */
         cardEntries: () => sorted().filter(def => !held(def.id)).flatMap(def => Object.entries(def.cards ?? {}).filter(([, card]) => typeof card?.for === 'function' && !off(card))
             .map(([id, card]) => ({ moduleId: def.id, id: `${def.id}/${id}`, fn: card.for }))),
+        /** [{ moduleId, key: "<module>/<id>", id, label, icon, query, command, args, payload }]: each module's one game view header toggle, module-id order; off, held back or its feature off: left out. */
+        headerControls: () => sorted().filter(def => !held(def.id)).flatMap(def => (Array.isArray(def.headerControls) ? def.headerControls : []).filter(control => !off(control))
+            .map(control => ({ moduleId: def.id, key: `${def.id}/${control.id}`, id: control.id, label: control.label, icon: control.icon, query: control.query, command: control.command, args: control.args ?? {}, payload: control.payload ?? {} }))),
         /** [{ moduleId, id, title, icon, render }] in module-id order, each module's in its own order. */
         tabs: () => sorted().flatMap(def => (def.tabs ?? []).filter(tab => !off(tab)).map(tab => ({ ...tab, moduleId: def.id }))),
         /** [{ moduleId, ...screen }] in module-id order, each module's in its own order (§13.1). */

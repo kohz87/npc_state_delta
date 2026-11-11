@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "applicationVersion": "1.15.0",
+  "applicationVersion": "1.16.0",
   "entrypoint": "bootstrap.js",
   "modules": [
     { "path": "bootstrap.js", "role": "bootstrap", "required": true },

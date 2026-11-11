@@ -1,6 +1,7 @@
 /* NPC State Delta dossier surface: the phase-1 board's view model (data only, no HTML) and the bond-tone / library-ring helpers. The section screens read the projection directly. */
 import { changeStamp, plain, RELATIONSHIP_AXES, relationshipValue, stringList } from './dossier-ui-model.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
+import { moodBars, moodWord } from './npc-mood.js';
 import { bondTone as bondToneOf, tieTone } from './dossier-ui-bond-tone.js';
 
 // Tile titles for the two sections the board names. The label "{{user}}" is kept literal here; the renderer substitutes the player's name.
@@ -132,10 +133,42 @@ function secretsModel(npc) {
     };
 }
 
-// Mood: the meters' word with the Energy and Control bars when the feature has a mood, else the scanner's mood word.
-function moodTile(npc) {
+// Mood: the word with the Energy and Control bars, always (all three mood fields are kept). The meters' mood gives the word and the
+// bar steps; a person with none yet shows the scanner's word (or the resting word) with both bars at the middle step.
+export function moodTile(npc) {
     const mood = object(npc.v2Meters).mood;
-    return mood ? { title: 'Mood', text: mood.word, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause } : { title: 'Mood', text: plain(npc.mood) };
+    if (mood) return { title: 'Mood', text: mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause };
+    const rest = moodBars(null);
+    return { title: 'Mood', text: plain(npc.mood) || moodWord(null), feeling: rest.max / 2, energy: rest.energy, control: rest.control, max: rest.max };
+}
+
+// The few plain words under the mood word, from the three bars (a step 0..max, the middle is neutral): only a bar well off the
+// middle (two steps or more, the code's band edge) speaks: unpleasant / pleasant, slack / keyed-up, cornered / in control.
+export function moodDescriptors(mood) {
+    if (!mood?.max) return [];
+    const mid = mood.max / 2;
+    const word = (value, low, high) => (value <= mid - 2 ? low : (value >= mid + 2 ? high : ''));
+    return [word(mood.feeling, 'unpleasant', 'pleasant'), word(mood.energy, 'slack', 'keyed-up'), word(mood.control, 'cornered', 'in control')].filter(Boolean);
+}
+
+// "Her", "His" or "Their" (lower-case for a sentence) from the gender the dossier holds.
+export function possessiveWord(gender = '', { lower = false } = {}) {
+    const text = plain(gender).toLocaleLowerCase();
+    const word = /^(?:f|she)|\b(?:female|woman|girl)\b/.test(text) ? 'Her' : (/^(?:m$|male|he\b)|\b(?:man|boy)\b/.test(text) ? 'His' : 'Their');
+    return lower ? word.toLocaleLowerCase() : word;
+}
+
+// The gate's receipt ("via praise · 3rd in 2 days · backfired", built by npc-meters-gate.js and kept as it is) in the words the mockup uses:
+// the board tile reads "praise, the 3rd time in 2 days, backfired", the Recent changes row "via praise: the 3rd time in 2 days, so it backfired".
+// Text that does not parse is returned as it came.
+const GATE_VERB = { backfired: 'it backfired', less: 'it landed less', suspicion: 'it read as pressure' };
+export function gateWords(text, { row = false } = {}) {
+    const match = /^via (.+?)(?: · (\d+(?:st|nd|rd|th)) in (\d+) (days?))? · (backfired|less|suspicion)$/.exec(plain(text));
+    if (!match) return plain(text);
+    const [, via, nth, span, unit, mode] = match;
+    const times = nth ? `the ${nth} time in ${span} ${unit}` : '';
+    if (row) return `via ${via}${times ? `: ${times}, so ${GATE_VERB[mode]}` : `: ${GATE_VERB[mode]}`}`;
+    return [via, times, mode].filter(Boolean).join(', ');
 }
 
 // Pull: the instinct word with a strength ring and "high · 2 days". Null (no tile) without one.
@@ -146,7 +179,7 @@ export function pullTile(npc) {
     const pull = object(npc.v2Meters).pull;
     if (!pull) return null;
     const days = pull.days === 1 ? '1 day' : `${pull.days} days`;
-    return { title: 'Pull', text: pullWord(pull.kind), level: pull.level, note: `${[STRENGTH[pull.level], days].filter(Boolean).join(' · ')}`, cause: pull.cause };
+    return { title: 'Pull', text: pullWord(pull.kind), level: pull.level, note: `${[STRENGTH[pull.level], days].filter(Boolean).join(' · ')}`, cause: pull.cause, fresh: pull.days === 0 };
 }
 
 // The board: the dial's four arcs, name and status, and one tile per section. Pull is null until its data exists (phase 2).

@@ -392,8 +392,10 @@ export function createEvents(s, deps) {
         if (globalName) globalThis[globalName] = interceptor;
         // A module turned ready or dormant: guarded blocks of its are asked again (store.lifecycleChanged).
         s.offModules?.();
-        s.offModules = events?.on?.('modules', () => {
-            if (store.lifecycleChanged?.()) events?.emit('head', { index: store.headIndex(), reason: 'module' });
+        // (only the restore barrier going up or down: the memos kept under the mark come back, the guards are not asked again for nothing)
+        const barrierOnly = changes => Array.isArray(changes) && changes.length > 0 && changes.every(c => c?.status === 'restore-pending' || (c?.from === 'restore-pending' && c?.status === 'ready'));
+        s.offModules = events?.on?.('modules', info => {
+            if (store.lifecycleChanged?.({ barrier: barrierOnly(info?.changes) })) events?.emit('head', { index: store.headIndex(), reason: 'module' });
         }) ?? null;
         for (const off of s.offBoard) off();
         s.offBoard = ['committed', 'head'].flatMap(name => [events?.on?.(name, stopChangedBoard), events?.on?.(name, resumeHeldBoard)]).filter(Boolean);

@@ -133,7 +133,7 @@ export function openFoes(domain, open, { fix = FIX_VERSION } = {}) {
         if (fix < 2 ? same : same && same.hurt > 0) continue;
         const free = fix < 2 ? sheet.foes.find(foe => foe.count === 0) : same ?? sheet.foes.find(foe => foe.count === 0 || (foe.filled && foe.hurt === 0));
         if (!free) continue;
-        const n = ((free.slot - 1) % FOE_SLOTS) + 1;
+        const n = free.local ?? ((free.slot - 1) % 4) + 1;
         const pin = domain.pins?.[domain.active?.[free.module]?.hash];
         const definition = pin?.definition;
         const instance = domain.instances?.[free.module]?.chat;
@@ -153,7 +153,7 @@ export function openFoes(domain, open, { fix = FIX_VERSION } = {}) {
     if (placed.length && fix >= 2) {
         const taken = new Set(placed.map(entry => entry.slot));
         for (const stale of readSheet({ domains: { dataModules: domain } }).foes.filter(foe => foe.filled && foe.hurt === 0 && !taken.has(foe.slot))) {
-            const n = ((stale.slot - 1) % FOE_SLOTS) + 1;
+            const n = stale.local ?? ((stale.slot - 1) % 4) + 1;
             const definition = domain.pins?.[domain.active?.[stale.module]?.hash]?.definition;
             const instance = domain.instances?.[stale.module]?.chat;
             if (!instance?.fields) continue;

@@ -23,7 +23,7 @@ export function dossierMenuHtml(npcId, { archived = false, deceased = false, dia
     if (!id) return '';
     const attr = escapeHtml(id);
     return `<details class="delta-header-menu">
-        <summary class="delta-btn delta-header-menu-toggle" aria-label="Dossier actions" title="Dossier actions">⋯</summary>
+        <summary class="delta-btn delta-header-menu-toggle ss-tap-pill" aria-label="Dossier actions" title="Dossier actions">⋯</summary>
         <div class="delta-header-menu-list">
             <button type="button" class="delta-btn delta-primary delta-edit" data-npc-id="${attr}">Edit</button>
             <button type="button" class="delta-btn npc-state-delta-refresh-chat" data-npc-id="${attr}">Refresh</button>

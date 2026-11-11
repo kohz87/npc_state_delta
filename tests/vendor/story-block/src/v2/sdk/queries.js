@@ -21,6 +21,7 @@ export function runQuery(registry, state, name, args, { receipts = () => [], rep
     if (!query) throw new Error(`Story Suite: no module answers the query "${name}".`);
     const tools = Object.freeze({
         reply,
+        hasQuery: other => Boolean(registry.query(other)),
         query: (other, otherArgs) => runQuery(registry, state, other, otherArgs, { receipts, reply, pendingProofs }),
         receipts: () => withCue(receipts() ?? []),
         // The proof a Re-read has planned but not stored (evidence.js), for story.evidence; none otherwise.

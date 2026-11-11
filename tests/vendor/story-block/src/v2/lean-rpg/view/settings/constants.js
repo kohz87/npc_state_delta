@@ -40,7 +40,7 @@ const words = (...parts) => parts.join(' ').toLowerCase();
 export const CARD_WORDS = Object.freeze({
     formula: words(S.formula, S.formulaStandardHelp, S.formulaNote, S.formulaRows.map(row => `${row.type} ${row.what}`).join(' '), Object.values(S.formulaNums).join(' '), S.formulaFootStandard),
     levels: words(S.levels, S.levelCap, S.levelCapHelp, S.practice, S.practiceHelp, S.xpRate, S.xpRateHelp),
-    rolls: words(S.rolls, S.rollsHelp, S.automatic, S.off, 'fight board choose exchanges'),
+    rolls: words(S.rolls, S.rollsHelp, S.checks, S.checksHelp, S.automatic, S.off, 'fight board choose exchanges'),
     difficulty: words(S.difficulty, S.gentle, S.standard, S.harsh, S.custom, STANDARD_FIELDS.map(field => `${fill(field.label, { label: SOUL_LABEL })} ${field.help}`).join(' '), S.replayNote),
     combat: words(S.combat, S.combatHelp, S.combatLabel, S.combatReset),
     join: words(S.join, S.joinHelp, S.joinAsk, S.joinAuto, S.joinOff),

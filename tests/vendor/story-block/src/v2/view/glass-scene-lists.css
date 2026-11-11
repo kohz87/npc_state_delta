@@ -1,0 +1,334 @@
+/* glass-scene-lists.css: the hero's Wearing, Travel and compact lines, the scene on a phone, tiers and list cards (split from glass.css, same rules in the same order). */
+/* Wearing and Condition under the place line (`you`, game view header): a label and the words (they wrap); plain text, the header's one
+   Edit button changes them */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-you {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
+    align-items: baseline;
+    min-width: 0;
+    max-width: 100%;
+    font-size: 13px;
+    color: var(--ss-text);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-you[hidden] {
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-you-part {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0 6px;
+    align-items: baseline;
+    min-width: 0;
+    max-width: 100%;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-you-part[hidden] {
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-you-label {
+    flex: none;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ss-muted);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-you-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-you-empty {
+    color: var(--ss-muted);
+}
+/* Travel under the Wearing row (`travel`, game view header): a label and the trip's line, which wraps */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-travel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 6px;
+    align-items: baseline;
+    min-width: 0;
+    max-width: 100%;
+    font-size: 13px;
+    color: var(--ss-text);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-travel[hidden] {
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-travel-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+/* compact: the one-row strip under a reply */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact {
+    padding: var(--ss-space-2) var(--ss-space-3);
+    border-radius: var(--ss-radius-l);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-body {
+    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-areas: "portrait text" "vitals vitals";
+    column-gap: 10px;
+    row-gap: 6px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-portrait {
+    width: 36px;
+    height: 36px;
+    border-width: 1.5px;
+    border-radius: 50%;
+    font-size: 16px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-who {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 8px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-name {
+    font-size: 16px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-pill {
+    font-size: 12px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-exp {
+    display: none;
+}
+/* the scene on a phone: the items side by side, wrapping onto more lines when they do not fit (the words are never cut) */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-corner {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-width: 0;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    font-size: 12px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-corner-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+    flex: 0 1 auto;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-corner-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-pools {
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+    gap: 8px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-bar-head {
+    font-size: 11px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-bar-track {
+    height: 5px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-statuses {
+    justify-content: flex-start;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-status {
+    width: 30px;
+    height: 30px;
+    margin: 0 5px 5px 0;
+    border-radius: 9px;
+    font-size: 15px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-status-left {
+    right: -4px;
+    bottom: -5px;
+    padding: 0 4px;
+    font-size: 10px;
+    line-height: 14px;
+}
+@container (min-width: 560px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-body {
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        grid-template-areas: "portrait text vitals";
+        column-gap: 14px;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-portrait {
+        width: 36px;
+        height: 36px;
+        font-size: 16px;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-name {
+        font-size: 16px;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-hero-compact .ss-hero-pools {
+        grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+    }
+}
+
+/* ---- tiers ---- */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-tiers {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    color: var(--ss-text);
+    font-family: var(--ss-font);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-tiers-tier {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--ss-space-2);
+    min-width: 0;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-tiers-link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-tiers-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--ss-muted) 60%, transparent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-tiers-line {
+    width: 2px;
+    height: 22px;
+    background: color-mix(in srgb, var(--ss-muted) 60%, transparent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-tiers-label {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--ss-muted);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-tiers-grid {
+    align-self: stretch;
+    display: grid;
+    grid-template-columns: repeat(var(--ss-cols, 3), minmax(0, 1fr));
+    justify-items: center;
+    gap: 18px 10px;
+    padding: 14px 10px 18px;
+    border-radius: var(--ss-radius-xl);
+}
+
+/* ---- listcard ---- */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard {
+    gap: 0;
+    padding: var(--ss-space-3) var(--ss-space-3);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-head {
+    margin-bottom: 2px;
+    padding: 0 6px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-rows {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-row {
+    border-bottom: 1px solid color-mix(in srgb, var(--ss-muted) 28%, transparent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-row:last-child {
+    border-bottom: 0;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 9px 6px;
+    border: 0;
+    border-radius: var(--ss-radius-s);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    transition: background-color var(--ss-motion, 0.2s) ease;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-item:where(button) {
+    min-height: 44px;
+    cursor: pointer;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-item:where(button):hover {
+    background: var(--ss-tile);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-item:focus-visible {
+    outline: 2px solid var(--ss-accent);
+    outline-offset: -2px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-item[aria-current="true"] {
+    background: var(--ss-accent-soft);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-icon {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--ss-radius-s);
+    background: var(--ss-tile);
+    object-fit: cover;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-main {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-title {
+    font-size: 14px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-sub {
+    font-size: 13px;
+    color: var(--ss-muted);
+    overflow-wrap: anywhere;
+}
+/* A pack row's tag: which module the pack is for ("World pack · Story Director"), a small labelled pill under the name. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-packs-tag {
+    align-self: flex-start;
+    margin: 2px 0 2px;
+    padding: 0 8px;
+    border: 1px solid color-mix(in srgb, var(--ss-accent) 45%, transparent);
+    border-radius: var(--ss-radius-pill);
+    color: var(--ss-text);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-value {
+    flex: none;
+    font-weight: 600;
+    white-space: nowrap;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-tag {
+    flex: none;
+    padding: 1px 9px;
+    border: 1px solid color-mix(in srgb, var(--ss-ring, var(--ss-muted)) 70%, transparent);
+    border-radius: var(--ss-radius-pill);
+    background: color-mix(in srgb, var(--ss-ring, var(--ss-muted)) 16%, transparent);
+    color: var(--ss-text);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-listcard-empty {
+    margin: 0;
+    padding: 9px 6px;
+    color: var(--ss-muted);
+}

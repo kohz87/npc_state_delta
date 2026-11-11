@@ -44,7 +44,7 @@ export function createAct(deps) {
         // A group already on the block, named again with no level and no rank, keeps the level it has: it is not drawn anew (a swipe would otherwise move a fight's foes).
         const have = prefix.domains?.dataModules?.instances?.[module]?.chat?.fields;
         const known = !dmOwn(rest, 'level') && !(typeof rank === 'string' && rank.trim()) && typeof rest.name === 'string' && have
-            ? [1, 2, 3, 4].find(n => typeof have[`foe${n}`] === 'string' && have[`count${n}`] > 0 && fold(have[`foe${n}`]) === fold(rest.name) && Number.isSafeInteger(have[`level${n}`])) : undefined;
+            ? [1, 2, 3, 4, 5, 6].find(n => typeof have[`foe${n}`] === 'string' && have[`count${n}`] > 0 && fold(have[`foe${n}`]) === fold(rest.name) && Number.isSafeInteger(have[`level${n}`])) : undefined;
         if (known !== undefined) return { ...rest, level: String(have[`level${known}`]) };
         // A level or rank above the party's highest level + 20 is held down to it (+ 10 on a reply captured before that rule: it has no `foeCap` mark, so a Re-read agrees with the live capture).
         const levels = partyLevels(readSheet({ domains: { dataModules: prefix.domains?.dataModules } })), cap = foeLevelCap(levels, ctx.carrier?.foeCap === 20 ? FOE_LEVEL.band : FOE_LEVEL.oldBand);
@@ -129,7 +129,7 @@ export function createAct(deps) {
         const route = definition.role === 'skills' && line ? skillRoute(instance.fields, labels.kind, args, line.text, skillRoom(prefix, definition, instance.fields)) : null;
         if (route?.refuse) refuse('DM_CONDITION', '', route.refuse);
         const same = definition.role === 'foes' && /^set-slot-\d$/u.test(labels.kind) && typeof args.name === 'string'
-            ? [1, 2, 3, 4].find(n => typeof instance.fields[`foe${n}`] === 'string' && instance.fields[`count${n}`] > 0 && fold(instance.fields[`foe${n}`]) === fold(args.name)) : undefined;
+            ? [1, 2, 3, 4, 5, 6].find(n => typeof instance.fields[`foe${n}`] === 'string' && instance.fields[`count${n}`] > 0 && fold(instance.fields[`foe${n}`]) === fold(args.name)) : undefined;
         if (same !== undefined) evaluation.effects([{ op: 'set', path: [`foe${same}`], value: ['arg', 'name'] }, { op: 'set', path: [`count${same}`], value: ['arg', 'count'] }, { op: 'set', path: [kind.labels.level ? `level${same}` : `class${same}`], value: ['arg', kind.labels.level ? 'level' : 'class'] }], { arg: args });
         else if (route?.update) evaluation.effects(['about', 'stat', 'uses'].map(key => ({ op: 'set', path: [`${key}${route.slot}`], value: ['arg', key] })), { arg: args });
         else {

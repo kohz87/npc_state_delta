@@ -28,7 +28,7 @@ export const standardWidgets = Object.freeze({
     'ss.badge': badge,
     'ss.timeline': timeline,
     'ss.stepper': stepper,
-    // Story Suite's look (view/glass.css, the UI stage).
+    // Story Suite's look (view/glass-*.css, the UI stage).
     'ss.tile': tile,
     'ss.bar': bar,
     'ss.status': status,

@@ -223,3 +223,19 @@ export function gameHeroProps({ state = null, query = null, context = {}, format
         ...(clock ? { clock } : {}),
     };
 }
+
+/**
+ * The game view header's module toggles (registry.headerControls(), one per module): each asks its own `query` (with `args`) for the state,
+ * a boolean or `{ on }`; any other answer (null while its feature is off, an absent module, a query that fails) leaves the pill out.
+ * → [{ key, label, icon, command, payload, on }]. Label and icon are cut by code points; the icon is a short text (an emoji).
+ */
+export function headerControlItems({ controls = [], query = null } = {}) {
+    const items = [];
+    for (const control of Array.isArray(controls) ? controls : []) {
+        const answer = safeQuery(query, control?.query, control?.args ?? {});
+        const on = answer && typeof answer === 'object' ? answer.on : answer;
+        if (typeof on !== 'boolean') continue;
+        items.push({ key: String(control.key), label: [...textOf(control.label)].slice(0, 24).join(''), icon: [...textOf(control.icon)].slice(0, 4).join(''), command: control.command, payload: control.payload ?? {}, on });
+    }
+    return items;
+}

@@ -5,7 +5,7 @@
 //   rankOf(level, ranks)          the rank whose band holds the level → { name, from, to } | null
 //   levelLabel(level, ranks)      "Rank E · Lv 14", or "Lv 14" when no rank holds the level (or there are none)
 //   RANK_QUERY `rpg.rank`         { level } → { name } | null (the story's pack, or `ranks` in the arguments)
-import { AUTO_CAP, AUTO_CAP_SETTING, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, PRECHECK_SETTING } from './names.js';
+import { AUTO_CAP, AUTO_CAP_SETTING, CHECKS_SETTING, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, PRECHECK_SETTING } from './names.js';
 
 /** A level runs from 1 to 99 (names.js LEVEL: the character's `level`, a foe's `level{n}`, a pack's rank bands and level cap). */
 export const LEVEL_MIN = LEVEL.min;
@@ -19,6 +19,8 @@ export const SETTINGS_SCHEMA = Object.freeze({
         help: 'How many exchanges Auto plays before it stops, 1 to 8, or 9 for until the end of the fight. Default 3.' }),
     [PRECHECK_SETTING]: Object.freeze({ type: 'bool', group: 'RPG', label: 'Set up a fight from my attack', feature: LEAN_RPG_FEATURE,
         help: 'When you type an attack and no foe is standing, a short call on your Assist profile finds the foes, so you fight on the board before the reply. Off: the narrator sets up the foes and the board opens after its reply.' }),
+    [CHECKS_SETTING]: Object.freeze({ type: 'bool', group: 'RPG', label: 'Story checks', feature: LEAN_RPG_FEATURE,
+        help: 'Rolls for attempts outside a fight, before the reply: three dice go in the note, the narrator reports each check, and code works out the result and gives practice. Works whatever Rolls says (it is for fights). Off: the narrator decides them (past results stay).' }),
 });
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);

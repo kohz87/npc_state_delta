@@ -26,7 +26,7 @@ const rarityOptions = () => Object.keys(GEAR.budget).map(value => ({ value, labe
 const slotOptions = () => [{ value: '', label: G.none }, ...Object.entries(G.slots).map(([value, label]) => ({ value, label }))];
 const statOptions = () => [{ value: '', label: F.noStat }, ...GEAR.stats.map(value => ({ value, label: value }))];
 // (the first owner is the main character: "Astra (you)")
-const wearerOptions = owners => [{ value: '', label: G.none }, ...(Array.isArray(owners) ? owners : []).map((entry, at) => ({ value: String(entry?.value ?? ''), label: `${String(entry?.label ?? '')}${at === 0 && entry?.label && !/\(you\)/.test(String(entry.label)) ? ` ${F.you}` : ''}` }))];
+const wearerOptions = (owners, by = '') => [{ value: '', label: G.none }, ...(Array.isArray(owners) ? owners : []).map((entry, at) => ({ value: String(entry?.value ?? ''), label: `${String(entry?.label ?? '')}${at === 0 && entry?.label && !/\(you\)/.test(String(entry.label)) ? ` ${F.you}` : ''}` })), ...(by && !(Array.isArray(owners) ? owners : []).some(entry => String(entry?.value) === by) ? [{ value: by, label: G.left }] : [])];
 const SHOWN = Object.freeze({ key: 'kind', in: Object.freeze(['equipment']) });
 
 // The Bonus lines (two), their stat and points boxes, and (when they can be changed) the live points line after them.
@@ -120,7 +120,7 @@ export function editFields(p) {
         { key: 'rarity', label: F.rarity, tone: true, type: 'choice', options: rarityOptions(), value: equipment || kit ? String(gear.rarity ?? 'common') : 'common', group: F.groupGear, row: 'sr', showWhen: SHOWN,
             ...(kit ? {} : { disabled: true, title: F.laterTitle }) },
         ...bonusFields(equipment ? row.stats : {}, !kit),
-        { key: 'by', label: F.equippedBy, type: 'choice', options: wearerOptions(gear.owners), value: String(gear.by ?? ''), group: F.groupGear, showWhen: SHOWN },
+        { key: 'by', label: F.equippedBy, type: 'choice', options: wearerOptions(gear.owners, String(gear.by ?? '')), value: String(gear.by ?? ''), group: F.groupGear, showWhen: SHOWN },
         ...(kit ? [] : [{ key: 'later', type: 'note', text: F.laterHint, group: F.groupGear, showWhen: SHOWN }]),
     ];
     return fields;
@@ -154,21 +154,24 @@ export function editPlan(p) {
             }
         }
         const steps = [];
+        if (Object.keys(payload).length > 2) steps.push({ command: 'inventory.edit', payload, keys: ['name', 'count', 'note', 'kind', 'slot', 'rarity', 'stat1', 'points1', 'stat2', 'points2'] });
+        // (Carry after the edit: a rename of a shared piece gives it a definition of its own, and the carry must land on that one, not on the other pieces')
         if (changed.carry !== undefined) {
             if (!Number.isSafeInteger(all.carry) || all.carry < 0 || all.carry > 500) return { error: E.carryRange.replace('{max}', '500') };
             steps.push({ command: 'inventory.carry', payload: { stack, carry: all.carry }, keys: ['carry'] });
         }
-        if (Object.keys(payload).length > 2) steps.push({ command: 'inventory.edit', payload, keys: ['name', 'count', 'note', 'kind', 'slot', 'rarity', 'stat1', 'points1', 'stat2', 'points2'] });
         // Who wears it: only for equipment; leaving Equipment takes it off inside the edit itself.
         if (all.kind === 'equipment') {
             const placed = String(gear.place ?? ''), wearer = String(gear.by ?? '');
-            const by = String(all.by ?? ''), slot = String(all.slot ?? '');
+            const by = String(all.by ?? '');
+            const slot = String(all.slot ?? '');
             if (!by || !slot) {
                 if (by === '' && placed && changed.by !== undefined) steps.push({ command: 'inventory.unequip', payload: { stack }, keys: ['by'] });
             } else if (!(placed === slot && wearer === by) && (changed.by !== undefined || changed.slot !== undefined || changed.kind !== undefined)) {
                 steps.push({ command: 'item.equip', payload: { stack, owner: by, slot, ...(by !== gear.owner ? { transfer: true } : {}) }, keys: ['by'] });
             }
         }
+        if (!steps.length && all.kind === 'equipment' && (changed.by !== undefined || changed.slot !== undefined || !Object.keys(changed).length)) return { error: gear.place ? E.nothingChanged : E.nothingWorn };
         return { steps };
     };
 }

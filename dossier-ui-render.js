@@ -5,9 +5,9 @@ import { portraitMark } from './dossier-ui-html.js';
 import { replyHeaderLabel } from './dossier-ui-model.js';
 import { DossierUiPanel } from './dossier-ui-panel.js';
 import { boardHtml } from './dossier-ui-board.js';
-import { libraryFootHtml, libraryHtml, libraryRows, librarySearchHtml, librarySignature } from './dossier-ui-library.js';
+import { libraryCountHtml, libraryFootHtml, libraryHtml, libraryRows, librarySearchHtml, librarySignature } from './dossier-ui-library.js';
 import { dossierProfileHtml } from './dossier-ui-profile.js';
-import { SECTION_KEYS, createScreenState, isPhone, layoutFor, screenSignature } from './dossier-ui-screens.js';
+import { SECTION_KEYS, createScreenState, isNarrow, layoutFor, screenSignature } from './dossier-ui-screens.js';
 import { sectionScreenHtml } from './dossier-ui-sections.js';
 
 function pane(name, html) {
@@ -89,10 +89,17 @@ export class DossierUiRender extends DossierUiPanel {
         if (!force && signature === this.lastScreenSignature) return rows.length;
         this.lastScreenSignature = signature;
         if (doc.dataset.screen !== 'library' || !doc.querySelector('[data-delta-library-list]')) {
-            doc.innerHTML = `<div class="delta-panes" data-layout="${isPhone() ? 'phone' : 'desktop'}" data-screen="library"><div data-pane="library" class="delta-library-screen">${librarySearchHtml(this.query, this.projection.index.length)}<div data-delta-library-list></div></div></div>`;
+            doc.innerHTML = `<div class="delta-panes" data-screen="library"><div data-pane="library" class="delta-library-screen">${librarySearchHtml(this.query, this.projection.index.length)}<div data-delta-library-list></div></div></div>${libraryCountHtml(this.projection.index.length)}`;
             doc.dataset.screen = 'library';
-            doc.scrollTop = 0;
+            if (doc.firstElementChild) doc.firstElementChild.scrollTop = 0;
         }
+        // the layout mark follows the panel's width on every draw (the panes are kept when only the width crossed the line)
+        doc.querySelector('.delta-panes')?.setAttribute('data-layout', isNarrow(this.root.querySelector('.delta-panel')) ? 'phone' : 'desktop');
+        const search = doc.querySelector('[data-delta-library-search]');
+        const total = this.projection.index.length;
+        if (search) search.placeholder = `Search ${total > 0 ? `${total} people` : 'people'}…`;
+        const count = doc.querySelector('.delta-library-foot[data-static]');
+        if (count) count.outerHTML = libraryCountHtml(this.projection.index.length);
         const list = doc.querySelector('[data-delta-library-list]');
         const focusedId = document.activeElement?.closest?.('.delta-library-face')?.dataset?.npcId || '';
         const deadHidden = !this.query && this.projection.index.some(row => row.bucket === 'dead');
@@ -114,7 +121,7 @@ export class DossierUiRender extends DossierUiPanel {
             this.screen = createScreenState();
             return this.renderLibrary(doc, { force: true });
         }
-        const phone = isPhone();
+        const phone = isNarrow(this.root.querySelector('.delta-panel'));
         const userName = this.userName = this.personaName();
         const refs = this.portraitRefs;
         const formPortraits = Object.fromEntries(Object.entries(npc.formPortraits || {}).map(([name, src]) => [name, portraitMark(src, refs)]));
@@ -125,10 +132,10 @@ export class DossierUiRender extends DossierUiPanel {
         if (!force && signature === this.lastScreenSignature) return 1;
         this.lastScreenSignature = signature;
         const key = `${screen.npcId}|${screen.name}`;
-        const scroll = doc.dataset.screenKey === key ? doc.scrollTop : 0;
+        const scroll = doc.dataset.screenKey === key ? (doc.querySelector('.delta-panes')?.scrollTop || 0) : 0;
         const layout = layoutFor(screen, { phone });
         const board = pane('board', boardHtml(npc, { refs, userName: userName || 'you', peers }));
-        const section = () => pane('section', sectionScreenHtml(SECTION_KEYS[screen.section], npc, { userName }));
+        const section = () => pane('section', sectionScreenHtml(SECTION_KEYS[screen.section], npc, { userName, reply: this.projection.reply }));
         let html;
         if (screen.name === 'profile') html = pane('profile', dossierProfileHtml(npc, { layout: phone ? 'phone' : 'desktop', portraitRefs: refs }));
         else if (screen.name === 'section') html = phone ? section() : board + section();
@@ -138,7 +145,8 @@ export class DossierUiRender extends DossierUiPanel {
         doc.dataset.screen = screen.name;
         doc.dataset.screenKey = key;
         refs.fill(doc);
-        doc.scrollTop = scroll;
+        const panes = doc.querySelector('.delta-panes');
+        if (panes) panes.scrollTop = scroll;
         return 1;
     }
 }

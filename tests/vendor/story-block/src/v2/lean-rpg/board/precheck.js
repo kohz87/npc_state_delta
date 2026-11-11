@@ -43,12 +43,12 @@ export function namedInMessage(name, message, previous = '') {
 }
 
 /**
- * Whether the message could be an attack: any clause with an attack word or phrasal attack and no doubt word. The gate is LOOSE on purpose
+* Whether the message could be an attack: any clause (also a comma or colon part, so a doubt word only cancels its own part) with an attack word or phrasal attack and no doubt word. The gate is LOOSE on purpose
  * (no subject test: a third party or an idiom passes); the Assist reading decides whether the reader is really starting a fight.
  */
 export function looksLikeAttack(message) {
     const text = String(message ?? '').replace(/[“"][^”"]*[”"]/gu, ' ');
-    return text.split(/[.!?;\n]|\b(?:and|then|but)\b/iu).some(clause => !UNCERTAIN.test(clause) && findAttack(clause) !== null);
+    return text.split(/[.!?;:,\n]|\b(?:and|then|but)\b/iu).some(clause => !UNCERTAIN.test(clause) && findAttack(clause) !== null);
 }
 
 function partyLine(sheet, roster) {

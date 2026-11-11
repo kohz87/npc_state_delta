@@ -46,7 +46,7 @@ export function createFieldsWidgets() {
                     const labels = current.labels ?? {}, units = current.units ?? {}, tones = current.tones ?? {};
                     const lines = names.map(name => ({ field: name, label: text(labels[name]) || definition.state[name].label || cap(humanize(name)), schema: definition.state[name],
                         value: values[name] ?? definition.state[name].default, tones: tones[name], unit: text(units[name]) }));
-                    drawRecordCard(env, root, { title, lines, module });
+                    drawRecordCard(env, root, { title, lines, module, tiles: current.tiles === true });
                 }
                 draw();
                 return { update(next) { current = next; draw(); }, destroy() { alive = false; clear(); } };

@@ -54,5 +54,5 @@ test('the dossier layout keeps portrait emphasis, section jumps and compact dead
     assert.match(ui, /data-bucket="\$\{escapeHtml\(npc\.bucket \|\| ''\)\}"/);
     assert.doesNotMatch(experience, /delta-cast-card|delta-hero/, 'the old rail and hero rules are gone');
     // Desktop: the board beside a section; the profile is two columns with the portrait on the left.
-    assert.match(ui, /\.delta-profile \{ grid-template-columns:minmax\(0,\.8fr\) minmax\(0,1\.2fr\); \}/);
+    assert.match(ui, /\.delta-profile \{ grid-template-columns:minmax\(0,\.8fr\) minmax\(0,1\.2fr\); gap:0; padding:0;/);
 });

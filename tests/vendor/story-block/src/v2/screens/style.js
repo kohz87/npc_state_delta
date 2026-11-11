@@ -4,7 +4,7 @@
 //
 // The screens are on the glass look (UI stage 5a): their colours are the look's tokens (`--ss-*`, view/theme.js) where a
 // token exists, so Glass, Solid and Follow SillyTavern all reach them; the older SillyTavern colours stay as the fallback.
-// A panel is a glass card, a heading is the section label (`ss-section-label`, view/glass.css: the label and a hairline).
+// A panel is a glass card, a heading is the section label (`ss-section-label`, view/glass-*.css: the label and a hairline).
 //
 // Tokens a pack or card can override through a screen's `theme` (custom properties on the root):
 //   --ss-accent                        highlights (default: SillyTavern's quote colour)

@@ -1,0 +1,249 @@
+/* settings-window.css: the settings window: shell, side, rail, page, form sections (split from settings.css, same rules in the same order). */
+/* The settings window (UI stage, step 3a; view/settings/window.js): a glass window over the page with a header (the
+   title, a search box, Close), a rail of sections and the page of the chosen one. `.story-suite-overlay` (host.css) is
+   the layer around it; the window is the glass, so it must sit where nothing above it has a filter or its own
+   background (the layer has neither). A phone gets the window full-screen and the rail as a row that scrolls sideways
+   above the page; from 760px it is a centred window with the rail down the left side.
+
+   Every rule is `:where(<roots>) .ss-settings…` (see glass-*.css). The rules for the folds and rows the sections still
+   draw (the old overlay's `story-suite-*` classes, until steps 3b–3g move each section to the form engine) start with
+   `.ss-settings` so they outweigh host.css, which loads after this sheet. */
+
+/* The help lines of the settings window (field, card and feature help, the Diagnostics credit) have their own tone, so they read
+   over a busy background (see theme.js PALETTES.help); opacity stays 1, so a faded class (.ss-packs-hint) does not take it down. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings :is(.ss-card-help, .ss-field-help, .ss-feature-help) { color: var(--ss-help, var(--ss-muted)); opacity: 1; }
+
+/* ---- the window */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    overflow: clip;
+    padding-top: env(safe-area-inset-top, 0px);
+    background: var(--ss-glass);
+    -webkit-backdrop-filter: var(--ss-blur);
+    backdrop-filter: var(--ss-blur);
+    color: var(--ss-text);
+    font-family: var(--ss-font);
+    font-size: 14px;
+    line-height: 1.4;
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings {
+        display: grid;
+        grid-template-columns: 250px minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+        max-width: 1120px;
+        max-height: 780px;
+        padding-top: 0;
+        border: 1px solid var(--ss-border);
+        border-radius: var(--ss-radius-xxl);
+        box-shadow: var(--ss-shadow);
+    }
+}
+
+/* A phone, full screen: the story behind must not read through the glass (it competes with the settings' own text). The tint is
+   layered over itself, which makes the glass about as dense as Solid whatever the Glass strength is (a browser with blur switched off shows the page through it as it is); from 760px the window floats over
+   the page and keeps the reader's strength. */
+@media (max-width: 759.98px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings {
+        background-image: linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong));
+    }
+}
+
+/* Close: the window's top right, on every width (over the title row on a phone, over the page's heading row from 760px). */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-close {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + var(--ss-space-3));
+    right: var(--ss-space-4);
+    z-index: 2;
+    width: 40px;
+    height: 40px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-m);
+    background: var(--ss-tile);
+    color: var(--ss-text);
+    font-family: var(--ss-font);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-close:focus-visible {
+    outline: 2px solid var(--ss-accent);
+    outline-offset: 2px;
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-close {
+        top: var(--ss-space-4);
+        right: var(--ss-space-4);
+    }
+}
+
+/* ---- the side: the title, the search and the rail. A phone: the three stacked above the page (the rail a row that
+   scrolls sideways); from 760px a column of its own down the window's left. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-side {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ss-space-2);
+    min-width: 0;
+    padding: var(--ss-space-3) 0 0;
+    border-bottom: 1px solid var(--ss-border);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-title {
+    margin: 0;
+    padding: 0 calc(var(--ss-space-4) + 48px) 0 var(--ss-space-4);
+    font-family: var(--ss-font);
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 40px;
+}
+/* A phone: Close is a 44px target (size.css) in the title row, so the row is as tall and Close never covers the search box under it. */
+@media (max-width: 759.98px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-title {
+        line-height: max(40px, calc(44px / var(--ss-zoomed, 1)));
+    }
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-search {
+    margin: 0 var(--ss-space-4);
+    min-width: 0;
+}
+/* The box has its own clear button (searchField); the browser's second one is hidden. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-search .ss-search-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-rail {
+    min-width: 0;
+}
+/* A phone: the sections in a row that scrolls sideways (the tabs block's own list). */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-rail .ss-tabs-list {
+    padding: var(--ss-space-1) var(--ss-space-4) var(--ss-space-2);
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-side {
+        min-height: 0;
+        overflow-y: auto;
+        padding: var(--ss-space-4) var(--ss-space-3);
+        border-bottom: 0;
+        border-right: 1px solid var(--ss-border);
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-title {
+        padding: 0 10px 10px;
+        line-height: 1.2;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-search {
+        margin: 0 0 var(--ss-space-2);
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-rail .ss-tabs-list {
+        flex-direction: column;
+        gap: 4px;
+        overflow: visible;
+        padding: 0;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-rail .ss-tabs-item:not([aria-current="page"]) {
+        border-color: transparent;
+        background: none;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-rail .ss-tabs-item {
+        flex: none;
+        width: 100%;
+        justify-content: flex-start;
+        min-height: 44px;
+        padding: 0 var(--ss-space-3);
+        font-size: 15px;
+        font-weight: 700;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-rail .ss-tabs-count {
+        margin-left: auto;
+    }
+}
+
+/* ---- the page */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-content {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: var(--ss-space-4) var(--ss-space-4) calc(var(--ss-space-5) + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-content {
+        padding: 20px 24px 28px;
+    }
+    /* Room for Close beside the status line. */
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-status {
+        padding-right: 52px;
+    }
+    /* The page's heading is a strip that stays at the top while the page scrolls under it, and Close sits in its right end: nothing the page
+       holds is ever under Close. It reaches over the page's own top and side padding, so the cards scroll under all of it. */
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-page-head {
+        position: sticky;
+        top: -20px;
+        z-index: 1;
+        margin: -20px -24px 0;
+        padding: 20px 76px 12px 24px;
+        /* The window already blurs what is behind it and a nested blur does not stack, so the strip is made dense by layering the tint:
+           the page's text passing under it stays unreadable. */
+        background-color: var(--ss-glass-strong);
+        background-image: linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong));
+    }
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-status {
+    flex: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-page {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-page-head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-page-title {
+    margin: 0;
+    font-family: var(--ss-font);
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.15;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-page-sub {
+    margin: 0;
+    color: var(--ss-muted);
+    font-size: 14px;
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-page-title {
+        font-size: 26px;
+    }
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings-pane {
+    min-width: 0;
+    gap: 12px;
+}
+
+/* ---- the form engine's sections inside the window: a tile each, not glass on glass */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-settings .ss-section {
+    border-radius: var(--ss-radius-l);
+    background: var(--ss-tile);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+}

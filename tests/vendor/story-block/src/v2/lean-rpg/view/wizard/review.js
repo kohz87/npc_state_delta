@@ -108,7 +108,7 @@ export function createReviewStep(ctx) {
         // Still no state after the host tried to start one (sdk.command): the chat has no message to hold it, said in one plain sentence.
         if (!first.ok) failure = safe(headState, null) ? fill(W.failedFirst, { why: refusalText(first, W.generic) }) : W.noChat;
         else {
-            const second = await call('dm.define', { definition: definitions.skills });
+            const second = await call('dm.define', { definition: definitions.skills, after: `pack.chat/${definitions.character.slug}` });
             if (!second.ok) {
                 const undone = await call('dm.remove', { module: `pack.chat/${definitions.character.slug}` });
                 const why = refusalText(second, W.generic);

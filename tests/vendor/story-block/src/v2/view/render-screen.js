@@ -112,7 +112,7 @@ export function createScreenRenderer({ queryAt, widgets = () => ({}), headIndex 
             if (!compiled.has(screen.template)) compiled.set(screen.template, tpl.compileTemplate(screen.template, { sanitize }));
             const view = tpl.renderTemplate(el, compiled.get(screen.template), { ...scope, query, formatters: formatters() ?? {} }, {
                 command, evaluate: templateEvaluate, widgets: widgets(), onDraft: api.onDraft,
-                api: { query, preview: api.preview, commit: api.commit, on: api.on },
+                api: { query, preview: api.preview, commit: api.commit, on: api.on, hold: api.hold, notify: api.notify },
             });
             return view && typeof view.destroy === 'function' ? () => view.destroy() : undefined;
         }

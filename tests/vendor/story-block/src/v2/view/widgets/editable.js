@@ -46,6 +46,8 @@ function render(el, input, api) {
         let editing = false;
         let busy = false;
         let alive = true;
+        // The redraw hold of the plan running now: released when the plan ends (success or refusal) or the form goes, never kept longer.
+        let releasePlan = null;
         // The grouped form being edited: its fields and plan (the props' own, or, for a piece the reader added by hand with Gear in fights on, the gear form's).
         let formFields = null;
         let formPlan = null;
@@ -156,7 +158,9 @@ function render(el, input, api) {
                     rows[2].classList.add('ss-w-editable-item-wide');
                     rows.push(pair);
                     slotSelect = choice(G.editSlot, Object.entries(G.slots), String(p.gear.slot ?? ''));
-                    bySelect = choice(G.editBy, (Array.isArray(p.gear.owners) ? p.gear.owners : []).map(entry => [String(entry?.value ?? ''), String(entry?.label ?? '')]), String(p.gear.by ?? ''));
+                    const owners = (Array.isArray(p.gear.owners) ? p.gear.owners : []).map(entry => [String(entry?.value ?? ''), String(entry?.label ?? '')]), by = String(p.gear.by ?? '');
+                    // A wearer who left the party is still listed (chosen), so None is a choice the reader can make and Save leaves the piece with them otherwise.
+                    bySelect = choice(G.editBy, by && !owners.some(entry => entry[0] === by) ? [...owners, [by, G.left]] : owners, by);
                     // A cast member's signature piece (`gear.bound`: their name): everything but the note is read-only, with one line saying why.
                     if (typeof p.gear.bound === 'string' && p.gear.bound) {
                         for (const control of [field, itemCount, slotSelect, bySelect]) { control.disabled = true; control.setAttribute('title', fill(G.boundTitle, { name: p.gear.bound })); }
@@ -263,8 +267,12 @@ function render(el, input, api) {
         }
         // The form's `plan`: the steps run one after the other; a refusal stops the rest and leaves the form open with its sentence. A step that
         // went through is not sent again by the next Save: its boxes now count as what the form opened with.
+        // The screen holds its redraw while the steps run (`api.hold()`, always released at the end, then one redraw); if navigation destroys the form meanwhile, the next step does not run.
         async function runPlan({ changed, all }) {
-            if (!Object.keys(changed).length && !p.always) { close(); return; }
+            if (!Object.keys(changed).length && !p.always) {
+                if (p.kind === 'item' && p.gear?.kind === 'equipment') { error.textContent = p.gear.place ? STRINGS.editMessages.nothingChanged : STRINGS.editMessages.nothingWorn; return; }
+                close(); return;
+            }
             let outcome;
             try { outcome = formPlan(changed, all); } catch (failure) { outcome = { error: String(failure?.message ?? failure) }; }
             if (outcome?.error) { error.textContent = String(outcome.error); return; }
@@ -272,30 +280,38 @@ function render(el, input, api) {
             if (!steps.length) { close(); return; }
             busy = true;
             save.disabled = true;
-            for (const step of steps) {
-                let result;
-                try { result = await api.command(String(step.command), step.payload && typeof step.payload === 'object' ? step.payload : {}); }
-                catch (failure) { result = { ok: false, message: String(failure?.message ?? failure) }; }
-                if (!alive) return;
-                if (!result?.ok) {
-                    busy = false;
-                    save.disabled = false;
-                    error.textContent = refusalText(result, E.failed);
-                    return;
+            const release = api.hold?.();
+            releasePlan = release;
+            let committed = 0;
+            try {
+                for (const step of steps) {
+                    let result;
+                    try { result = await api.command(String(step.command), step.payload && typeof step.payload === 'object' ? step.payload : {}); }
+                    catch (failure) { result = { ok: false, message: String(failure?.message ?? failure) }; }
+                    if (!alive) return;
+                    if (!result?.ok) {
+                        busy = false;
+                        save.disabled = false;
+                        error.textContent = refusalText(result, E.failed);
+                        // After a committed step the screen redraws when the hold goes, so the sentence also shows as a page notice.
+                        if (committed) api.notify?.(error.textContent);
+                        return;
+                    }
+                    committed += 1;
+                    for (const entry of fields.inputs) if (Array.isArray(step.keys) && step.keys.includes(String(entry.spec.key))) entry.spec = { ...entry.spec, value: all[String(entry.spec.key)] ?? '' };
                 }
-                for (const entry of fields.inputs) if (Array.isArray(step.keys) && step.keys.includes(String(entry.spec.key))) entry.spec = { ...entry.spec, value: all[String(entry.spec.key)] ?? '' };
-            }
-            busy = false;
-            save.disabled = false;
-            close();
+                busy = false;
+                save.disabled = false;
+                close();
+            } finally { releasePlan = null; release?.(); }
         }
 
         // The steps an item's Slot and Equipped by choices need: taken off, or handed to the wearer and put on. [] when nothing changed.
         function wearSteps() {
             if (!slotSelect || !bySelect || slotSelect.disabled) return []; // (a bound piece: the choices are locked)
             const stack = p.payload?.stack;
-            const by = bySelect.value, slot = slotSelect.value;
             const placed = String(p.gear.place ?? ''), wearer = String(p.gear.by ?? '');
+            const by = bySelect.value, slot = slotSelect.value;
             if (by === '' || slot === '') return placed ? [{ command: 'inventory.unequip', payload: { stack } }] : [];
             if (placed === slot && wearer === by) return [];
             // (one command, so a refusal of the slot leaves the item with its owner: all or nothing)
@@ -306,21 +322,29 @@ function render(el, input, api) {
         async function runSteps(steps) {
             busy = true;
             save.disabled = true;
-            for (const step of steps) {
-                let result;
-                try { result = await api.command(step.command, step.payload); }
-                catch (failure) { result = { ok: false, message: String(failure?.message ?? failure) }; }
-                if (!alive) return;
-                if (!result?.ok) {
-                    busy = false;
-                    save.disabled = false;
-                    error.textContent = refusalText(result, E.failed);
-                    return;
+            const release = api.hold?.();
+            releasePlan = release;
+            let committed = 0;
+            try {
+                for (const step of steps) {
+                    let result;
+                    try { result = await api.command(step.command, step.payload); }
+                    catch (failure) { result = { ok: false, message: String(failure?.message ?? failure) }; }
+                    if (!alive) return;
+                    if (!result?.ok) {
+                        busy = false;
+                        save.disabled = false;
+                        error.textContent = refusalText(result, E.failed);
+                        // After a committed step the screen redraws when the hold goes, so the sentence also shows as a page notice.
+                        if (committed) api.notify?.(error.textContent);
+                        return;
+                    }
+                    committed += 1;
                 }
-            }
-            busy = false;
-            save.disabled = false;
-            close();
+                busy = false;
+                save.disabled = false;
+                close();
+            } finally { releasePlan = null; release?.(); }
         }
 
         async function submit() {
@@ -344,7 +368,11 @@ function render(el, input, api) {
                     if (!/^\d+$/.test(raw) || !Number.isSafeInteger(carry) || carry > 500) { error.textContent = E.carryRange.replace('{max}', '500'); return; }
                     if (carry !== was) steps.push({ command: 'inventory.carry', payload: { stack: p.payload?.stack, carry } });
                 }
-                if (!edited && !worn.length && !steps.length) { close(); return; }
+                if (!edited && !worn.length && !steps.length) {
+                    // (an equipment piece's Save that changes nothing says so, in the form's own line, instead of closing as if it had done something)
+                    if (p.gear?.kind === 'equipment') { error.textContent = p.gear.place ? STRINGS.editMessages.nothingChanged : STRINGS.editMessages.nothingWorn; return; }
+                    close(); return;
+                }
                 if (worn.length || steps.length) { await runSteps([...(edited ? [{ command: p.command, payload }] : []), ...worn, ...steps]); return; }
             } else if (formFields) {
                 const read = fields.readFields(p);
@@ -414,7 +442,7 @@ function render(el, input, api) {
             else if (!p.open && editing && p.bare) close(true);
         }
         update(input);
-        return { update, destroy() { alive = false; } };
+        return { update, destroy() { alive = false; releasePlan?.(); } };
     });
 }
 

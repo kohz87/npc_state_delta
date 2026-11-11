@@ -222,7 +222,7 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
         /** Every declared feature: [{ id, moduleId, moduleName, label, describe, default, prompt, on }]. */
         features: () => (registry.features?.() ?? []).map(feature => Object.freeze({ ...feature, on: featureOn(registry, feature.id) })),
         /**
-         * [{ id, name, version, domains, commands, kinds, tabs, features, capabilities, status, reason }] in id order.
+         * [{ id, name, version, domains, commands, kinds, tabs, headerControls, features, capabilities, status, reason }] in id order.
          * `domains`, `commands` and `kinds` are what the module declares; `capabilities` are the names it declares for
          * packs' requires.capabilities (a frozen list, empty when it declares none); it is available only while
          * `status` is 'ready' ('dormant': waiting for a peer; 'restore-pending': a restore holds it), and
@@ -238,6 +238,7 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
                 commands: Object.keys(def.commands ?? {}),
                 kinds: Object.keys(def.capture?.kinds ?? {}),
                 tabs: (def.tabs ?? []).map(tab => tab.id),
+                headerControls: (def.headerControls ?? []).map(control => control.id),
                 features: (def.features ?? []).map(feature => feature.id),
                 capabilities: Object.freeze([...new Set(def.capabilities ?? [])]),
                 status: life?.status ?? 'ready',

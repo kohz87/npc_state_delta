@@ -14,7 +14,7 @@ import { tiesText } from '../src/npc-notes-ties.js';
 import { suite } from './helpers/pacing-suite.js';
 import { MODULE_ID } from '../src/storysuite-v2.js';
 import { validateNpcSlice } from '../src/npc-meters.js';
-import { FEATURE_NOTES, RECORD_FIELDS } from '../src/npc-meters-config.js';
+import { FEATURE_NOTES, RECORD_FIELDS, readLeaf } from '../src/npc-meters-config.js';
 import { seedNotes, driveScale, foldTies, aliasCanon, tieRows, dossierNotes } from '../src/npc-notes-kinds.js';
 import { stepPull } from '../npc-instincts.js';
 import { setDrives } from '../src/npc-notes-drives.js';
@@ -189,7 +189,7 @@ test('notes host: only a story line catches a lie: six trust, in the day\'s allo
     await s.say(['~ lie Oren | to: Astra | said: I never sold the spell']);
     await s.say(['~ lie Oren | to: Astra | caught: yes']);
     assert.equal(s.npc('Oren').meters.trust, -5, 'trust 1 - 6');
-    assert.match(oren(s).mood.cause, /caught lying to Astra/);
+    assert.match(readLeaf(oren(s).mood).cause, /caught lying to Astra/);
     assert.ok(JSON.parse(oren(s).lies)[0].caught);
     assert.equal((await cast(s)).notes.lies[0].said, 'I never sold the spell', 'a caught lie is shown');
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
@@ -392,4 +392,101 @@ test('notes host (review fix 5/9): a swipe of the reply whose scan sent npc.flag
     assert.equal(oren(s).lookLockedAt, undefined, 'the swiped reply\'s stamp is gone');
     assert.ok(!(s.host.head().domains.npc.problems ?? []).some(item => /Look drift refused/.test(item?.text ?? '')), 'and its Problem');
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('notes host: npc.meet gives a scan-admitted person an entry with the dossier\'s mood and drives; a button, a repeat and a swipe-free rebuild all hold', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    assert.equal((await s.host.sdk.command('npc.meet', { name: 'Mara' })).ok, false, 'not from a button');
+    const slice = () => s.host.head().domains.npc;
+    assert.equal(slice().npcs.mara, undefined, 'a person the scan admitted has no entry yet');
+    await s.adapter.meet({ name: 'Mara', personality: 'cheerful, warm and kind; confident and bold', about: 'a caravan guard' });
+    const mara = slice().npcs.mara;
+    assert.ok(mara && mara.meters, 'the entry exists with meters');
+    assert.ok(mara.mood && mara.mood.v > 0 && mara.mood.d > 0, 'a resting mood from the temperament words');
+    assert.deepEqual(validateNpcSlice(slice()), []);
+    const live = JSON.stringify(slice());
+    await s.adapter.meet({ name: 'Mara', personality: 'cheerful, warm and kind' });   // refused: nothing to add
+    assert.equal(JSON.stringify(slice()), live, 'a second meeting changes nothing');
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(slice()), live, 'rebuild equals live');
+    assert.deepEqual(s.host.store.problems(), []);
+});
+
+test('notes host: npc.meet gives a scan-admitted person with no temperament words a mood at rest (0/0/0) and a pull entry, once', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.adapter.meet({ name: 'Corren', personality: 'quiet', about: 'a clerk' });
+    const slice = () => s.host.head().domains.npc;
+    const mood = slice().npcs.corren.mood;
+    assert.ok(mood && mood.v === 0 && mood.a === 0 && mood.d === 0, 'a mood with all three fields at rest');
+    assert.deepEqual(validateNpcSlice(slice()), []);
+    await s.say(['~ npc Oren | trust: +1']);
+    assert.ok(slice().npcs.corren.mood, 'the tick keeps stepping it');
+    const live = JSON.stringify(slice());
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(slice()), live, 'rebuild equals live');
+});
+
+test('notes host: npc.meet takes the reply the scan read (as npc.adjust does); rebuild equals live', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    const older = s.host.store.headIndex();
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.adapter.meet({ name: 'Mara', personality: 'cheerful, warm and kind', reply: older });   // a scan of the older reply admitted her
+    const slice = () => s.host.head().domains.npc;
+    assert.ok(slice().npcs.mara && slice().npcs.mara.meters, 'met');
+    assert.deepEqual(validateNpcSlice(slice()), []);
+    const live = JSON.stringify(slice());
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(slice()), live, 'rebuild equals live');
+});
+
+test('scan-admitted people: the scan sends npc.meet for a dossier it just made, not for a known or archived one, and an older host without meet gets nothing', async () => {
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-meet-'));
+    const ext = path.join(temp, 'a', 'b', 'ext');
+    fs.mkdirSync(ext, { recursive: true });
+    for (const file of fs.readdirSync(root).filter(name => name.endsWith('.js'))) fs.copyFileSync(path.join(root, file), path.join(ext, file));
+    fs.cpSync(path.join(root, 'src'), path.join(ext, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(temp, 'extensions.js'), 'export const getContext = () => ({ chat: [] });\nexport const extension_settings = {};\n');
+    globalThis.document = { documentElement: { dataset: { npcStateDeltaStoryBlockV2: '1' } } };
+    const sent = [];
+    try {
+        const { createHostedPart } = await import(pathToFileURL(path.join(ext, 'runtime-hosted.js')).href);
+        const deps = { chatHydrationStatus: () => ({}), getChatKey: () => 'k', getChatState: () => ({}), latestMessageId: () => 0, latestReplyIndex: () => 0 };
+        const order = [];
+        const adapter = { hosted: () => true, flag: async () => { order.push('flag'); }, adjust: async () => { order.push('adjust'); }, meet: async item => { order.push('meet'); sent.push(item); } };
+        const part = createHostedPart({ storySuiteV2: adapter }, deps);
+        const old = { id: 'o1', name: 'Oren' };
+        const fresh = { id: 'n2', name: 'Coram', personality: 'calm and stoic', background: 'a ferryman' };
+        const tick = () => new Promise(resolve => setTimeout(resolve, 5));
+        part.forwardRelationshipChangesToHost([old], [old, fresh, { id: 'n3', name: 'Gone', archived: true }], 4, null, []);
+        await tick();
+        assert.deepEqual(sent, [{ name: 'Coram', personality: 'calm and stoic', about: 'a ferryman', reply: 4 }], 'the meeting names the reply the scan read');
+        sent.length = 0;
+        // Not the dead and not incidental extras (the slice holds 80 people); an ordinary, living, meaningful one is met.
+        const extras = [{ id: 'd1', name: 'Raider', lifeState: 'deceased' }, { id: 'd2', name: 'Raider Two', lifeState: 'dead' }, { id: 'i1', name: 'Passer-by', dossierSignal: 'incidental' }, { id: 'm1', name: 'Wren', dossierSignal: 'meaningful', lifeState: 'alive' }];
+        part.forwardRelationshipChangesToHost([old], [old, ...extras], 4, null, []);
+        await tick();
+        assert.deepEqual(sent.map(item => item.name), ['Wren']);
+        sent.length = 0;
+        // Order: the slice entry first (adjust, else meet), then the look lock, which never makes an entry itself.
+        order.length = 0;
+        const moved = { id: 'n4', name: 'Tarn', relationship: { trust: 5 }, overallAppearance: 'a tall man in grey' };
+        part.forwardRelationshipChangesToHost([old], [old, moved, { id: 'n5', name: 'Lis', overallAppearance: 'a short woman' }], 4, null, []);
+        await tick();
+        assert.deepEqual(order, ['adjust', 'meet', 'meet', 'flag', 'flag'], 'meters and meetings before the look flags');
+        sent.length = 0;
+        part.forwardRelationshipChangesToHost([old, fresh], [old, fresh], 5, null, []);
+        await tick();
+        assert.deepEqual(sent, [], 'a known person is not met again');
+        const older = createHostedPart({ storySuiteV2: { hosted: () => true, flag: async () => {}, adjust: async () => {} } }, deps);
+        older.forwardRelationshipChangesToHost([old], [old, fresh], 6, null, []);
+        await tick();
+        assert.deepEqual(sent, [], 'an adapter without meet: as before');
+    } finally { delete globalThis.document; fs.rmSync(temp, { recursive: true, force: true }); }
 });

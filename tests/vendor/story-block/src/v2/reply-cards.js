@@ -7,7 +7,7 @@
 // stops returning goes away on the next draw (a character made, a fight ended); a swipe or a delete moves it with the head.
 //
 // A card: { tone: 'accent'|'bad'|'good'|'info', icon: 'ph-…' | 'fa-…', title, text?, rows?: [{ icon?, text, tag?, tagTone? }] (at most 4),
-// actions?: [{ id, label, icon?, primary?, command?, payload?, open? }] (at most 3), later?: true|false }. An action runs its `command`
+// actions?: [{ id, label, icon?, primary?, command?, payload?, open? }] (at most 4), later?: true|false }. An action runs its `command`
 // (sdk.command, recorded with the reply) or opens its `open` screen in the game view; `later` adds a Later button that folds the card
 // into one line. Text is plain: the host prints it, never parses it. `normalizeCard` drops what it cannot read; a card without a title
 // is no card.
@@ -23,7 +23,7 @@ import { dmNameOf } from './data-modules/schema.js';
 
 export const CARD_TONES = Object.freeze(['accent', 'bad', 'good', 'info']);
 export const CARD_ROWS_MAX = 4;
-export const CARD_ACTIONS_MAX = 3;
+export const CARD_ACTIONS_MAX = 4;
 const ICON = /^(ph-[a-z0-9-]+(:fill)?|fa-[a-z0-9-]+)$/;
 const COMMAND = /^[a-z0-9][a-z0-9_-]*(\.[a-z0-9_-]+)+$/i;
 const LATER_KEY = 'story-block.replyCards.later';
@@ -52,7 +52,8 @@ function payloadOf(value) {
 
 function actionOf(raw, at) {
     if (!isRecord(raw)) return null;
-    const label = oneLine(raw.label ?? '', 32);
+    // (32 code points, the way benchLabel counts: an emoji name must not lose its tail to a UTF-16 cut)
+    const label = [...oneLine(raw.label ?? '', 128)].slice(0, 32).join('');
     const command = typeof raw.command === 'string' && COMMAND.test(raw.command) ? raw.command : '';
     const open = typeof raw.open === 'string' && /^[A-Za-z0-9._\-/]{1,120}$/.test(raw.open) ? raw.open : '';
     if (!label || (!command && !open)) return null;

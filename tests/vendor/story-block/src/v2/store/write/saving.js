@@ -4,7 +4,7 @@
 // last three, so the object's key order and the store's method order stay as they were.
 
 export function createSavingStart(s, deps) {
-    const { saver, markNow, forgetMemos, current } = deps;
+    const { saver, markNow, forgetMemos, markFlipped, current } = deps;
 
     return {
         /** Marks the chat as changed outside its records (the timeline's archive in the chat's metadata): the next save writes it. */
@@ -17,11 +17,19 @@ export function createSavingStart(s, deps) {
          * blocks that were made under other owners no longer hold (chain), so the head is replayed again from before them with
          * the guards asked, and only then does the caller publish a head. Guarded blocks before the checkpoint a replay would
          * start from are found by that replay. → true when the chat holds guarded blocks.
+         * `{ barrier: true }`: only the restore barrier went up or down (no module turned ready or dormant by itself): the guards'
+         * answers under a mark seen since the last data change still hold, so its memos come back (memo.js markFlipped).
          */
-        lifecycleChanged() {
-            s.lastMark = markNow();
-            s.cache = null;
-            forgetMemos();
+        lifecycleChanged({ barrier = false } = {}) {
+            const mark = markNow();
+            // A barrier flip to another guard mark with no write: what was read under the other marks is banked and this mark's comes
+            // back. A module turned ready or dormant, the same mark, or a chat with no guarded block: all is forgotten and the guards are asked.
+            if (barrier && s.guardSeen && mark !== s.lastMark) markFlipped(mark);
+            else {
+                s.lastMark = mark;
+                s.cache = null;
+                forgetMemos();
+            }
             current();
             return s.guardSeen;
         },

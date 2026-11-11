@@ -2,7 +2,8 @@
 // keepEarliest, ensureInitial) and the timeline witness (prefixWitness, witnessScope, witnessMemoSize, witnessFresh), moved out of createStore
 // unchanged: the methods of `api` that read the chat and the memos. `createRead(s, deps)` returns them as one object and createStore puts
 // each in `api` at the place it was. It is given the store's state holder `s` and the store functions it calls (memo.js's come from
-// createMemo); `deps.api` is only used as `api.sourceAt(...)`. It never imports store.js.
+// createMemo); `deps.api` is only used as `api.sourceAt(...)`. It never imports store.js. The witness answers are also kept by the identity
+// of their own prefix (prefixKey), so a write or a lifecycle flip elsewhere in the chat does not make every boundary be worked out again.
 
 import { KEY, carrierIndexes, isCarrier, lastCarrier, readRecord, swipeOf } from '../persist.js';
 import { isObject, revOf, deepFreeze } from './constants.js';
@@ -10,7 +11,38 @@ import { deriveId, hashJson, isMetaSpan } from '../replay.js';
 import { hasMeta, payloadHashOf } from './digest.js';
 import { markerProblem } from '../timeline/boundary.js';
 
+// The most witness answers kept by the identity of their own prefix (outside forgetMemos; the oldest goes first).
+const BY_PREFIX_MAX = 2048;
+
 export function createRead(s, deps) {
+    const { archive, chatId, marked, replayEnv } = deps;
+    const byPrefixMax = Number.isInteger(deps.witnessPrefixMax) && deps.witnessPrefixMax > 0 ? deps.witnessPrefixMax : BY_PREFIX_MAX;     // (a smaller cap is for tests)
+    const text = read => { try { return String(read()); } catch { return '?'; } };
+    // The one carrier each (sid, swipeKey) names in this generation (null when none or several), worked out once per generation.
+    function uniqueIndex(gen, arr, cursor) {
+        if (!gen.sources) {
+            gen.sources = new Map();
+            for (const index of carrierIndexes(arr)) {
+                const source = deps.api.sourceAt(index);
+                if (!source) continue;
+                const k = `${source.sid}\u0000${source.swipeKey}`;
+                gen.sources.set(k, gen.sources.has(k) ? -1 : index);
+            }
+        }
+        const at = gen.sources.get(`${cursor.sid}\u0000${cursor.swipeKey}`);
+        return Number.isInteger(at) && at >= 0 ? at : null;
+    }
+    // Everything a witness answer reads, by the prefix it is about: the cursor, its carrier and the chained hash of every replay input
+    // through it (spineRun, checkpoint chain and guarded text included), the boundary message's text, the Features, the guard mark,
+    // the reply mark, the chat, the source archive (the replay environment carries the Features and the registered replay rules; a checkpoint's proof owners are in the spine run). Null: no memo (the cursor is not unique in the chat, or has no record).
+    function prefixKey(gen, arr, cursor, key) {
+        const index = uniqueIndex(gen, arr, cursor);
+        if (index === null) return null;
+        const open = s.scopeSpines && s.scopeSpines.arr === arr && s.scopeSpines.epoch === s.epoch;
+        const run = open ? s.scopeSpines.run : (gen.spines ??= deps.spineRun(arr));
+        if (run[index] === undefined) return null;
+        return JSON.stringify([key, index, run[index], payloadHashOf(arr[index]), text(replayEnv), s.guardSeen ? deps.markSeen() : '', text(marked), text(chatId), archive().size]);
+    }
     const { api, blockParts, blocksBefore, carriedTo, chainHash, current, faultsNow, forgetMemos, idsOf, keptNow, list, listProofs, markSeen, memoAt, prefixWitnessUncached, preservedAt, rawKind, readOnlyMessage, reservedSid, saver, sidFor, sourceFor, spansFor, spineRun, witnessGeneration, witnessKeyOf, write } = deps;
 
     return {
@@ -308,8 +340,29 @@ export function createRead(s, deps) {
                 const hit = gen.answers.get(key);
                 return hit === null ? null : { ...hit };
             }
+            const pkey = prefixKey(gen, arr, cursor, key);
+            const byPrefix = (s.witnessByPrefix ??= new Map());
+            if (pkey !== null && byPrefix.has(pkey)) {
+                const kept = byPrefix.get(pkey);
+                byPrefix.delete(pkey); byPrefix.set(pkey, kept);
+                // (a replay lowers replanFrom as a side effect; a hit skips the replay, so it lowers it again)
+                if (kept.replan < s.replanFrom) s.replanFrom = kept.replan;
+                gen.answers.set(key, kept.answer);
+                return kept.answer === null ? null : { ...kept.answer };
+            }
             s.counts.witnessMisses++;
-            const answer = prefixWitnessUncached(arr, cursor);
+            // (the replan point this one replay finds, apart from what was found before it: it is kept with the answer)
+            const replanBefore = s.replanFrom;
+            s.replanFrom = Infinity;
+            let answer;
+            let found;
+            try { answer = prefixWitnessUncached(arr, cursor); } finally { found = s.replanFrom; s.replanFrom = Math.min(replanBefore, found); }
+            // (keyed again after the replay: it may have seen guarded blocks for the first time, and the mark is part of the key)
+            const stored = pkey === null ? null : prefixKey(gen, arr, cursor, key);
+            if (stored !== null) {
+                byPrefix.set(stored, { answer, replan: found });
+                while (byPrefix.size > byPrefixMax) byPrefix.delete(byPrefix.keys().next().value);
+            }
             // (the replay may have seen guarded blocks for the first time: the mark then reads differently, though nothing else did)
             if (gen === s.witnessGen && gen.mark === '' && s.guardSeen && gen.epoch === s.epoch) gen.mark = markSeen();
             gen.answers.set(key, answer);

@@ -102,5 +102,58 @@
     cursor: pointer;
 }
 
-/* The dialog's step row keeps its full height: an overflow container in a flex column has min-height 0 and would shrink under the body (mounts.css styles the row). */
+/* The dialog's step row keeps its full height: an overflow container in a flex column has min-height 0 and would shrink under the body (mounts-*.css styles the row). */
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-dialog-steps { flex: none; }
+
+/* The quiet answer on a card under a reply (No, Not now): muted text. Here, not in mounts-*.css, which is over the size limit. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-rc-action[data-action="no"] { color: var(--ss-muted); }
+
+/* A module's toggle in the game view's title bar (view/mounts/screen.js drawControls): a small pill between the title and the close
+   button. Its label and size never change with the state, only the fill (aria-pressed), so nothing moves when it is switched; the
+   label is cut with an ellipsis where the bar is narrow (390px). The touch target is taller than the pill (the ::after). */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-gameview-pill {
+    position: relative;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 52%;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-sizing: border-box;
+    min-height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--ss-field-border, currentColor);
+    border-radius: 999px;
+    color: var(--ss-field-fg, inherit);
+    background: transparent;
+    font: inherit;
+    font-size: 0.85em;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-gameview-pill::after {
+    content: "";
+    position: absolute;
+    inset: -7px -3px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-gameview-pill-icon {
+    flex: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-gameview-pill-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-gameview-pill[aria-pressed="true"] {
+    border-color: var(--ss-field-focus, currentColor);
+    background: color-mix(in srgb, var(--ss-field-focus, currentColor) 24%, transparent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-gameview-pill[aria-disabled="true"] {
+    opacity: 0.7;
+    cursor: progress;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-gameview-pill:focus-visible {
+    outline: 2px solid var(--ss-text, currentColor);
+    outline-offset: 2px;
+}

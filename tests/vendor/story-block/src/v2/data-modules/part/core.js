@@ -1,6 +1,6 @@
 // The data-module part's shared lifecycle helpers (extracted from data-modules/part.js):
 // installed offers, dependency checks, reader actions, replay guards, action receipts and refusals.
-import { DM_LIMITS as L } from '../schema.js';
+import { DM_LIMITS as L, dmRoom } from '../schema.js';
 import { dataModuleHash, dataModulesPackHash } from '../check.js';
 import { copy, bytes, refuse, DataModuleError } from '../interpreter.js';
 import { activeDefinition, publicView } from '../adapters.js';
@@ -41,11 +41,11 @@ export function createCore({ packs, state: head = () => null, lifecycle = () => 
         if (ctx.cause !== 'ui' || ctx.caller !== null) refuse('REFUSED', '', 'Only a direct reader action in Setup may pin, attach or migrate.');
         if (restore()?.state === 'pending') refuse('RESTORE_PENDING', '', 'A restore is pending.');
     }
-    function guard(ctx, prefix, { kind, module, hash, generation, subject = 'chat', reads = [], imports = [], actor = false, decision = {}, pin = null, bound = false, localOnly = false, clock = false }) {
+    function guard(ctx, prefix, { kind, module, hash, generation, subject = 'chat', reads = [], imports = [], actor = false, decision = {}, pin = null, bound = false, localOnly = false, clock = false, party = false, bench = '' }) {
         const predicate = { kind, module, hash, generation, subject };
         const adapters = pin?.definition.imports ?? activeDefinition(prefix, module)?.imports ?? {};
         const available = localOnly ? [] : Object.keys(adapters).filter(alias => adapters[alias].query === 'dataModules.public');
-        const selector = { module, subject, reads, imports, actor, ...(clock ? { clock: true } : {}), ...(available.length ? { available } : {}),
+        const selector = { module, subject, reads, imports, actor, ...(clock ? { clock: true } : {}), ...(party ? { party } : {}), ...(bench ? { bench } : {}), ...(available.length ? { available } : {}),
             ...(pin ? { adapters, subjects: decision.subjects ?? [] } : {}) };
         const source = copy(ctx.source);
         if (!source) refuse('DM_SCHEMA', '', 'A reply must hold this data module action.');
@@ -82,7 +82,7 @@ export function createCore({ packs, state: head = () => null, lifecycle = () => 
         // Scratch from earlier replies is pruned only by a successful data root.
         draft.perReply = { [key]: next };
         // (The bus counts the patch's ops and the span's bytes for every data root; this is the data's own share, and the pins.)
-        if (pin && (Object.keys(draft.pins).length > L.pins || bytes(draft.pins) > L.pinsBytes)) refuse('DM_BUDGET', '', 'Retained pin budget exhausted.');
+        if (pin && (Object.keys(draft.pins).length > dmRoom(ctx).pins || bytes(draft.pins) > L.pinsBytes)) refuse('DM_BUDGET', '', 'Retained pin budget exhausted.');
         if (bytes(data) + bytes(result) > (pin ? L.pinBytes : L.actionBytes)) refuse('DM_BUDGET', '', 'Data module action storage budget exhausted.');
         return { summary, narrate: false, data: { v2: { result: result ?? {} } }, ...(notes.length ? { problem: notes.join(' ') } : {}), ...(replan ? { replan: true } : {}) };
     }

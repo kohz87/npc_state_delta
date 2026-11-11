@@ -4,11 +4,11 @@ import { storyMinuteText } from '../calendar.js';
 import { isAway, labelKey, labelsOf, normalizeKeyPeople } from './key-people.js';
 import { normalizeCast } from './cast-dossier.js';
 import { normalizeApproachKind } from '../npc-meters-gate.js';
-import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
+import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, readLeaf, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
 import { runKind, noteLine, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
 import { applyEvents, restMood, restingMood } from '../npc-mood.js';
-import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence } from './npc-meters-slice.js';
+import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence, asStored } from './npc-meters-slice.js';
 
 export function createNpcCommands({
     featureOn, normalized, defsFrom, tierCaps, ownOrModule, readerAction, headReply, commandReply,
@@ -111,19 +111,20 @@ export function createNpcCommands({
     }
 
     // One record's mood decay and pull for this tick (feature mood-pull). `rawPeople`: Story Director's key people as answered.
-    function moodPullStep(record, day, world, rawPeople, minutes) {
+    function moodPullStep(ctx, key, record, day, world, rawPeople, minutes) {
         const labels = new Set([record.name, ...(resolve(record.name)?.aliases ?? [])].map(labelKey).filter(Boolean));
         const has = list => list.some(label => labels.has(label));
         const gone = (Array.isArray(rawPeople) ? rawPeople : []).find(person => isObject(person?.away) && !person.removed && has([person.name, ...(Array.isArray(person.aliases) ? person.aliases : [])].map(labelKey)));
-        const out = stepPull(record.track, {
+        const out = stepPull(readLeaf(record.track), {
             day, party: world.party ? has([...world.party]) : null, here: world.here, present: has([...world.present]),
             awayDay: isInt(gone?.away?.since) ? Math.floor(gone.away.since / DAY_MINUTES) : null,
             threads: world.threads.filter(thread => has(thread.names)),
             // Drives (notes feature): the person's instinct strengths scale what pulls at them; none stored: the scores as they are.
             scale: featureOn(FEATURE_NOTES) && record.drives ? driveScale(record.drives) : undefined,
         });
-        if (isObject(record.mood) && isInt(minutes)) record.mood = applyEvents(record.mood, minutes, []);
-        const set = (field, value, empty) => { if (empty) delete record[field]; else record[field] = value; };
+        const mood = readLeaf(record.mood);
+        if (isObject(mood) && isInt(minutes)) record.mood = asStored(ctx, key, 'mood', applyEvents(mood, minutes, []));
+        const set = (field, value, empty) => { if (empty) delete record[field]; else record[field] = asStored(ctx, key, field, value); };
         set('track', out.track, !Object.keys(out.track).length);
         set('inst', out.inst, !Object.values(out.inst).some(Boolean));
         set('pull', out.pull, !out.pull);
@@ -209,6 +210,36 @@ export function createNpcCommands({
             return cue ? { ...done, summary: sentence([cue]), narrate: true } : done;
         },
         /**
+         * npc.meet { name, personality?, about?, reply? }: Delta's own scan admitted a person the slice has no record for (or one with no mood
+         * and drives yet). They get an entry the way a cast meeting gives one: the dossier's numbers as the first meters, a resting
+         * mood from their temperament (feature mood-pull) and their drives (feature notes). Recorded on the reply like any change, so a
+         * swipe takes it back; chats that never send it replay unchanged. Refused when there is nothing to add.
+         */
+        'npc.meet'(ctx, payload = {}) {
+            if (!ownOrModule(ctx, 'npc.meet', payload)) ctx.fail('REFUSED', 'A meeting is noted only by NPC State Delta\'s own scan.');
+            const have = ctx.read(NPC_DOMAIN);
+            const named = identify(have?.npcs ?? {}, payload?.name);
+            if (!named) ctx.fail('INVALID', 'It names no one.');
+            const before = have?.npcs?.[named.key];
+            const needsMood = featureOn(FEATURE_MOOD_PULL, ctx) && !(before && before.mood);
+            const needsDrives = featureOn(FEATURE_NOTES, ctx) && !(before && before.drives);
+            if (before && !needsMood && !needsDrives) ctx.fail('REFUSED', 'Nothing to update.');
+            // `reply`: the reply the scan read (as npc.adjust's), so a scan of an older reply does not record the meeting on the head.
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            const out = run(ctx, { label: payload.name, changes: [], problems: [], limit: false, reply: commandReply(ctx, at), at, allowEmpty: true });
+            const record = ctx.draft(NPC_DOMAIN).npcs?.[named.key];
+            if (!record) return out;
+            let minutes = null;
+            try { minutes = ctx.time(); } catch { minutes = null; }
+            if (needsMood && isInt(minutes)) {
+                const rest = restingMood(payload?.personality, payload?.about);
+                // Always stored, even at 0/0/0: a person with no temperament words still has a mood (and so a decay and pull) like a cast meeting's.
+                record.mood = restMood(rest, minutes);
+            }
+            if (needsDrives) Object.assign(record, seedNotes({ personality: payload?.personality, about: payload?.about }));
+            return out;
+        },
+        /**
          * npc.milestone { name, add?: [words], remove?: [words or keys] }: the reader's own milestones
          * for one NPC (the dossier editor). Each is kept under its words' key, so the same milestone
          * written twice is one; a new one may promote on the ladder at once.
@@ -275,7 +306,7 @@ export function createNpcCommands({
                 try { ensure(ctx, slice.npcs, who, defs, seed); } catch { continue; }
                 // Temperament (feature mood-pull): a person whose pack words give a resting mood starts at it, so it is stored with the record.
                 const rest = moodPull && isInt(minutes) && slice.npcs[who.key] ? restingMood(person.entry.personality, person.entry.about) : null;
-                if (rest && (rest.v || rest.a || rest.d)) slice.npcs[who.key].mood = restMood(rest, minutes);
+                if (rest && (rest.v || rest.a || rest.d)) slice.npcs[who.key].mood = asStored(ctx, who.key, 'mood', restMood(rest, minutes));
                 // Notes (feature notes): the pack's tastes and drives are the person's first, kept in the record's leaves.
                 if (slice.npcs[who.key] && featureOn(FEATURE_NOTES, ctx)) Object.assign(slice.npcs[who.key], seedNotes(person.entry));
                 note(slice, ctx.rev, unknown);
@@ -315,7 +346,7 @@ export function createNpcCommands({
                         drift.push({ meter: def.id, before: value, after: next });
                     }
                 }
-                if (moodPull && day !== null) moodPullStep(record, day, worldNow(), rawPeople, minutes);
+                if (moodPull && day !== null) moodPullStep(ctx, key, record, day, worldNow(), rawPeople, minutes);
                 const settled = settleRecord(record, [record.name], settings, defs, featureOn(FEATURE_STAGES, ctx) && !away);
                 if (JSON.stringify(record) === was) continue;
                 changed = true;

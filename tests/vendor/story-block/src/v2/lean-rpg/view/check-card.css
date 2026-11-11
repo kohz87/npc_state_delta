@@ -1,0 +1,27 @@
+/* The Check card under a reply (check-card.js; approved Story Checks mockup): the battle log's glass, monospace numbers,
+   result colours and a utility mark. Every rule is scoped to .rpg-check; colours are theme tokens only (var(--ss-good) and the like), each with a token-mixed fallback because the chat scope does not define them. */
+.rpg-check { display: grid; gap: 6px; margin: 8px 0; padding: 0; min-width: 0; color: var(--ss-text);
+    border: 1px solid var(--ss-border); border-radius: 10px; background: color-mix(in srgb, var(--ss-text) 6%, var(--ss-glass-strong, var(--ss-glass, transparent))); box-sizing: border-box; }
+.rpg-check .rpg-check-head { min-width: 0; box-sizing: border-box; }
+.rpg-check .rpg-check-h { flex: none; }
+.rpg-check .rpg-check-head > .fa-solid:first-child { color: var(--ss-muted); width: 16px; text-align: center; }
+.rpg-check .rpg-check-sum { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rpg-check .rpg-check-sum[hidden], .rpg-check .rpg-check-body[hidden] { display: none; }
+.rpg-check .rpg-check-chip { display: inline-block; min-width: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; }
+.rpg-check .rpg-check-chip-ok { color: var(--ss-good, color-mix(in srgb, green 65%, var(--ss-text))); }
+.rpg-check .rpg-check-chip-cost { color: var(--ss-warn-text, var(--ss-warn, color-mix(in srgb, orange 65%, var(--ss-text)))); }
+.rpg-check .rpg-check-chip-fail { color: var(--ss-bad-text, var(--ss-bad, color-mix(in srgb, red 65%, var(--ss-text)))); }
+.rpg-check-line { display: grid; gap: 2px; min-width: 0; }
+.rpg-check-who { font-weight: 600; overflow-wrap: anywhere; }
+.rpg-check-name, .rpg-check-what { font-weight: 600; }
+.rpg-check-muted { color: var(--ss-muted); font-weight: 400; }
+.rpg-check-difficulty { font-weight: 400; }
+.rpg-check-num { font-family: var(--monoFontFamily, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: 12px;
+    color: var(--ss-muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.rpg-check-result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.rpg-check-pill { display: inline-block; font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; }
+.rpg-check-ok { color: var(--ss-good, color-mix(in srgb, green 65%, var(--ss-text))); }
+.rpg-check-cost { color: var(--ss-warn-text, var(--ss-warn, color-mix(in srgb, orange 65%, var(--ss-text)))); }
+.rpg-check-fail { color: var(--ss-bad-text, var(--ss-bad, color-mix(in srgb, red 65%, var(--ss-text)))); }
+.rpg-check-util { color: var(--ss-sp, var(--ss-accent-text, var(--ss-accent, color-mix(in srgb, teal 65%, var(--ss-text))))); font-size: 11.5px; font-weight: 600; }
+.rpg-check-gain { font-size: 12px; color: var(--ss-muted); overflow-wrap: anywhere; }

@@ -1,4 +1,4 @@
-// The building blocks of Story Suite's look (view/glass.css) as widgets, for templates and layouts:
+// The building blocks of Story Suite's look (view/glass-*.css) as widgets, for templates and layouts:
 //
 // * ss.tile: an icon in a rounded square with a label under it, a number badge (a skill's level, a stack's
 //   count; `countStyle: 'corner'` puts it in the corner, as a bag does), a tick (`state: 'ready'`) or a
@@ -17,7 +17,7 @@ import { BAR_STEPS, barStep, clamp, fmt, h, iconNode, num, runCommand, setData, 
 import { defineWidget, resolveProps } from './props.js';
 import { cutAt } from '../../../text.js';
 
-/** Ring colours a tile or a status badge accepts (a class each, glass.css); anything else is neutral. */
+/** Ring colours a tile or a status badge accepts (a class each, glass-*.css); anything else is neutral. */
 export const GLASS_TONES = Object.freeze(['neutral', 'accent', 'good', 'warn', 'bad', 'info', 'uncommon', 'rare', 'epic', 'legendary']);
 /** The suite's bar colours (tokens --ss-hp, --ss-mp, --ss-sp, --ss-exp). */
 export const BAR_KINDS = Object.freeze(['hp', 'mp', 'sp', 'exp']);

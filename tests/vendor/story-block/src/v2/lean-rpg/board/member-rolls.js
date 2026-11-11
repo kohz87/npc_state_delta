@@ -19,7 +19,7 @@ export function memberRolls(plan) {
         startRound() { cursor = Math.max(0, (Number(rotation?.number) || 1) - 1); },
         attacks(entries, bar) {
             const mine = entries.filter(entry => entry.foe.slot === bar.slot);
-            return bar.foe.pack === true ? mine.slice(0, packAttacks(bar.foe.count, bar.value, bar.size)) : mine;
+            return bar.foe.pack === true ? mine.slice(0, packAttacks(bar.foe.count, bar.value, bar.size, bar.foe.full)) : mine;
         },
         // `reduced`: a group hit beside the main target takes one Health block less, never below a plain hit (decisive 2, else 1).
         hitBlocks(entry, bar, decisive, reduced = false) {

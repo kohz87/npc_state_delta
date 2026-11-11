@@ -133,7 +133,7 @@ export function prepareStandard(plan, sheet, rules, { maxOf = () => Infinity, lv
             out.acts.push({ ...entry, support: true, difficulty: act.difficulty, dc: LIMITS.dc[act.difficulty], target: { id: charId(mate), name: mate.who } });
         } else {
             const later = then && act.then ? laterOf(actor.character, act) : null;
-            out.acts.push({ ...entry, ...(act.area === true && !spent ? { area: true } : {}), ...(act.group !== undefined ? { group: act.group } : {}), ...(act.aoe === true && !spent ? { aoe: true } : {}),
+            out.acts.push({ ...entry, ...(act.area === true && !spent ? { area: true } : {}), ...(act.group !== undefined ? { group: act.group } : {}), ...(act.aoe === true && !spent ? { aoe: true } : {}), ...(act.areaAll === true && act.aoe === true && !spent ? { areaAll: true } : {}),
                 ...(later ? { then: later } : {}), foe: foeSide(foe) });
         }
     }

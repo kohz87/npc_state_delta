@@ -145,6 +145,13 @@ export function rollStandard(plan, prepared, source, rules, { carried = null, fl
             return { kind: 'act', type: entry.type, skill: entry.skill, ...(entry.why ? { why: entry.why } : {}), ...(entry.area ? { area: true } : {}), ...(reduced ? { reduced: true } : {}),
                 pc: rolled.pc, foe: { ...rolled.foe, name: foeBar.name, slot: foeBar.slot }, outcome: rolled.outcome, decisive: rolled.decisive, ...(damage ? { damage } : {}) };
         };
+        if (entry.area && entry.aoe && entry.areaAll) {
+            // (the area rule with `areaAll`: ONE roll, no main group; every standing group's bars take the same full effect. The first line carries the roll, the others are marked as followups for the log's grouping.)
+            const all = foes.filter(bar => standing(bar.id));
+            if (!all.length) return { idle: 'no-target' };
+            return { lines: all.map((bar, at) => ({ ...hit(bars.get(bar.id), { pcDie, foeDie }), aoe: true, aoeGroup: bar.foe.group ?? bar.at, aoeAgainst: entry.foe.name,
+                ...(Number.isFinite(bar.foe.level) ? { aoeLevel: bar.foe.level } : {}), ...(at ? { aoeFollowup: true } : {}) })) };
+        }
         if (entry.area && entry.aoe) {
             // (the newer area rule, record `aoe: 1`: ONE roll, the main group's. Its group's bars take the full effect, every other standing group's bars
             // the same roll at one Health block less. The old path below is kept for records without `aoe`.)

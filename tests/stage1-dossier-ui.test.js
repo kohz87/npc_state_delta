@@ -20,6 +20,7 @@ import { libraryFaceHtml, libraryFootHtml, librarySearchHtml } from '../dossier-
 import { createPortraitRefs } from '../dossier-ui-html.js';
 import { dialArcs, dialSvg } from '../dossier-ui-dial.js';
 import { dossierMenuHtml } from '../dossier-ui-header.js';
+import { v2MetersProjection } from '../dossier-ui-meters.js';
 import { dossierProfileHtml } from '../dossier-ui-profile.js';
 import { SECTION_KEYS, createScreenState, escapeAction, goBack, layoutFor, openNpc, openSection, parseScreen, screenSignature, setSection, showScreen, stepSection, swipeStep } from '../dossier-ui-screens.js';
 import { sectionHeaderHtml, sectionScreenHtml } from '../dossier-ui-sections.js';
@@ -122,9 +123,9 @@ test('Detail projection preserves editable fields and leaves flat current appear
 
 test('Stage 1 UI is a thin adapter over the existing runtime editor/settings owners', () => {
   assert.match(uiSource, /this\.api\.openEditor\(id\)/);
-  assert.match(uiSource, /Behavioural levers/);
+  assert.match(uiSource, /row\('Levers'/, 'the levers read as a label / value row in Character');
   assert.match(uiSource, /relationshipSummary/, 'the player dynamic reads in the With section');
-  assert.match(uiSource, /\['Condition', plain\(npc\.status\)\]/);
+  assert.match(uiSource, /\['Condition', escapeHtml\(plain\(npc\.status\)\)\]/);
   assert.match(uiSource, /currentCard\('Home base'/);
   assert.doesNotMatch(uiSource, /proseHtml\(selected\.appearance\)/, 'resolved flat appearance must not be rendered beside the form model');
   assert.match(uiSource, /npc_state_delta_settings/);
@@ -213,7 +214,12 @@ test('the board shows the tiles in order with the player\'s name, escapes text a
   assert.match(html, /data-delta-portrait="\d+"/);
   assert.match(html, /data-delta-screen="profile"/);
   for (const section of ['with', 'now', 'ties', 'past', 'secrets']) assert.match(html, new RegExp(`data-delta-section="${section}"`), section);
-  assert.match(html, /human · female · mage/);
+  assert.match(html, /Human · Female · Mage/, 'each identity part keeps its words with the first letter capitalised');
+  // Mood tile: the word plus both bars, also for a person with no hosted mood (a mid-step rest) and no scanner word (the resting word).
+  assert.match(html, /Energy[\s\S]*Control/);
+  const rest = boardHtml({ ...rika, mood: '', v2Meters: undefined }, {});
+  assert.match(rest, /delta-tile-bar"><span>Energy<\/span><i><b style="width:50%">[\s\S]*Control<\/span><i><b style="width:50%">/);
+  assert.match(boardHtml({ id: 'x', name: 'Marrit', gender: 'male', role: 'bargemaster' }, {}), /Male · Bargemaster/);
 });
 
 test('sections: five screens with arrows and dots; hidden secrets never show their words; bond tones', () => {
@@ -433,7 +439,9 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.equal(tiles.find(tile => tile.title === 'Mood').bars.length, 2);
   assert.equal(tiles.find(tile => tile.title === 'Mood').big, 'alarmed · tense');
   assert.equal(tiles.find(tile => tile.title === 'Pull').note, 'high · 2 days');
-  assert.match(boardHtml(npc, { userName: 'Astra' }), /3rd in 2 days · backfired/);
+  assert.match(boardHtml(npc, { userName: 'Astra' }), /praise, the 3rd time in 2 days, backfired/, 'the gate receipt in the mockup\'s words');
+  assert.doesNotMatch(boardHtml(npc, { userName: 'Astra' }), /Reply #3/, 'no stamp line under the change');
+  assert.match(boardHtml(npc, { userName: 'Astra' }), /tap the portrait for (?:her|his|their) profile/);
   const ties = sectionScreenHtml('ties', npc);
   assert.match(ties, />ally</); assert.match(ties, />owes</); assert.match(ties, />owed by</);
   assert.match(ties, /a lie you have not caught/);
@@ -447,4 +455,135 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
   assert.doesNotMatch(sectionScreenHtml('ties', bare), /Lies told|Knows about/);
   assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /Tastes|Drives|look was set/);
+});
+
+// The dossier's stylesheets as the page gets them (the template numbers filled in), plus the source for the pins that read it.
+async function builtCss() {
+  const [a, b, c] = await Promise.all([import('../dossier-ui-styles.js'), import('../dossier-ui-styles-board.js'), import('../dossier-ui-styles-sections.js')]);
+  return `${dossierUiSource()}\n${a.STYLES}\n${b.BOARD_STYLES}\n${c.SECTIONS_STYLES}`;
+}
+
+test('the dial\'s no-portrait fallback is small initials in the suite font stack, and the desktop layout fits a narrow panel and sizes to its content', async () => {
+  const html = boardHtml({ id: 'm', name: 'Marrit' }, {});
+  assert.match(html, /delta-portrait-placeholder[^>]*><span>M<\/span>/);
+  const css = await builtCss();
+  assert.doesNotMatch(css.match(/dossier-dial-portrait \.delta-portrait-placeholder \{[^}]*\}/)?.[0] || '', /Georgia|serif;|font-size:48px/);
+  assert.match(css, /\.delta-board \{ grid-template-columns:clamp\(250px,32%,460px\)/);
+  assert.match(css, /@media \(min-width: 1101px\) \{\s*#\$\{ROOT_ID\} \.delta-panel \{ height:auto;/);
+});
+
+test('the dossier layout follows its own container width: container queries, one switch line, no window query, bar in the flow', async () => {
+  const css = await builtCss();
+  const screens = await import('../dossier-ui-screens.js');
+  assert.match(css, /container:dsr \/ inline-size/);
+  assert.match(css, new RegExp(`@container dsr \\(min-width: ${screens.TWO_PANE_MIN}px\\)`));
+  assert.match(css, new RegExp(`@container dsr \\(max-width: ${screens.TWO_PANE_MIN - 0.02}px\\)`));
+  assert.equal(screens.THREE_PANE_MIN, screens.PANE_HERO_SLIM_MIN + screens.PANE_TILES_MIN + screens.PANE_SECTION_WIDE_MIN, 'the three-pane line is a sum of the pane minimums');
+  assert.equal(screens.TWO_PANE_MIN, screens.PANE_HERO_MIN + screens.PANE_SECTION_MIN);
+  assert.match(css, new RegExp(`@container dsr \\(min-width: ${screens.TWO_PANE_MIN}px\\) and \\(max-width: ${screens.THREE_PANE_MIN - 0.02}px\\)`));
+  assert.doesNotMatch(css, /@media \((min|max)-width: 65[01]px\)\s*\{\s*#\$\{ROOT_ID\} \.delta-(board|panes|profile|brand|topbar)/);
+  assert.doesNotMatch(css, /position:sticky; bottom:0; display:block;/, 'the library bar sits in the flow under the scroll area');
+  // the switch reads the panel width, not the window: a 500 px panel in a 2000 px window is narrow, a 700 px one is not
+  const panel = width => ({ clientWidth: width });
+  assert.equal(screens.isNarrow(panel(500), { innerWidth: 2000 }), true);
+  assert.equal(screens.isNarrow(panel(700), { innerWidth: 400 }), false);
+  assert.equal(screens.isNarrow(null, { innerWidth: 400 }), true);
+  // the name has its own class with resets, so a host theme's heading rules cannot restyle it
+  assert.match(boardHtml({ id: 'm', name: 'Marrit' }, {}), /<h3 class="delta-board-title">Marrit<\/h3>/);
+  assert.match(css, /\.delta-board-title \{[^}]*border-left:0 !important[^}]*text-align:center !important/);
+  assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}) }, { layout: 'phone' }), /<h2 class="delta-profile-title">Rika<\/h2>/);
+  assert.match(css, /\.delta-header-menu > summary\.delta-btn \{ display:inline-flex; align-items:center; justify-content:center;/);
+});
+
+test('fix 3: two-letter initials, mood bars in Right now, flat profile rows in the mockup order, count bar on the library, no debug wording', async () => {
+  const { initialsOf, portraitHtml } = await import('../dossier-ui-html.js');
+  assert.equal(initialsOf('The inspector'), 'TI');
+  assert.equal(initialsOf('Marrit'), 'M');
+  assert.match(portraitHtml({ name: 'Sister Temiwa' }, 'x'), /<span>ST<\/span>/);
+  const now = sectionScreenHtml('now', { id: 'n', name: 'Marrit', mood: 'Cautious' });
+  assert.match(now, /<dt>Mood<\/dt><dd><b>Cautious<\/b><\/dd>[\s\S]*delta-now-bars[\s\S]*Feeling[\s\S]*Energy[\s\S]*Control/, 'Mood: the word and the three bars across the row, at rest as well');
+  assert.match(sectionScreenHtml('now', { id: 'n', name: 'Marrit' }), /<dt>Mood<\/dt><dd><b>[^<]+<\/b><\/dd>[\s\S]*delta-now-bars/, 'also with no mood word at all');
+  const npc = { ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), appearanceModel: { overallAppearance: 'Freckled', appearanceForms: [{ name: 'Mage', appearance: 'Singed coat' }], currentForm: 'Mage' }, mannerisms: ['Ties off bandages'], personality: 'Proud', background: 'Frostbite', birthdaySource: 'generated' };
+  const html = dossierProfileHtml(npc, { layout: 'desktop' });
+  assert.match(html, /<dt>Look<\/dt><dd>Freckled<\/dd><dt>Wearing<\/dt><dd>Singed coat<\/dd><dt>Habits<\/dt><dd>Ties off bandages<\/dd>/);
+  assert.ok(html.indexOf('data-delta-profile="identity"') < html.indexOf('data-delta-profile="appearance"') && html.indexOf('data-delta-profile="appearance"') < html.indexOf('data-delta-profile="character"') && html.indexOf('data-delta-profile="character"') < html.indexOf('data-delta-profile="background"'), 'Identity, Appearance, Character, ..., Background');
+  assert.doesNotMatch(html, /delta-profile-col"|Deterministic fallback|Physical features/);
+  const { libraryCountHtml } = await import('../dossier-ui-library.js');
+  assert.match(libraryCountHtml(10), /data-static="true">▸ Dossier library · 10 NPCs</);
+  assert.doesNotMatch(libraryCountHtml(10), /data-delta-screen/, 'on the library the bar is a count, not a link');
+  const header = await import('../dossier-ui-header.js');
+  assert.match(header.dossierMenuHtml('a'), /delta-header-menu-toggle ss-tap-pill/);
+  const css = await builtCss();
+  assert.match(css, /--dt-meta:clamp\(/, 'type flows with the panel width');
+  assert.doesNotMatch(css.match(/@media \(max-width: 900px\)/)?.[0] || '', /./, 'the sheet and the launcher agree on the full-screen line (1100)');
+});
+
+test('round 2 fix 2-4: Right now in groups with three bars and Pull last, Recent changes list, plain coloured tie words', async () => {
+  const meters = { mood: { word: 'Alarmed', valence: -2, bars: { energy: 5, control: 2, max: 6 }, cause: 'trust dropped: Astra lied' }, pull: { kind: 'closure', level: 3, days: 0, cause: 'an open thread' },
+    secrets: [], bars: [], notes: { ties: [{ name: 'Bregje', tags: ['rival'] }], lies: [{ hidden: true, day: 5 }], knows: [], tastes: [], drives: [] } };
+  const base = { ...dossierDetailProjection({ id: 'r', name: 'Rika', location: 'Deck', goal: 'Pay the crew', status: 'Tense', keyRelationships: ['Bregje: rival | clashes'],
+    fieldChanges: { mood: 3, location: 3 }, fieldChangeMessages: { mood: 3, location: 3 }, relationshipEventHistory: [{ impact: 'ordinary', reason: 'a gift', evidence: { desire: 'toffee' }, message: 1 }] }, {}, {}), v2Meters: v2MetersProjection(meters) };
+  const now = sectionScreenHtml('now', base, { reply: 3 });
+  assert.match(now, /<b>Alarmed<\/b> · unpleasant, keyed-up/, 'the word with the bars\' plain words');
+  assert.equal((now.match(/delta-tile-bar"/g) || []).length, 3, 'Feeling, Energy, Control');
+  assert.ok(now.indexOf('Moved by') < now.indexOf('Where and what') && now.indexOf('<dt>Goal</dt>') < now.indexOf('<dt>Pull'), 'groups in order, Pull last');
+  assert.match(now, /trust dropped: Astra lied/);
+  assert.match(now, /<dt>Pull <span class="delta-new-badge">New<\/span><\/dt><dd><b>Closure<\/b> · an open thread/);
+  assert.match(now, /Updated this reply \(#3\): mood, where\./);
+  assert.match(sectionScreenHtml('now', base, { reply: 5 }), /Updated at reply #3: mood, where\./);
+  assert.doesNotMatch(sectionScreenHtml('now', { ...base, v2Meters: v2MetersProjection({ ...meters, mood: { ...meters.mood, cause: '' } }) }), /Moved by/, 'no cause, no group');
+  const withHtml = sectionScreenHtml('with', { ...base, lastRelationshipChange: { impact: 'net', delta: { trust: 0, affection: 0, desire: 0, tension: 2 }, reason: '', turn: null, message: 3, hosted: true, event: { tier: 'meaningful', held: false, note: '', ask: [], date: 'Goldwane 21', gate: 'via praise · backfired' } } }, {});
+  assert.match(withHtml, /Recent changes[\s\S]*delta-chg-when">Goldwane 21<br><small>#3<\/small>[\s\S]*data-good="no">Tension \+2[\s\S]*via praise: it backfired[\s\S]*Desire/);
+  assert.doesNotMatch(withHtml, /Last relationship change/);
+  const ties = sectionScreenHtml('ties', base, {});
+  assert.match(ties, /data-tone="bad"><span class="delta-bond-word">rival<\/span>/);
+  assert.match(ties, /a lie you have not caught/, 'an uncaught lie never shows its words');
+  const css = await builtCss();
+  assert.doesNotMatch(css.match(/\.delta-bond-word \{[^}]*\}/g)?.join(' ') || '', /border:1px/, 'the relation word is plain coloured text, no pill');
+});
+
+test('round 2 fix 6-11: gate words, pronouns, the Pull ring at three quarters, tension rising is bad, a square-root dial, Character rows, one mood word', async () => {
+  const { gateWords, possessiveWord } = await import('../dossier-ui-view-model.js');
+  assert.equal(gateWords('via praise · 3rd in 2 days · backfired'), 'praise, the 3rd time in 2 days, backfired');
+  assert.equal(gateWords('via praise · 3rd in 2 days · backfired', { row: true }), 'via praise: the 3rd time in 2 days, so it backfired');
+  assert.equal(gateWords('via gift · less', { row: true }), 'via gift: it landed less');
+  assert.equal(gateWords('whatever was written'), 'whatever was written', 'text that does not parse stays as it was');
+  assert.deepEqual(['female', 'male', 'x'].map(g => possessiveWord(g, { lower: true })), ['her', 'his', 'their']);
+  const tiles = boardTiles({ tiles: { lastChange: { moved: [{ axis: 'tension', label: 'Tension', value: 2 }] }, pull: { text: 'Closure', level: 3, note: 'high' }, mood: { text: 'Calm' } } }, { userName: 'Astra' });
+  assert.equal(tiles[0].tone, 'bad', 'tension up reads as bad');
+  assert.equal(tiles.find(tile => tile.title === 'Pull').ring.value, 75, 'high is three quarters');
+  const sweep = value => { const arc = dialArcs({ trust: value }).find(a => a.axis === 'trust'); const [x, y] = arc.path.split('A')[1].split(' ').slice(-2).map(Number); return Math.round(Math.atan2(x - 120, 120 - y) * 180 / Math.PI); };
+  assert.equal(sweep(100), 90); assert.equal(sweep(25), 45); assert.ok(sweep(11) >= 28 && sweep(11) <= 32, 'about a third of the quadrant at +11');
+  const { dossierIndexProjection } = await import('../dossier-ui-model.js');
+  const { projectDossierState } = await import('../dossier-ui-catalog.js');
+  const state = { npcs: [{ id: 'r', name: 'Rika', mood: 'Cautious', bucket: 'active' }], meterViews: { r: { bars: [], mood: { word: 'Alarmed', bars: { energy: 5, control: 1, max: 6 }, cause: '' } } } };
+  assert.equal(projectDossierState(state).index[0].mood, 'Alarmed', 'the library says what the board says');
+  assert.ok(dossierIndexProjection);
+  const npc = { ...dossierDetailProjection({ id: 'r', name: 'Rika', personality: 'Proud', speech: 'Sharp', behaviorProfile: ['Bickers', 'Hides fear'] }, {}, {}), birthday: 'Emberwane 17', birthdaySource: 'established' };
+  const phone = dossierProfileHtml(npc, { layout: 'phone' });
+  const desktop = dossierProfileHtml(npc, { layout: 'desktop' });
+  assert.doesNotMatch(phone, /<h3>Identity<\/h3>/, 'no Identity heading on a phone'); assert.doesNotMatch(desktop, /<h3>Identity<\/h3>/, 'none on the desktop either: the rows sit under Profile');
+  assert.match(desktop, /<p>Proud<\/p><dl class="delta-kv delta-profile-kv"><dt>Speech<\/dt><dd>Sharp<\/dd><dt>Levers<\/dt><dd>Bickers; Hides fear<\/dd>/);
+  assert.doesNotMatch(desktop, /<h4>Personality|<h4>Speech/);
+  assert.match(desktop, /<span>Emberwane 17<small class="delta-continuity-source">Story established<\/small><\/span>/, 'the note is in the value column, not a cell of its own');
+});
+
+test('round 3 fix 2-6: no tier line under a change row, a muted secrets intro, Levers joined without a doubled full stop, no Identity heading, the card dial without labels', async () => {
+  const { recentChangeRowHtml } = await import('../dossier-ui-relationship.js');
+  const { secretsSectionHtml } = await import('../dossier-ui-sections.js');
+  const earlier = recentChangeRowHtml({ event: { impact: 'meaningful', reason: 'She shared the map.', axes: ['Trust'] } });
+  assert.doesNotMatch(earlier, /meaningful change|ordinary change/);
+  assert.match(earlier, /She shared the map\./);
+  const latest = recentChangeRowHtml({ change: { impact: 'meaningful', reason: 'A kept promise.', delta: { trust: 3 } } });
+  assert.doesNotMatch(latest, /meaningful change/);
+  assert.match(secretsSectionHtml({ v2Meters: { secrets: [{ state: 'hidden', opens: 'opens at Trust 60', width: 10 }] } }), /<p class="delta-muted delta-secrets-intro">/);
+  const npc = dossierDetailProjection({ id: 'r', name: 'Rika', personality: 'Proud', behaviorProfile: ['Never rushes before concluding business.', 'Honesty: high'] }, {}, {});
+  assert.match(dossierProfileHtml(npc, { layout: 'desktop' }), /<dd>Never rushes before concluding business; Honesty: high<\/dd>/);
+  const css = dossierUiSource();
+  const mapCss = fs.readFileSync(new URL('../relationship-map-focus.js', import.meta.url), 'utf8');
+  assert.match(mapCss, /\.delta-map-card-dial \.dial-label \{ display:none; \}/);
+  assert.match(mapCss, /\.delta-map-ties-focus \.delta-map-ties-head \{ font-size:var\(--dt-kick\); letter-spacing:\.12em; text-transform:uppercase/);
+  assert.match(css, /\.delta-section-body p\.delta-secrets-intro\.delta-muted \{[^}]*font-size:var\(--dt-meta\)/);
+  assert.match(css, /--delta-muted: color-mix\(in srgb, var\(--delta-text\) 62%, transparent\);/);
+  assert.match(fs.readFileSync(new URL("../dossier-ui-styles-board.js", import.meta.url), "utf8"), /\.delta-tile-dots::before \{ content:""; position:absolute/);
 });

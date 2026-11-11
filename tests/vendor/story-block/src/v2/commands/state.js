@@ -47,12 +47,13 @@ export function createStateTools({ store, findQuery, fail, originOf }) {
     function queryTools(tx, state = currentState(tx)) {
         const tools = Object.freeze({
             reply: tx.reply,
+            hasQuery: name => Boolean(findQuery(name)),
             query(name, args) {
                 const fn = findQuery(name);
                 if (!fn) fail('NOT_FOUND', `There is no query called "${name}".`);
                 return frozenCopy(fn(state, deepFreeze(clone(args)), tools));
             },
-            receipts: () => entriesWithCue(store.receipts?.() ?? []),
+            receipts: () => entriesWithCue(tx.receiptsBefore ?? store.receipts?.() ?? []),
             // The proof this root has given so far (not stored yet), for story.evidence (evidence.js).
             pendingProofs: () => [...(tx.planned ?? []), ...(tx.proofs?.list ?? [])].map(proof => ({ proof, block: null })),
         });

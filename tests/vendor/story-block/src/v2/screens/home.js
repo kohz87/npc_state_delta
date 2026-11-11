@@ -23,7 +23,7 @@
 
 import { STRINGS, html, jsonText } from '../strings.js';
 import { BASE_CSS } from './style.js';
-import { SHOW_MORE_WIDGET } from './show-more.js';
+import { QUESTS_LINK_WIDGET, SHOW_MORE_WIDGET } from './show-more.js';
 
 // The save points panel (MODULES §F93) is a host widget (screens/savepoints.js), drawn by the page.
 const SAVEPOINTS_WIDGET = 'story-block.savepoints';
@@ -88,6 +88,7 @@ const TEMPLATE = `
       </ul>
     </div>
     <ss-widget name="${SHOW_MORE_WIDGET}" class="more-slot" data-props='{"target":".sb-cap","key":"story-block/home:quests","more":"${jsonText(STRINGS.showMore.more)}","less":"${jsonText(STRINGS.showMore.less)}"}'></ss-widget>
+    <ss-widget name="${QUESTS_LINK_WIDGET}" class="more-slot"></ss-widget>
   </section>
 
   <section class="panel mounts" data-if="len(q.mounts) > 0">
@@ -127,7 +128,7 @@ const CSS = `${BASE_CSS}
 .sb-cap[data-capped="true"] { max-height: 15em; overflow: hidden; }
 .more-slot { display: block; }
 .more-slot:empty { display: none; }
-.more-slot .sb-show-more { justify-self: start; }
+.more-slot .sb-show-more, .more-slot .sb-open-quests { justify-self: start; }
 /* A quest is a small stacked block: title and status pill on one line when they fit, the goal under it; a hairline and 8px either side between quests. */
 .quests ul { display: grid; gap: 0; }
 .chip.status[data-state="here"], .chip.status[data-state="ready"] { color: var(--sb-good); }

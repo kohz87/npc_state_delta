@@ -4,12 +4,13 @@
 //   as "record": a small card of label/value lines. `field` is a map field; `fields` lists whole-number fields (a map) or any fields (a record).
 //   names: { key: "Shown name" } for a map's keys; labels: { field: "Label" } for a record's lines; units: { field: "copper" } after a value;
 //   tones: { field: { value: "good" | "warn" | "bad" | "accent" | "neutral" } } for a choice drawn as a chip.
+//   tiles: true (a record only): the lines as small tiles in one row, no pencils; a choice is a plain word (amber for a "warn" tone), a short code a round badge.
 // The stub below lets the checker and editableLayout accept the node; the real widget is registered by the host.
 import { dmObject, dmOwn } from './schema.js';
 
 export const FIELDS_WIDGET = 'story-block.fields';
 export const HEADING_WIDGET = 'story-block.heading';
-export const FIELDS_PROPS = Object.freeze(['module', 'field', 'fields', 'as', 'title', 'names', 'labels', 'units', 'tones']);
+export const FIELDS_PROPS = Object.freeze(['module', 'field', 'fields', 'as', 'title', 'names', 'labels', 'units', 'tones', 'tiles']);
 export const BLOCK_NODE_WIDGETS = Object.freeze({
     [FIELDS_WIDGET]: Object.freeze({ props: {}, primary: null, validate: () => [], render: () => ({ destroy() {} }) }),
     [HEADING_WIDGET]: Object.freeze({ props: {}, primary: null, validate: () => [], render: () => ({ destroy() {} }) }),
@@ -31,6 +32,7 @@ export function fieldsNodeProblems(definition, props) {
         if (map && (first.type === 'map' ? first.values.type !== 'int' || names.length !== 1 : names.some(name => definition.state[name].type !== 'int'))) bad('.field', 'A map of numbers is a map field of whole numbers, or a list of whole-number fields.');
     }
     for (const key of ['names', 'labels', 'units', 'tones']) if (props[key] !== undefined && !dmObject(props[key])) bad(`.${key}`, `${key} must be an object.`);
+    if (props.tiles !== undefined && (typeof props.tiles !== 'boolean' || props.as !== 'record')) bad('.tiles', 'tiles is true or false and goes with as "record".');
     if (props.title !== undefined && (typeof props.title !== 'string' || [...props.title].length > 60)) bad('.title', 'title must be text of at most 60 characters.');
     return out;
 }

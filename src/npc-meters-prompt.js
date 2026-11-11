@@ -1,6 +1,6 @@
 // The NPC meter prompt line, tail and redaction. A pure part of npc-meters.js (same owner, moved without change);
 // npc-meters.js re-exports every public name it exported before. Never imports npc-meters.js.
-import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_GATE, FEATURE_PRESETS, FEATURE_MOOD_PULL, FEATURE_NOTES, RECENT_MESSAGES, SECRET_TEXT_MAX, TAIL_SECRETS_PER_NPC, isInt, clean, bandWord } from './npc-meters-config.js';
+import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_GATE, FEATURE_PRESETS, FEATURE_MOOD_PULL, FEATURE_NOTES, RECENT_MESSAGES, SECRET_TEXT_MAX, TAIL_SECRETS_PER_NPC, isInt, clean, bandWord, readLeaf } from './npc-meters-config.js';
 import { meterValue } from './npc-meters-slice.js';
 import { APPROACH_KINDS, gateCue } from '../npc-meters-gate.js';
 import { readEvent } from './npc-meters-pacing.js';
@@ -62,12 +62,12 @@ export function createNpcPrompt({
         for (const key of Object.keys(npcs).sort()) {
             if (!here.has(key)) continue;
             const record = npcs[key];
-            const mood = normalizeMood(record.mood);
+            const mood = normalizeMood(readLeaf(record.mood));
             if (mood && (mood.v || mood.a || mood.d) && moods.length < PULL_PEOPLE) {
                 const control = mood.d <= -2 ? ', cornered' : mood.d >= 2 ? ', in control' : '';
                 moods.push(`${record.name} ${moodWord(mood).toLowerCase()}${control}`);
             }
-            const pull = record.pull;
+            const pull = readLeaf(record.pull);
             if (pull && PULL_WORDS[pull.kind] && pulls.length < PULL_PEOPLE) {
                 const days = isInt(record.day) && isInt(pull.since) ? Math.max(0, record.day - pull.since) : 0;
                 pulls.push(`${record.name}: ${PULL_WORDS[pull.kind]} (${clean(pull.cause, 60)}${days > 0 ? `, ${days} ${days === 1 ? 'day' : 'days'}` : ''})`);

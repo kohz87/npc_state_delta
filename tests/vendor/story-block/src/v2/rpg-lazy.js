@@ -13,10 +13,10 @@
 // cards, queries, hooks, settings and guard as lean-rpg/index.js createLeanRpgPart, handed to the real part once the
 // library is there), the loader (`createRpgLoader`) and the check of a chat (`holdsRpg`). No DOM, no SillyTavern.
 import { CORE_FEATURE } from './features.js';
-import { AUTO_CAP, AUTO_CAP_SETTING, BOARD_SKILL, BOARD_SKILL_CARRY, FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, PRECHECK_LIMIT_MS, PRECHECK_SETTING, RESOLVE, ROLLS, ROLLS_SETTING } from './lean-rpg/names.js';
+import { AUTO_CAP, AUTO_CAP_SETTING, BOARD_SKILL, BOARD_SKILL_CARRY, CHECKS_SETTING, CHECK_STEP, DICE, FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, PRECHECK_LIMIT_MS, PRECHECK_SETTING, RESOLVE, ROLLS, ROLLS_SETTING } from './lean-rpg/names.js';
 import { noRoll } from './lean-rpg/noroll.js';
 import { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, rankQuery } from './lean-rpg/levels.js';
-import { rosterQueries } from './lean-rpg/roster.js';
+import { levelsQuery, rosterQueries } from './lean-rpg/roster.js';
 
 let library = null;
 
@@ -31,7 +31,7 @@ const JOIN_NO = 'rpg.joinNo';
 const JOINS_QUERY = 'rpg.joins';
 const ROLLS_QUERY = 'rpg.rolls';
 // (`capture.party` is the receipt of a `+ party` line; the guarded block it makes is `dm.join`.)
-const GUARD_KINDS = new Set([RESOLVE, FIGHT, PRACTICE_STEP, 'dm.join', 'capture.party']);
+const GUARD_KINDS = new Set([RESOLVE, FIGHT, PRACTICE_STEP, CHECK_STEP, DICE, 'dm.join', 'capture.party', 'capture.roll']);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /**
@@ -110,6 +110,9 @@ export function createLazyRpgPart(deps = {}) {
             [RESOLVE]: Object.assign(run(RESOLVE, ctx => waiting(ctx)), { prelude: true, internal: true }),
             // (a tiny record with no state, answered at once, the library or not: a stored note replays whatever is loaded)
             [NOROLL]: Object.assign((ctx, payload) => noRoll(ctx, payload), { prelude: true, internal: true }),
+            // (the story-check dice are asked for by the loaded part's hook only; a chat that holds them loads the library first: GUARD_KINDS)
+            [DICE]: Object.assign(run(DICE, ctx => waiting(ctx)), { prelude: true, internal: true }),
+            [CHECK_STEP]: Object.assign(run(CHECK_STEP, ctx => waiting(ctx)), { internal: true }),
             [FIGHT]: Object.assign(run(FIGHT, ctx => waiting(ctx)), { internal: true }),
             [PRACTICE_STEP]: Object.assign(run(PRACTICE_STEP, ctx => waiting(ctx)), { internal: true }),
             // "No" on a companion's card (join.js JOIN_NO): the reader's answer, only while the feature is on.
@@ -123,6 +126,7 @@ export function createLazyRpgPart(deps = {}) {
             [RANK_QUERY]: Object.assign(rankQuery, { feature: LEAN_RPG_FEATURE }),
             // (the roster is a pure read of the Character blocks: answered at once too, roster.js)
             ...rosterQueries({ persona: deps?.persona, on: deps?.rosterOn }),
+            'party.levels': Object.assign(levelsQuery, { feature: LEAN_RPG_FEATURE }),
         },
         hooks: {
             canGenerate: Object.assign((view, info) => part()?.hooks.canGenerate(view, info), { feature: LEAN_RPG_FEATURE }),
@@ -130,7 +134,7 @@ export function createLazyRpgPart(deps = {}) {
             afterCapture: (view, info) => part()?.hooks.afterCapture(view, info),
             afterReceive: (view, info) => { part()?.hooks.afterReceive(view, info); },
         },
-        settings: { defaults: { [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [AUTO_CAP_SETTING]: AUTO_CAP.default, [PRECHECK_SETTING]: true }, schema: SETTINGS_SCHEMA },
+        settings: { defaults: { [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [AUTO_CAP_SETTING]: AUTO_CAP.default, [PRECHECK_SETTING]: true, [CHECKS_SETTING]: true }, schema: SETTINGS_SCHEMA },
         guard: (view, info) => { const made = part(); return made ? made.guard(view, info) : { ok: false, reason: 'The RPG is not loaded.' }; },
     };
 }
