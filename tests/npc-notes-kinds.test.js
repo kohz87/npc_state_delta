@@ -269,6 +269,8 @@ test('notes host: npc.flag stamps the first look once and the reader\'s button i
     assert.ok(stamp && Number.isInteger(stamp.day));
     await s.adapter.flag({ name: 'Oren', lock: true, reply: s.host.store.headIndex() });
     assert.deepEqual(oren(s).lookLockedAt, stamp, 'kept once');
+    assert.equal(await s.adapter.flag({ name: 'Sister Temiwa', lock: true, reply: s.host.store.headIndex() }), null, 'a person with no meters gets no entry made by a flag');
+    assert.equal(s.npc('Sister Temiwa'), null);
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });
 

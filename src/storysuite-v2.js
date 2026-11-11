@@ -34,7 +34,7 @@
 // The factory is cut into parts under src/adapter/ (queries, cast-ui, timeline, connect, editor). Each part is a factory that gets
 // the shared state (`session`: the lets more than one part uses) and `deps` (the options, the constants below and the parts built
 // before it). This file keeps the exported constants, the assembly of the parts and the adapter object they make.
-import { FEATURE_SCAN_EVERY_REPLY, normalizeGeneratedSecrets, secretsFromLines, secretsToLines } from './npc-meters.js';
+import { FEATURE_SCAN_EVERY_REPLY, FEATURE_NOTES, normalizeGeneratedSecrets, secretsFromLines, secretsToLines } from './npc-meters.js';
 import { METERS_CARD_ID } from './npc-meters-screen.js';
 import { DOSSIER_FIELDS } from './fields/registry.js';
 import { escapeHtml } from './util/html.js';
@@ -216,8 +216,8 @@ export function createStorySuiteV2Adapter({
         pageApi,
         /** While hosted: Delta's scanner changes for one NPC → `npc.adjust` (a promise of the result, or null). */
         adjust: ({ name, meters, start, reply, impact } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(typeof impact === 'string' ? { impact } : {}) }, { own: true, background: true }),
-        /** While hosted: Delta's scan tells the slice a person's look was first set (`lock`) or contradicted (`text`, `cue`) → `npc.flag` (notes feature). */
-        flag: ({ name, text, cue, lock, reply } = {}) => send('npc.flag', { name, ...(text ? { text } : {}), ...(cue ? { cue } : {}), ...(lock === true ? { lock: true } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true, background: true }),
+        /** While hosted: Delta's scan tells the slice a person's look was first set (`lock`) or contradicted (`text`, `cue`) → `npc.flag`. Only with the notes feature on and for a person who already has meters (a flag never makes an entry); else null. */
+        flag: ({ name, text, cue, lock, reply } = {}) => (part.featureOn(FEATURE_NOTES) === true && (() => { const entries = sliceEntries(); return Boolean(entries && entryFor(entries, dossierOf(name) ?? { name })); })() ? send('npc.flag', { name, ...(text ? { text } : {}), ...(cue ? { cue } : {}), ...(lock === true ? { lock: true } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true, background: true }) : null),
         /** While hosted: the reader's own values from the dossier editor → `npc.set` (the host's latest reply; headReply). */
         setMeters: ({ name, meters } = {}) => send('npc.set', { name, meters }),
         /** While hosted: stages and notes again for one NPC (after its notes were edited) → `npc.refresh`. */
