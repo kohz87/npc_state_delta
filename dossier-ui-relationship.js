@@ -1,6 +1,7 @@
 /* NPC State Delta dossier surface: relationship meter steps, changes and history markup. */
 import { escapeHtml } from './src/util/html.js';
 import { changeStamp, plain, relationshipValue, RELATIONSHIP_AXES, stampHtml, wholeNumber } from './dossier-ui-model.js';
+import { gateWords } from './dossier-ui-view-model.js';
 
 // (1.2.15) The change the latest reply made to one axis, beside its meter: ▲3 / ▼2. Only for a change
 // recorded at the latest reply (an older one is history, shown below the meters); tension rising reads
@@ -63,6 +64,35 @@ function relationshipHistoryHtml(history, latest) {
         .slice(0, 3);
     if (!rows.length) return '';
     return `<div class="delta-rel-history"><h4>Earlier changes</h4><ul class="delta-list">${rows.map(event => `<li><span class="delta-rel-impact delta-rel-impact-${escapeHtml(event.impact)}">${escapeHtml(impactLabel(event.impact))}</span>${changeStamp(event).label ? ` ${stampHtml(changeStamp(event), 'small', 'delta-muted')}` : ''} ${escapeHtml(event.reason)}</li>`).join('')}</ul></div>`;
+}
+
+// One row of the With {{user}} "Recent changes" list: the date and reply number on the left, the change in its good / bad
+// colour (tension rising is bad) over a muted "via ..." line on the right. `change` is the latest change (the projection's
+// lastRelationshipChange, with the signed numbers and, when hosted, the event's gate and date); `event` is an earlier one from the stored
+// history, which keeps only its tier, the axes it had evidence for and its reason (no signed numbers, no calendar date).
+export function recentChangeRowHtml({ change = null, event = null } = {}) {
+    const source = change || event;
+    const stamp = changeStamp(source || {});
+    const hosted = change?.hosted ? change.event : null;
+    const when = [hosted?.date, stamp.mark].filter(Boolean);
+    const whenHtml = when.length ? `<span class="delta-chg-when">${when.map((part, index) => (index ? `<small>${escapeHtml(part)}</small>` : escapeHtml(part))).join('<br>')}</span>` : '<span class="delta-chg-when"></span>';
+    let head = '';
+    let lines = [];
+    if (change) {
+        head = hosted?.held ? '<span class="delta-chg-d" data-good="muted">Held</span>' : RELATIONSHIP_AXES
+            .filter(([axis]) => change.delta?.[axis])
+            .map(([axis, label]) => {
+                const value = change.delta[axis];
+                const good = axis === 'tension' ? value < 0 : value > 0;
+                return `<span class="delta-chg-d" data-good="${good ? 'yes' : 'no'}">${escapeHtml(label)} ${value > 0 ? '+' : '−'}${Math.abs(value)}</span>`;
+            }).join(' · ') || '<span class="delta-chg-d" data-good="muted">Progress only</span>';
+        lines = [hosted?.held ? `Held: ${hosted.note || 'the day\'s allowance is used'}` : gateWords(hosted?.gate, { row: true }), change.reason];
+    } else {
+        head = `<span class="delta-chg-d" data-good="muted">${escapeHtml((event.axes || []).length ? event.axes.join(' · ') : impactLabel(event.impact))}</span>`;
+        lines = [event.reason];
+    }
+    const via = lines.filter(Boolean).map(line => `<div class="delta-chg-via">${escapeHtml(line)}</div>`).join('');
+    return `<li class="delta-chg">${whenHtml}<div><b>${head}</b>${via}</div></li>`;
 }
 
 export { relationshipAxis, relationshipHistoryHtml };

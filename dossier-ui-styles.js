@@ -1,5 +1,6 @@
 /* NPC State Delta dossier surface: the panel's scoped stylesheet. */
 import { ROOT_ID, SETTINGS_ID } from './dossier-ui-constants.js';
+import { TWO_PANE_MIN } from './dossier-ui-screens.js';
 
 export const STYLES = `
 #${ROOT_ID} {
@@ -9,7 +10,7 @@ export const STYLES = `
   /* the same tint with its alpha dropped: the opaque floor under the panel and the section bar (the chat must not read through them) */
   --delta-floor: var(--ss-sheet-floor, #18191d);
   --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
-  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-muted: color-mix(in srgb, var(--delta-text) 62%, transparent);
   --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
   --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
   --delta-line: var(--ss-border, rgba(218,193,148,.24));
@@ -27,6 +28,8 @@ export const STYLES = `
 #${ROOT_ID} *, #${ROOT_ID} *::before, #${ROOT_ID} *::after { box-sizing: border-box; text-shadow: none; }
 #${ROOT_ID} [hidden] { display: none !important; }
 #${ROOT_ID} button, #${ROOT_ID} input { font: inherit; }
+/* a host theme's heading rules (a coloured bar, an indent, an alignment) must not restyle the dossier's own headings */
+#${ROOT_ID} :is(h1,h2,h3,h4) { border:0; border-image:none; background:none; box-shadow:none; }
 #${ROOT_ID} button { color: inherit; }
 #${ROOT_ID} :is(button,input):focus-visible { outline: 2px solid var(--delta-accent); outline-offset: 2px; }
 #${ROOT_ID} .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
@@ -41,15 +44,17 @@ export const STYLES = `
 #${ROOT_ID} .delta-launcher-mark { display:grid; place-items:center; width:25px; height:25px; border-radius:8px; border:1px solid #a9bdd9; font:700 13px/1 Georgia,serif; }
 #${ROOT_ID} .delta-panel {
   position: fixed; z-index: 2147483500; left:50%; top:50%; transform:translate(-50%,-50%);
-  width:min(1320px,97vw); height:min(940px,96dvh); overflow:hidden;
+  width:min(1320px,97vw); height:min(940px,96dvh); overflow:hidden; container:dsr / inline-size;
   display:flex; flex-direction:column; border:1px solid var(--delta-line); border-radius:var(--ss-radius-xl, 15px);
+  /* the dossier's type scale flows with the panel's own width (cqw reads where it is used, so each child sees the panel) */
+  --dt-kick:clamp(9.5px,.25cqw + 8px,11.5px); --dt-pill:clamp(10px,.3cqw + 8.6px,12px); --dt-meta:clamp(11px,.3cqw + 9.6px,13px); --dt-body:clamp(12px,.35cqw + 10.4px,14.5px);
   color:var(--delta-text); background-color:var(--delta-floor); background-image:linear-gradient(var(--delta-bg),var(--delta-bg)); backdrop-filter:var(--ss-blur, none); -webkit-backdrop-filter:var(--ss-blur, none);
   box-shadow:0 0 0 100vmax rgba(0,0,0,.72),0 20px 70px rgba(0,0,0,.55);
 }
 #${ROOT_ID} .delta-topbar { flex:0 0 auto; min-height:56px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px 8px 16px; border-bottom:1px solid var(--delta-line); background:color-mix(in srgb,var(--delta-bg) 94%,black 6%); }
 #${ROOT_ID} .delta-brand, #${ROOT_ID} .delta-top-actions { display:flex; align-items:center; gap:10px; min-width:0; }
 #${ROOT_ID} .delta-brand strong { font-size:1.03rem; white-space:nowrap; }
-#${ROOT_ID} .delta-kicker { font-size:.67rem; line-height:1.2; letter-spacing:.14em; text-transform:uppercase; color:var(--delta-accent); opacity:.82; }
+#${ROOT_ID} .delta-kicker { font-size:var(--dt-kick); line-height:1.2; letter-spacing:.14em; text-transform:uppercase; color:var(--delta-accent); opacity:.82; }
 #${ROOT_ID} .delta-chat-state { display:inline-flex; padding:4px 9px; border:1px solid rgba(255,255,255,.1); border-radius:999px; color:var(--delta-muted); background:rgba(0,0,0,.16); font-size:.74rem; }
 #${ROOT_ID} .delta-btn {
   appearance:none; min-height:35px; padding:6px 11px; border:1px solid var(--delta-line); border-radius:8px;
@@ -67,13 +72,17 @@ export const STYLES = `
 #${ROOT_ID} .delta-document { min-width:0; min-height:0; overflow:auto; padding:0; overscroll-behavior:contain; scrollbar-color:rgba(218,193,148,.35) transparent; }
 #${ROOT_ID} .delta-section { margin:0 0 14px; padding:14px 15px; border:1px solid var(--ss-border, rgba(218,193,148,.14)); border-radius:var(--ss-radius-l, 10px); background:var(--delta-surface); }
 #${ROOT_ID} .delta-panel.ss-cards { margin:0; gap:0; }
+/* Story Suite draws everything in its roots at 80% (size.css zooms .ss-cards); the dossier is drawn at the size of the approved mockup (100%),
+   and the length rules that divide by --ss-zoomed (the launcher's full-screen size, the 44px tap areas) read 1 here. Outside Story Suite
+   neither is set and this changes nothing. To follow the suite's size again, delete this one rule. */
+#${ROOT_ID} .delta-panel.ss-cards { zoom:1; --ss-zoomed:1; }
 #${ROOT_ID} .delta-panel.ss-cards {
   /* UI 4c: the aliases are read where the tokens exist: inside the panel's ss-cards root (the root above is outside it). */
   --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
   /* the same tint with its alpha dropped: the opaque floor under the panel and the section bar (the chat must not read through them) */
   --delta-floor: var(--ss-sheet-floor, #18191d);
   --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
-  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-muted: color-mix(in srgb, var(--delta-text) 62%, transparent);
   --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
   --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
   --delta-line: var(--ss-border, rgba(218,193,148,.24));
@@ -94,7 +103,7 @@ export const STYLES = `
 #${ROOT_ID} .delta-prose-grid .delta-wide { grid-column:1/-1; }
 #${ROOT_ID} .delta-list { margin:0; padding-left:20px; }
 #${ROOT_ID} .delta-list li + li { margin-top:4px; }
-#${ROOT_ID} .delta-bond-word { display:inline-block; padding:0 7px; border-radius:999px; font-size:.78em; font-weight:700; border:1px solid currentColor; }
+#${ROOT_ID} .delta-bond-word { display:inline; font-size:.78em; font-weight:700; }
 #${ROOT_ID} .delta-bond-close { color:#2e9d5b; }
 #${ROOT_ID} .delta-bond-hostile { color:#d04a4a; }
 #${ROOT_ID} .delta-bond-duty { color:#c8962a; }
@@ -122,22 +131,22 @@ export const STYLES = `
 #${ROOT_ID} .delta-cast-badge { display:inline-block; margin-left:8px; font-family:var(--ss-font, system-ui, sans-serif); padding:1px 9px; border:1px solid rgba(160,130,255,.5); border-radius:999px; background:rgba(160,130,255,.18); color:#c9b8ff; font-size:.72rem; font-weight:600; line-height:1.4; vertical-align:middle; white-space:nowrap; }
 #${ROOT_ID} .delta-cast-from { display:grid; gap:6px; margin:10px 0; padding:12px 14px; border:1px solid rgba(160,130,255,.35); border-radius:12px; background:rgba(160,130,255,.08); font-size:.86rem; line-height:1.5; }
 #${ROOT_ID} .delta-cast-pin { justify-self:start; border-color:rgba(160,130,255,.6); }
-#${ROOT_ID} .delta-cast-pin-note { font-size:.78rem; }
-#${ROOT_ID} .delta-cast-from h5 { margin:0; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; opacity:.8; }
+#${ROOT_ID} .delta-cast-pin-note { font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-cast-from h5 { margin:0; font-size:var(--dt-kick); letter-spacing:.08em; text-transform:uppercase; opacity:.8; }
 #${ROOT_ID} .delta-key-star { color:#f5c84b; font-size:.85em; }
-#${ROOT_ID} .delta-secrets h3 .delta-secrets-count { margin-left:6px; color:var(--delta-muted); font-size:.74rem; font-weight:400; letter-spacing:0; text-transform:none; }
+#${ROOT_ID} .delta-secrets h3 .delta-secrets-count { margin-left:6px; color:var(--delta-muted); font-size:var(--dt-meta); font-weight:400; letter-spacing:0; text-transform:none; }
 #${ROOT_ID} .delta-secret { display:grid; gap:4px; padding:10px 0; border-top:1px solid rgba(218,193,148,.12); }
-#${ROOT_ID} .delta-secret p { margin:0; font-size:.86rem; line-height:1.5; }
+#${ROOT_ID} .delta-secret p { margin:0; font-size:var(--dt-body); line-height:1.5; }
 #${ROOT_ID} .delta-secret-head { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
-#${ROOT_ID} .delta-secret-pill { display:inline-flex; padding:1px 9px; border:1px solid rgba(216,188,120,.45); border-radius:999px; background:rgba(216,188,120,.12); color:var(--delta-accent-soft); font-size:.72rem; }
+#${ROOT_ID} .delta-secret-pill { display:inline-flex; padding:1px 9px; border:1px solid rgba(216,188,120,.45); border-radius:999px; background:rgba(216,188,120,.12); color:var(--delta-accent-soft); font-size:var(--dt-kick); }
 #${ROOT_ID} .delta-secret-bar { display:block; height:12px; border-radius:6px; background:repeating-linear-gradient(90deg,rgba(255,255,255,.14) 0 10px,rgba(255,255,255,.08) 10px 14px); }
-#${ROOT_ID} .delta-secret-when { color:var(--delta-muted); font-size:.76rem; }
-#${ROOT_ID} .delta-secrets-note { margin:6px 0 0; font-size:.76rem; }
-#${ROOT_ID} .delta-away { margin:10px 0; padding:12px 14px; border:1px solid rgba(120,170,255,.35); border-radius:12px; background:rgba(120,170,255,.08); font-size:.82rem; line-height:1.5; }
-#${ROOT_ID} .delta-away h5 { margin:0 0 6px; font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; opacity:.85; }
+#${ROOT_ID} .delta-secret-when { color:var(--delta-muted); font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-secrets-note { margin:6px 0 0; font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-away { margin:10px 0; padding:12px 14px; border:1px solid rgba(120,170,255,.35); border-radius:12px; background:rgba(120,170,255,.08); font-size:var(--dt-body); line-height:1.5; }
+#${ROOT_ID} .delta-away h5 { margin:0 0 6px; font-size:var(--dt-kick); letter-spacing:.08em; text-transform:uppercase; opacity:.85; }
 #${ROOT_ID} .delta-away p { margin:0 0 6px; }
 #${ROOT_ID} .delta-away ol { margin:0 0 6px; padding-left:18px; display:grid; gap:3px; }
-#${ROOT_ID} .delta-away .delta-away-note { margin:6px 0 0; font-size:.76rem; }
+#${ROOT_ID} .delta-away .delta-away-note { margin:6px 0 0; font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-status-dead { color:#efb8b8; background:rgba(111,54,60,.28); border-color:rgba(207,118,126,.28); }
 #${ROOT_ID} .delta-no-results { flex:1 1 auto; min-width:260px; display:grid; place-items:center; align-content:center; gap:3px; color:var(--delta-muted); text-align:center; }
 #${ROOT_ID} .delta-no-results b { color:var(--delta-text); }
@@ -182,13 +191,32 @@ export const STYLES = `
 #${ROOT_ID} .delta-lightbox-close { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); }
 #${SETTINGS_ID}.npc-state-delta-stage1-settings-target { outline:2px solid #d8bc78; outline-offset:4px; }
 @supports (color: rgb(from red r g b)) {
-  #${ROOT_ID} .delta-panel { --delta-floor: var(--ss-sheet-floor, rgb(from var(--delta-bg) r g b / 1)); }
+  #${ROOT_ID} .delta-panel, #${ROOT_ID} .delta-panel.ss-cards { --delta-floor: var(--ss-sheet-floor, rgb(from var(--delta-bg) r g b / 1)); }
 }
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   #${ROOT_ID} .delta-panel { width:calc(100vw / var(--ss-zoomed, 1)); height:calc(100dvh / var(--ss-zoomed, 1)); border-radius:0; border-left:0; border-right:0; }
 }
+/* The floating window (the host forces the panel to the whole screen up to 1100px, launcher-ui.js): it sizes to its screen, up to its old height. */
+@media (min-width: 1101px) {
+  #${ROOT_ID} .delta-panel { height:auto; max-height:min(940px,96dvh); min-height:min(520px,96dvh); }
+  /* the relationship map sizes its circle from the stage, so a map screen keeps the panel's full height */
+  #${ROOT_ID} .delta-panel:has(.delta-spread.delta-map-mode) { height:min(940px,96dvh); }
+}
+/* The panel is the dossier's container: every layout below follows its OWN width (container queries), never the window's.
+   The document is a column: the screen scrolls inside it and the library bar sits under it in the flow (never over the last tile). */
+#${ROOT_ID} .delta-panel-body, #${ROOT_ID} .delta-stage, #${ROOT_ID} .delta-spread { display:flex; flex-direction:column; height:auto; }
+#${ROOT_ID} .delta-panel-body { flex:1 1 auto; }
+#${ROOT_ID} .delta-stage, #${ROOT_ID} .delta-spread { flex:1 1 auto; }
+#${ROOT_ID} .delta-document { flex:1 1 auto; display:flex; flex-direction:column; overflow:hidden; }
+#${ROOT_ID} .delta-document > .delta-panes { flex:1 1 auto; height:auto; overflow:auto; overscroll-behavior:contain; scrollbar-color:rgba(218,193,148,.35) transparent; }
+#${ROOT_ID} .delta-document > .delta-library-foot { flex:none; }
+#${ROOT_ID} .delta-spread.delta-map-mode { display:grid; flex:1 1 auto; height:auto; }
+/* Where the panel is taller than a short board, every screen fills the height (the dial pane centres its content, the tiles spread): no void under the tiles. */
+#${ROOT_ID} .delta-panes[data-layout="desktop"]:is([data-screen="board"], [data-screen="section"], [data-screen="profile"]) { align-content:stretch; }
 @media (max-width: 650px) {
   #${ROOT_ID} .delta-launcher { right:10px; bottom:66px; }
+}
+@container dsr (max-width: ${TWO_PANE_MIN - 0.02}px) {
   #${ROOT_ID} .delta-brand .delta-kicker, #${ROOT_ID} .delta-chat-state { display:none; }
   #${ROOT_ID} .delta-topbar { padding-left:10px; }
   #${ROOT_ID} .delta-current-grid, #${ROOT_ID} .delta-prose-grid, #${ROOT_ID} .delta-two-column, #${ROOT_ID} .delta-rel-grid { grid-template-columns:1fr; }

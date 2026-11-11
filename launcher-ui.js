@@ -228,10 +228,21 @@ html[data-npc-state-delta-story-block-v2="1"]:not([data-npc-state-delta-launcher
     padding-right: max(10px, env(safe-area-inset-right));
     padding-left: max(10px, env(safe-area-inset-left));
   }
+  /* Close is a compact pill (class ss-tap-pill): its tap area is 44px tall by the suite's own rule, so the visible button stays as small as the others. */
   #${ROOT_ID} .delta-close {
+    position: relative;
     flex: 0 0 auto;
-    min-width: 44px;
-    min-height: 44px;
+    min-width: 0;
+  }
+  /* the tap area stays 44px tall (and as wide as the button) while the visible button is as compact as its neighbours */
+  #${ROOT_ID} .delta-close::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
   }
   #${ROOT_ID} .delta-document {
     padding-bottom: max(8px, env(safe-area-inset-bottom));

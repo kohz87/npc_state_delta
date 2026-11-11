@@ -59,18 +59,24 @@ function portraitMark(src, refs) {
     return key ? `ref:${key}` : plain(src);
 }
 
+// Up to two initials: the first letters of the first two words ("The inspector" reads "TI", "Marrit" reads "M").
+export const initialsOf = name => String(name ?? '').split(/\s+/).filter(Boolean).slice(0, 2).map(word => [...word][0].toUpperCase()).join('');
+
 function portraitHtml(npc, className, { alt = true, refs = null } = {}) {
     const src = plain(npc?.portrait);
     if (src) return `<img class="${className}" ${imageSourceAttribute(src, refs)} alt="${alt ? `${escapeHtml(npc?.name || 'NPC')} portrait` : ''}" loading="lazy" decoding="async">`;
-    const initial = escapeHtml(String(npc?.name || '?').trim().charAt(0).toUpperCase() || '?');
+    const initial = escapeHtml(initialsOf(npc?.name) || '?');
     return `<div class="${className} delta-portrait-placeholder" aria-hidden="true"><span>${initial}</span></div>`;
 }
 
+// As written in the dossier, with the first letter of each part capitalised.
+const capFirst = value => { const text = plain(value); return text ? `${[...text][0].toUpperCase()}${[...text].slice(1).join('')}` : ''; };
+
 function identityLine(npc) {
     return [
-        npc?.species,
-        npc?.gender,
-        npc?.role,
+        capFirst(npc?.species),
+        capFirst(npc?.gender),
+        capFirst(npc?.role),
         npc?.age ? `Age ${npc.age}` : '',
         npc?.apparentAge ? `Looks ${npc.apparentAge}` : '',
     ].filter(Boolean).join(' · ') || 'Identity details not established';
@@ -98,9 +104,9 @@ export function changeSummaryHtml(npc, current = {}) {
 }
 
 function birthdayCard(npc) {
-    const source = npc.birthdaySource === 'generated' ? 'Deterministic fallback'
-        : npc.birthdaySource === 'established' ? 'Story established' : '';
-    return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday${changedMark(npc, 'birthDate')}</b><span>${escapeHtml(npc.birthday || 'Unknown')}</span>${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</div>`;
+    // (a generated birthday shows no source line: "deterministic fallback" is internal wording, not something to read on the profile)
+    const source = npc.birthdaySource === 'established' ? 'Story established' : '';
+    return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday${changedMark(npc, 'birthDate')}</b><span>${escapeHtml(npc.birthday || 'Unknown')}${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</span></div>`;   // the note sits in the value column, under the date, not in a cell of its own
 }
 
 export function appearanceFormsHtml(npc, { portraitRefs = null } = {}) {

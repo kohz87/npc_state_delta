@@ -1,7 +1,17 @@
 /* NPC State Delta dossier screens: the pure screen state machine (library | board | profile | section:n), back and Esc order,
-   sideways swipe steps, the one shared phone query (650px) and the desktop pane layout. No markup here; the screen renderers draw each screen. */
+   sideways swipe steps, the dossier's own width switch (one column, or two panes) and the desktop pane layout. No markup here; the screen renderers draw each screen. */
 
-export const PHONE_QUERY = '(max-width: 650px)';
+// The layout follows the dossier's OWN width (its panel, not the window). Every switch line is a sum of the minimum content widths
+// that must fit side by side, never a device width. The CSS @container lines in dossier-ui-styles*.js import these same numbers.
+export const PANE_HERO_MIN = 250; // the dial pane: the dial (210 at least) with its labels and padding
+export const PANE_HERO_SLIM_MIN = 230; // the same pane with a section open beside it
+export const PANE_TILES_MIN = 290; // the tiles: two columns of 140 and the gap and padding
+export const PANE_SECTION_MIN = 370; // a section pane, narrowest (its clamp tops out at 420)
+export const PANE_SECTION_WIDE_MIN = 420; // a section pane at the width three panes are given
+// Two panes (dial pane beside the tiles or a section): 250 + 370.
+export const TWO_PANE_MIN = PANE_HERO_MIN + PANE_SECTION_MIN;
+// Three panes (dial pane, tiles and a section): 230 + 290 + 420.
+export const THREE_PANE_MIN = PANE_HERO_SLIM_MIN + PANE_TILES_MIN + PANE_SECTION_WIDE_MIN;
 export const SWIPE_MIN_PX = 48;
 export const SECTION_KEYS = Object.freeze(['now', 'with', 'ties', 'past', 'secrets']);
 const SCREEN_NAMES = Object.freeze(['library', 'board', 'profile', 'section']);
@@ -111,21 +121,29 @@ export function screenSignature(state) {
     return `${state.npcId || ''}|${formatScreen(state)}`;
 }
 
-// One MediaQueryList per window, shared by every dossier surface.
-const phoneQueries = new WeakMap();
-export function phoneQuery(win = globalThis) {
-    if (!win || typeof win.matchMedia !== 'function') return null;
-    let query = phoneQueries.get(win);
-    if (!query) {
-        query = win.matchMedia(PHONE_QUERY);
-        phoneQueries.set(win, query);
-    }
-    return query;
+// The dossier's width in CSS px: its panel when it is shown, else the window (nothing is drawn while it is hidden anyway).
+export function panelWidth(panel, win = globalThis) {
+    if (!panel || !(panel.clientWidth > 0)) return win?.innerWidth || 0;
+    // The container the CSS queries see is the panel's content box, in fractional px (clientWidth rounds, and a zoomed host gives fractional borders).
+    const style = typeof win?.getComputedStyle === 'function' ? win.getComputedStyle(panel) : null;
+    const px = value => parseFloat(value) || 0;
+    const box = style && style.boxSizing === 'border-box' ? px(style.width) - px(style.borderLeftWidth) - px(style.borderRightWidth) - px(style.paddingLeft) - px(style.paddingRight) : 0;
+    return box > 0 ? box : panel.clientWidth;
 }
 
-export function isPhone(win = globalThis) {
-    const query = phoneQuery(win);
-    return Boolean(query && query.matches);
+// One column (the narrow layout) while the dossier is narrower than two panes need.
+export function isNarrowWidth(width) {
+    return width > 0 && width < TWO_PANE_MIN; // an unknown width (nothing measured yet) draws the two-pane layout
+}
+export function isNarrow(panel, win = globalThis) {
+    return isNarrowWidth(panelWidth(panel, win));
+}
+
+// The width a ResizeObserver entry reports: the panel's content box, the very box the CSS @container lines measure, so the redraw
+// and the stylesheet agree on the same frame. Falls back to measuring the panel for a host without contentBoxSize.
+export function observedWidth(entry, panel, win = globalThis) {
+    const box = Array.isArray(entry?.contentBoxSize) ? entry.contentBoxSize[0] : entry?.contentBoxSize;
+    return box && box.inlineSize > 0 ? box.inlineSize : panelWidth(panel, win);
 }
 
 // Wires touch swipes on one element; onStep receives +1 or -1. Returns the unbind function.

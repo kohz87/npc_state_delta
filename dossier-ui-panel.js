@@ -5,7 +5,7 @@ import { createPortraitRefs } from './dossier-ui-html.js';
 import { STYLES } from './dossier-ui-styles.js';
 import { BOARD_STYLES } from './dossier-ui-styles-board.js';
 import { SECTIONS_STYLES } from './dossier-ui-styles-sections.js';
-import { bindSwipe, createScreenState, phoneQuery, escapeAction, goBack, normalizeSection, openNpc, openSection, SECTION_KEYS, setSection, showScreen, stepSection } from './dossier-ui-screens.js';
+import { bindSwipe, createScreenState, isNarrow, isNarrowWidth, observedWidth, escapeAction, goBack, normalizeSection, openNpc, openSection, SECTION_KEYS, setSection, showScreen, stepSection } from './dossier-ui-screens.js';
 
 export class DossierUiPanel {
     constructor(api) {
@@ -57,7 +57,8 @@ export class DossierUiPanel {
         this.observerRetryTimer = null;
         document.removeEventListener?.('keydown', this.boundEscape);
         document.removeEventListener?.('click', this.boundOutside);
-        phoneQuery(window)?.removeEventListener?.('change', this.boundPhoneChange);
+        this.sizeObserver?.disconnect?.();
+        this.sizeObserver = null;
         window.removeEventListener?.('focus', this.boundFocus);
         this.unbindSwipe?.();
         this.portraitRefs.release();
@@ -76,7 +77,7 @@ export class DossierUiPanel {
                     <div class="delta-top-actions">
                         <button type="button" class="delta-btn delta-open-settings">Settings</button>
                         <span class="delta-header-slot"></span>
-                        <button type="button" class="delta-btn delta-close" aria-label="Close NPC dossiers">Close</button>
+                        <button type="button" class="delta-btn delta-close ss-tap-pill" aria-label="Close NPC dossiers">Close</button>
                     </div>
                 </header>
                 <div class="delta-notice" hidden></div>
@@ -160,9 +161,18 @@ export class DossierUiPanel {
             this.root?.querySelector('details.delta-header-menu[open]')?.removeAttribute('open');
         };
         document.addEventListener('click', this.boundOutside);
-        // One shared phone query: crossing the 650px line redraws the screen in the other layout.
-        this.boundPhoneChange = () => { if (this.panelOpen) this.renderFromProjection({ force: true }); };
-        phoneQuery(window)?.addEventListener?.('change', this.boundPhoneChange);
+        // The layout follows the panel's own width: when it crosses the one-column / two-pane line the screen is redrawn in the other layout.
+        const panel = this.root.querySelector('.delta-panel');
+        this.narrow = isNarrow(panel);
+        if (panel && typeof ResizeObserver === 'function') {
+            this.sizeObserver = new ResizeObserver(entries => {
+                const narrow = isNarrowWidth(observedWidth(entries[entries.length - 1], panel));
+                if (narrow === this.narrow) return;
+                this.narrow = narrow;
+                if (this.panelOpen) this.renderFromProjection({ force: true });
+            });
+            this.sizeObserver.observe(panel);
+        }
         document.addEventListener('keydown', this.boundEscape);
         window.addEventListener('focus', this.boundFocus);
     }
