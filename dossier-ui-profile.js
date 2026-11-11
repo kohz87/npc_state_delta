@@ -2,7 +2,7 @@
    character, background). Markup only, built from the detail projection; the screens module draws it and fills portraits. */
 import { escapeHtml } from './src/util/html.js';
 import { plain } from './dossier-ui-model.js';
-import { appearanceFormsHtml, birthdayCard, changedMark, currentCard, identityLine, listHtml, portraitHtml, proseHtml } from './dossier-ui-html.js';
+import { appearanceFormsHtml, birthdayCard, changedMark, currentCard, identityLine, portraitHtml, proseHtml } from './dossier-ui-html.js';
 
 const METER_LABELS = Object.freeze([['trust', 'T'], ['affection', 'A'], ['desire', 'D'], ['tension', 'Te']]);
 
@@ -21,8 +21,10 @@ export function profileMeterLine(npc = {}) {
         .join(' · ');
 }
 
-function block(key, title, body) {
-    return `<section class="delta-profile-block" data-delta-profile="${key}"><h3>${escapeHtml(title)}</h3>${body}</section>`;
+// A block: its small coloured heading and its body. `heading: false` leaves the heading out (the phone's first block is the name and
+// its line, as in the mockup, not a block called Identity).
+function block(key, title, body, { heading = true } = {}) {
+    return `<section class="delta-profile-block" data-delta-profile="${key}">${heading ? `<h3>${escapeHtml(title)}</h3>` : ''}${body}</section>`;
 }
 
 function identityBody(npc) {
@@ -68,11 +70,12 @@ function appearanceBody(npc, portraitRefs) {
     return `${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : '<p class="delta-muted">No appearance established yet.</p>'}${note}${more}`;
 }
 
+// Personality as plain prose, then label / value rows (Speech, Levers) as the mockup draws it: no sub-headings.
 function characterBody(npc) {
-    return `<h4>Personality${changedMark(npc, 'personality')}</h4>${proseHtml(npc.personality)}`
-        + `<h4>Speech${changedMark(npc, 'speech')}</h4>${proseHtml(npc.speech)}`
-        + `<h4>Behavioural levers${changedMark(npc, 'behaviorProfile')}</h4>${listHtml(npc.behaviorProfile)}`
-;
+    const levers = Array.isArray(npc.behaviorProfile) ? npc.behaviorProfile.filter(Boolean).join('; ') : plain(npc.behaviorProfile);
+    const row = (label, text, mark = '') => (plain(text) ? `<dt>${label}${mark}</dt><dd>${escapeHtml(plain(text))}</dd>` : '');
+    const rows = row('Speech', npc.speech, changedMark(npc, 'speech')) + row('Levers', levers, changedMark(npc, 'behaviorProfile'));
+    return `${proseHtml(npc.personality)}${changedMark(npc, 'personality') ? `<p class="delta-muted">${changedMark(npc, 'personality')}</p>` : ''}${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : ''}`;
 }
 
 // The portrait fills the top (phone) or the left column (desktop). The back control goes to the board; the
@@ -99,7 +102,7 @@ function headBlock(npc, desktop) {
 // details in two columns on the right). `portraitRefs` is the view's createPortraitRefs() instance.
 export function dossierProfileHtml(npc = {}, { layout = 'phone', portraitRefs = null } = {}) {
     const desktop = layout === 'desktop';
-    const identity = block('identity', 'Identity', identityBody(npc));
+    const identity = block('identity', 'Identity', identityBody(npc), { heading: desktop });
     const appearance = block('appearance', 'Appearance', appearanceBody(npc, portraitRefs));
     const character = block('character', 'Character', characterBody(npc));
     const notes = npc.v2Meters?.notes;

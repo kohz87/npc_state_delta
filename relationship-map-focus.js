@@ -5,7 +5,7 @@
 import { MAP_CARD_BESIDE_MIN, MAP_CARD_MIN, MAP_CENTER, MAP_LENSES, MAP_SPAN, mapRadius, nodeBoxes, plain, resolveMapBonds, ringWordSpot, signed } from './relationship-map-core.js';
 import { portraitHtml } from './dossier-ui-html.js';
 import { dialHtml } from './dossier-ui-dial.js';
-import { moodTile } from './dossier-ui-view-model.js';
+import { moodTile, possessiveWord } from './dossier-ui-view-model.js';
 import { KNOWN_SOCIAL_RELATION_FAMILIES, socialRelationFamily } from './social-relations.js';
 import { escapeHtml } from './src/util/html.js';
 import { tieTone } from './dossier-ui-bond-tone.js';
@@ -195,13 +195,7 @@ export function cardNumbersLine(selected) {
     return [['Warmth', warmth], ['Trust', by.trust || 0], ['Tension', by.tension || 0]].map(([label, value]) => `${label} ${signed(value)}`).join(' · ');
 }
 
-// "Her", "His" or "Their", from the gender the dossier holds (the heading "Her ties" in Focus).
-export function possessiveWord(gender = '') {
-    const text = plain(gender).toLocaleLowerCase();
-    if (/^(?:f|she)|\b(?:female|woman|girl)\b/.test(text)) return 'Her';
-    if (/^(?:m$|male|he\b)|\b(?:man|boy)\b/.test(text)) return 'His';
-    return 'Their';
-}
+export { possessiveWord };
 
 // The phone's one line: "warmth +11 · ally of Temiwa · rival of Bregje" (a tie word that reads "of": ally, rival; owes and the rest lead the name).
 function compactLine(sel, ties, shortOf) {
@@ -261,7 +255,7 @@ ${root} .delta-map-bond { stroke:var(--tone,var(--map-grey)); stroke-dasharray:5
 ${root} .delta-map-bond-solid { stroke-dasharray:none; stroke-width:3; }
 ${root} .delta-map-node[data-focus="dim"] { opacity:.22; }
 ${root} .delta-map-node[data-focus="focus"] .delta-map-avatar { box-shadow:0 0 0 4px rgba(216,188,120,.25); }
-${root} .delta-map-word { color:color-mix(in srgb, var(--tone) 75%, var(--delta-text)); font-size:.68rem; font-weight:700; line-height:1.2; }
+${root} .delta-map-word { color:color-mix(in srgb, var(--tone) 75%, var(--delta-text)); font-size:var(--dt-kick); font-weight:700; line-height:1.2; }
 ${root} .delta-map-focus-chip { display:inline-flex; align-items:center; gap:6px; min-height:34px; padding:0 4px 0 12px; border:1px solid var(--delta-accent); border-radius:999px; color:var(--delta-text); font-size:var(--dt-meta); }
 ${root} .delta-map-focus-clear { min-width:30px; min-height:30px; border:0; border-radius:50%; color:var(--delta-text); background:transparent; cursor:pointer; }
 /* the card: under the map (phone) it is a face, name and one line, or in Focus the "Rika's ties" block; beside the map (when the circle and

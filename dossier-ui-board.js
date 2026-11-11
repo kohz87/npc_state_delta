@@ -2,7 +2,7 @@
 import { escapeHtml } from './src/util/html.js';
 import { initialsOf, portraitHtml } from './dossier-ui-html.js';
 import { dialHtml } from './dossier-ui-dial.js';
-import { boardModel } from './dossier-ui-view-model.js';
+import { boardModel, gateWords, possessiveWord } from './dossier-ui-view-model.js';
 
 // Tone keys → the --delta-* tokens the skins define. Anything else gets no tone, so a model value can never inject CSS.
 const TONES = { good: 'var(--delta-good)', bad: 'var(--delta-danger)', ten: 'var(--dsk-ten)', aff: 'var(--aff)', des: 'var(--des)', held: 'var(--held)' };
@@ -57,16 +57,17 @@ export function boardTiles(model = {}, { userName = 'you', facesHtml = '' } = {}
             title: `${(last.title || 'With {{user}}').replace('{{user}}', userName)} · ${last.heading || 'Last change'}`,
             section: 'with',
             wide: true,
-            tone: moved.some(item => item.value < 0) ? 'bad' : (moved.length ? 'good' : ''),
+            // tension rising reads as bad, the other axes falling too (the same rule as the Recent changes list)
+            tone: moved.some(item => (item.axis === 'tension' ? item.value > 0 : item.value < 0)) ? 'bad' : (moved.length ? 'good' : ''),
             lead: moved.length ? moved.map(item => `${item.label} ${signed(item.value)}`).join(' · ') : '',
             big: moved.length ? '' : (last.hasChange ? '' : 'No change yet'),
-            lines: [last.gate, last.reason, last.when],
+            lines: [gateWords(last.gate), last.reason],
         },
         {
             title: tiles.mood?.title || 'Mood', wide: !tiles.pull, tone: 'ten', big: tiles.mood?.text || 'Unknown', bigClass: 'delta-tile-mood',
             bars: moodBarList(tiles.mood),
         },
-        tiles.pull ? { title: tiles.pull.title || 'Pull', big: tiles.pull.text, bigClass: 'delta-tile-mood', ring: { value: (tiles.pull.level / 3) * 100, text: '' }, note: tiles.pull.note } : null,
+        tiles.pull ? { title: tiles.pull.title || 'Pull', big: tiles.pull.text, bigClass: 'delta-tile-mood', ring: { value: (tiles.pull.level / 4) * 100, text: '' }, note: tiles.pull.note } : null,
         {
             // The place joins the title when the body is what she is doing, as the mockup reads: RIGHT NOW · NORTHERN RIDGE.
             title: `${now.title || 'Right now'}${now.doing && now.place ? ` · ${now.place}` : ''}`,
@@ -128,7 +129,7 @@ export function boardHtml(npc = {}, { refs = null, userName = 'you', peers = nul
     const profile = `<div class="delta-board-dial" role="button" tabindex="0" data-delta-screen="profile" aria-label="${esc(name)} profile">${dialHtml(npc, { refs })}</div>`;
     const nameBlock = `<div class="delta-board-name"><h3 class="delta-board-title">${esc(name)}</h3>`
         + (pills.length ? `<div class="delta-board-pills">${pills.map(pill => `<span class="delta-pill delta-pill-${pill.kind}">${esc(pill.text)}</span>`).join('')}</div>` : '')
-        + (identity ? `<p class="delta-muted">${esc(identity)}</p>` : '')
+        + `<p class="delta-muted">${esc([identity, `tap the portrait for ${possessiveWord(npc.gender, { lower: true })} profile`].filter(Boolean).join(' · '))}</p>`
         + (model.status ? `<p class="delta-board-status">${esc(model.status)}</p>` : '')
         + '</div>';
     // Desktop puts the dial and name in a pane of their own beside the tiles (the mockup's left pane); phone stacks them.

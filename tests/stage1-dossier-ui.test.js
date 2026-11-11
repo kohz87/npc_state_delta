@@ -123,7 +123,7 @@ test('Detail projection preserves editable fields and leaves flat current appear
 
 test('Stage 1 UI is a thin adapter over the existing runtime editor/settings owners', () => {
   assert.match(uiSource, /this\.api\.openEditor\(id\)/);
-  assert.match(uiSource, /Behavioural levers/);
+  assert.match(uiSource, /row\('Levers'/, 'the levers read as a label / value row in Character');
   assert.match(uiSource, /relationshipSummary/, 'the player dynamic reads in the With section');
   assert.match(uiSource, /\['Condition', escapeHtml\(plain\(npc\.status\)\)\]/);
   assert.match(uiSource, /currentCard\('Home base'/);
@@ -439,7 +439,9 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.equal(tiles.find(tile => tile.title === 'Mood').bars.length, 2);
   assert.equal(tiles.find(tile => tile.title === 'Mood').big, 'alarmed · tense');
   assert.equal(tiles.find(tile => tile.title === 'Pull').note, 'high · 2 days');
-  assert.match(boardHtml(npc, { userName: 'Astra' }), /3rd in 2 days · backfired/);
+  assert.match(boardHtml(npc, { userName: 'Astra' }), /praise, the 3rd time in 2 days, backfired/, 'the gate receipt in the mockup\'s words');
+  assert.doesNotMatch(boardHtml(npc, { userName: 'Astra' }), /Reply #3/, 'no stamp line under the change');
+  assert.match(boardHtml(npc, { userName: 'Astra' }), /tap the portrait for (?:her|his|their) profile/);
   const ties = sectionScreenHtml('ties', npc);
   assert.match(ties, />ally</); assert.match(ties, />owes</); assert.match(ties, />owed by</);
   assert.match(ties, /a lie you have not caught/);
@@ -531,11 +533,37 @@ test('round 2 fix 2-4: Right now in groups with three bars and Pull last, Recent
   assert.match(sectionScreenHtml('now', base, { reply: 5 }), /Updated at reply #3: mood, where\./);
   assert.doesNotMatch(sectionScreenHtml('now', { ...base, v2Meters: v2MetersProjection({ ...meters, mood: { ...meters.mood, cause: '' } }) }), /Moved by/, 'no cause, no group');
   const withHtml = sectionScreenHtml('with', { ...base, lastRelationshipChange: { impact: 'net', delta: { trust: 0, affection: 0, desire: 0, tension: 2 }, reason: '', turn: null, message: 3, hosted: true, event: { tier: 'meaningful', held: false, note: '', ask: [], date: 'Goldwane 21', gate: 'via praise · backfired' } } }, {});
-  assert.match(withHtml, /Recent changes[\s\S]*delta-chg-when">Goldwane 21<br><small>#3<\/small>[\s\S]*data-good="no">Tension \+2[\s\S]*via praise · backfired[\s\S]*Desire/);
+  assert.match(withHtml, /Recent changes[\s\S]*delta-chg-when">Goldwane 21<br><small>#3<\/small>[\s\S]*data-good="no">Tension \+2[\s\S]*via praise: it backfired[\s\S]*Desire/);
   assert.doesNotMatch(withHtml, /Last relationship change/);
   const ties = sectionScreenHtml('ties', base, {});
   assert.match(ties, /data-tone="bad"><span class="delta-bond-word">rival<\/span>/);
   assert.match(ties, /a lie you have not caught/, 'an uncaught lie never shows its words');
   const css = await builtCss();
   assert.doesNotMatch(css.match(/\.delta-bond-word \{[^}]*\}/g)?.join(' ') || '', /border:1px/, 'the relation word is plain coloured text, no pill');
+});
+
+test('round 2 fix 6-11: gate words, pronouns, the Pull ring at three quarters, tension rising is bad, a square-root dial, Character rows, one mood word', async () => {
+  const { gateWords, possessiveWord } = await import('../dossier-ui-view-model.js');
+  assert.equal(gateWords('via praise · 3rd in 2 days · backfired'), 'praise, the 3rd time in 2 days, backfired');
+  assert.equal(gateWords('via praise · 3rd in 2 days · backfired', { row: true }), 'via praise: the 3rd time in 2 days, so it backfired');
+  assert.equal(gateWords('via gift · less', { row: true }), 'via gift: it landed less');
+  assert.equal(gateWords('whatever was written'), 'whatever was written', 'text that does not parse stays as it was');
+  assert.deepEqual(['female', 'male', 'x'].map(g => possessiveWord(g, { lower: true })), ['her', 'his', 'their']);
+  const tiles = boardTiles({ tiles: { lastChange: { moved: [{ axis: 'tension', label: 'Tension', value: 2 }] }, pull: { text: 'Closure', level: 3, note: 'high' }, mood: { text: 'Calm' } } }, { userName: 'Astra' });
+  assert.equal(tiles[0].tone, 'bad', 'tension up reads as bad');
+  assert.equal(tiles.find(tile => tile.title === 'Pull').ring.value, 75, 'high is three quarters');
+  const sweep = value => { const arc = dialArcs({ trust: value }).find(a => a.axis === 'trust'); const [x, y] = arc.path.split('A')[1].split(' ').slice(-2).map(Number); return Math.round(Math.atan2(x - 120, 120 - y) * 180 / Math.PI); };
+  assert.equal(sweep(100), 90); assert.equal(sweep(25), 45); assert.ok(sweep(11) >= 28 && sweep(11) <= 32, 'about a third of the quadrant at +11');
+  const { dossierIndexProjection } = await import('../dossier-ui-model.js');
+  const { projectDossierState } = await import('../dossier-ui-catalog.js');
+  const state = { npcs: [{ id: 'r', name: 'Rika', mood: 'Cautious', bucket: 'active' }], meterViews: { r: { bars: [], mood: { word: 'Alarmed', bars: { energy: 5, control: 1, max: 6 }, cause: '' } } } };
+  assert.equal(projectDossierState(state).index[0].mood, 'Alarmed', 'the library says what the board says');
+  assert.ok(dossierIndexProjection);
+  const npc = { ...dossierDetailProjection({ id: 'r', name: 'Rika', personality: 'Proud', speech: 'Sharp', behaviorProfile: ['Bickers', 'Hides fear'] }, {}, {}), birthday: 'Emberwane 17', birthdaySource: 'established' };
+  const phone = dossierProfileHtml(npc, { layout: 'phone' });
+  const desktop = dossierProfileHtml(npc, { layout: 'desktop' });
+  assert.doesNotMatch(phone, /<h3>Identity<\/h3>/, 'no Identity heading on a phone'); assert.match(desktop, /<h3>Identity<\/h3>/);
+  assert.match(desktop, /<p>Proud<\/p><dl class="delta-kv delta-profile-kv"><dt>Speech<\/dt><dd>Sharp<\/dd><dt>Levers<\/dt><dd>Bickers; Hides fear<\/dd>/);
+  assert.doesNotMatch(desktop, /<h4>Personality|<h4>Speech/);
+  assert.match(desktop, /<span>Emberwane 17<small class="delta-continuity-source">Story established<\/small><\/span>/, 'the note is in the value column, not a cell of its own');
 });

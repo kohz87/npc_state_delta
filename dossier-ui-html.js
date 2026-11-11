@@ -106,7 +106,7 @@ export function changeSummaryHtml(npc, current = {}) {
 function birthdayCard(npc) {
     // (a generated birthday shows no source line: "deterministic fallback" is internal wording, not something to read on the profile)
     const source = npc.birthdaySource === 'established' ? 'Story established' : '';
-    return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday${changedMark(npc, 'birthDate')}</b><span>${escapeHtml(npc.birthday || 'Unknown')}</span>${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</div>`;
+    return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday${changedMark(npc, 'birthDate')}</b><span>${escapeHtml(npc.birthday || 'Unknown')}${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</span></div>`;   // the note sits in the value column, under the date, not in a cell of its own
 }
 
 export function appearanceFormsHtml(npc, { portraitRefs = null } = {}) {

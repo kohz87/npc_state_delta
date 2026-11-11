@@ -80,7 +80,7 @@ test('launcher remains direct-to-dossier and is presented as a circular 48px flo
 
 test('dossier library is a grid of tone-ringed faces; the old collapsible cast rail is gone', () => {
     const styles = fs.readFileSync(fileURLToPath(new URL('../dossier-ui-styles-board.js', import.meta.url)), 'utf8');
-    assert.match(styles, /\.delta-library-faces \{ display:grid; grid-template-columns:repeat\(auto-fill,minmax\(clamp\(150px,13cqw,220px\),1fr\)\)/);
+    assert.match(styles, /\.delta-library-faces \{ display:grid; grid-template-columns:repeat\(auto-fill,minmax\(clamp\(150px,17cqw,260px\),1fr\)\)/);
     assert.match(styles, /\.delta-library-av \{[^}]*box-shadow:0 0 0 2px var\(--dsk-tile\), 0 0 0 3\.5px var\(--rc\)/);
     assert.doesNotMatch(source, /delta-cast-card|delta-cast-rail-wrap|delta-rail-arrow|libraryCollapsed|ensureLibraryChrome/);
     assert.doesNotMatch(source, /delta-library-collapsed|data-delta-library-toggle/);

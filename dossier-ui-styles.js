@@ -54,7 +54,7 @@ export const STYLES = `
 #${ROOT_ID} .delta-topbar { flex:0 0 auto; min-height:56px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px 8px 16px; border-bottom:1px solid var(--delta-line); background:color-mix(in srgb,var(--delta-bg) 94%,black 6%); }
 #${ROOT_ID} .delta-brand, #${ROOT_ID} .delta-top-actions { display:flex; align-items:center; gap:10px; min-width:0; }
 #${ROOT_ID} .delta-brand strong { font-size:1.03rem; white-space:nowrap; }
-#${ROOT_ID} .delta-kicker { font-size:.67rem; line-height:1.2; letter-spacing:.14em; text-transform:uppercase; color:var(--delta-accent); opacity:.82; }
+#${ROOT_ID} .delta-kicker { font-size:var(--dt-kick); line-height:1.2; letter-spacing:.14em; text-transform:uppercase; color:var(--delta-accent); opacity:.82; }
 #${ROOT_ID} .delta-chat-state { display:inline-flex; padding:4px 9px; border:1px solid rgba(255,255,255,.1); border-radius:999px; color:var(--delta-muted); background:rgba(0,0,0,.16); font-size:.74rem; }
 #${ROOT_ID} .delta-btn {
   appearance:none; min-height:35px; padding:6px 11px; border:1px solid var(--delta-line); border-radius:8px;
@@ -72,6 +72,10 @@ export const STYLES = `
 #${ROOT_ID} .delta-document { min-width:0; min-height:0; overflow:auto; padding:0; overscroll-behavior:contain; scrollbar-color:rgba(218,193,148,.35) transparent; }
 #${ROOT_ID} .delta-section { margin:0 0 14px; padding:14px 15px; border:1px solid var(--ss-border, rgba(218,193,148,.14)); border-radius:var(--ss-radius-l, 10px); background:var(--delta-surface); }
 #${ROOT_ID} .delta-panel.ss-cards { margin:0; gap:0; }
+/* Story Suite draws everything in its roots at 80% (size.css zooms .ss-cards); the dossier is drawn at the size of the approved mockup (100%),
+   and the length rules that divide by --ss-zoomed (the launcher's full-screen size, the 44px tap areas) read 1 here. Outside Story Suite
+   neither is set and this changes nothing. To follow the suite's size again, delete this one rule. */
+#${ROOT_ID} .delta-panel.ss-cards { zoom:1; --ss-zoomed:1; }
 #${ROOT_ID} .delta-panel.ss-cards {
   /* UI 4c: the aliases are read where the tokens exist: inside the panel's ss-cards root (the root above is outside it). */
   --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
@@ -127,22 +131,22 @@ export const STYLES = `
 #${ROOT_ID} .delta-cast-badge { display:inline-block; margin-left:8px; font-family:var(--ss-font, system-ui, sans-serif); padding:1px 9px; border:1px solid rgba(160,130,255,.5); border-radius:999px; background:rgba(160,130,255,.18); color:#c9b8ff; font-size:.72rem; font-weight:600; line-height:1.4; vertical-align:middle; white-space:nowrap; }
 #${ROOT_ID} .delta-cast-from { display:grid; gap:6px; margin:10px 0; padding:12px 14px; border:1px solid rgba(160,130,255,.35); border-radius:12px; background:rgba(160,130,255,.08); font-size:.86rem; line-height:1.5; }
 #${ROOT_ID} .delta-cast-pin { justify-self:start; border-color:rgba(160,130,255,.6); }
-#${ROOT_ID} .delta-cast-pin-note { font-size:.78rem; }
-#${ROOT_ID} .delta-cast-from h5 { margin:0; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; opacity:.8; }
+#${ROOT_ID} .delta-cast-pin-note { font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-cast-from h5 { margin:0; font-size:var(--dt-kick); letter-spacing:.08em; text-transform:uppercase; opacity:.8; }
 #${ROOT_ID} .delta-key-star { color:#f5c84b; font-size:.85em; }
-#${ROOT_ID} .delta-secrets h3 .delta-secrets-count { margin-left:6px; color:var(--delta-muted); font-size:.74rem; font-weight:400; letter-spacing:0; text-transform:none; }
+#${ROOT_ID} .delta-secrets h3 .delta-secrets-count { margin-left:6px; color:var(--delta-muted); font-size:var(--dt-meta); font-weight:400; letter-spacing:0; text-transform:none; }
 #${ROOT_ID} .delta-secret { display:grid; gap:4px; padding:10px 0; border-top:1px solid rgba(218,193,148,.12); }
-#${ROOT_ID} .delta-secret p { margin:0; font-size:.86rem; line-height:1.5; }
+#${ROOT_ID} .delta-secret p { margin:0; font-size:var(--dt-body); line-height:1.5; }
 #${ROOT_ID} .delta-secret-head { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
-#${ROOT_ID} .delta-secret-pill { display:inline-flex; padding:1px 9px; border:1px solid rgba(216,188,120,.45); border-radius:999px; background:rgba(216,188,120,.12); color:var(--delta-accent-soft); font-size:.72rem; }
+#${ROOT_ID} .delta-secret-pill { display:inline-flex; padding:1px 9px; border:1px solid rgba(216,188,120,.45); border-radius:999px; background:rgba(216,188,120,.12); color:var(--delta-accent-soft); font-size:var(--dt-kick); }
 #${ROOT_ID} .delta-secret-bar { display:block; height:12px; border-radius:6px; background:repeating-linear-gradient(90deg,rgba(255,255,255,.14) 0 10px,rgba(255,255,255,.08) 10px 14px); }
-#${ROOT_ID} .delta-secret-when { color:var(--delta-muted); font-size:.76rem; }
-#${ROOT_ID} .delta-secrets-note { margin:6px 0 0; font-size:.76rem; }
-#${ROOT_ID} .delta-away { margin:10px 0; padding:12px 14px; border:1px solid rgba(120,170,255,.35); border-radius:12px; background:rgba(120,170,255,.08); font-size:.82rem; line-height:1.5; }
-#${ROOT_ID} .delta-away h5 { margin:0 0 6px; font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; opacity:.85; }
+#${ROOT_ID} .delta-secret-when { color:var(--delta-muted); font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-secrets-note { margin:6px 0 0; font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-away { margin:10px 0; padding:12px 14px; border:1px solid rgba(120,170,255,.35); border-radius:12px; background:rgba(120,170,255,.08); font-size:var(--dt-body); line-height:1.5; }
+#${ROOT_ID} .delta-away h5 { margin:0 0 6px; font-size:var(--dt-kick); letter-spacing:.08em; text-transform:uppercase; opacity:.85; }
 #${ROOT_ID} .delta-away p { margin:0 0 6px; }
 #${ROOT_ID} .delta-away ol { margin:0 0 6px; padding-left:18px; display:grid; gap:3px; }
-#${ROOT_ID} .delta-away .delta-away-note { margin:6px 0 0; font-size:.76rem; }
+#${ROOT_ID} .delta-away .delta-away-note { margin:6px 0 0; font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-status-dead { color:#efb8b8; background:rgba(111,54,60,.28); border-color:rgba(207,118,126,.28); }
 #${ROOT_ID} .delta-no-results { flex:1 1 auto; min-width:260px; display:grid; place-items:center; align-content:center; gap:3px; color:var(--delta-muted); text-align:center; }
 #${ROOT_ID} .delta-no-results b { color:var(--delta-text); }

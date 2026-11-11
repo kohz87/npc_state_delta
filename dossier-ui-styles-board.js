@@ -41,7 +41,7 @@ ${PANEL}[data-skin="modern"], ${PANEL}[data-skin="modern"] .delta-panel.ss-cards
 /* Library: faces ringed by tone (the face sets --rc inline), search above, key people first. */
 ${PANEL} .delta-library-search { display:flex; align-items:center; gap:8px; margin:12px 12px 0; min-height:36px; padding:0 10px; border:1px solid var(--delta-line); border-radius:10px; color:var(--delta-muted); font-size:var(--dt-body); }
 ${PANEL} .delta-library-search input { flex:1 1 auto; min-width:0; min-height:30px !important; padding:0; border:0; background:transparent; color:var(--delta-text); outline:none; }
-${PANEL} .delta-library-faces { display:grid; grid-template-columns:repeat(auto-fill,minmax(clamp(150px,13cqw,220px),1fr)); gap:clamp(8px,1.4cqw,16px); padding:clamp(10px,1.8cqw,18px); }
+${PANEL} .delta-library-faces { display:grid; grid-template-columns:repeat(auto-fill,minmax(clamp(150px,17cqw,260px),1fr)); gap:clamp(8px,1.4cqw,16px); padding:clamp(10px,1.8cqw,18px); }
 ${PANEL} .delta-library-face { --rc:var(--dial); display:grid; justify-items:center; align-content:start; gap:4px; width:100%; min-width:0; padding:14px 8px 12px; border:1px solid var(--delta-line); border-radius:14px; background:var(--dsk-tile); color:var(--delta-text); font:inherit; text-align:center; cursor:pointer; }
 ${PANEL} .delta-library-face.selected { outline:2px solid var(--delta-accent); outline-offset:-1px; }
 ${PANEL} .delta-library-av { display:block; width:clamp(56px,6.5cqw,92px); height:clamp(56px,6.5cqw,92px); margin-bottom:10px; overflow:hidden; border-radius:var(--dsk-face-radius); box-shadow:0 0 0 2px var(--dsk-tile), 0 0 0 3.5px var(--rc); }
@@ -49,7 +49,7 @@ ${PANEL} .delta-library-portrait { display:block; width:100%; height:100%; objec
 ${PANEL} .delta-library-portrait.delta-portrait-placeholder { display:grid; place-items:center; background:var(--face-flat); color:var(--delta-muted); font:700 clamp(15px,2.2cqw,26px)/1 var(--ss-font, system-ui, -apple-system, "Segoe UI", sans-serif); letter-spacing:.04em; }
 ${PANEL} .delta-tile-face.delta-portrait-placeholder { background:var(--face-flat); font-size:0; }
 ${PANEL} .delta-library-face > b { max-width:100%; color:var(--delta-accent-soft); overflow-wrap:anywhere; }
-${PANEL} .delta-library-meta { max-width:100%; font-size:var(--dt-meta); color:var(--delta-muted); overflow-wrap:anywhere; }
+${PANEL} .delta-library-meta { max-width:100%; font-size:var(--dt-meta); color:color-mix(in srgb, var(--delta-accent) 32%, var(--delta-muted)); overflow-wrap:anywhere; }
 
 /* Dial: the portrait <img> sits centred under the SVG ring. The SVG fills the box; its arcs take their colour from the attributes, the tracks and ticks from the skin. */
 ${PANEL} .dossier-dial { position:relative; width:min(clamp(210px,74cqw,440px),100%); aspect-ratio:1; margin:0 auto; }
@@ -86,27 +86,27 @@ ${PANEL} .delta-tile { --c:var(--delta-muted); display:grid; align-content:start
 ${PANEL} button.delta-tile { cursor:pointer; }
 ${PANEL} .delta-tile-wide { grid-column:span 2; }
 ${PANEL} .delta-tile-k { display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:var(--dt-kick); font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:color-mix(in srgb, var(--c) 72%, var(--delta-text)); }
-${PANEL} .delta-tile-arrow { font-size:12px; letter-spacing:0; color:var(--delta-muted); }
+${PANEL} .delta-tile-arrow { font-size:var(--dt-pill); letter-spacing:0; color:var(--delta-muted); }
 ${PANEL} .delta-tile-mood::first-letter { text-transform:uppercase; }
 ${PANEL} .delta-tile-lead { font-weight:700; }
 ${PANEL} .delta-tile-small { font-size:var(--dt-meta); color:var(--delta-muted); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 ${PANEL} .delta-tile-faces { display:flex; }
-${PANEL} .delta-tile-face-ring { width:24px; height:24px; margin-left:-6px; overflow:hidden; border:2px solid var(--dsk-tile); border-radius:50%; box-shadow:0 0 0 1.5px var(--r); background:var(--face-flat); }
+${PANEL} .delta-tile-face-ring { --fr:clamp(22px,1.6cqw + 12px,34px); width:var(--fr); height:var(--fr); margin-left:calc(var(--fr) / -4); overflow:hidden; border:2px solid var(--dsk-tile); border-radius:50%; box-shadow:0 0 0 1.5px var(--r); background:var(--face-flat); }
 ${PANEL} .delta-tile-face-ring:first-child { margin-left:0; }
 ${PANEL} .delta-tile-face { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 4%; }
 ${PANEL} .delta-tile-big { font-size:clamp(17px,.5cqw + 13px,22px); font-weight:700; line-height:1.15; color:var(--delta-accent-soft); overflow-wrap:anywhere; }
 ${PANEL} .delta-tile-row { display:flex; align-items:center; gap:8px; }
-${PANEL} .delta-tile-ring { --v:0; position:relative; display:grid; place-items:center; flex:none; width:40px; height:40px; border-radius:50%; background:conic-gradient(var(--c) calc(var(--v) * 1%), var(--dial) 0); }
+${PANEL} .delta-tile-ring { --v:0; position:relative; display:grid; place-items:center; flex:none; width:clamp(34px,3.4cqw + 20px,52px); height:clamp(34px,3.4cqw + 20px,52px); border-radius:50%; background:conic-gradient(var(--c) calc(var(--v) * 1%), var(--dial) 0); }
 ${PANEL} .delta-tile-ring::after { content:""; position:absolute; inset:5px; border-radius:50%; background:var(--dsk-tile); }
-${PANEL} .delta-tile-ring > span { position:relative; z-index:1; font-size:10px; font-weight:700; }
+${PANEL} .delta-tile-ring > span { position:relative; z-index:1; font-size:var(--dt-kick); font-weight:700; }
 
 /* mood bars, pull ring, ties initials and past dots (phase 2 data) */
 ${PANEL} .delta-tile-bars { display:grid; gap:5px; }
-${PANEL} .delta-tile-bar { display:grid; grid-template-columns:54px minmax(0,1fr); align-items:center; gap:8px; font-size:var(--dt-meta); color:var(--delta-muted); }
+${PANEL} .delta-tile-bar { display:grid; grid-template-columns:clamp(48px,5.6cqw,68px) minmax(0,1fr); align-items:center; gap:8px; font-size:var(--dt-meta); color:var(--delta-muted); }
 ${PANEL} .delta-tile-bar i { height:5px; border-radius:3px; background:var(--dial); overflow:hidden; }
 ${PANEL} .delta-tile-bar b { display:block; height:100%; border-radius:3px; background:var(--dsk-ten, var(--delta-accent)); }
 ${PANEL} .delta-tile-ring { --c:var(--held, var(--delta-warn)); }
-${PANEL} .delta-tile-faces .delta-tile-face.delta-tile-initials { display:grid; place-items:center; font-size:8px; line-height:1; letter-spacing:-.04em; overflow:hidden; font-weight:700; background:var(--face-flat); color:var(--delta-text); transform:none; }
+${PANEL} .delta-tile-faces .delta-tile-face.delta-tile-initials { display:grid; place-items:center; font-size:clamp(7px,.2cqw + 6px,9px); line-height:1; letter-spacing:-.04em; overflow:hidden; font-weight:700; background:var(--face-flat); color:var(--delta-text); transform:none; }
 ${PANEL} .delta-tile-dots { display:flex; align-items:center; gap:0; margin:2px 0; }
 ${PANEL} .delta-tile-dots i, ${PANEL} .delta-timeline i { flex:none; width:9px; height:9px; border-radius:50%; background:var(--des, #b7a3cf); }
 ${PANEL} .delta-tile-dots i + i { margin-left:14px; }
