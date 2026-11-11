@@ -1,7 +1,9 @@
 // The NPC meter prompt line, tail and redaction. A pure part of npc-meters.js (same owner, moved without change);
 // npc-meters.js re-exports every public name it exported before. Never imports npc-meters.js.
-import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_PRESETS, RECENT_MESSAGES, SECRET_TEXT_MAX, TAIL_SECRETS_PER_NPC, isInt, clean, bandWord } from './npc-meters-config.js';
+import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_GATE, FEATURE_PRESETS, RECENT_MESSAGES, SECRET_TEXT_MAX, TAIL_SECRETS_PER_NPC, isInt, clean, bandWord } from './npc-meters-config.js';
 import { meterValue } from './npc-meters-slice.js';
+import { APPROACH_KINDS, gateCue } from '../npc-meters-gate.js';
+import { readEvent } from './npc-meters-pacing.js';
 
 export function createNpcPrompt({
     call, hooks, storedSettings, tierCaps, tierAllowance, featureOn, defsFrom, setupFor, rungsFor, rulesFor,
@@ -23,8 +25,10 @@ export function createNpcPrompt({
         const caps = tierCaps();
         const custom = settings.custom.map(def => `, ${def.id} (${def.min}..${def.max})`).join('');
         const base = `NPC meters: ${BUILT_IN_METERS.map(def => def.id).join(', ')} (-100..100)${custom}. When the scene changes how someone feels: ~ npc Name | meter: +N, -N or =N. Code clamps each meter, moves it at most ${settings.changeCap} a reply and sets the stages; never write a stage.${caps ? ` Add | impact: ordinary (a kind word, most moments) | meaningful (a real favour, a shared secret) | major (saved from danger, a betrayal) | extreme (a life-changing turning point, very rare). Most moments are ordinary${majorPerDay()}. The most a move can be: ${IMPACT_TIERS.map(tier => caps[tier]).join('/')}; =N moves toward N; none given: ordinary.` : ''}`;
+        // Behind the anti-lever feature only (off: the line is as it was): the optional approach label.
+        const via = featureOn(FEATURE_GATE) ? ` Add | via: ${APPROACH_KINDS.join(', ')} when the move is one of those approaches; the same approach to the same person again soon gives less, then backfires.` : '';
         const rules = featureOn(FEATURE_PRESETS) ? settings.custom.filter(def => def.describe).map(def => `${def.id} ${def.describe}`) : [];
-        return rules.length ? `${base} Meter rules: ${rules.join('; ')}.` : base;
+        return rules.length ? `${base}${via} Meter rules: ${rules.join('; ')}.` : `${base}${via}`;
     }
 
     // How far a locked note is from opening (smaller is nearer): its meter's gap, else a story event's fixed middle.
@@ -61,13 +65,19 @@ export function createNpcPrompt({
         const moved = [];
         const notes = [];
         const hidden = [];
+        const cues = [];
         let order = 0;
         for (const key of Object.keys(npcs).sort()) {
             if (!here.has(key)) continue;
             const record = npcs[key];
             // Where the window's reply was (its index, kept beside a record ID).
             const where = isInt(record.turn?.at) ? record.turn.at : record.turn?.reply;
-            if (isInt(where) && where >= length - RECENT_MESSAGES) {
+            const recent = isInt(where) && where >= length - RECENT_MESSAGES;
+            // The gate's cue: only while this reply's own story line fired it (the last event is the reply's), one short line, optional.
+            const event = recent && featureOn(FEATURE_GATE) ? readEvent(record.lastEvent) : null;
+            const fired = event && event.at === record.turn?.reply ? event.events.findLast(item => item.gate) : null;
+            if (fired) cues.push(gateCue({ mode: fired.gate.mode, via: fired.via, name: record.name }));
+            if (recent) {
                 const parts = defs.map(def => {
                     const stage = record.stages?.[def.id];
                     const value = meterValue(record, def);
@@ -96,7 +106,7 @@ export function createNpcPrompt({
         if (moved.length) lines.push(`NPC meters now: ${moved.join('; ')}.`);
         hidden.sort((a, b) => a.distance - b.distance || a.order - b.order);
         // The wording rides on the nearest note (the host drops the farthest first, so it stays while any note does).
-        const optional = hidden.map((item, i) => (i ? item.short : `${HIDDEN_ONCE}\n${item.short}`));
+        const optional = [...cues, ...hidden.map((item, i) => (i ? item.short : `${HIDDEN_ONCE}\n${item.short}`))];
         return { lines: [...lines, ...notes], optional };
     }
 

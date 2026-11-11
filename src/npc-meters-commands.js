@@ -3,7 +3,8 @@
 import { storyMinuteText } from '../calendar.js';
 import { isAway, labelKey, labelsOf, normalizeKeyPeople } from './key-people.js';
 import { normalizeCast } from './cast-dossier.js';
-import { NPC_DOMAIN, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
+import { normalizeApproachKind } from '../npc-meters-gate.js';
+import { NPC_DOMAIN, FEATURE_GATE, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence } from './npc-meters-slice.js';
 
 export function createNpcCommands({
@@ -30,10 +31,13 @@ export function createNpcCommands({
         const changes = [];
         let disposition;
         let tier = 'ordinary';
+        let via = null;
         for (const [label, raw] of Object.entries(isObject(line.labels) ? line.labels : {})) {
             const key = slug(label);
             if (REASON_LABELS.has(key)) continue;
             if (key === 'impact' && !byLabel.has(key)) { tier = tierOf(raw); continue; }
+            // The anti-lever approach label (a feature, off: "not a meter" as before); an unknown word is no approach, quietly.
+            if (key === 'via' && !byLabel.has(key) && featureOn(FEATURE_GATE, ctx)) { via = normalizeApproachKind(String(raw ?? '').trim().toLowerCase()); continue; }
             if (key === 'stage' || key === 'stages') { problems.push(`Stages are set by code from the meters; "stage: ${clean(raw, 60)}" was not used.`); continue; }
             if (key === 'disposition') { disposition = clean(raw, DISPOSITION_MAX); continue; }
             const def = byLabel.get(key);
@@ -46,7 +50,7 @@ export function createNpcCommands({
         // index an older one had is its own reply, with its own cap.
         const at = isInt(ctx.carrier?.index) ? ctx.carrier.index : null;
         const reply = replyKey(ctx.carrier?.sid, at);
-        return run(ctx, { label: line.name, changes, problems, limit: true, reply, at, disposition, allowEmpty: line.op === '+', impact: tierCaps() ? { tier, caps: tierCaps() } : null, story: true });
+        return run(ctx, { label: line.name, changes, problems, limit: true, reply, at, disposition, via, allowEmpty: line.op === '+', impact: tierCaps() ? { tier, caps: tierCaps() } : null, story: true });
     }
 
     // ---- commands (cause ui from Delta itself; capture is the story's) ----
