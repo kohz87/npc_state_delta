@@ -32,11 +32,13 @@ export function v2MetersProjection(view) {
 const int = (value, min, max, fallback = 0) => Math.max(min, Math.min(max, Number.isFinite(Number(value)) ? Math.round(Number(value)) : fallback));
 const list = (value, cap) => (Array.isArray(value) ? value.filter(item => item && typeof item === 'object').slice(0, cap) : []);
 
-// Mood (feature mood-pull): the word, the Energy and Control bars (steps of max) and what moved it. Null without a mood.
+// Mood (feature mood-pull): the word, the Feeling, Energy and Control bars (steps of max) and what moved it. Null without a mood.
 function moodProjection(mood) {
     if (!mood || typeof mood !== 'object' || !plain(mood.word)) return null;
     const max = int(mood.bars?.max, 1, 12, 6);
-    return { word: plain(mood.word), energy: int(mood.bars?.energy, 0, max), control: int(mood.bars?.control, 0, max), max, cause: plain(mood.cause).slice(0, 120) };
+    // Feeling is the valence (-3 unpleasant .. 3 pleasant) as a step of max like the other two; without one it rests in the middle.
+    const feeling = Number.isFinite(Number(mood.valence)) ? int(Number(mood.valence) + max / 2, 0, max) : Math.round(max / 2);
+    return { word: plain(mood.word), feeling, energy: int(mood.bars?.energy, 0, max), control: int(mood.bars?.control, 0, max), max, cause: plain(mood.cause).slice(0, 120) };
 }
 
 // Pull (feature mood-pull): the instinct, its strength 1..3, what causes it and for how many days. Null without one.

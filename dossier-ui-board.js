@@ -13,6 +13,8 @@ const signed = value => `${value > 0 ? '+' : ''}${value}`;
 
 // The Energy and Control bars of the Mood tile (the Board tile and the Right now section draw the same two bars).
 export const moodBarList = mood => (mood?.max ? [{ label: 'Energy', value: mood.energy, max: mood.max }, { label: 'Control', value: mood.control, max: mood.max }] : null);
+// Right now draws all three: Feeling too, spanning the full row.
+export const moodBarList3 = mood => (mood?.max ? [{ label: 'Feeling', value: mood.feeling, max: mood.max }, ...moodBarList(mood)] : null);
 export const barsHtml = bars => `<span class="delta-tile-bars">${bars.map(bar => `<span class="delta-tile-bar"><span>${esc(bar.label)}</span><i><b style="width:${percent((bar.value / (bar.max || 1)) * 100)}%"></b></i></span>`).join('')}</span>`;
 
 // One tile. Fields (all optional except title): title, section, tone, wide, big, lines[], note, ring{value,text}.

@@ -20,6 +20,7 @@ import { libraryFaceHtml, libraryFootHtml, librarySearchHtml } from '../dossier-
 import { createPortraitRefs } from '../dossier-ui-html.js';
 import { dialArcs, dialSvg } from '../dossier-ui-dial.js';
 import { dossierMenuHtml } from '../dossier-ui-header.js';
+import { v2MetersProjection } from '../dossier-ui-meters.js';
 import { dossierProfileHtml } from '../dossier-ui-profile.js';
 import { SECTION_KEYS, createScreenState, escapeAction, goBack, layoutFor, openNpc, openSection, parseScreen, screenSignature, setSection, showScreen, stepSection, swipeStep } from '../dossier-ui-screens.js';
 import { sectionHeaderHtml, sectionScreenHtml } from '../dossier-ui-sections.js';
@@ -124,7 +125,7 @@ test('Stage 1 UI is a thin adapter over the existing runtime editor/settings own
   assert.match(uiSource, /this\.api\.openEditor\(id\)/);
   assert.match(uiSource, /Behavioural levers/);
   assert.match(uiSource, /relationshipSummary/, 'the player dynamic reads in the With section');
-  assert.match(uiSource, /\['Condition', plain\(npc\.status\)\]/);
+  assert.match(uiSource, /\['Condition', escapeHtml\(plain\(npc\.status\)\)\]/);
   assert.match(uiSource, /currentCard\('Home base'/);
   assert.doesNotMatch(uiSource, /proseHtml\(selected\.appearance\)/, 'resolved flat appearance must not be rendered beside the form model');
   assert.match(uiSource, /npc_state_delta_settings/);
@@ -498,8 +499,8 @@ test('fix 3: two-letter initials, mood bars in Right now, flat profile rows in t
   assert.equal(initialsOf('Marrit'), 'M');
   assert.match(portraitHtml({ name: 'Sister Temiwa' }, 'x'), /<span>ST<\/span>/);
   const now = sectionScreenHtml('now', { id: 'n', name: 'Marrit', mood: 'Cautious' });
-  assert.match(now, /Cautious<span class="delta-tile-bars">[\s\S]*Energy[\s\S]*Control/, 'Mood: the word and both bars, at rest as well');
-  assert.match(sectionScreenHtml('now', { id: 'n', name: 'Marrit' }), /<dt>Mood<\/dt><dd>[^<]+<span class="delta-tile-bars">/, 'also with no mood word at all');
+  assert.match(now, /<dt>Mood<\/dt><dd><b>Cautious<\/b><\/dd>[\s\S]*delta-now-bars[\s\S]*Feeling[\s\S]*Energy[\s\S]*Control/, 'Mood: the word and the three bars across the row, at rest as well');
+  assert.match(sectionScreenHtml('now', { id: 'n', name: 'Marrit' }), /<dt>Mood<\/dt><dd><b>[^<]+<\/b><\/dd>[\s\S]*delta-now-bars/, 'also with no mood word at all');
   const npc = { ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), appearanceModel: { overallAppearance: 'Freckled', appearanceForms: [{ name: 'Mage', appearance: 'Singed coat' }], currentForm: 'Mage' }, mannerisms: ['Ties off bandages'], personality: 'Proud', background: 'Frostbite', birthdaySource: 'generated' };
   const html = dossierProfileHtml(npc, { layout: 'desktop' });
   assert.match(html, /<dt>Look<\/dt><dd>Freckled<\/dd><dt>Wearing<\/dt><dd>Singed coat<\/dd><dt>Habits<\/dt><dd>Ties off bandages<\/dd>/);
@@ -513,4 +514,28 @@ test('fix 3: two-letter initials, mood bars in Right now, flat profile rows in t
   const css = await builtCss();
   assert.match(css, /--dt-meta:clamp\(/, 'type flows with the panel width');
   assert.doesNotMatch(css.match(/@media \(max-width: 900px\)/)?.[0] || '', /./, 'the sheet and the launcher agree on the full-screen line (1100)');
+});
+
+test('round 2 fix 2-4: Right now in groups with three bars and Pull last, Recent changes list, plain coloured tie words', async () => {
+  const meters = { mood: { word: 'Alarmed', valence: -2, bars: { energy: 5, control: 2, max: 6 }, cause: 'trust dropped: Astra lied' }, pull: { kind: 'closure', level: 3, days: 0, cause: 'an open thread' },
+    secrets: [], bars: [], notes: { ties: [{ name: 'Bregje', tags: ['rival'] }], lies: [{ hidden: true, day: 5 }], knows: [], tastes: [], drives: [] } };
+  const base = { ...dossierDetailProjection({ id: 'r', name: 'Rika', location: 'Deck', goal: 'Pay the crew', status: 'Tense', keyRelationships: ['Bregje: rival | clashes'],
+    fieldChanges: { mood: 3, location: 3 }, fieldChangeMessages: { mood: 3, location: 3 }, relationshipEventHistory: [{ impact: 'ordinary', reason: 'a gift', evidence: { desire: 'toffee' }, message: 1 }] }, {}, {}), v2Meters: v2MetersProjection(meters) };
+  const now = sectionScreenHtml('now', base, { reply: 3 });
+  assert.match(now, /<b>Alarmed<\/b> · unpleasant, keyed-up/, 'the word with the bars\' plain words');
+  assert.equal((now.match(/delta-tile-bar"/g) || []).length, 3, 'Feeling, Energy, Control');
+  assert.ok(now.indexOf('Moved by') < now.indexOf('Where and what') && now.indexOf('<dt>Goal</dt>') < now.indexOf('<dt>Pull'), 'groups in order, Pull last');
+  assert.match(now, /trust dropped: Astra lied/);
+  assert.match(now, /<dt>Pull <span class="delta-new-badge">New<\/span><\/dt><dd><b>Closure<\/b> · an open thread/);
+  assert.match(now, /Updated this reply \(#3\): mood, where\./);
+  assert.match(sectionScreenHtml('now', base, { reply: 5 }), /Updated at reply #3: mood, where\./);
+  assert.doesNotMatch(sectionScreenHtml('now', { ...base, v2Meters: v2MetersProjection({ ...meters, mood: { ...meters.mood, cause: '' } }) }), /Moved by/, 'no cause, no group');
+  const withHtml = sectionScreenHtml('with', { ...base, lastRelationshipChange: { impact: 'net', delta: { trust: 0, affection: 0, desire: 0, tension: 2 }, reason: '', turn: null, message: 3, hosted: true, event: { tier: 'meaningful', held: false, note: '', ask: [], date: 'Goldwane 21', gate: 'via praise · backfired' } } }, {});
+  assert.match(withHtml, /Recent changes[\s\S]*delta-chg-when">Goldwane 21<br><small>#3<\/small>[\s\S]*data-good="no">Tension \+2[\s\S]*via praise · backfired[\s\S]*Desire/);
+  assert.doesNotMatch(withHtml, /Last relationship change/);
+  const ties = sectionScreenHtml('ties', base, {});
+  assert.match(ties, /data-tone="bad"><span class="delta-bond-word">rival<\/span>/);
+  assert.match(ties, /a lie you have not caught/, 'an uncaught lie never shows its words');
+  const css = await builtCss();
+  assert.doesNotMatch(css.match(/\.delta-bond-word \{[^}]*\}/g)?.join(' ') || '', /border:1px/, 'the relation word is plain coloured text, no pill');
 });

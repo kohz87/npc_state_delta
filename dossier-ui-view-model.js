@@ -137,9 +137,18 @@ function secretsModel(npc) {
 // bar steps; a person with none yet shows the scanner's word (or the resting word) with both bars at the middle step.
 export function moodTile(npc) {
     const mood = object(npc.v2Meters).mood;
-    if (mood) return { title: 'Mood', text: mood.word, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause };
+    if (mood) return { title: 'Mood', text: mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause };
     const rest = moodBars(null);
-    return { title: 'Mood', text: plain(npc.mood) || moodWord(null), energy: rest.energy, control: rest.control, max: rest.max };
+    return { title: 'Mood', text: plain(npc.mood) || moodWord(null), feeling: rest.max / 2, energy: rest.energy, control: rest.control, max: rest.max };
+}
+
+// The few plain words under the mood word, from the three bars (a step 0..max, the middle is neutral): only a bar well off the
+// middle (two steps or more, the code's band edge) speaks: unpleasant / pleasant, slack / keyed-up, cornered / in control.
+export function moodDescriptors(mood) {
+    if (!mood?.max) return [];
+    const mid = mood.max / 2;
+    const word = (value, low, high) => (value <= mid - 2 ? low : (value >= mid + 2 ? high : ''));
+    return [word(mood.feeling, 'unpleasant', 'pleasant'), word(mood.energy, 'slack', 'keyed-up'), word(mood.control, 'cornered', 'in control')].filter(Boolean);
 }
 
 // Pull: the instinct word with a strength ring and "high · 2 days". Null (no tile) without one.
@@ -150,7 +159,7 @@ export function pullTile(npc) {
     const pull = object(npc.v2Meters).pull;
     if (!pull) return null;
     const days = pull.days === 1 ? '1 day' : `${pull.days} days`;
-    return { title: 'Pull', text: pullWord(pull.kind), level: pull.level, note: `${[STRENGTH[pull.level], days].filter(Boolean).join(' · ')}`, cause: pull.cause };
+    return { title: 'Pull', text: pullWord(pull.kind), level: pull.level, note: `${[STRENGTH[pull.level], days].filter(Boolean).join(' · ')}`, cause: pull.cause, fresh: pull.days === 0 };
 }
 
 // The board: the dial's four arcs, name and status, and one tile per section. Pull is null until its data exists (phase 2).

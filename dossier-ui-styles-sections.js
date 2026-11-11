@@ -63,10 +63,6 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-affection .delta-sheet-track b { background:#d99aaa; }
 #${ROOT_ID} .delta-sheet-desire .delta-sheet-track b { background:#b7a3cf; }
 #${ROOT_ID} .delta-sheet-tension .delta-sheet-track b { background:var(--dsk-ten, #d9a273); }
-#${ROOT_ID} .delta-sheet-recent .delta-list { margin:4px 0 0; padding:0; list-style:none; display:grid; gap:6px; }
-#${ROOT_ID} .delta-sheet-recent li { display:flex; flex-wrap:wrap; gap:4px 8px; padding-top:6px; border-top:1px solid var(--delta-line); font-size:var(--dt-body); overflow-wrap:anywhere; }
-#${ROOT_ID} .delta-sheet-when { font-size:11px; color:var(--delta-muted); }
-#${ROOT_ID} .delta-sheet-impact { font-size:10.5px; font-weight:700; text-transform:uppercase; color:var(--delta-accent); }
 
 /* pills (board): the key and mood kinds take the gold and warm tones */
 #${ROOT_ID} .delta-pill-key { color:var(--delta-warn); }
@@ -152,17 +148,36 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-track b { border-radius:3px; }
 #${ROOT_ID} .delta-sheet-meter { grid-template-columns:70px minmax(0,1fr) 34px; font-size:13px; }
 #${ROOT_ID} .delta-sheet-meter > span { color:var(--delta-text); }
-#${ROOT_ID} .delta-sheet-recent li { display:grid; grid-template-columns:78px minmax(0,1fr); gap:2px 10px; }
-#${ROOT_ID} .delta-sheet-recent li > .delta-sheet-impact { grid-column:2; grid-row:1; color:var(--c); }
-#${ROOT_ID} .delta-sheet-recent li > .delta-sheet-when { grid-column:1; grid-row:1 / span 2; }
-#${ROOT_ID} .delta-sheet-recent li > span:last-child { grid-column:2; color:var(--delta-muted); }
 #${ROOT_ID} .delta-secret-bar { height:12px; border-radius:3px; background:#0b0a0c; background-image:none; }
 /* Ties: the relation word leads the name, the dynamic sits under */
 #${ROOT_ID} .delta-bond { grid-template-columns:auto minmax(0,1fr); align-items:baseline; gap:2px 8px; }
-#${ROOT_ID} .delta-bond-word { grid-column:1; grid-row:1; text-align:left; font-size:11px; letter-spacing:.06em; text-transform:uppercase; }
-#${ROOT_ID} .delta-bond > b { grid-column:2; grid-row:1; font-size:15px; }
+#${ROOT_ID} .delta-bond-word { display:inline; grid-column:1; grid-row:1; padding:0; border:0; border-radius:0; text-align:left; font-size:var(--dt-kick); letter-spacing:.06em; text-transform:uppercase; }
+#${ROOT_ID} .delta-bond > b { grid-column:2; grid-row:1; font-size:clamp(14px,.5cqw + 12px,17px); }
 #${ROOT_ID} .delta-bond > p { color:var(--delta-text); }
 @container dsr (max-width: ${TWO_PANE_MIN - 0.02}px) { #${ROOT_ID} .delta-section-screen::before { content:""; display:block; width:36px; height:4px; margin:8px auto 0; border-radius:2px; background:var(--dial); } }
+
+/* Right now: the three bars run the full row; headings and the Pull badge as the mockup draws them */
+#${ROOT_ID} .delta-now { gap:clamp(8px,1.1cqw,13px); }
+#${ROOT_ID} .delta-now .delta-kv { grid-template-columns:clamp(60px,7cqw,92px) minmax(0,1fr); gap:clamp(5px,.7cqw,9px) clamp(10px,1.2cqw,16px); }
+#${ROOT_ID} .delta-now .delta-kv dd b { font-weight:700; }
+#${ROOT_ID} .delta-now-bars .delta-tile-bars { gap:clamp(6px,.8cqw,10px); }
+#${ROOT_ID} .delta-now-bars .delta-tile-bar { grid-template-columns:clamp(54px,7cqw,84px) minmax(0,1fr); font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-now-bars .delta-tile-bar i { height:clamp(5px,.5cqw,7px); }
+#${ROOT_ID} .delta-now-moved { margin:0; font-size:var(--dt-body); }
+#${ROOT_ID} .delta-now-updated { margin:0; font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-new-badge { display:inline-block; padding:0 .45em; border-radius:4px; font-size:var(--dt-kick); font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--good, var(--delta-good)); background:color-mix(in srgb, var(--good, var(--delta-good)) 18%, transparent); }
+
+/* With {{user}}: the Recent changes list, a date and reply column, the coloured change and its "via" line */
+#${ROOT_ID} .delta-sheet-recent .delta-list { margin:0; padding:0; list-style:none; display:grid; gap:0; }
+#${ROOT_ID} .delta-chg { display:grid; grid-template-columns:clamp(66px,9cqw,104px) minmax(0,1fr); gap:clamp(8px,1.2cqw,16px); padding:clamp(8px,1cqw,12px) 0; border-top:1px solid var(--delta-line); }
+#${ROOT_ID} .delta-chg:first-child { border-top:1px solid var(--delta-line); }
+#${ROOT_ID} .delta-chg-when { font-size:var(--dt-meta); color:var(--delta-muted); }
+#${ROOT_ID} .delta-chg-when small { font-size:var(--dt-kick); }
+#${ROOT_ID} .delta-chg > div { min-width:0; display:grid; gap:2px; align-content:start; overflow-wrap:anywhere; }
+#${ROOT_ID} .delta-chg-d[data-good="yes"] { color:var(--good, var(--delta-good)); }
+#${ROOT_ID} .delta-chg-d[data-good="no"] { color:var(--bad, var(--delta-danger)); }
+#${ROOT_ID} .delta-chg-d[data-good="muted"] { color:var(--delta-text); }
+#${ROOT_ID} .delta-chg-via { font-size:var(--dt-meta); color:var(--delta-muted); }
 
 /* profile as the mockup draws it: flat label/value rows, small coloured headings */
 #${ROOT_ID} .delta-profile-block { border-top:0; padding-top:0; }

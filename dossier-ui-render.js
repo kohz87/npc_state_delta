@@ -135,7 +135,7 @@ export class DossierUiRender extends DossierUiPanel {
         const scroll = doc.dataset.screenKey === key ? (doc.querySelector('.delta-panes')?.scrollTop || 0) : 0;
         const layout = layoutFor(screen, { phone });
         const board = pane('board', boardHtml(npc, { refs, userName: userName || 'you', peers }));
-        const section = () => pane('section', sectionScreenHtml(SECTION_KEYS[screen.section], npc, { userName }));
+        const section = () => pane('section', sectionScreenHtml(SECTION_KEYS[screen.section], npc, { userName, reply: this.projection.reply }));
         let html;
         if (screen.name === 'profile') html = pane('profile', dossierProfileHtml(npc, { layout: phone ? 'phone' : 'desktop', portraitRefs: refs }));
         else if (screen.name === 'section') html = phone ? section() : board + section();
