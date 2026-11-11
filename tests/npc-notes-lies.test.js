@@ -103,7 +103,15 @@ test('catchLie: stamps the latest uncaught lie to the person and returns the tru
     const list = readLies(res.text);
     assert.deepEqual(list[1].caught, { day: 5, r: 'r7' });
     assert.equal(list[0].caught, undefined);
-    assert.deepEqual(res.change, { changes: [{ meter: 'trust', mode: 'add', value: -6 }], impact: { tier: 'meaningful' } });
+    assert.deepEqual(res.change, { changes: [{ meter: 'trust', mode: 'add', value: -6 }], impact: { tier: 'extreme' } });
+});
+
+test('the caught-lie tier is one source: the kinds file re-exports the lies file\'s extreme tier', async () => {
+    const kinds = await import('../src/npc-notes-kinds.js');
+    const lies = await import('../src/npc-notes-lies.js');
+    assert.equal(lies.CAUGHT_TIER, 'extreme');
+    assert.equal(kinds.CAUGHT_TIER, lies.CAUGHT_TIER);
+    assert.equal(kinds.CAUGHT_DROP, lies.CAUGHT_DROP);
 });
 
 test('catchLie: matches by the words said, ignoring case, and skips lies already caught', () => {
@@ -127,7 +135,7 @@ test('catchLie: no match, no key, or an unusable tier or drop gives null', () =>
 test('catchLie: the tier and the drop are parameters', () => {
     const res = catchLie(one().text, { to: 'Astra', day: 2, r: 'c', tier: 'major', drop: 9 });
     assert.deepEqual(res.change, { changes: [{ meter: 'trust', mode: 'add', value: -9 }], impact: { tier: 'major' } });
-    assert.deepEqual(caughtChange(), { changes: [{ meter: 'trust', mode: 'add', value: -6 }], impact: { tier: 'meaningful' } });
+    assert.deepEqual(caughtChange(), { changes: [{ meter: 'trust', mode: 'add', value: -6 }], impact: { tier: 'extreme' } });
 });
 
 test('lieTail: the latest uncaught lie as one hidden line, or empty', () => {
@@ -141,7 +149,14 @@ test('lieTail: the latest uncaught lie as one hidden line, or empty', () => {
 
 test('lieRows: uncaught rows are hidden and their words are redacted by default', () => {
     const rows = lieRows(one().text);
-    assert.deepEqual(rows, [{ id: 'r1:Astra:I didn\'t sell a spell.', to: 'Astra', said: null, day: 3, hidden: true, caught: null }]);
+    assert.deepEqual(rows, [{ id: 'lie-0', to: 'Astra', said: null, day: 3, hidden: true, caught: null }]);
+});
+
+test('lieRows: a redacted row carries neither the words nor an id that embeds them', () => {
+    const [row] = lieRows(one().text);
+    assert.equal(row.said, null);
+    assert.doesNotMatch(JSON.stringify(row), /sell a spell/);
+    assert.match(row.id, /^lie-\d+$/);
 });
 
 test('lieRows: redact false shows the words of uncaught rows too', () => {

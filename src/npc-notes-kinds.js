@@ -7,7 +7,7 @@
 // record fields these kinds own; validateNotes(record) checks them; notesTail(record, ctx) builds the optional tail lines.
 // Pure: no storage, never imports npc-meters.js.
 import { FEATURE_NOTES, npcKey } from './npc-meters-config.js';
-import { readLies, addLie, catchLie, lieTail, lieRows, caughtSummary } from './npc-notes-lies.js';
+import { readLies, addLie, catchLie, lieTail, lieRows, caughtSummary, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-lies.js';
 import { readKnows, addKnow, openKnow, knowsTail, knowsView, KNOWS_MAX, KNOWS_TEXT_MAX } from './npc-notes-knows.js';
 import { readTastes, addTaste, tastesText, tasteTail, TASTE_LIMITS } from './npc-notes-tastes.js';
 import { readTies, applyTags, tiesText, tiesView, tagsFromRelation, owedBy } from './npc-notes-ties.js';
@@ -20,8 +20,8 @@ export const NOTES_TAIL_PER_NPC = 2;
 export const NOTES_TAIL_MAX = 4;
 // A caught lie costs about six trust (owner decision); only the extreme tier's cap lets a step that big land, and it is counted
 // in that tier's events per story day.
-export const CAUGHT_TIER = 'extreme';
-export const CAUGHT_DROP = 6;
+// (Both live in npc-notes-lies.js, the one source.)
+export { CAUGHT_TIER, CAUGHT_DROP };
 
 const NO_NOTES = Object.freeze({ run() {}, flag() {} });
 

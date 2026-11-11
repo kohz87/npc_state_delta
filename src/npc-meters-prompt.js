@@ -136,7 +136,13 @@ export function createNpcPrompt({
         const optional = [...cues, ...hidden.map((item, i) => (i ? item.short : `${HIDDEN_ONCE}\n${item.short}`))];
         if (featureOn(FEATURE_MOOD_PULL)) optional.push(...moodPullLines(npcs, here));
         // Notes (npc-notes-kinds.js): at most two lines a person and four in all, after the meters, opened notes and mood (optional).
-        if (featureOn(FEATURE_NOTES)) optional.push(...notesTail(npcs, { present: Object.keys(npcs).sort().filter(key => here.has(key)) }));
+        if (featureOn(FEATURE_NOTES)) {
+            const noted = notesTail(npcs, { present: Object.keys(npcs).sort().filter(key => here.has(key)) });
+            // A secret note line (a lie told) with no locked meter note before it carries the (hidden) wording itself.
+            const first = hidden.length ? -1 : noted.findIndex(line => / \(hidden\): /.test(line));
+            if (first >= 0) noted[first] = `${HIDDEN_ONCE}\n${noted[first]}`;
+            optional.push(...noted);
+        }
         return { lines: [...lines, ...notes], optional };
     }
 

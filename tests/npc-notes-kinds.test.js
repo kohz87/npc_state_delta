@@ -58,7 +58,7 @@ test('runKind lie catch: stamps the uncaught lie, runs the trust drop at the mea
     assert.equal(out.problem, '');
     assert.equal(JSON.parse(out.text)[0].caught.r, 'r2');
     assert.deepEqual(notes.calls, [
-        ['run', { changes: [{ meter: 'trust', mode: 'add', value: -6 }], impact: { tier: 'meaningful' } }],
+        ['run', { changes: [{ meter: 'trust', mode: 'add', value: -6 }], impact: { tier: 'extreme' } }],
         ['flag', 'Rika: caught in a lie to Astra.', undefined],
     ]);
 });
@@ -177,7 +177,7 @@ test('notes host: the record fields are the kinds file\'s NOTE_FIELDS, and a lie
     await s.setDay(1);
     await s.say(['~ lie Oren | to: Astra | said: I never sold the spell']);
     assert.equal(JSON.parse(oren(s).lies).length, 1);
-    assert.ok(optional(s).some(line => /^Oren \(hidden\): told Astra "I never sold the spell"/.test(line)), JSON.stringify(optional(s)));
+    assert.ok(optional(s).some(line => /(^|\n)Oren \(hidden\): told Astra "I never sold the spell"/.test(line)), JSON.stringify(optional(s)));
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
     assert.equal((await cast(s)).notes.lies[0].said, null, 'the player\'s view of an uncaught lie has no words of it');
 });
@@ -204,7 +204,7 @@ test('notes host: know lines of one reply are kept together, a secret reads as h
     assert.equal(JSON.parse(oren(s).knows).length, 2);
     assert.equal((await cast(s)).notes.knows.find(item => item.about === 'Astra').hidden, true);
     assert.doesNotMatch(JSON.stringify((await cast(s)).notes), /gate-logs/);
-    assert.ok(optional(s).some(line => /^Oren \(hidden\): knows Astra's copies the gate-logs/.test(line)));
+    assert.ok(optional(s).some(line => /(^|\n)Oren \(hidden\): knows Astra's copies the gate-logs/.test(line)));
     await s.say(['~ know Oren | about: Astra | fact: copies the gate-logs | told: yes']);
     assert.equal((await cast(s)).notes.knows.find(item => item.about === 'Astra').hidden, false);
     const before = oren(s).knows;
@@ -354,5 +354,42 @@ test('notes host: a refused look reaches npc.flag as a Problem, written once; th
     await s.adapter.flag({ name: 'Oren', drift, reply: head() });
     assert.equal(count(), once, 'the same text is not written twice');
     assert.equal(await s.adapter.flag({ name: 'Oren', drift: { before: 'Grey hair.', incoming: 'grey hair' }, reply: head() }), null, 'the same look sends nothing');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('notes host (review fixes): npc.cast hides an uncaught lie\'s words and id; the lie tail line carries the (hidden) wording when no locked meter note does; a caught lie held by the day\'s allowance is still recorded as caught', async () => {
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ lie Oren | to: Astra | said: I never sold the spell']);
+    const lies = (await cast(s)).notes.lies;
+    assert.equal(lies.length, 1);
+    assert.doesNotMatch(JSON.stringify(lies), /never sold/);
+    const lines = optional(s);
+    const at = lines.findIndex(line => /\nOren \(hidden\): told Astra/.test(line));
+    assert.ok(at >= 0, JSON.stringify(lines));
+    assert.match(lines[at], /^Lines marked \(hidden\) are secrets: never state or reveal them/);
+    const held = await suite({ allowance: { ordinary: 0, meaningful: 0, major: 0, extreme: 0 }, features: ON });
+    await held.setDay(1);
+    await held.say(['~ npc Oren | trust: +1']);
+    await held.say(['~ lie Oren | to: Astra | said: I never sold the spell']);
+    const trust = held.npc('Oren').meters.trust;
+    await held.say(['~ lie Oren | to: Astra | caught: yes']);
+    assert.ok(JSON.parse(oren(held).lies)[0].caught, 'the player caught it, so it is recorded as caught even when the day holds the drop');
+    assert.equal(held.npc('Oren').meters.trust, trust, 'the allowance held the trust drop');
+});
+
+test('notes host (review fix 5/9): a swipe of the reply whose scan sent npc.flag takes back the look stamp and the Problem', async () => {
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.say(['~ npc Oren | trust: +1']);
+    const head = () => s.host.store.headIndex();
+    await s.adapter.flag({ name: 'Oren', lock: true, reply: head() });
+    await s.adapter.flag({ name: 'Oren', drift: { before: 'Grey hair, grey eyes.', incoming: 'Black hair.' }, reply: head() });
+    assert.ok(oren(s).lookLockedAt, 'stamped');
+    assert.ok((s.host.head().domains.npc.problems ?? []).some(item => /Look drift refused/.test(item?.text ?? '')), 'flagged');
+    await s.swipe(['~ npc Oren | trust: +1']);
+    assert.equal(oren(s).lookLockedAt, undefined, 'the swiped reply\'s stamp is gone');
+    assert.ok(!(s.host.head().domains.npc.problems ?? []).some(item => /Look drift refused/.test(item?.text ?? '')), 'and its Problem');
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });

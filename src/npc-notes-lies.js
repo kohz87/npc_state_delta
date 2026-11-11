@@ -8,7 +8,8 @@ export const LIES_MAX = 6;
 export const LIE_TO_MAX = 40;
 export const LIE_SAID_MAX = 120;
 export const LIES_TEXT_MAX = 3200;
-export const CAUGHT_TIER = 'meaningful';
+// The owner's decision (10 Nov): a caught lie is an extreme-tier trust drop of 6. The one place it is written; npc-notes-kinds.js re-exports it.
+export const CAUGHT_TIER = 'extreme';
 export const CAUGHT_DROP = 6;
 const TIERS = ['ordinary', 'meaningful', 'major', 'extreme'];
 const ID_MAX = 200;
@@ -77,7 +78,7 @@ export function addLie(prior, { to, said, day = null, r } = {}) {
 
 /**
  * The meter change a caught lie makes, for run(): trust down by `drop` at `tier` (both are the owner's settings; the defaults
- * are CAUGHT_TIER and CAUGHT_DROP, not yet chosen by the owner).
+ * are CAUGHT_TIER and CAUGHT_DROP, the owner's decision).
  */
 export function caughtChange(tier = CAUGHT_TIER, drop = CAUGHT_DROP) {
     return { changes: [{ meter: 'trust', mode: 'add', value: -drop }], impact: { tier } };
@@ -124,12 +125,14 @@ export function lieTail(name, stored) {
  * hidden" without the words; `redact: false` shows the words of every row.
  */
 export function lieRows(stored, { redact = true } = {}) {
-    return listOf(stored).map(item => {
+    return listOf(stored).map((item, i) => {
         const hidden = !item.caught;
+        const secret = hidden && redact;
         return {
-            id: item.id,
+            // The stored id embeds the words, so a redacted row gets an opaque place number instead.
+            id: secret ? `lie-${i}` : item.id,
             to: item.to,
-            said: hidden && redact ? null : item.said,
+            said: secret ? null : item.said,
             day: item.day,
             hidden,
             caught: item.caught ? { ...item.caught } : null,
