@@ -158,8 +158,8 @@ Generated 2026-11-07.
 - `core-profile-finalize.js`: Applies planned Personality/Speech development to an NPC record at the end of a merge (`finalizeProfileDevelopment`) split from `core.js`.
 - `core-text.js`: Scan text and JSON helpers: evidence and UI-noise stripping, scanner JSON repair, narration-capture reading and the `clean*` helpers split from `core-mechanics.js`.
 - `destructive-settlement-core.js`: Narrative fingerprints and lineage, first divergence, settlement check and the controller primitives used by `destructive-settlement.js`.
-- `hardening-core.js`: Pure lifecycle primitives: owner-scoped settings keys, canonical ownership moves, live/deleted chat-key resolution and rename-state checks used by `hardening.js` and `runtime-chat-keys.js`.
-- `hardening.js`: Installs the host lifecycle listeners (character rename and delete, chat events) once via `prepareNpcStateHardening`, with bounded retries and recovery records.
+- `hardening-core.js`: Pure lifecycle primitives: owner-scoped settings keys, canonical ownership moves, live/deleted chat-key resolution and rename-state checks used by `hardening.js`, `runtime-chat-keys.js` and `runtime-lifecycle.js`.
+- `hardening.js`: Installs the character rename and delete listeners once via `prepareNpcStateHardening`: moves or retires the owner's chat sidecars with verified writes, recovery copies and bounded retries, sets the branch provenance hint and cleans up queued recovery garbage at startup.
 - `relationship-map-core.js`: Pure relationship-map layout, selection, bond and lens rules over the dossier projection (no DOM or host access).
 - `runtime-branch.js`: Branch tracking: a chat's checkpoint and lineage, host swipe state, dossiers inherited from an explicit parent, and the stale-host mark, via `createBranchPart` split from `index.js`.
 - `runtime-cast-sync.js`: Makes a dossier from a Story Director cast entry and applies its pack picture when Story Block answers, via `createCastSyncPart` split from `index.js`.
