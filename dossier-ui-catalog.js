@@ -125,7 +125,7 @@ function eventDetails(event) {
     const tier = ['ordinary', 'meaningful', 'major', 'extreme'].includes(event.tier) ? event.tier : null;
     if (!tier) return null;
     const ask = Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(event.ask?.[axis]) || 0)]).filter(([, value]) => value !== 0));
-    return { tier, held: event.held === true, note: plain(event.note).slice(0, 120), ask, date: plain(event.date).slice(0, 40) };
+    return { tier, held: event.held === true, note: plain(event.note).slice(0, 120), ask, date: plain(event.date).slice(0, 40), ...(plain(event.gate) ? { gate: plain(event.gate).slice(0, 80) } : {}) };
 }
 
 function ownRelationshipChange(stored, net) {

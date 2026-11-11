@@ -40,11 +40,24 @@ function identityBody(npc) {
         + `</div>`;
 }
 
+// Tastes (likes, dislikes and who or what they come from) and Drives (the instinct strengths): only with data (feature notes).
+function tastesBody(notes) {
+    if (!notes?.tastes?.length) return '';
+    return block('tastes', 'Tastes', `<ul class="delta-tastes">${notes.tastes.map(row => `<li><span class="delta-taste-sign" aria-label="${row.sign === '-' ? 'dislikes' : 'likes'}">${row.sign === '-' ? '✕' : '♥'}</span><b>${escapeHtml(row.item)}</b>${row.from || row.mirrored ? `<span class="delta-muted">${escapeHtml([row.from, row.mirrored ? 'echoes you' : ''].filter(Boolean).join(' · '))}</span>` : ''}</li>`).join('')}</ul>`);
+}
+
+function drivesBody(notes) {
+    if (!notes?.drives?.length) return '';
+    return block('drives', 'Drives', `<div class="delta-drives">${notes.drives.map(row => `<div class="delta-drive"><span>${escapeHtml(row.label)}</span><i title="${escapeHtml(row.word)}"><b style="width:${Math.round((row.strength / 3) * 100)}%"></b></i></div>`).join('')}</div>`);
+}
+
 function appearanceBody(npc, portraitRefs) {
     if (!npc.appearanceModel || typeof npc.appearanceModel !== 'object') {
         return '<p class="delta-muted">No appearance established yet.</p>';
     }
-    return appearanceFormsHtml(npc, { portraitRefs });
+    const locked = npc.v2Meters?.notes?.look;
+    const note = locked ? `<p class="delta-muted delta-look-lock">🔒 The look was set ${Number.isInteger(locked.day) ? `on day ${locked.day}` : 'when first seen'} and stays as it was; changes need an edit or a story event.</p>` : '';
+    return note + appearanceFormsHtml(npc, { portraitRefs });
 }
 
 function characterBody(npc) {
@@ -81,11 +94,13 @@ export function dossierProfileHtml(npc = {}, { layout = 'phone', portraitRefs = 
     const identity = block('identity', 'Identity', identityBody(npc));
     const appearance = block('appearance', 'Appearance', appearanceBody(npc, portraitRefs));
     const character = block('character', 'Character', characterBody(npc));
+    const notes = npc.v2Meters?.notes;
+    const tastes = tastesBody(notes) + drivesBody(notes);
     const background = block('background', 'Background', proseHtml(npc.background));
     const body = desktop
         ? `<div class="delta-profile-cols"><div class="delta-profile-col">${identity}${appearance}</div>`
-            + `<div class="delta-profile-col">${character}${background}</div></div>`
-        : `${identity}${appearance}${character}${background}`;
+            + `<div class="delta-profile-col">${character}${tastes}${background}</div></div>`
+        : `${identity}${appearance}${character}${tastes}${background}`;
     return `<div class="delta-profile delta-profile-${desktop ? 'desktop' : 'phone'}" data-delta-screen-body="profile">`
         + `${portraitBlock(npc, portraitRefs, desktop)}<div class="delta-profile-sheet">${headBlock(npc, desktop)}${body}</div></div>`;
 }

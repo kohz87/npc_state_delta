@@ -413,3 +413,45 @@ test('the library face shows the mood (the dossier status when archived), the fo
   assert.match(libraryFootHtml(10), /data-delta-screen="library"[^>]*>▸ Dossier library · 10 NPCs/);
   assert.match(librarySearchHtml('', 10), /placeholder="Search 10 people…"/);
 });
+
+test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and secrets, tastes, drives, look note; none without data', async () => {
+  const { v2MetersProjection } = await import('../dossier-ui-meters.js');
+  const { sectionScreenHtml } = await import('../dossier-ui-sections.js');
+  const { dossierProfileHtml } = await import('../dossier-ui-profile.js');
+  const meters = v2MetersProjection({
+    bars: [], rank: '', next: '', milestones: [], secrets: [],
+    mood: { word: 'alarmed · tense', bars: { energy: 5, control: 1, max: 6 }, cause: 'trust dropped: Astra lied' },
+    pull: { kind: 'closure', level: 3, days: 2, cause: 'an open thread' },
+    notes: {
+      lies: [{ hidden: false, to: 'Astra', said: 'I sold nothing', day: 3, caught: { day: 4 } }, { hidden: true, said: 'SECRET WORDS', to: 'Astra', day: 5 }],
+      knows: [{ about: 'X', how: 'saw', day: 2, secret: true, hidden: true, text: 'a secret about X · hidden' }, { about: 'Y', how: 'heard', day: 3, text: 'Y owes a debt', secret: false, hidden: false }],
+      tastes: [{ sign: '+', item: 'toffee', from: 'barge crews' }, { sign: '-', item: 'paperwork', mirrored: true }],
+      ties: [{ name: 'Temiwa', tags: ['ally'] }, { name: 'Vane', tags: ['owes'] }, { name: 'Bregje', tags: [], owedBy: true }],
+      drives: [{ label: 'Conflict', strength: 3, word: 'high' }], look: { day: 3 },
+    },
+  });
+  const npc = {
+    id: 'r', name: 'Rika', mood: 'old', v2Meters: meters, memories: ['m1'],
+    relationship: { trust: 1, affection: 0, desire: 0, tension: 0 },
+    keyRelationships: ['Temiwa: friend | kind', 'Vane: colleague | covered her', 'Bregje: colleague | clerk'],
+    lastRelationshipChange: { impact: 'net', delta: { trust: 0, affection: 0, desire: 0, tension: 2 }, reason: '', hosted: true, message: 3, event: { tier: 'meaningful', held: false, note: '', ask: {}, date: '', gate: 'via praise · 3rd in 2 days · backfired' } },
+  };
+  const tiles = boardTiles(boardModel(npc), { userName: 'Astra' });
+  assert.equal(tiles.find(tile => tile.title === 'Mood').bars.length, 2);
+  assert.equal(tiles.find(tile => tile.title === 'Mood').big, 'alarmed · tense');
+  assert.equal(tiles.find(tile => tile.title === 'Pull').note, 'high · 2 days');
+  assert.match(boardHtml(npc, { userName: 'Astra' }), /3rd in 2 days · backfired/);
+  const ties = sectionScreenHtml('ties', npc);
+  assert.match(ties, />ally</); assert.match(ties, />owes</); assert.match(ties, />owed by</);
+  assert.match(ties, /a lie you have not caught/);
+  assert.doesNotMatch(ties, /SECRET WORDS|a secret about/);
+  assert.match(ties, /I sold nothing/); assert.match(ties, /Y owes a debt/);
+  assert.match(sectionScreenHtml('now', npc), /trust dropped: Astra lied/);
+  const profile = dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: meters }, { layout: 'phone' });
+  assert.match(profile, /toffee/); assert.match(profile, /Conflict/); assert.match(profile, /look was set on day 3/);
+  const bare = { ...npc, v2Meters: v2MetersProjection({ bars: [], secrets: [] }) };
+  const none = boardTiles(boardModel(bare), { userName: 'Astra' });
+  assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
+  assert.doesNotMatch(sectionScreenHtml('ties', bare), /Lies told|Knows about/);
+  assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /Tastes|Drives|look was set/);
+});

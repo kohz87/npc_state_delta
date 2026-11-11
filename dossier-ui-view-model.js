@@ -1,7 +1,7 @@
 /* NPC State Delta dossier surface: the phase-1 board's view model (data only, no HTML) and the bond-tone / library-ring helpers. The section screens read the projection directly. */
 import { changeStamp, plain, RELATIONSHIP_AXES, relationshipValue, stringList } from './dossier-ui-model.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
-import { bondTone as bondToneOf } from './dossier-ui-bond-tone.js';
+import { bondTone as bondToneOf, tieTone } from './dossier-ui-bond-tone.js';
 
 // Tile titles for the two sections the board names. The label "{{user}}" is kept literal here; the renderer substitutes the player's name.
 const SECTION_TITLES = Object.freeze({
@@ -40,6 +40,7 @@ function eventModel(event) {
         note: plain(source.note),
         ask,
         date: plain(source.date),
+        gate: plain(source.gate),
     };
 }
 
@@ -59,6 +60,7 @@ function changeModel(change) {
         legacy: stamp.legacy,
         hosted: source.hosted === true,
         event,
+        gate: event?.gate || '',
         hasChange: moved.length > 0 || Boolean(plain(source.reason)) || event !== null,
     };
 }
@@ -82,6 +84,10 @@ function rightNowModel(npc) {
     };
 }
 
+function tagTone(tags) {
+    return boardTone(tieTone(tags) || 'neutral') === 'grey' ? '' : boardTone(tieTone(tags));
+}
+
 function tiesModel(npc) {
     const entries = stringList(npc.keyRelationships, 12).map(text => {
         const parsed = parseKeyRelationshipEntry(text);
@@ -92,8 +98,11 @@ function tiesModel(npc) {
             dynamic: parsed?.dynamic ?? '',
         };
     });
-    const faces = entries.slice(0, 3).map(entry => ({ name: entry.name, tone: bondTone(entry.relation) }));
-    return { count: entries.length, names: faces.map(face => face.name), faces, entries };
+    // Tie tags (feature notes) tint a face by the bond: rival red, owes gold, ally green; else the relation word's tone.
+    const tagged = new Map(object(npc.v2Meters).notes?.ties?.map(row => [String(row.name).toLowerCase(), row.tags]) ?? []);
+    const faces = entries.slice(0, 3).map(entry => ({ name: entry.name, tone: tagTone(tagged.get(entry.name.toLowerCase())) || bondTone(entry.relation) }));
+    const lies = object(npc.v2Meters).notes?.lies?.length ?? 0;
+    return { count: entries.length, names: faces.map(face => face.name), faces, entries, lies };
 }
 
 function pastModel(npc) {
@@ -101,6 +110,8 @@ function pastModel(npc) {
     return {
         count: memories.length,
         latest: memories.length ? memories[memories.length - 1] : '',
+        // One dot per remembered thing (violet); a lie told is gold and something known blue (feature notes). At most 5.
+        dots: [...memories.map(() => 'mem'), ...(object(npc.v2Meters).notes?.lies ?? []).map(() => 'lie'), ...(object(npc.v2Meters).notes?.knows ?? []).map(() => 'know')].slice(0, 5),
         memories,
         background: plain(npc.background),
     };
@@ -119,6 +130,23 @@ function secretsModel(npc) {
         lastOpen: open ? plain(notes.filter(note => note?.state === 'open').pop().title) : '',
         notes,
     };
+}
+
+// Mood: the meters' word with the Energy and Control bars when the feature has a mood, else the scanner's mood word.
+function moodTile(npc) {
+    const mood = object(npc.v2Meters).mood;
+    return mood ? { title: 'Mood', text: mood.word, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause } : { title: 'Mood', text: plain(npc.mood) };
+}
+
+// Pull: the instinct word with a strength ring and "high · 2 days". Null (no tile) without one.
+const PULL_WORDS = ['Belonging', 'Closure', 'Awe'];
+export const pullWord = kind => PULL_WORDS.find(word => word.toLowerCase() === kind) || '';
+const STRENGTH = ['', 'low', 'medium', 'high'];
+export function pullTile(npc) {
+    const pull = object(npc.v2Meters).pull;
+    if (!pull) return null;
+    const days = pull.days === 1 ? '1 day' : `${pull.days} days`;
+    return { title: 'Pull', text: pullWord(pull.kind), level: pull.level, note: `${[STRENGTH[pull.level], days].filter(Boolean).join(' · ')}`, cause: pull.cause };
 }
 
 // The board: the dial's four arcs, name and status, and one tile per section. Pull is null until its data exists (phase 2).
@@ -140,12 +168,12 @@ export function boardModel(npc = {}) {
         keyHere: key.here === true,
         dial: dialAxesModel(source.relationship),
         tiles: {
-            lastChange: { title: SECTION_TITLES.with, heading: 'Last change', hasChange: last.hasChange, moved: last.moved, reason: last.reason, when: last.when },
-            mood: { title: 'Mood', text: plain(source.mood) },
-            pull: null,
+            lastChange: { title: SECTION_TITLES.with, heading: 'Last change', hasChange: last.hasChange, moved: last.moved, reason: last.reason, gate: last.gate, when: last.when },
+            mood: moodTile(source),
+            pull: pullTile(source),
             rightNow: { title: SECTION_TITLES.now, ...(({ place, doing, summary }) => ({ place, doing, summary }))(rightNowModel(source)) },
-            ties: { title: 'Ties', count: ties.count, names: ties.names, faces: ties.faces },
-            past: { title: 'Past', count: past.count, latest: past.latest },
+            ties: { title: 'Ties', count: ties.count, names: ties.names, faces: ties.faces, lies: ties.lies },
+            past: { title: 'Past', count: past.count, latest: past.latest, dots: past.dots },
             secrets: { title: 'Secrets', total: secrets.total, open: secrets.open, next: secrets.next, lastOpen: secrets.lastOpen },
         },
     };

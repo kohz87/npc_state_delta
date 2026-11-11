@@ -175,7 +175,7 @@ export function noteLine(kind, labels, { current = '', r = null, day = null } = 
 }
 
 /**
- * What the dossier shows of a record's notes: { lies, knows, tastes, ties, drives } as plain rows. A lie the story has not caught and a
+ * What the dossier shows of a record's notes: { lies, knows, tastes, ties, drives, look } as plain rows (`look`: the locked-look stamp { day, r } or null). A lie the story has not caught and a
  * secret it has not told are redacted (no words of them) unless `show`; `bonds` are the person's bond strings (ties rows follow them).
  */
 export function dossierNotes(record, { bonds = null, show = false } = {}) {
@@ -186,6 +186,7 @@ export function dossierNotes(record, { bonds = null, show = false } = {}) {
         tastes: readTastes(source.tastes).map(({ sign, item, from, mirrored }) => ({ sign, item, from: from ?? '', mirrored: mirrored === true })),
         ties: Array.isArray(bonds) ? tieRows(readTies(source.ties) ?? {}, bonds, []) : (readTies(source.ties) ?? {}),
         drives: driveRows(readDrives(source.drives) ?? undefined),
+        look: readLookStamp(source.lookLockedAt),
     };
 }
 

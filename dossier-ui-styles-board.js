@@ -95,6 +95,19 @@ ${PANEL} .delta-tile-ring { --v:0; position:relative; display:grid; place-items:
 ${PANEL} .delta-tile-ring::after { content:""; position:absolute; inset:5px; border-radius:50%; background:var(--dsk-tile); }
 ${PANEL} .delta-tile-ring > span { position:relative; z-index:1; font-size:10px; font-weight:700; }
 
+/* mood bars, pull ring, ties initials and past dots (phase 2 data) */
+${PANEL} .delta-tile-bars { display:grid; gap:5px; }
+${PANEL} .delta-tile-bar { display:grid; grid-template-columns:54px minmax(0,1fr); align-items:center; gap:8px; font-size:11.5px; color:var(--delta-muted); }
+${PANEL} .delta-tile-bar i { height:5px; border-radius:3px; background:var(--dial); overflow:hidden; }
+${PANEL} .delta-tile-bar b { display:block; height:100%; border-radius:3px; background:var(--dsk-ten, var(--delta-accent)); }
+${PANEL} .delta-tile-ring { --c:var(--held, var(--delta-warn)); }
+${PANEL} .delta-tile-faces .delta-tile-face.delta-tile-initials { display:grid; place-items:center; font-size:8px; line-height:1; letter-spacing:-.04em; overflow:hidden; font-weight:700; background:var(--face-flat); color:var(--delta-text); transform:none; }
+${PANEL} .delta-tile-dots { display:flex; align-items:center; gap:0; margin:2px 0; }
+${PANEL} .delta-tile-dots i, ${PANEL} .delta-timeline i { flex:none; width:9px; height:9px; border-radius:50%; background:var(--des, #b7a3cf); }
+${PANEL} .delta-tile-dots i + i { margin-left:14px; }
+${PANEL} .delta-tile-dots i.delta-dot-lie, ${PANEL} .delta-timeline i.delta-dot-lie { background:var(--held, #d9b85c); }
+${PANEL} .delta-tile-dots i.delta-dot-know { background:var(--trust, #8fb4d9); }
+
 /* the library bar under every other screen */
 ${PANEL} .delta-library-foot { position:sticky; bottom:0; display:block; width:100%; padding:8px 12px; border:0; border-top:1px solid var(--delta-line); background:var(--delta-floor); color:var(--delta-muted); font:inherit; font-size:10.5px; font-weight:700; letter-spacing:.12em; text-align:left; text-transform:uppercase; cursor:pointer; }
 

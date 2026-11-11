@@ -161,4 +161,22 @@ export const SECTIONS_STYLES = `
 
 /* the Fantasy look frames the profile portrait; Neutral and Modern keep it plain */
 #${ROOT_ID}[data-skin="fantasy"] .delta-profile-portrait { border-radius:4px; box-shadow:0 0 0 1px var(--delta-line), 0 0 0 4px var(--delta-floor), 0 0 0 5px var(--delta-line); }
+
+/* phase 2: lies told / knows about others, the Past timeline, tastes, drives, the look lock, the gate wording */
+#${ROOT_ID} .delta-notes-block h4 { margin:10px 0 2px; font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--held, var(--delta-warn)); }
+#${ROOT_ID} .delta-notes-block[data-notes="knows"] h4 { color:var(--trust, var(--delta-accent-soft)); }
+#${ROOT_ID} .delta-note-row { display:grid; gap:2px; margin:6px 0; }
+#${ROOT_ID} .delta-note-row > span { font-size:12px; color:var(--delta-muted); }
+#${ROOT_ID} .delta-timeline { position:relative; }
+#${ROOT_ID} .delta-timeline li, #${ROOT_ID} .delta-timeline li:first-child { position:relative; padding:0 0 4px 22px; border-top:0; }
+#${ROOT_ID} .delta-timeline li > i { position:absolute; left:0; top:.45em; }
+#${ROOT_ID} .delta-timeline::before { content:""; position:absolute; left:4px; top:8px; bottom:8px; width:1px; background:var(--delta-line); }
+#${ROOT_ID} .delta-tastes { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+#${ROOT_ID} .delta-tastes li { display:grid; grid-template-columns:22px minmax(0,1fr); column-gap:6px; }
+#${ROOT_ID} .delta-tastes li > .delta-muted { grid-column:2; font-size:12px; }
+#${ROOT_ID} .delta-taste-sign { color:var(--trust, var(--delta-accent-soft)); }
+#${ROOT_ID} .delta-drive { display:grid; grid-template-columns:90px minmax(0,1fr); align-items:center; gap:8px; font-size:12px; color:var(--delta-muted); }
+#${ROOT_ID} .delta-drive i { height:5px; border-radius:3px; background:var(--dial); overflow:hidden; }
+#${ROOT_ID} .delta-drive b { display:block; height:100%; background:var(--trust, var(--delta-accent)); }
+#${ROOT_ID} .delta-rel-gate { margin:0; color:var(--delta-danger); font-size:12.5px; }
 `;

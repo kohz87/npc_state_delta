@@ -23,6 +23,8 @@ export function boardTileHtml(tile = {}) {
     const body = [
         tile.big ? `<span class="delta-tile-big${tile.bigClass ? ` ${tile.bigClass}` : ''}">${esc(tile.big)}</span>` : '',
         tile.faces || '',
+        tile.bars ? `<span class="delta-tile-bars">${tile.bars.map(bar => `<span class="delta-tile-bar"><span>${esc(bar.label)}</span><i><b style="width:${percent((bar.value / (bar.max || 1)) * 100)}%"></b></i></span>`).join('')}</span>` : '',
+        tile.dots?.length ? `<span class="delta-tile-dots">${tile.dots.map(kind => `<i class="delta-dot-${/^(mem|lie|know)$/.test(kind) ? kind : 'mem'}"></i>`).join('')}</span>` : '',
         ...lines,
         tile.ring ? `<span class="delta-tile-row"><span class="delta-tile-ring" style="--v:${percent(tile.ring.value)}"><span>${esc(tile.ring.text)}</span></span>${tile.note ? `<span class="delta-muted">${esc(tile.note)}</span>` : ''}</span>` : (tile.note ? `<span class="delta-muted">${esc(tile.note)}</span>` : ''),
     ].join('');
@@ -52,10 +54,13 @@ export function boardTiles(model = {}, { userName = 'you', facesHtml = '' } = {}
             tone: moved.some(item => item.value < 0) ? 'bad' : (moved.length ? 'good' : ''),
             lead: moved.length ? moved.map(item => `${item.label} ${signed(item.value)}`).join(' · ') : '',
             big: moved.length ? '' : (last.hasChange ? '' : 'No change yet'),
-            lines: [last.reason, last.when],
+            lines: [last.gate, last.reason, last.when],
         },
-        { title: tiles.mood?.title || 'Mood', wide: !tiles.pull, tone: 'ten', big: tiles.mood?.text || 'Unknown', bigClass: 'delta-tile-mood' },
-        tiles.pull ? { title: tiles.pull.title || 'Pull', big: tiles.pull.text } : null,
+        {
+            title: tiles.mood?.title || 'Mood', wide: !tiles.pull, tone: 'ten', big: tiles.mood?.text || 'Unknown', bigClass: 'delta-tile-mood',
+            bars: tiles.mood?.max ? [{ label: 'Energy', value: tiles.mood.energy, max: tiles.mood.max }, { label: 'Control', value: tiles.mood.control, max: tiles.mood.max }] : null,
+        },
+        tiles.pull ? { title: tiles.pull.title || 'Pull', big: tiles.pull.text, bigClass: 'delta-tile-mood', ring: { value: (tiles.pull.level / 3) * 100, text: '' }, note: tiles.pull.note } : null,
         {
             // The place joins the title when the body is what she is doing, as the mockup reads: RIGHT NOW · NORTHERN RIDGE.
             title: `${now.title || 'Right now'}${now.doing && now.place ? ` · ${now.place}` : ''}`,
@@ -70,13 +75,14 @@ export function boardTiles(model = {}, { userName = 'you', facesHtml = '' } = {}
             tone: 'aff',
             faces: facesHtml,
             small: true,
-            lines: [ties.count ? `${ties.count} · ${(ties.names || []).join(', ')}` : 'None established yet'],
+            lines: [ties.count ? `${ties.count}${ties.lies ? ` · ${ties.lies} ${ties.lies === 1 ? 'lie' : 'lies'}` : ''} · ${(ties.names || []).join(', ')}` : 'None established yet'],
         },
         {
             title: `${past.title || 'Past'}${past.count ? ` · ${past.count}` : ''}`,
             section: 'past',
             tone: 'des',
             small: true,
+            dots: past.dots,
             lines: [past.latest || 'Nothing remembered yet'],
         },
         {
@@ -91,12 +97,14 @@ export function boardTiles(model = {}, { userName = 'you', facesHtml = '' } = {}
     return sets.filter(Boolean);
 }
 
+export const initialsOf = name => String(name ?? '').split(/\s+/).filter(Boolean).slice(0, 2).map(word => [...word][0].toUpperCase()).join('');
+
 // The faces of the Ties tile: up to three people ringed by the bond tone, with their portrait when they have a dossier of their own
 // (`peers`: lower-cased name -> portrait). A person with no portrait shows the plain disc.
 function tieFacesHtml(faces = [], { peers = null, refs = null } = {}) {
     if (!faces.length) return '';
     const ring = { good: 'var(--good)', bad: 'var(--bad)', gold: 'var(--held)' };
-    return `<span class="delta-tile-faces">${faces.map(face => `<span class="delta-tile-face-ring" style="--r:${ring[face.tone] || 'var(--dial)'}" title="${esc(face.name)}">${portraitHtml({ name: face.name, portrait: peers?.get(String(face.name).toLowerCase()) || '' }, 'delta-tile-face', { alt: false, refs })}</span>`).join('')}</span>`;
+    return `<span class="delta-tile-faces">${faces.map(face => `<span class="delta-tile-face-ring" style="--r:${ring[face.tone] || 'var(--dial)'}" title="${esc(face.name)}">${peers?.get(String(face.name).toLowerCase()) ? portraitHtml({ name: face.name, portrait: peers.get(String(face.name).toLowerCase()) }, 'delta-tile-face', { alt: false, refs }) : `<span class="delta-tile-face delta-tile-initials">${esc(initialsOf(face.name))}</span>`}</span>`).join('')}</span>`;
 }
 
 // The Board screen for one NPC: the dial (portrait inside; a tap opens the profile), the name, identity

@@ -4,7 +4,8 @@ import { changeStamp, plain, relationshipValue, RELATIONSHIP_AXES } from './doss
 import { lastRelationshipChangeHtml } from './dossier-ui-relationship.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
 import { castFromHtml, keyAwayHtml } from './dossier-ui-catalog.js';
-import { bondTone } from './dossier-ui-view-model.js';
+import { bondTone, boardTone, pullTile } from './dossier-ui-view-model.js';
+import { tieTone } from './dossier-ui-bond-tone.js';
 import { SECTION_KEYS } from './dossier-ui-screens.js';
 
 // The five sections in the order the arrows, a sideways swipe and the dots walk them.
@@ -56,13 +57,17 @@ export function sectionHeaderHtml(id, { npcName = '', userName = '' } = {}) {
 export function nowSectionHtml(npc = {}) {
     const cast = npc.cast && typeof npc.cast === 'object' ? npc.cast : {};
     const rows = [
-        ['Mood', plain(npc.mood)],
+        ['Mood', plain(npc.v2Meters?.mood?.word) || plain(npc.mood)],
         ['Where', plain(cast.where) || plain(npc.location)],
         ['Doing', plain(cast.doing)],
         ['Goal', plain(cast.goal) || plain(npc.goal)],
         ['Condition', plain(npc.status)],
     ].filter(([, value]) => value);
     // The Story Director away block and the pack's cast block (with its Pin button) live here, as they did in the old dossier.
+    const mood = npc.v2Meters?.mood;
+    const pull = pullTile(npc);
+    if (mood?.cause) rows.splice(1, 0, ['What moved it', mood.cause]);
+    if (pull) rows.splice(mood?.cause ? 2 : 1, 0, ['Pull', `${pull.text} · ${pull.note}${pull.cause ? ` · ${pull.cause}` : ''}`]);
     const blocks = `${npc.key ? keyAwayHtml(npc.key) : ''}${npc.cast ? castFromHtml(npc.cast, npc.id) : ''}`;
     if (!rows.length) return blocks || '<p class="delta-muted">Nothing about this moment is known yet.</p>';
     return `${blocks}<dl class="delta-sheet delta-kv">${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}</dl>`;
@@ -93,25 +98,50 @@ export function withSectionHtml(npc = {}) {
 }
 
 // One important bond: the relation word (toned: green kin and friends, red rivals and enemies, gold debts and duties),
-// the other person, and the dynamic. An entry that does not parse is shown as written, in the plain tone.
-function tieHtml(entry) {
+// the other person, and the dynamic. A tie tag from the notes (ally / rival / owes, "owed by" the other way) takes the word and the tone.
+// An entry that does not parse is shown as written, in the plain tone.
+function tieHtml(entry, tie = null) {
     const parsed = parseKeyRelationshipEntry(entry);
     if (!parsed) return `<div class="delta-bond" data-tone="grey"><p>${escapeHtml(plain(entry))}</p></div>`;
-    const tone = bondTone(parsed.relation);
-    return `<div class="delta-bond" data-tone="${escapeHtml(tone)}"><span class="delta-bond-word">${escapeHtml(parsed.relation)}</span><b>${escapeHtml(parsed.subject)}</b>${parsed.dynamic ? `<p>${escapeHtml(parsed.dynamic)}</p>` : ''}</div>`;
+    const tags = tie?.tags ?? [];
+    const word = tags.includes('owes') ? 'owes' : (tie?.owedBy && !tags.length ? 'owed by' : (tags[0] || parsed.relation));
+    const tone = tags.length ? boardTone(tieTone(tags)) : (tie?.owedBy ? 'gold' : bondTone(parsed.relation));
+    return `<div class="delta-bond" data-tone="${escapeHtml(tone)}"><span class="delta-bond-word">${escapeHtml(word)}</span><b>${escapeHtml(parsed.subject)}</b>${parsed.dynamic ? `<p>${escapeHtml(parsed.dynamic)}</p>` : ''}</div>`;
+}
+
+const dayText = day => (Number.isInteger(day) ? `day ${day}` : '');
+const part = (label, kind, body) => (body ? `<section class="delta-notes-block" data-notes="${kind}"><h4>${escapeHtml(label)}</h4>${body}</section>` : '');
+
+// Lies told: a caught lie in its words; lies not caught only as a count (never the words). Hidden when there are none.
+export function liesHtml(lies = []) {
+    const caught = lies.filter(lie => !lie.hidden);
+    const hidden = lies.length - caught.length;
+    const rows = caught.map(lie => `<p class="delta-note-row"><b>“${escapeHtml(lie.said)}”</b><span>to ${escapeHtml(lie.to)}${dayText(lie.day) ? ` · ${dayText(lie.day)}` : ''} · caught</span></p>`).join('');
+    const count = hidden ? `<p class="delta-note-row"><b>${hidden === 1 ? 'a lie you have not caught' : `${hidden} lies you have not caught`}</b></p>` : '';
+    return part('Lies told', 'lies', rows + count);
+}
+
+// What this person knows about others: only what the story told or opened (a secret not opened is not in the projection).
+export function knowsHtml(knows = []) {
+    return part('Knows about others', 'knows', knows.map(row => `<p class="delta-note-row"><b>${escapeHtml(row.text)}</b><span>${escapeHtml([row.how && `${row.how} it`, dayText(row.day)].filter(Boolean).join(' · '))}</span></p>`).join(''));
 }
 
 export function tiesSectionHtml(npc = {}) {
     const entries = Array.isArray(npc.keyRelationships) ? npc.keyRelationships : [];
-    if (!entries.length) return '<p class="delta-muted">No important ties recorded yet.</p>';
-    return `<div class="delta-sheet delta-ties">${entries.map(tieHtml).join('')}</div>`;
+    const notes = npc.v2Meters?.notes;
+    const byName = new Map((notes?.ties ?? []).map(row => [row.name.toLowerCase(), row]));
+    const extra = lieAndKnow(notes);
+    if (!entries.length && !extra) return '<p class="delta-muted">No important ties recorded yet.</p>';
+    return `<div class="delta-sheet delta-ties">${entries.map(entry => tieHtml(entry, byName.get(String(parseKeyRelationshipEntry(entry)?.subject ?? '').toLowerCase()))).join('')}${extra}</div>`;
 }
 
-// Past: the remembered events as written (the projection carries no timestamps).
+const lieAndKnow = notes => (notes ? liesHtml(notes.lies) + knowsHtml(notes.knows) : '');
+
+// Past: the remembered events as written on a timeline of dots (the projection carries no timestamps for them).
 export function pastSectionHtml(npc = {}) {
     const memories = (Array.isArray(npc.memories) ? npc.memories : []).map(plain).filter(Boolean);
     if (!memories.length) return '<p class="delta-muted">Nothing remembered yet.</p>';
-    return `<ol class="delta-sheet delta-past">${memories.map(memory => `<li>${escapeHtml(memory)}</li>`).join('')}</ol>`;
+    return `<ol class="delta-sheet delta-past delta-timeline">${memories.map(memory => `<li><i class="delta-dot-mem" aria-hidden="true"></i>${escapeHtml(memory)}</li>`).join('')}</ol>`;
 }
 
 // Secrets: the hosted meters' notes (npc.v2Meters.secrets). An open note shows its title and text; a hidden note shows
