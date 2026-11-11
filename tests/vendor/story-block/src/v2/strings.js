@@ -33,7 +33,10 @@ export const STRINGS = deepFreeze({
         origin: 'Made in this chat', reader: 'Only the reader can change a block.',
         chatScope: 'A block must have chat scope.', exists: 'A block with this name is already active.',
         limit: 'This chat already has the maximum number of blocks and data modules.',
-        blockLimit: 'This chat can have at most 8 blocks.',
+        // (the same sentence as the RPG's `join.fullActive`, kept here so the check needs no RPG library)
+        partyFull: 'the party is full ({max} active); someone must leave first',
+        afterCharacter: 'A Skills block can only follow a Character of this chat.',
+        blockLimit: 'This chat can have at most {max} blocks.',
         chatOnly: 'Only a block made in this chat can be changed here.',
         sameSlug: 'Keep the block identifier when changing its fields.',
         defined: 'You made {name}.', redefined: 'You changed {name}.', removed: 'You removed {name}.',
@@ -41,7 +44,7 @@ export const STRINGS = deepFreeze({
         staticLimit: 'The purpose and story lines together must fit 2000 characters.',
         showOptions: 'Choose where the block shows (its own tab, a card on Home, both or neither), a short tab name and an app icon.',
         // How a block's records, numbers and fields are drawn (screens/block-layouts.js).
-        view: { active: 'Active ({n})', finished: 'Finished ({n})', more: 'More', less: 'Less', unknown: 'Not known yet ({n})', known: '{n} of {total} known',
+        view: { active: 'Active ({n})', finished: 'Finished ({n})', more: 'More', less: 'Less', unknown: 'Not known yet ({n})', moreKnown: '{n} more known', known: '{n} of {total} known',
             nothing: 'Nothing here yet.', editQuest: 'Edit {name}', edited: 'Edit' },
         listOnlyText: 'A list must be a text field.', listLimit: 'A list can have at most 12 entries.',
         labelLimit: 'Use a name of 1 to 60 characters.', choiceLimit: 'A choice needs 2 to 32 different options.',

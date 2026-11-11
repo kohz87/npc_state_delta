@@ -61,10 +61,10 @@
 // stat (or the defending skill's), `skill` the defending skill (null: none; a roll made before there were any has none) and `pc` the
 // defender (outcome 'fail' means the defender failed). `summary.exchanges` = rounds.length is the
 // number B shows as "Rolled for you: N exchanges". The told count is not recorded: the narrator is not asked to count.
-import { FIGHT, FIX_VERSION, LEVEL, LV_VERSION, PRACTICE_STEP, RESOLVE, practiceOf } from './names.js';
+import { CHECK_STEP, FOE_SLOTS, FIGHT, FIX_VERSION, LEVEL, LV_VERSION, PRACTICE_STEP, RESOLVE, practiceOf } from './names.js';
 import { fightGuard } from './fight.js';
 import { boardGuard, resolveBoard } from './board/commit.js';
-import { practiceGuard } from './practice.js';
+import { checkGuard, practiceGuard } from './practice.js';
 import { EARLIER_RULES, hasLevels, normalizeRules, STANDARD } from './rules.js';
 import { prepareStandard, rollStandard } from './standard.js';
 import { cueOfResult } from './cue.js';
@@ -129,7 +129,7 @@ function writeBars(ctx, hurts) {
 
 // The levels a roll gave its opened foes, in the plan's order (recorded with the roll, as the guard cannot draw them again).
 const levelsOf = settled => settled.map(entry => entry.level);
-const levelsValid = levels => Array.isArray(levels) && levels.length <= 4 && levels.every(level => Number.isInteger(level) && level >= 1 && level <= 99);
+const levelsValid = levels => Array.isArray(levels) && levels.length <= FOE_SLOTS && levels.every(level => Number.isInteger(level) && level >= 1 && level <= 99);
 
 // The numbers a payload rolls with: the ones it carries, or, for a roll recorded before the numbers were kept, those it was made with (the cap of 5 included).
 const rulesOfPayload = value => (value === undefined ? EARLIER_RULES : normalizeRules(value));
@@ -225,6 +225,7 @@ export function leanRpgGuard({ state, hash }, { guard, source, recorded }) {
     const bad = reason => ({ ok: false, reason });
     if (guard?.predicate?.kind === FIGHT) return fightGuard({ state, hash }, { guard, source, recorded });
     if (guard?.predicate?.kind === PRACTICE_STEP) return practiceGuard({ state, hash }, { guard, source, recorded });
+    if (guard?.predicate?.kind === CHECK_STEP) return checkGuard({ state, hash }, { guard, source, recorded });
     try {
         const predicate = guard?.predicate;
         if (guard?.version !== 2 || guard.rulesHash !== null || !isObject(predicate) || predicate.kind !== RESOLVE) return bad('Malformed roll guard.');

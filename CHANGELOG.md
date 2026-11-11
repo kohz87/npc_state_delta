@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.16.0
+
+Update Story Block, Story Director and NPC State Delta together. The new features (anti-lever gate, mood and pull, dossier notes) apply to new replies; start a new chat to see them all. Replies already written replay and Re-read exactly as before.
+
 - **Dossier redesign.** The one long page is now screens: a Library of tone-ringed faces (search, key people first), a Board with the meter dial and tiles, a Profile, and five sections (Right now, With you, Ties, Past, Secrets) with arrows, dots and swipe. The header keeps Dossier/Map/Close and adds a ⋯ menu (Edit, Refresh, More). New setting Dossier style: Neutral (default), Fantasy, Modern. The library's All/Active/Archived filters are replaced by search. The Board matches the approved screens: head-and-shoulders crop, toned tiles with faces and a secrets ring, three panes on desktop, a library bar to go back, per-section colours.
 - **Important bonds: up to 8** (was 5), shown with the real relation word and a tone colour (green kin and friends, red rivals and enemies, gold debts and duties). The relationship map's lines take the same tones and Focus shows one person's ties.
 - **Anti-lever gate** (on by default). A story line may name how a move was made (`| via: praise, gift, help, flirt, threat, shared-danger`); the same approach to the same person again soon gives less, then backfires. The receipt and the With section say so ("via praise · 3rd in 2 days · backfired"). Adds one sentence to the static prompt (about 50 tokens).

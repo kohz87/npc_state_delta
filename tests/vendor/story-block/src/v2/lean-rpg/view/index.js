@@ -39,7 +39,7 @@ export { heroLead } from './hero-data.js';
 export const PACK = 'rpg';
 const STYLE_ATTR = 'data-ss-rpg';
 
-const STYLE_FILES = ['./lean-rpg.css', './bars.css', '../board/board.css', '../board/fight-start.css'];
+const STYLE_FILES = ['./lean-rpg.css', './bars.css', './check-card.css', '../board/board.css', '../board/fight-start.css'];
 
 function addStyle(doc, file) {
     try {
@@ -82,6 +82,16 @@ export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets,
         } catch { return null; }
     };
     const rules = () => rulesFromSettings(values(), pack());
+    // The Fight offer asks for the rules on every redraw while a foe stands; each read of the pack settles the timeline, so it is read once per head
+    // (the head after the read: a settle that moved it is read again next time).
+    let packKept = null;
+    const packOnce = () => {
+        const head = headState();
+        if (packKept && packKept.head === head) return packKept.value;
+        const value = pack();
+        packKept = { head: headState(), value };
+        return value;
+    };
     // What the story's pack says about levels: its rank bands and the field that names the party's rank (a story with neither shows "Lv 14" and "Rank F · Lv 7" only where a band exists).
     const levels = () => { let found = null; try { found = packLevelsOf(query?.('packs.content', { kind: 'rpg' })); } catch { found = null; } return { ranks: found?.ranks ?? [], playerRank: found?.playerRank ?? null, levelCap: found?.levelCap ?? null }; };
     const levelCap = () => levelCapFor(values(), levels().levelCap);
@@ -95,7 +105,7 @@ export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets,
     const wizard = createWizard({ headState, readerName, readerAbout, roleOf, openDialog, replyKey, rules, packNote, levels, levelCap });
     const exporter = createExporter({ headState, readerName, roleOf, openDialog });
     const start = createStart({ doc, headState, readerName, featureOn, roleOf, openDialog, wizard, meta, save, redraw: () => refresh() });
-    widgets[PARTY_WIDGET] = createPartyWidget({ headState, readerName, roleOf, openWizard: openDialog ? wizard.open : null, exportCharacter: openDialog ? exporter.open : null, rules, rolled: () => practiceFromRollsOnly(true, values()), levels, board: { on: boardOn, flags: () => boardFlags(headState()) },
+    widgets[PARTY_WIDGET] = createPartyWidget({ chatKey: () => String(ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? ''), headState, readerName, roleOf, openWizard: openDialog ? wizard.open : null, exportCharacter: openDialog ? exporter.open : null, rules, rolled: () => practiceFromRollsOnly(true, values()), levels, board: { on: boardOn, flags: () => boardFlags(headState()) },
         // The slot card behind a card's Inventory button: the switch and the `gear.view` answer (null while off).
         gear: gear ? { on: () => gear.on(), plan: () => planGear(readSheet(headState()), (name, args) => query?.(name, args), readerName()), view: args => { try { return query?.('gear.view', args) ?? null; } catch { return null; } } } : null });
     widgets[WIZARD_WIDGET] = wizard.widget;
@@ -107,9 +117,9 @@ export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets,
     board = createBoardView({ doc, headState: () => fightStart.state(), meta, save, store, rules, query, readerName, roleOf, levels, on: boardOn, start: fightStart, cap: () => autoCapFrom(values()) });
     let offers;
     const offerView = createOfferLineView({ doc, onFight: data => offers.choose(data, 'board'), onAuto: data => offers.choose(data, 'auto') });
-    offers = createFightOffers({ ctx, doc, store, meta, on: () => featureOn() && boardOn() && isStandard(rules()), view: offerView,
+    offers = createFightOffers({ ctx, doc, store, meta, on: () => featureOn() && boardOn() && isStandard(rulesFromSettings(values(), packOnce())), view: offerView,
         open: ({ auto = false } = {}) => { if (!board.open()) return false; if (auto) board.auto(); openScreen(FIGHT_SCREEN_ID); return true; }, save, refresh });
-    const battleLog = createBattleLog({ ctx, doc, store, events, featureOn, roleOf, levels, offer: offers });
+    const battleLog = createBattleLog({ ctx, doc, store, events, featureOn, roleOf, readerName, levels, offer: offers });
     widgets[FIGHT_WIDGET] = createFightWidget({ headState, readerName, roleOf, battleLog, closeView, levels, board, start: fightStart });
     screens.setPack(PACK, [createPartyScreen(), createFightScreen({ roleOf, offer: () => Boolean(offers.find()), waiting: () => Boolean(fightStart.current()), kept: () => board.kept() }), wizard.screen, exporter.screen, start.holdScreen]);
     // The Fight screen opens only for a pause that is ready (foes found, a choice to make). A wait for the fight ("Setting up the fight…") opens nothing:

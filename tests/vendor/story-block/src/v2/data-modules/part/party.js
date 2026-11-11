@@ -1,6 +1,6 @@
 // The data modules' companions (extracted from data-modules/part.js): joining, leaving and
 // returning, their signature skills and gear, and the Ask card's reader action.
-import { DM_LIMITS as L, dmObject } from '../schema.js';
+import { dmObject, dmRoom } from '../schema.js';
 import { validateDataModules } from '../check.js';
 import { copy, refuse, atPath } from '../interpreter.js';
 import { activeDefinition, inputsOf, instanceOf } from '../adapters.js';
@@ -12,9 +12,9 @@ import { castSkillsOf } from '../../packs/cast-skills.js';
 import { gearOn } from '../../domains/inventory.js';
 import { actorIdOf } from '../../lean-rpg/roster.js';
 import { placeOf } from '../../domains/gear.js';
-import { CLASS_NAMES } from '../../lean-rpg/names.js';
+import { CLASS_NAMES, PARTY_ACTIVE } from '../../lean-rpg/names.js';
 import { packLevelsOf } from '../../lean-rpg/levels.js';
-import { E, B, J, rpg, stateOf, draftOf, instancePath, blockCount, activeCount, hashOf, newInstance } from './shared.js';
+import { E, B, J, rpg, partyWitness, partyLimit, stateOf, draftOf, instancePath, blockCount, activeCount, hashOf, newInstance } from './shared.js';
 import { skillCapacity, skillRow } from './skills.js';
 
 export function createParty(deps) {
@@ -183,7 +183,9 @@ export function createParty(deps) {
         answer.data.gear = { owner, items: added };
         return answer;
     }
-    function makeParty(ctx, request, soul, call, { added = false } = {}) {
+    // A reply captured with the `partyRoom` mark records the party it relied on (replayInputs `party`); an older one does not.
+    const marked = partyWitness;
+    function makeParty(ctx, request, soul, call, { added = false, bench = '', four = false } = {}) {
         if (restore()?.state === 'pending') refuse('RESTORE_PENDING', '', E.restorePending);
         const prefix = stateOf(ctx), domain = prefix.domains.dataModules;
         // (the formula and numbers in force: the reader's settings, else what the story's pack asks for, as the rolls read them)
@@ -207,8 +209,9 @@ export function createParty(deps) {
         const catalog = Object.keys(domain?.active ?? {}).map(id => activeDefinition(prefix, id)).filter(Boolean);
         const checked = validateDataModules([made.character, made.skills, ...extras], { packId: 'chat', capabilities: ['data-modules-v1', 'story-director'], definitions: catalog });
         if (!checked.ok) refuse(checked.errors[0].code, checked.errors[0].path, checked.errors[0].message);
-        if (blockCount(domain) + 2 > L.definitions) refuse('DM_BUDGET', '', B.blockLimit);
-        if (activeCount(domain) + 2 > L.pins) refuse('DM_BUDGET', '', B.limit);
+        const room = dmRoom(ctx);
+        if (blockCount(domain) + 2 > room.definitions) refuse('DM_BUDGET', '', fill(B.blockLimit, { max: room.definitions }));
+        if (activeCount(domain) + 2 > room.pins) refuse('DM_BUDGET', '', B.limit);
         const generation = Math.max(ctx.rev, 1), draft = draftOf(ctx);
         const pins = checked.definitions.map(definition => ({ definition, hash: hashOf(definition), pin: { definition, packId: 'chat', packVersion: '0', packHash: null, interpreter: 1 } }));
         for (const { definition, hash, pin } of pins) {
@@ -217,7 +220,7 @@ export function createParty(deps) {
             draft.instances[definition.id] = { chat: newInstance(definition, inputsOf(prefix, definition)) };
         }
         const [head, ...rest] = pins;
-        const recorded = guard(ctx, prefix, { kind: 'dm.join', module: head.definition.id, hash: head.hash, generation, imports: [],
+        const recorded = guard(ctx, prefix, { kind: 'dm.join', module: head.definition.id, hash: head.hash, generation, imports: [], party: four ? PARTY_ACTIVE : marked(ctx), bench,
             decision: { subjects: ['chat'], inputs: {}, previous: null, base: Boolean(domain && Object.keys(domain.active ?? {}).length),
                 more: rest.map(entry => ({ module: entry.definition.id, hash: entry.hash, generation, pin: entry.pin })) }, pin: head.pin, bound: true });
         const left = plan.skipped.length ? ` ${fill(J.noExtras, { list: plan.skipped.map(item => rpg().extraName(item.role)).join(', ') })}` : '';
@@ -244,36 +247,40 @@ export function createParty(deps) {
             if (isReader(person.name)) refuse('REFUSED', '', fill(J.isYou, { name: person.name }));
             return leave(ctx, person, true, call);
         }
-        const check = rpg().checkJoin(prefix, read);
+        const limit = partyLimit(marked(ctx)), check = rpg().checkJoin(prefix, read, dmRoom(ctx), limit);
+        // A full party (4 active) is not refused: the line is kept in this reply's own receipt as an offer, and the card asks who to bench.
+        if (!check.ok && check.full && limit === PARTY_ACTIVE) return fullOffer(read, check);
         if (!check.ok) refuse('REFUSED', '', check.why);
         if (check.returning) return leave(ctx, check.returning, false, call);
         if (rpg().joinMode(settings()) === 'ask') {
             // Ask: nothing is made. The line is kept in this reply's own receipt, and the card under the reply (rpg.joins) is read from it.
             // (the pack as it is when the line is read, also on a Re-read: an offer changes nothing in the story's state, so there is no block to read it from)
             const seeds = packSeeds(ctx, read.name);
-            const offer = { op: 'offer', name: read.name, about: read.about, soul: read.soul, best: read.best, ...(seeds.length ? { skills: seeds } : {}) };
+            const offer = { op: 'offer', name: read.name, about: read.about, soul: read.soul, best: read.best, ...(limit === PARTY_ACTIVE ? { four: true } : {}), ...(seeds.length ? { skills: seeds } : {}) };
             return { summary: fill(J.offerNote, { name: read.name }), narrate: false, data: { join: offer } };
         }
         return makeParty(ctx, read, check.soul, call);
     }
+    // With gear on, the pieces bound to them leave with them, in this receipt (they come back once when they return: giveGear).
+    function stow(ctx, answer, owner, module) {
+        if (owner === 'party') return;
+        const away = ctx.call('inventory.stow', { owner, module });
+        const items = Array.isArray(away?.data?.items) ? away.data.items : [];
+        if (items.length) {
+            answer.summary = `${answer.summary} ${fill(J.gearLeaves, { items: items.join(', ') })}`;
+            answer.data.gear = { owner, away: items };
+        }
+    }
     // Left (or back): the Character block's `left` field, one guarded `dm.set`. A sheet made before the field existed cannot be marked.
-    function leave(ctx, person, left, call) {
+    function leave(ctx, person, left, call, { bench = '', four = false } = {}) {
         const definition = activeDefinition(stateOf(ctx), person.module);
         if (!person.canLeave || !definition) refuse('DM_SCHEMA', '', fill(J.noLeave, { name: person.name }));
         // (their actor is found before the field changes: a member who left is no longer on the roster)
         const owner = left && gearOn(ctx) ? gearOwnerOf(ctx, person.name, person.module) : 'party';
-        const answer = deps.setField(ctx, { module: person.module, field: 'left', value: left }, call, { story: true });
+        const answer = deps.setField(ctx, { module: person.module, field: 'left', value: left }, call, { story: !bench, party: !left && (four ? PARTY_ACTIVE : marked(ctx)), bench });
         answer.summary = fill(left ? J.left : J.returned, { name: person.name });
         answer.data.join = { op: left ? 'left' : 'back', name: person.name };
-        // With gear on, the pieces bound to them leave with them, in this receipt (they come back once when they return: giveGear).
-        if (owner !== 'party') {
-            const away = ctx.call('inventory.stow', { owner, module: person.module });
-            const items = Array.isArray(away?.data?.items) ? away.data.items : [];
-            if (items.length) {
-                answer.summary = `${answer.summary} ${fill(J.gearLeaves, { items: items.join(', ') })}`;
-                answer.data.gear = { owner, away: items };
-            }
-        }
+        stow(ctx, answer, owner, person.module);
         if (left) return answer;
         reseed(ctx, answer, person.name);
         const back = restoreKept(ctx, person);
@@ -293,10 +300,42 @@ export function createParty(deps) {
         const request = rpg().readJoin({ op: '+', name: payload?.name, labels: { about: payload?.about, class: Number.isSafeInteger(soul) ? CLASS_NAMES[soul - 1] ?? 'X' : 'X', best: payload?.best ?? '' } }, rpg().soulNaming(stateOf(ctx)));
         call.label = 'Party';
         if (request.error) refuse('DM_LABEL', '', request.error);
-        const check = rpg().checkJoin(stateOf(ctx), request);
+        // (the reader's own action keeps the limit of 4; an offer made on a reply with the `partyFour` mark meets a full party as a bench card, any other card is refused)
+        const four = payload?.four === true, check = rpg().checkJoin(stateOf(ctx), request, undefined, PARTY_ACTIVE);
+        // The accepted card meets a full party: not refused, the request is kept as an offer in this receipt and the card asks who to bench.
+        if (!check.ok && check.full && four) return fullOffer(request, check);
         if (!check.ok) refuse('REFUSED', '', check.why);
         if (check.returning) refuse('REFUSED', '', fill(J.taken, { name: request.name }));
-        return makeParty(ctx, request, check.soul, call);
+        return makeParty(ctx, request, check.soul, call, { four });
     }
-    return { skillsBlockOf, standingBlock, defaultSeeds, seededData, makeParty, party, leave, addParty, restoreKept, giveGear };
+    // A join or return that met a full party (4 active): the request, kept in the reply's own receipt (the card under the reply, rpg.joins, reads it).
+    function fullOffer(request, check) {
+        const offer = { op: 'offer', name: request.name, about: request.about ?? '', soul: request.soul ?? 1, best: request.best ?? '', full: true, four: true, ...(check.back ? { back: true } : {}) };
+        return { summary: fill(J.benchAsked, { name: request.name, max: PARTY_ACTIVE }), narrate: false, data: { join: offer } };
+    }
+    // A full party's card, a member picked: they step out (marked left, bound gear stowed, as `- party` does) and the newcomer joins or returns, as one reader action.
+    // One guard covers it (the join's or the return's, with the member who steps out in its witness): the newcomer is made first, against the party as it was.
+    function benchParty(ctx, payload, call = {}) {
+        if (ctx.cause !== 'ui' || ctx.caller !== null) refuse('REFUSED', '', J.cardOnly);
+        const prefix = stateOf(ctx), soul = payload?.soul === undefined ? 1 : payload.soul;
+        const request = rpg().readJoin({ op: '+', name: payload?.name, labels: { about: payload?.about, class: Number.isSafeInteger(soul) ? CLASS_NAMES[soul - 1] ?? 'X' : 'X', best: payload?.best ?? '' } }, rpg().soulNaming(prefix));
+        call.label = 'Party';
+        if (request.error) refuse('DM_LABEL', '', request.error);
+        const named = fold(typeof payload?.bench === 'string' ? payload.bench : '');
+        const person = rpg().benchable(prefix, isReader).find(entry => fold(entry.name) === named);
+        if (!person) refuse('REFUSED', '', J.benchWhom);
+        if (rpg().partyOf(prefix).filter(entry => !entry.left).length < PARTY_ACTIVE) refuse('REFUSED', '', J.benchRoom);
+        const check = rpg().checkJoin(prefix, request, undefined, Infinity);
+        if (!check.ok) refuse('REFUSED', '', check.why);
+        const out = check.returning ? leave(ctx, check.returning, false, call, { bench: person.module, four: true }) : makeParty(ctx, request, check.soul, call, { bench: person.module, four: true });
+        // (the member's own Left field, in this same receipt; with gear on, what is bound to them goes with them)
+        const owner = gearOn(ctx) ? gearOwnerOf(ctx, person.name, person.module) : 'party';
+        atPath(draftOf(ctx), instancePath(person.module, 'chat')).fields.left = true;
+        out.summary = `${fill(J.benchNote, { left: person.name, name: request.name })} ${out.summary}`;
+        out.data.join = { ...out.data.join, benched: person.name };
+        delete out.data.edit;   // (a return by hand marks its receipt as an edit; this one is the card's)
+        stow(ctx, out, owner, person.module);
+        return out;
+    }
+    return { skillsBlockOf, standingBlock, defaultSeeds, seededData, makeParty, party, leave, addParty, benchParty, restoreKept, giveGear };
 }

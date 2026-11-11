@@ -3,13 +3,15 @@
 // [Happened] cue and is never cut. Opening names come from the recorded setup for both preview and receipt.
 
 import { BATTLE_MARKER, STAGES, stageWord } from '../names.js';
-import { MEMBER_CAP, packLeft } from './members.js';
+import { MEMBER_CAP, MEMBER_CAP_SIX, packLeft } from './members.js';
 
 const clean = value => String(value ?? '').replace(/\s+/gu, ' ').trim();
 
 function packSuffix(damage, foe) {
     const count = Number(foe?.count ?? damage?.count ?? damage?.packCount);
-    if (!(foe?.pack === true || damage?.pack === true || count > MEMBER_CAP) || !Number.isInteger(count) || count <= MEMBER_CAP) return '';
+    // (a split pack always holds more than five foes before the six-group rule and more than six after, so its flag alone says it is one)
+    const flagged = foe?.pack === true || damage?.pack === true;
+    if (!(flagged || count > MEMBER_CAP) || !Number.isInteger(count) || count <= (flagged ? 1 : MEMBER_CAP)) return '';
     const left = Number.isFinite(damage?.left) ? damage.left : packLeft(count, damage?.to, damage?.size);
     return ` (about ${left} of ${count} left)`;
 }
@@ -40,7 +42,7 @@ function lineNote(line, members = null) {
 function newFoesNote(result, setup) {
     if (!Array.isArray(result.members) || !Array.isArray(setup?.opened) || !setup.opened.length) return '';
     const foes = setup.opened.filter(entry => entry && clean(entry.name) && Number.isInteger(entry.count) && entry.count > 0).map(entry => {
-        const list = entry.count >= 2 && entry.count <= MEMBER_CAP ? ', each fought on its own' : entry.count > MEMBER_CAP ? ', fought as a pack' : '';
+        const cap = setup?.foesSix === 1 ? MEMBER_CAP_SIX : MEMBER_CAP, list = entry.count >= 2 && entry.count <= cap ? ', each fought on its own' : entry.count > cap ? ', fought as a pack' : '';
         return `${clean(entry.name)} ×${entry.count}${Number.isInteger(entry.level) ? ` (Lv ${entry.level})` : ''}${list}`;
     });
     return foes.length ? `New foes: ${foes.join(', ')}.` : '';
@@ -74,3 +76,21 @@ export function settledNote(result, setup = null) {
             : 'Then follow the reader’s requested aftermath only as the outcome permits; do not assume the foes or their possessions are accessible or looting succeeds.');
     return lines.join(' | ');
 }
+
+// The board's log lines (the view reads them; a followup of an area skill under `areaAll` is a group hit alike, not reduced).
+const signed = n => n >= 0 ? `+${n}` : String(n);
+export const labelLine = line => {
+    const pc = line.pc ?? {}, foe = line.foe ?? {}, who = line.flee ? `${pc.who} flees` : line.support ? `${pc.who} heals ${line.target}` : line.reduced ? `… also hits ${foe.name} (reduced)` : line.kind === 'foe' ? `${foe.name} attacks ${pc.who}` : `${pc.who} → ${foe.name}`;
+    const bonus = (pc.statBonus ?? 0) + (pc.classBonus ?? 0) + (pc.rank ?? 0) + (pc.edge ?? 0);
+    const changes = [line.damage ? barMovement(line.damage) : '', line.cost ? barMovement(line.cost, true) : ''].filter(Boolean);
+    const skill = line.skill ? ` (${line.skill})` : '';
+    const verdict = `${line.kind === 'foe' ? `${pc.who}'s defence${skill}: ` : ''}${line.kind === 'foe' && Number.isInteger(line.soaked) && line.soaked >= 0 ? 'GLANCED OFF' : String(line.outcome).toUpperCase()}`;
+    return `${who}${line.kind === 'foe' ? '' : skill}: d20 ${pc.die} ${signed(bonus)} = ${pc.total} vs ${foe.total ?? line.dc} — ${verdict}${line.decisive ? ', DECISIVE' : ''}${changes.length ? ` · ${changes.join(' · ')}` : ''}`;
+};
+export const labelAreaGroup = group => {
+    const line = group[0], name = line.aoeName || line.foe?.name || '';
+    const changes = group.flatMap(item => [item.damage ? barMovement(item.damage) : '', item.cost ? barMovement(item.cost, true) : '']).filter(Boolean);
+    if (line.reduced || line.aoeFollowup) return `… also ${line.outcome === 'fail' ? 'targets' : 'hits'} ${name}${line.reduced ? ' (reduced)' : ''}${changes.length ? ` → ${changes.join(', ')}` : line.outcome === 'fail' ? ' — FAIL' : ''}`;
+    const base = labelLine({ ...line, foe: { ...line.foe, name }, damage: undefined, cost: undefined });
+    return `${base}${line.aoeNoTarget ? ' · main target Down' : ''}${changes.length ? ` → ${changes.join(', ')}` : ''}`;
+};

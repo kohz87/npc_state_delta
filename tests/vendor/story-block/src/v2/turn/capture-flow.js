@@ -172,6 +172,7 @@ export function createCaptureFlow(s, deps) {
         const planned = () => (live || !plan ? [] : [...plan.blocks.flatMap(piece => piece.block?.evidence ?? []), ...steps.flatMap(step => step.block?.evidence ?? [])]);
         // The reply's own receipts as far as this run knows them (`info.receipts`, read only when a hook asks): the store's for a live reply, a Re-read's planned ones.
         const replyReceipts = () => (live ? (store.receipts?.() ?? []).filter(entry => entry.index === index).map(entry => entry.receipt) : [...(plan?.blocks ?? []).map(piece => piece.receipt), ...steps.map(step => step.receipt)].filter(Boolean)).map(receiptWithCue);
+        const previousReceipts = () => (live ? [] : (store.receipts?.() ?? []).filter(entry => entry.index === index).map(entry => entry.receipt)); // `info.previous` (a Re-read): the reply's stored receipts, still the old ones
         const hooks = [
             ...(prechecks.length ? [{ moduleId: HOST_MODULE, precheck: true, fn: () => ({ commands: prechecks }) }] : []),
             ...(onlyPrechecks ? [] : registry.hookEntries('afterCapture').filter(entry => !alwaysOnly || entry.fn.always === true)),
@@ -179,7 +180,7 @@ export function createCaptureFlow(s, deps) {
         for (const { moduleId, fn, precheck = false } of hooks) {
             const seen = live ? view() : makeView({ store, registry, settings, chat: ctx?.chat, active: viewReader, state: now, reply, pendingProofs: () => planned().map(proof => ({ proof, block: null })) });
             let out;
-            try { out = await within(fn(seen, Object.defineProperty({ index, type, ...(alwaysOnly ? { always: true } : {}) }, 'receipts', { get: replyReceipts })), HOOK_TIMEOUT_MS); } catch (error) {
+            try { out = await within(fn(seen, Object.defineProperties({ index, type, ...(alwaysOnly ? { always: true } : {}) }, { receipts: { get: replyReceipts }, previous: { get: previousReceipts } })), HOOK_TIMEOUT_MS); } catch (error) {
                 problems.push(problem({ module: moduleId, index, code: 'FAILED', message: `afterCapture failed: ${error?.message ?? error}` }));
                 continue;
             }
@@ -189,9 +190,9 @@ export function createCaptureFlow(s, deps) {
             }
             for (const command of Array.isArray(out?.commands) ? out.commands : []) {
                 const payload = command?.payload ?? {};
-                const seed = command.seed ?? seeds?.(command?.type);
+                const seed = command.seed ?? seeds?.(command?.type), kept = plan && seed !== undefined ? plan.reuse.stepReceipt(command?.type) : undefined;
                 const taking = plan ? occurrenceFor(plan, command?.type, payload) : null;
-                const result = bus.run(command?.type, payload, { cause: 'system', state: live ? store.head() : now, ...(reply ? { reply: plan ? { ...reply, ...(taking.span && (plan.preserveSources || occurrenceOf(taking.span) === null) ? { ordinal: taking.span.source.ordinal } : {}), pending: plan.pending, opsBefore: plan.blocks.reduce((sum, piece) => sum + (Number.isInteger(piece.n) ? piece.n : 0), 0) + steps.reduce((sum, step) => sum + (Array.isArray(step.ops) ? step.ops.length : 0), 0) } : reply } : {}), ...(plan ? { planned: planned(), replacing: plan.replacing, reusing: taking.span, ...(Number.isInteger(taking.value) ? { occurrence: taking.value } : {}) } : {}), ...(seed === undefined ? {} : { seed }) });
+                const result = bus.run(command?.type, payload, { cause: 'system', state: live ? store.head() : now, ...(reply ? { reply: plan ? { ...reply, ...(taking.span && (plan.preserveSources || occurrenceOf(taking.span) === null) ? { ordinal: taking.span.source.ordinal } : {}), pending: plan.pending, opsBefore: plan.blocks.reduce((sum, piece) => sum + (Number.isInteger(piece.n) ? piece.n : 0), 0) + steps.reduce((sum, step) => sum + (Array.isArray(step.ops) ? step.ops.length : 0), 0) } : reply } : {}), ...(plan ? { planned: planned(), replacing: plan.replacing, reusing: taking.span, ...(Number.isInteger(taking.value) ? { occurrence: taking.value } : {}) } : {}), ...(seed === undefined ? {} : { seed }), ...(kept ? { receiptId: kept } : {}) });
                 if (!result?.ok) {
                     problems.push(problem({ module: moduleId, index, code: result?.code ?? 'FAILED', message: `The step "${command?.type}" after the reply's lines was not run: ${result?.message ?? 'unknown error'}` }));
                     if (precheck && command?.type === 'rpg.resolve' && payload?.board) throw holdBoard(result?.message);
@@ -320,7 +321,7 @@ export function createCaptureFlow(s, deps) {
                 continue;
             }
             const mark = lineMark(line.raw);
-            const seed = seeds?.(entry.kind, mark);
+            const seed = seeds?.(entry.kind, mark), kept = plan && seed !== undefined ? plan.reuse.receipt(`${CAPTURE_PREFIX}${entry.kind}`, mark) : undefined;
             // C3-4: a Re-read runs a line that made a change before (its receipt gives the seed) even
             // while its feature is off, so turning a feature off never takes away what it already did.
             const again = base !== null && seed !== undefined;
@@ -345,7 +346,7 @@ export function createCaptureFlow(s, deps) {
             try {
                 const operation = { type: `${CAPTURE_PREFIX}${entry.kind}`, payload: { ...line, kind: entry.kind, word: line.kind } };
                 const taking = plan ? occurrenceFor(plan, operation.type, operation.payload) : null;
-                const run = opts => bus.run(operation.type, operation.payload, { cause: 'story', state, capture: entry, carrier: plan ? { ...carrier, ...(taking.span && (plan.preserveSources || occurrenceOf(taking.span) === null) ? { ordinal: taking.span.source.ordinal } : {}), pending: plan.pending, opsBefore: plan.blocks.reduce((sum, piece) => sum + (Number.isInteger(piece.n) ? piece.n : 0), 0) } : carrier, chat, standing, standingReceipts, ...(plan ? { planned: plan.blocks.flatMap(piece => piece.block?.evidence ?? []), replacing: plan.replacing, reusing: taking.span, ...(Number.isInteger(taking.value) ? { occurrence: taking.value } : {}) } : {}), ...(seed === undefined ? {} : { seed }), ...opts });
+                const run = opts => bus.run(operation.type, operation.payload, { cause: 'story', state, capture: entry, carrier: plan ? { ...carrier, ...(taking.span && (plan.preserveSources || occurrenceOf(taking.span) === null) ? { ordinal: taking.span.source.ordinal } : {}), pending: plan.pending, opsBefore: plan.blocks.reduce((sum, piece) => sum + (Number.isInteger(piece.n) ? piece.n : 0), 0) } : carrier, chat, standing, standingReceipts, ...(plan ? { planned: plan.blocks.flatMap(piece => piece.block?.evidence ?? []), replacing: plan.replacing, reusing: taking.span, ...(Number.isInteger(taking.value) ? { occurrence: taking.value } : {}) } : {}), ...(seed === undefined ? {} : { seed }), ...(kept ? { receiptId: kept } : {}), ...opts });
                 result = entry.off ? await run({ capture: { ...entry, off: false }, again: true }) : await run();
                 // Refused by a feature that is off (a command it called, ctx.feature): run as it ran before.
                 if (again && !entry.off && result?.code === 'FEATURE_OFF') result = await run({ again: true });

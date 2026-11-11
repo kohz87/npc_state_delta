@@ -9,7 +9,7 @@ import { assemble, contextNotice, estimateTokens } from '../prompt.js';
 import { ensureModules, makeView } from '../sdk.js';
 import { cutAt } from '../../text.js';
 import { CORE_FEATURE } from '../features.js';
-import { RESOLVE as RPG_RESOLVE } from '../lean-rpg/names.js';
+import { DICE as RPG_DICE, RESOLVE as RPG_RESOLVE } from '../lean-rpg/names.js';
 import { NO_ROLLS_LINE, receiptCue } from '../lean-rpg/cue.js';
 import { holdStart } from './fight-start.js';
 import { readRecord } from '../persist.js';
@@ -130,6 +130,8 @@ export function createPromptBuild(s, deps) {
                 // How the carried board fight ended (won / fled / lost / open): the tail reads it to allow a new foe group only after an ended fight.
                 if (preludeType === RPG_RESOLVE && payload?.board) boardStop = result.receipt?.data?.v2?.result?.stop ?? null;
                 prechecks.push({ type: preludeType, payload, seed: result.receipt.seed });
+                // The reply's story-check dice: told as the tail note itself (kept whole, no [Happened] marker), drawn from the receipt's recorded dice.
+                if (preludeType === RPG_DICE) { cues[moduleId] = [...(cues[moduleId] ?? []), { text: receiptCue(result.receipt), keep: true }]; continue; }
                 // A prelude that says it is not for the narrator (`narrate: false`, the RPG's no-rolls note) is stored with the reply and told to no one.
                 if (result.receipt.narrate === false) continue;
                 const told = `[Happened]\n${receiptCue(result.receipt)}`;

@@ -19,10 +19,10 @@ export const LIMITS = Object.freeze({
 export const RECORD_LIMITS = Object.freeze({ slug: 64, note: 500, word: 40, element: 24 });
 
 // Content kinds a pack may carry. Each is a list of records.
-export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg', 'cast']);
+export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg', 'cast', 'names']);
 // Kinds added after the first pack format: a normalized pack has them only when the file gives
 // them, so what older packs list (counts) stays as it was.
-export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg', 'cast']);
+export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg', 'cast', 'names']);
 // `content.you` (Your look, MODULES §F126): an object, not a list. A pack opts in to a Rank for {{user}} with
 // `content.you.rank: { "label": "Guild rank" }` (the label is what Home and the Status card call it, 1 to 30 characters).
 export const YOU_FIELDS = Object.freeze(['rank']);
@@ -32,7 +32,7 @@ export const YOU_RANK_LABEL_MAX = 30;
 export const HOST_CAPABILITIES = Object.freeze(['data-modules-v1']);
 
 // Top-level fields of pack.json; anything else is refused so a typo is not silently ignored.
-export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'economy', 'calendar', 'weather', 'content', 'start', 'layouts', 'screens', 'theme']);
+export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'economy', 'calendar', 'weather', 'ripples', 'content', 'start', 'layouts', 'screens', 'theme']);
 // A pack's money scale (MODULES §F104): `{ scale?: 0.001–1000 (default 1), note? }`. `scale` multiplies the
 // built-in money defaults (a module's default loot and prices) when
 // this pack's currency is in use; numbers the pack writes itself (ranks, item values, prices) stay as written.
@@ -48,7 +48,7 @@ export const ITEM_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'kind', 'ra
 export const ITEM_CARRY = Object.freeze({ min: 1, max: 1000 });
 // `bonus`: the gear bonus an item gives while worn (0–6), instead of the one its rarity gives (`story-block.gear`). A pack sets it; the story never does.
 export const ITEM_BONUS = Object.freeze({ min: 0, max: 6 });
-export const EVENT_FIELDS = Object.freeze(['id', 'when', 'cue', 'once', 'after', 'then']);
+export const EVENT_FIELDS = Object.freeze(['id', 'when', 'cue', 'once', 'after', 'then', 'decision']);
 // The events part's own limits (src/v2/events), so a pack that passes here also runs there.
 export const EVENT_LIMITS = Object.freeze({ when: 500, cue: 500, then: 8 });
 export const CHOICE_FIELDS = Object.freeze(['id', 'name', 'note', 'stats', 'tags']);
@@ -76,6 +76,11 @@ export const TERM_SEPARATORS = /[|:#<>\r\n]/;
 // A ladder of ranks, lowest first: `{ id: 'F', title?, levels?: [lo, hi], reward?: [lo, hi], xp?: [lo, hi] }`, the
 // reward in whole units of the chat's one currency and `xp` the experience a job of the rank may give (whole XP, 0 to
 // RANKS_LIMITS.xp). Without `xp`, an open quest template's XP is held to `reward` as before (2.5.0 added `xp`).
+// The `names` content kind: ONE object (not a list), `{ banned?: [..], <culture id>: { regions, given, family? } }`. Story Director's names
+// part reads it through `packs.content { kind: 'names' }` to suggest given names for new people in a scene whose `place.region` contains
+// one of a culture's regions (first culture in key order wins). `banned` (overused names) is merged across packs.
+export const NAMES_FIELDS = Object.freeze(['regions', 'given', 'family']);
+export const NAMES_LIMITS = Object.freeze({ cultures: 20, regions: 8, region: 80, given: 60, family: 60, name: 40, banned: 200, bannedName: 80 });
 export const RANK_FIELDS = Object.freeze(['id', 'title', 'levels', 'reward', 'xp']);
 export const RANK_ID = /^[\p{L}\p{N}+-]{1,8}$/u;
 export const RANKS_LIMITS = Object.freeze({ records: 12, title: 30, level: 999, xp: 1000000 });
@@ -198,6 +203,13 @@ export const WEATHER_FIELDS = Object.freeze(['seasons', 'tables']);
 export const WEATHER_SEASON_FIELDS = Object.freeze(['name', 'months']);
 export const WEATHER_TABLE_FIELDS = Object.freeze(['season', 'region', 'weather']);
 export const WEATHER_LIMITS = Object.freeze({ seasons: 12, months: 60, season: 24, region: 80, tables: 120, kinds: 24, text: 60 });
+// A pack's ripples table (read by Story Director's `ripples` part): the powers rival claimants can win over, scoring tiers and caps, and
+// the pack's own world directions. Story Block checks its shape; Story Director scores it.
+export const RIPPLES_FIELDS = Object.freeze(['powers', 'tiers', 'caps', 'worldDirections', 'standingModule']);
+export const RIPPLES_POWER_FIELDS = Object.freeze(['id', 'name', 'aliases', 'factions', 'givers', 'npcs', 'base', 'standing', 'standingBase']);
+export const RIPPLES_TIERS = Object.freeze(['small', 'great', 'failed', 'abandoned', 'fight']);
+export const RIPPLES_CAPS = Object.freeze(['quest', 'event', 'standing', 'fight', 'power']);
+export const RIPPLES_LIMITS = Object.freeze({ powers: 12, id: 40, list: 20, name: 80, tier: 50, cap: 100, directions: 20 });
 export const START_FIELDS = Object.freeze(['scene', 'inventory']);
 // Screens (SPEC §13.1) a pack adds or overrides by id.
 // `tab` puts a screen in a shared tab (the same `tab` on several screens draws them as sections of one tab, in `order`; `tabTitle` names it, the first one

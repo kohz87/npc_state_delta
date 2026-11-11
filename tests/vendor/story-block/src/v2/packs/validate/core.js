@@ -7,7 +7,7 @@ import { oneLine } from '../../../text.js';
 import { templateShape, MAX_LOOP_DEPTH } from '../../view/template/index.js';
 import { MAX_JSON_DEPTH } from '../../view/template/json.js';
 
-export const HOST_VERSION = '2.27.0';
+export const HOST_VERSION = '2.31.0';
 
 /** A slug for a display name: "Iron Sword (old)" → "iron-sword-old". */
 export function slugify(name) {

@@ -4,7 +4,7 @@
 import {
     EVENT_FIELDS, EVENT_LIMITS, SLUG, COMMAND, ECONOMY_FIELDS, ECONOMY_LIMITS, WEATHER_LIMITS, WEATHER_FIELDS,
     WEATHER_SEASON_FIELDS, CALENDAR_LIMITS, WEATHER_TABLE_FIELDS, CHOICE_FIELDS, RECORD_LIMITS, LIMITS,
-    START_FIELDS, SKILL_FIELDS, SKILL_TYPES, STAT_NAME, SKILL_TARGETS, PRESET_FIELDS,
+    START_FIELDS, RIPPLES_FIELDS, RIPPLES_POWER_FIELDS, RIPPLES_TIERS, RIPPLES_CAPS, RIPPLES_LIMITS, SKILL_FIELDS, SKILL_TYPES, STAT_NAME, SKILL_TARGETS, PRESET_FIELDS,
 } from '../limits.js';
 import { oneLine, foldKey } from '../../../text.js';
 import { MAX_COINS, MAX_COIN_VALUE, coinsOf } from '../../domains/money.js';
@@ -29,6 +29,7 @@ export function checkEvent(record, path, add, readableConditions = true) {
     if (typeof record.cue !== 'string' || !record.cue.trim() || record.cue.trim().length > EVENT_LIMITS.cue) say('cue', `cue must be text of 1 to ${EVENT_LIMITS.cue} characters.`);
     if (record.once !== undefined && typeof record.once !== 'boolean') say('once', 'once must be true or false.');
     if (record.after !== undefined && (typeof record.after !== 'string' || !SLUG.test(record.after))) say('after', 'after must be the id of another event in this pack.');
+    if (record.decision !== undefined && (typeof record.decision !== 'string' || !SLUG.test(record.decision) || record.once === false)) say('decision', 'decision must be a slug on a once event.');
     const then = record.then ?? [];
     if (!Array.isArray(then) || then.length > EVENT_LIMITS.then) say('then', `then must be a list of at most ${EVENT_LIMITS.then} { "command": …, "payload": { … } }.`);
     else then.forEach((step, index) => {
@@ -43,6 +44,7 @@ export function checkEvent(record, path, add, readableConditions = true) {
         cue: record.cue.trim(),
         once: record.once ?? true,
         after: record.after ?? null,
+        ...(record.decision === undefined ? {} : { decision: record.decision }),
         then: then.map(step => ({ command: step.command, payload: { ...(step.payload ?? {}) } })),
     };
 }
@@ -168,6 +170,77 @@ export function checkWeather(weather, add) {
         tables.push({ season: typeof table.season === 'string' ? oneLine(table.season, L.season) : '', region: typeof table.region === 'string' ? oneLine(table.region, L.region) : '', weather: kinds });
     });
     return ok ? { ...(seasons.length ? { seasons } : {}), tables } : null;
+}
+
+/*
+ * A pack's ripples table: `{ powers, tiers?, caps?, worldDirections?, standingModule? }`, read by Story Director's ripples part
+ * (hidden sway per power from the player's deeds). `powers`: 1 to 12 `{ id (a slug), name, base 0..100, aliases?, factions?, givers?,
+ * npcs?: [{ name, weight 1..3 }], standing?, standingBase? }`; `tiers` and `caps`: whole numbers by name; `worldDirections`: `{ event,
+ * favours (a power id), unless? }`. A bad section is a pack Problem (`BAD_RIPPLES`), said once, and the section is not kept.
+ */
+export function checkRipples(ripples, add) {
+    let ok = true;
+    const say = (path, message, code = 'BAD_RIPPLES') => { ok = false; add(code, path, message); return null; };
+    const L = RIPPLES_LIMITS;
+    if (!isObject(ripples)) return say('ripples', 'ripples must be { "powers": [ … ], "tiers": { … }, "caps": { … }, "worldDirections": [ … ] }.');
+    for (const key of Object.keys(ripples)) if (!RIPPLES_FIELDS.includes(key)) say(`ripples.${key}`, `"${key}" is not a ripples field (expected ${RIPPLES_FIELDS.join(', ')}).`, 'UNKNOWN_FIELD');
+    const text = (value, max = L.name) => (typeof value === 'string' && value.trim() && value.length <= max ? oneLine(value, max) : '');
+    const names = (value, at) => {
+        if (value === undefined) return [];
+        const list = Array.isArray(value) ? value.map(item => text(item)) : [];
+        if (!Array.isArray(value) || value.length > L.list || list.some(item => !item)) { say(at, `${at} must be a list of at most ${L.list} names of at most ${L.name} characters.`); return []; }
+        return list;
+    };
+    const powers = [];
+    if (!Array.isArray(ripples.powers) || !ripples.powers.length || ripples.powers.length > L.powers) say('ripples.powers', `powers must be a list of 1 to ${L.powers} powers.`);
+    else ripples.powers.forEach((power, index) => {
+        const at = `ripples.powers[${index}]`;
+        if (!isObject(power)) return say(at, `${at} must be an object.`);
+        for (const key of Object.keys(power)) if (!RIPPLES_POWER_FIELDS.includes(key)) say(`${at}.${key}`, `"${key}" is not a power field (expected ${RIPPLES_POWER_FIELDS.join(', ')}).`, 'UNKNOWN_FIELD');
+        if (typeof power.id !== 'string' || !SLUG.test(power.id) || power.id.length > L.id) return say(`${at}.id`, `id must be a lowercase slug of at most ${L.id} characters (like "wendhild").`);
+        if (powers.some(other => other.id === power.id)) return say(`${at}.id`, `id "${power.id}" is used twice.`);
+        const name = text(power.name);
+        if (!name) return say(`${at}.name`, `name must be text of at most ${L.name} characters.`);
+        if (!isInt(power.base) || power.base > 100) return say(`${at}.base`, 'base must be a whole number 0 to 100.');
+        const npcs = [];
+        if (power.npcs !== undefined) {
+            if (!Array.isArray(power.npcs) || power.npcs.length > L.list) return say(`${at}.npcs`, `npcs must be a list of at most ${L.list} { "name", "weight" }.`);
+            for (const npc of power.npcs) {
+                if (!isObject(npc) || Object.keys(npc).some(key => key !== 'name' && key !== 'weight') || !text(npc.name) || (npc.weight !== undefined && !(isInt(npc.weight, 1) && npc.weight <= 3))) return say(`${at}.npcs`, 'an npc is { "name", "weight": 1 to 3 }.');
+                npcs.push({ name: text(npc.name), weight: npc.weight ?? 1 });
+            }
+        }
+        if (power.standing !== undefined && !text(power.standing)) return say(`${at}.standing`, 'standing must be the name of a standing key.');
+        if (power.standingBase !== undefined && !Number.isSafeInteger(power.standingBase)) return say(`${at}.standingBase`, 'standingBase must be a whole number.');
+        powers.push({
+            id: power.id, name, base: power.base, aliases: names(power.aliases, `${at}.aliases`), factions: names(power.factions, `${at}.factions`),
+            givers: names(power.givers, `${at}.givers`), npcs, ...(power.standing !== undefined ? { standing: text(power.standing) } : {}),
+            ...(power.standingBase !== undefined ? { standingBase: power.standingBase } : {}),
+        });
+    });
+    const numbers = (value, keys, max, at) => {
+        if (value === undefined) return undefined;
+        if (!isObject(value) || Object.keys(value).some(key => !keys.includes(key) || !isInt(value[key]) || value[key] > max)) { say(at, `${at} must map ${keys.join(', ')} to whole numbers 0 to ${max}.`); return undefined; }
+        return { ...value };
+    };
+    const tiers = numbers(ripples.tiers, RIPPLES_TIERS, L.tier, 'ripples.tiers');
+    const caps = numbers(ripples.caps, RIPPLES_CAPS, L.cap, 'ripples.caps');
+    const directions = [];
+    if (ripples.worldDirections !== undefined) {
+        if (!Array.isArray(ripples.worldDirections) || ripples.worldDirections.length > L.directions) say('ripples.worldDirections', `worldDirections must be a list of at most ${L.directions} { "event", "favours", "unless" }.`);
+        else ripples.worldDirections.forEach((entry, index) => {
+            const at = `ripples.worldDirections[${index}]`;
+            if (!isObject(entry) || Object.keys(entry).some(key => !['event', 'favours', 'unless'].includes(key)) || !text(entry.event)) return say(at, `${at} must be { "event", "favours", "unless" }.`);
+            if (!powers.some(power => power.id === entry.favours)) return say(`${at}.favours`, 'favours must be the id of one of the powers.');
+            directions.push({ event: text(entry.event), favours: entry.favours, unless: names(entry.unless, `${at}.unless`) });
+        });
+    }
+    let standingModule = '';
+    if (ripples.standingModule !== undefined) {
+        standingModule = text(ripples.standingModule);
+        if (!standingModule) say('ripples.standingModule', 'standingModule must be text (the standing data module\'s name).');
+    }
+    return ok ? { powers, ...(tiers ? { tiers } : {}), ...(caps ? { caps } : {}), ...(directions.length ? { worldDirections: directions } : {}), ...(standingModule ? { standingModule } : {}) } : null;
 }
 
 // A race or talent for the character creation wizard: { id?, name, note?, stats?, tags? }.

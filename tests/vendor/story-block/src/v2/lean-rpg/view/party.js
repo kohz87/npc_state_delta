@@ -7,7 +7,7 @@
 // wizard (wizard.js). Each card also has Export (export.js: a file of the character to import in another chat, with or without what they carry). The tab shows while the feature is on, with or without a Character block.
 // Every node is built with createElement and textContent.
 
-import { shell, h } from '../../view/widgets/dom.js';
+import { shell, h, s } from '../../view/widgets/dom.js';
 import { meter } from '../../view/widgets/meter.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { drawStageBars } from './bars.js';
@@ -40,10 +40,16 @@ const sameCharacter = (a, b) => a.module === b.module && a.subject === b.subject
  * its draft, is kept here, outside the widget (as Settings → Blocks keeps its editor): `shared.open` is the Spend points sheet's
  * session and `shared.skills` the Skills view's; at most one of them is open.
  */
-export function createPartyWidget({ headState = () => null, readerName = () => '', roleOf, openWizard = null, exportCharacter = null, rules = undefined, rolled = () => false, levels = () => ({}), gear = null, board = null } = {}) {
+export function createPartyWidget({ headState = () => null, readerName = () => '', roleOf, openWizard = null, exportCharacter = null, rules = undefined, rolled = () => false, levels = () => ({}), gear = null, board = null, chatKey = () => '', storage = undefined } = {}) {
     // `gear` ({ on(), view(args), plan() }, none without a host): while Gear in fights is on a card has an Inventory button that opens the slot card (gear-card.js).
     const shared = { open: null, skills: null, gear: null };
     const live = new Set();
+    // "Left the party" folded or open: the viewer's choice, per chat on this device (localStorage), never game state; a storage that throws means folded.
+    const foldKey = () => `story-block.partyLeftOpen|${chatKey()}`;
+    const area = () => { try { return storage === undefined ? globalThis.localStorage : storage; } catch { return null; } };
+    const kept = new Map();
+    const leftOpen = () => { if (kept.has(foldKey())) return kept.get(foldKey()); try { return area()?.getItem?.(foldKey()) === '1'; } catch { return false; } };
+    const setLeftOpen = on => { kept.set(foldKey(), on); try { if (on) area()?.setItem?.(foldKey(), '1'); else area()?.removeItem?.(foldKey()); } catch { /* the choice lasts this page only */ } };
     const tell = () => { for (const redraw of [...live]) redraw(); };
     return {
         props: {}, primary: null, validate: () => [],
@@ -144,12 +150,13 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 if (shared.gear && !(wearing && wearView)) shared.gear = null;
                 main.hidden = Boolean(open || looking || shared.gear);
                 if (open) sheet = renderDistribute(host, { character: open, session: shared.open, api, doc, onClose: closeSheet, onDone: ended, ...(rules ? { rules } : {}) });
-                else if (shared.gear) sheet = renderGearCard(host, { character: wearing, view: wearView, onBack: closeGear, doc });
+                else if (shared.gear) sheet = renderGearCard(host, { character: wearing, view: wearView, onBack: closeGear, api, onChanged: tell, doc });
                 else if (looking) sheet = renderSkills(host, { character: looking, session: shared.skills, api, doc, onBack: closeSkills, onSaved: tell, rolled, board, ...(rules ? { rules } : {}) });
                 const head = h(doc, 'div', 'rpg-head');
                 head.appendChild(h(doc, 'h3', '', P.title));
+                const away = party.filter(character => character.left), here = party.filter(character => !character.left);
                 const count = h(doc, 'div', 'rpg-pills');
-                count.appendChild(h(doc, 'span', 'ss-pill', party.length === 1 ? P.countOne : fill(P.count, { n: party.length })));
+                count.appendChild(h(doc, 'span', 'ss-pill rpg-count', fill(P.active, { n: here.length }) + (away.length ? fill(P.leftCount, { n: away.length }) : '')));
                 if (party.length && openWizard) button(count, P.newCharacter, 'ss-button rpg-new', newCharacter);
                 head.appendChild(count);
                 main.appendChild(head);
@@ -160,7 +167,21 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 }
                 const grid = h(doc, 'div', 'rpg-cards');
                 main.appendChild(grid);
-                for (const character of party) card(grid, character);
+                for (const character of here) card(grid, character);
+                if (!away.length) return;
+                // One row for the members who left: a chevron on the left, the whole row a button; opened, their full cards as ever.
+                const opened = leftOpen();
+                const row = button(main, '', `rpg-left-fold${opened ? ' rpg-left-open' : ''}`, () => { setLeftOpen(!opened); tell(); root.querySelector('.rpg-left-fold')?.focus?.(); });   // (the redraw replaced the button: focus its replacement, so a keyboard reader keeps their place)
+                row.setAttribute('aria-expanded', String(opened));
+                const chevron = h(doc, 'span', 'rpg-left-chev');
+                const drawn = s(doc, 'svg', { viewBox: '0 0 12 12', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' });
+                drawn.appendChild(s(doc, 'path', { d: 'M4.5 2.5 8 6l-3.5 3.5' }));
+                chevron.appendChild(drawn);
+                const line = h(doc, 'span', 'rpg-left-line');
+                line.appendChild(h(doc, 'b', '', fill(P.leftRow, { n: away.length })));
+                if (!opened) line.appendChild(h(doc, 'span', 'rpg-left-names', away.map(character => fill(P.leftOne, { name: character.name, level: character.level })).join(', ')));
+                row.append(chevron, line);
+                if (opened) { const gone = h(doc, 'div', 'rpg-cards rpg-left-cards'); main.appendChild(gone); for (const character of away) card(gone, character); }
             }
 
             live.add(draw);

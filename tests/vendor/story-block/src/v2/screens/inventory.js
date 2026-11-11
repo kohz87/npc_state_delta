@@ -2,7 +2,8 @@
 
 import { KIND_ORDER, RARITIES } from '../domains/inventory.js';
 import { STRINGS, html, jsonText } from '../strings.js';
-import { INVENTORY_ADD_WIDGET } from './inventory-add.js';
+import { INVENTORY_ADD_WIDGET, INVENTORY_GRID_WIDGET, INVENTORY_VIEW_WIDGET, WORN_FOLD_WIDGET } from './inventory-add.js';
+import { GRID_CSS } from './inventory-grid.js';
 import { BASE_CSS, RARITY_THEME } from './style.js';
 
 export const INVENTORY_SCREEN_ID = 'story-block/inventory';
@@ -46,9 +47,9 @@ const BOUND_FREE = "q.gx.rows[it.stack].bound == null";
 // The lock of a bound chip: the app's own ph-lock-simple (solid), drawn by the badge widget (a template cannot carry an svg's path).
 const LOCK = `<ss-widget class="bound-lock" name="ss.badge" data-props='{"icon":"ph-lock-simple:fill","label":"${jsonText(G.bound)}"}'></ss-widget>`;
 
-// With Gear in fights on (`q.gx` answers; it is null while off) the same card gains the gear parts; `group(kind)` without `gear` is the template as it
-// always was, so the gear-off render is exactly that.
-function group(kind, gear = false) {
+// With Gear in fights on (`q.gx` answers; it is null while off) the same card gains the gear parts; `itemRow(kind, false, …)` is the template as it
+// always was, so the gear-off render is exactly that. `test` is the row's data-if (which items it draws).
+function itemRow(kind, gear, test) {
     const row = 'q.gx.rows[it.stack]';
     const edit = `{"value":"{{ it.name }}","itemCount":{{ q.counts[it.stack] }},"itemNote":"{{ it.note }}","displayValue":false,"kind":"item","label":"${jsonText(S.editItem)}","command":"inventory.edit","payload":{"stack":"{{ it.stack }}","group":true}${gear
         ? `,"gear":{"kind":"{{ it.kind }}","stack":"{{ it.stack }}","owner":"{{ it.owner }}","by":"{{ ${row}.byId }}","place":"{{ ${row}.place }}","slot":"{{ ${row}.slotKey }}","bound":"{{ ${row}.bound.who }}","def":"{{ it.def }}","rarity":"{{ it.rarity }}","row":{{ ${row} }},"kit":{{ q.gx.kit.open }},"owners":{{ q.gx.owners }}}` : ''}}`;
@@ -84,17 +85,22 @@ function group(kind, gear = false) {
           <span class="sep" data-if="it.note != '' && (${row}.bonus != '' || it.kind == 'equipment')" aria-hidden="true">·</span>
           <p class="note muted" data-if="it.note">{{ it.note }}</p>
         </div>` : '';
-    const buttons = gear ? '' : `
+    // Gear on: a bag piece has Equip (choose the wearer; a taken slot swaps, the old piece goes back to the bag); a worn piece has Unequip, or, a cast member's signature piece, its lock.
+    const bagPiece = `it.kind == 'equipment' && ${row}.place == '' && ${row}.slotKey != '' && ${row}.bound == null`;
+    const equipWho = `
+            <button class="ss-button pick-member" data-each="q.gx.owners as who" data-command="item.equip" data-payload='{"stack":"{{ it.stack }}","owner":"{{ who.value }}","transfer":true}'
+                    title="${html(G.equipWhoTitle, { name: '{{ it.name }}', who: '{{ who.label }}' })}">{{ who.label }}</button>`;
+    const buttons = gear ? foldAction('equip', bagPiece, 'fa-hand-fist', html(G.equip), html(S.equipTitle, { name: '{{ it.name }}' })) : `
           <button class="ss-button" data-if="it.kind == 'equipment' && it.equipped == null" data-command="inventory.equip"
                   data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.equipTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i> ${html(S.equip)}</button>`;
-    const unequip = gear ? '' : `
+    const unequip = gear ? `
+          <button class="ss-button" data-if="${row}.place != '' && ${row}.bound == null" data-command="inventory.unequip"
+                  data-payload='{"stack":"{{ it.stack }}"}' title="${html(G.unequipTitle, { name: '{{ it.name }}' })}">${html(S.unequip)}</button>
+          <span class="chip bound sig" data-if="${row}.place != '' && ${row}.bound != null" title="${html(G.signatureTitle, { name: '{{ ' + row + '.bound.who }}' })}">${LOCK}${html(G.signature)}</span>` : `
           <button class="ss-button" data-if="it.equipped != null" data-command="inventory.unequip"
                   data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.unequipTitle, { name: '{{ it.name }}' })}">${html(S.unequip)}</button>`;
     return `
-  <section class="group" data-kind="${kind}" data-if="${gear ? `q.gx != null && ${anyKind(kind)}` : `q.gx == null && ${anyKind(kind)}`}">
-    <h4 class="ss-section-label"><i class="fa-solid ${KIND_ICONS[kind]}" aria-hidden="true"></i> ${html(KIND_TITLES[kind])}</h4>
-    <ul>
-      <li class="item ss-glass${gear ? ' grow' : ''}" data-each="q.items as it" data-draft-close="fold[it.stack]" data-if="it.kind == '${kind}' && ${ITEM_FILTER}"
+      <li class="item ss-glass${gear ? ' grow' : ''}" data-each="q.items as it" data-draft-close="fold[it.stack]" data-if="${test}"
           data-class="${RARITY_CLASSES}; equipped: it.equipped != null${gear ? `; broken: ${row}.broken` : ''}">
         <span class="ss-tile-box" aria-hidden="true"><i class="fa-solid ${KIND_ICONS[kind]}"></i><span class="ss-tile-count" data-if="it.qty != 1">{{ it.qty }}</span></span>
         <div class="body">
@@ -107,6 +113,7 @@ function group(kind, gear = false) {
           ${foldAction('use', "it.kind == 'consumable' && len(q.gear.users[it.stack]) > 0", 'fa-flask', html(S.useOn), html(S.useOnTitle, { name: '{{ it.name }}' }))}${unequip}
           ${foldAction('drop', gear ? BOUND_FREE : '', 'fa-trash-can', html(S.drop), html(S.dropTitle, { name: '{{ it.name }}' }))}
         </div>
+          ${gear ? foldPanel('equip', 'use-on', bagPiece, html(G.equipWho), equipWho) : ''}
           ${foldPanel('use', 'use-on', "it.kind == 'consumable' && len(q.gear.users[it.stack]) > 0", html(S.useOn), `
             <button class="ss-button" data-each="q.gear.users[it.stack] as who" data-command="item.use"
                     data-payload='{"stack":"{{ it.stack }}","target":"{{ who.id }}"}' title="${html(S.useOnWho, { name: '{{ it.name }}' })}">{{ who.name }}</button>`)}
@@ -116,10 +123,31 @@ function group(kind, gear = false) {
             <button class="ss-button ss-button-danger" data-command="inventory.drop"
                     data-payload='{"stack":"{{ it.stack }}","qty":{{ it.qty }}}'><span data-if="it.qty != 1">${html(S.dropAll, { qty: '{{ it.qty }}' })}</span><span data-if="it.qty == 1">${html(S.drop)}</span></button>`)}
         </div>
-      </li>
+      </li>`;
+}
+
+// One kind's section: gear on, the Equipment section lists only the pieces nobody wears (the worn ones are under the Worn row).
+function group(kind, gear = false) {
+    const worn = 'q.gx.rows[it.stack].place';
+    return `
+  <section class="group" data-kind="${kind}" data-if="${gear ? `q.gx != null && ${anyKind(kind)}` : `q.gx == null && ${anyKind(kind)}`}">
+    <h4 class="ss-section-label"><i class="fa-solid ${KIND_ICONS[kind]}" aria-hidden="true"></i> ${html(gear && kind === 'equipment' ? G.bagTitle : KIND_TITLES[kind])}</h4>
+    <ul>${itemRow(kind, gear, `it.kind == '${kind}'${gear ? ` && ${worn} == ''` : ''} && ${ITEM_FILTER}`)}
     </ul>
   </section>`;
 }
+
+// The Worn row (gear on): the folded "Worn (N)" row of the widget, and, open, the worn pieces grouped by wearer, each row with Unequip (or the signature lock) and Edit.
+const WORN = `<section class="worn-sec" data-if="q.gx != null && ${anyKind('equipment')}">
+    <ss-widget name="${WORN_FOLD_WIDGET}" data-props='{"rows":{{ q.gx.rows }},"open":"{{ draft.wornOpen }}"}'></ss-widget>
+    <div class="worn-list" data-if="draft.wornOpen == '1' || draft.equippedOnly == true">
+      <section class="worn-who" data-each="q.gx.wearers as w">
+        <h4 class="ss-section-label">{{ w.label }}</h4>
+        <ul>${itemRow('equipment', true, `q.gx.rows[it.stack].byId == w.value && q.gx.rows[it.stack].place != '' && ${ITEM_FILTER}`)}
+        </ul>
+      </section>
+    </div>
+  </section>`;
 
 // With Gear in fights on, the sections come in this order (equipment first); the kinds it does not name follow, so nothing is hidden.
 const GEAR_ORDER = Object.freeze(['equipment', 'consumable', 'goods', 'quest', 'material', 'money']);
@@ -138,6 +166,10 @@ const CARRY = `<section class="carry-sec" data-if="q.gx != null">
     </ul>
   </section>`;
 
+// The Grid view's widget gets the screen's data and the header's filter boxes (inventory-add.js draws the tiles; the List rows below stay as they were).
+const GRID_PROPS = '{"items":{{ q.items }},"counts":{{ q.counts }},"rows":{{ q.gx.rows }},"wearers":{{ q.gx.wearers }},"owners":{{ q.gx.owners }},"kit":{{ q.gx.kit.open }},"users":{{ q.gear.users }},'
+    + '"filter":{"kind":"{{ draft.kind }}","rarity":"{{ draft.rarity }}","find":"{{ draft.find }}","equippedOnly":"{{ draft.equippedOnly }}"}}';
+
 const TEMPLATE = `
 <div class="inv" data-class="gear: q.gx != null">
   <header class="top">
@@ -150,6 +182,7 @@ const TEMPLATE = `
     <span data-inline-control="ss.editable" data-props='{"value":{{ q.wallet.coin }},"displayValue":false,"money":true,"currency":{{ q.currency }},"label":"${jsonText(S.editPurse)}","command":"wallet.set","valueKey":"amount"}'></span>
     </div>
     <span data-inline-control="${INVENTORY_ADD_WIDGET}"></span>
+    <ss-widget name="${INVENTORY_VIEW_WIDGET}" data-props='{"view":"{{ draft.view }}"}'></ss-widget>
     </div>
     <div class="filter" role="search" aria-label="${html(S.filterLabel)}" data-if="len(q.items) > 0">
       <input type="search" class="find" data-draft="find" placeholder="${html(S.find)}" title="${html(S.findTitle)}"
@@ -183,13 +216,15 @@ ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[
   </section>
   <p class="empty muted" data-if="len(q.items) == 0">${html(S.empty)}</p>
 
-  <div class="groups">${GEAR_ORDER.map(kind => group(kind, true).trim()).join('')}${KIND_ORDER.map(kind => group(kind)).join('')}
+  <ss-widget name="${INVENTORY_GRID_WIDGET}" data-if="draft.view == 'grid' && len(q.items) > 0" data-props='${GRID_PROPS}'></ss-widget>
+  <div class="groups" data-if="draft.view != 'grid'">${GEAR_ORDER.map(kind => group(kind, true).trim() + (kind === 'equipment' ? WORN : '')).join('')}${KIND_ORDER.map(kind => group(kind)).join('')}
   </div>
-  <p class="nomatch muted" data-if="len(q.items) > 0">${html(S.noMatch)}</p>
+  <p class="nomatch muted" data-if="len(q.items) > 0 && draft.view != 'grid'">${html(S.noMatch)}</p>
 </div>`;
 
 const CSS = `${BASE_CSS}
-.inv { display: grid; gap: var(--sb-gap); }
+${GRID_CSS}
+.inv { display: grid; gap: var(--sb-gap); position: relative; }
 .top { display: flex; flex-wrap: wrap; gap: var(--sb-gap); align-items: center; }
 .wallet-and-add { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .wallet { display: inline-flex; gap: 6px; align-items: center; font-size: 1.05em; }
@@ -220,6 +255,17 @@ const CSS = `${BASE_CSS}
 .filter .check input { flex: 0 0 auto; width: 1em; height: 1em; min-width: 0; margin: 0; accent-color: var(--sb-accent); }
 .groups { display: grid; gap: var(--sb-gap); }
 .group:not(:has(.item)) { display: none; }
+.worn-sec { display: grid; gap: 8px; }
+.worn-sec > .ss-w-worn-fold[hidden], .worn-who:not(:has(.item)) { display: none; }
+.worn-list { display: grid; gap: 10px; }
+.worn-who { display: grid; gap: 6px; }
+.worn-fold-btn { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 6px 10px; border: 1px solid var(--sb-border); border-radius: 12px; background: transparent; color: var(--sb-em); font: inherit; text-align: left; cursor: pointer; min-width: 0; overflow: hidden; }
+.worn-fold-btn b { color: var(--sb-fg); white-space: nowrap; flex: none; }
+.worn-names { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worn-chev { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--sb-fg); }
+.worn-chev svg { width: 12px; height: 12px; display: block; transition: transform 0.15s; }
+.worn-open .worn-chev svg { transform: rotate(90deg); }
+.worn-fold-btn:focus-visible { outline: 2px solid var(--sb-accent); outline-offset: 2px; }
 .nomatch { display: none; }
 .groups:not(:has(.item)) + .nomatch { display: block; }
 .item { --rarity: var(--sb-common); padding: 12px; margin: 0 0 4px; border-radius: var(--ss-radius-l, 14px); transition: box-shadow 0.15s ease; }
@@ -346,6 +392,13 @@ const CSS = `${BASE_CSS}
 .bound > .bound-lock .ss-w-badge { padding: 0; border: 0; background: none; min-height: 0; gap: 0; }
 .bound > .bound-lock .ss-w-badge-icon { color: inherit; display: inline-flex; }
 .bound > .bound-lock .ss-icon-svg { width: 9px; height: 9px; }
+/* On a phone the buttons leave the right-hand column and sit on their own line under the item, so the name, the pill and the condition line keep the full width. */
+@media (max-width: 480px) {
+  .inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 20px 16px 16px auto; }
+  .inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > .actions { grid-column: 1; grid-row: 4; justify-self: start; }
+  .inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > .fold { grid-row: 5; }
+  .inv.gear .g-l3 .cpart, .inv.gear .g-l3 .cword { flex: none; overflow: visible; }
+}
 /* The rarity word is for desktop widths: on a phone the name's colour already says it. */
 @media (max-width: 500px) { .inv.gear .g-l1 { gap: 4px; } .inv.gear .g-l1 .rarity { display: none; } .inv.gear .g-l1 .chip.slot { padding: 0 4px; } }
 `;

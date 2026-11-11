@@ -28,7 +28,7 @@ import { stepper } from '../../view/widgets/stepper.js';
 import { refusalText } from '../../strings.js';
 import { DEFAULT_CURRENCY } from '../../domains/money.js';
 import { FILE_LIMITS, moneyText, parseCharacterFile, skillLine, thingsWord } from '../charfile.js';
-import { LEVEL, CREATION, RANK_NAMES, STATS, USES } from '../names.js';
+import { LEVEL, CREATION, PARTY_ACTIVE, RANK_NAMES, STATS, USES } from '../names.js';
 import { fold } from '../read.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { readParty } from './party-data.js';
@@ -65,7 +65,7 @@ export function createWizardScreen() {
 function worldOf(state, persona, roleOf, replyKey = '') {
     const party = readParty(state, { own: persona, roleOf });
     const free = actionsFree(state, replyKey);
-    return { persona, names: party.map(character => character.name), hasYou: party.some(character => character.own), room: hasRoom(state), free, extras: extrasPlan(state, { roleOf, free }),
+    return { persona, names: party.map(character => character.name), hasYou: party.some(character => character.own), full: party.filter(character => character.left !== true).length >= PARTY_ACTIVE, room: hasRoom(state), free, extras: extrasPlan(state, { roleOf, free }),
         used: Object.keys(state?.domains?.dataModules?.active ?? {}) };
 }
 

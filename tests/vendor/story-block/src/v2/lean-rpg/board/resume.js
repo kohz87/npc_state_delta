@@ -10,7 +10,7 @@ const ENDED = new Set(['won', 'lost', 'fled']);
 const isObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const num = value => (Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 0);
 const groupOf = member => (Number.isInteger(member?.group) ? member.group
-    : num(member?.slot) >= 1 && num(member?.slot) <= 4 ? num(member.slot) : Math.floor(num(member?.slot) / 10));
+    : num(member?.slot) >= 1 && num(member?.slot) <= 6 ? num(member.slot) : Math.floor(num(member?.slot) / 10));
 const slotOf = member => (Number.isInteger(member?.slot) ? member.slot
     : groupOf(member) * 10 + Math.max(1, num(member?.n)));
 const valueOf = member => (Number.isFinite(Number(member?.value)) ? Number(member.value) : Number(member?.hurt));
@@ -77,11 +77,12 @@ export function resumeMembers(records, slots, foesBlock) {
         const packed = mine.some(member => member?.pack === true || num(member?.count) > 1);
         const original = packed ? mine.reduce((sum, member) => sum + Math.max(0, num(member?.count)), 0) : mine.length;
         if (original <= 0) return null;
+        if (original === 6 && result.foesSix !== 1) return null;   // (six foes were one pack before the six-group rule and are six bars under it: their bars do not carry across)
         if (original === 1) {
             if (count !== 1 || num(valueOf(mine[0])) !== hurt) return null;
             continue;
         }
-        const [collapsed] = collapseFoes([{ ...foe, filled: true, count: original }], values);
+        const [collapsed] = collapseFoes([{ ...foe, filled: true, count: original }], values, { six: result.foesSix === 1 });
         if (!collapsed || collapsed.count.to !== count || collapsed.hurt.to !== hurt) return null;
     }
     return carriedFrom(members);

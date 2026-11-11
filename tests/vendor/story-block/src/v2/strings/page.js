@@ -12,17 +12,11 @@ export const PAGE_STRINGS = {
         suiteTitle: 'Story Suite settings',
         dismiss: 'Dismiss',
         blocked: '{module}: {reason}',
-        // The screen bar (view/screen-bar.js): the navigation of the game view and the Story panel, and its More sheet.
+        // The screen bar (view/screen-bar.js): the navigation of the game view and the Story panel.
         screens: 'Screens',
-        more: 'More',
-        moreSheet: 'More screens',
-        moreWith: 'More, {title}',
         // An active tab with something to show (a red dot): its name says it, with the badge's words when it gave some.
         alertWord: 'alert',
         alertSlot: '{title}, {alert}',
-        moreAlert: '{more}, {title}: {alert}',
-        moreHint: 'Choose your bar in Settings → Tabs',
-        moreEmpty: 'Every screen is in the bar.',
     },
     panel: {
         title: 'Story',

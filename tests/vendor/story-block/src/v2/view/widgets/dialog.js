@@ -1,4 +1,4 @@
-// ss.dialog (view/glass.css, classes `ss-modal`): the glass dialog. A modal over the page: a titled glass
+// ss.dialog (view/glass-*.css, classes `ss-modal`): the glass dialog. A modal over the page: a titled glass
 // panel with some text and up to four buttons. It is labelled by its title (`aria-labelledby`) and described
 // by its text; the focus goes in when it opens (the main button, else the first control), Tab and Shift+Tab
 // stay inside it, Escape and a click on the dimmed page behind close it, and the focus goes back to where it was

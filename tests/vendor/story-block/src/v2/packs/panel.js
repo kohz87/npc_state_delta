@@ -8,7 +8,7 @@ import { button, el, plural } from '../../ui/dom.js';
 import { LIMITS, ZIP_LIMITS } from './limits.js';
 import { isZipFile, readPackZip } from './bundle.js';
 
-const COUNT_WORDS = { items: 'item', creatures: 'creature', shops: 'shop', recipes: 'recipe', events: 'event', quests: 'quest', races: 'race', talents: 'talent', skills: 'skill', presets: 'ready-made character', places: 'place', routes: 'route', terms: 'term set', ranks: 'rank', crafts: 'craft', meterPresets: 'meter preset', markets: 'market', rpg: 'skill set', rules: 'rules set', cast: 'cast member' };
+const COUNT_WORDS = { items: 'item', creatures: 'creature', shops: 'shop', recipes: 'recipe', events: 'event', quests: 'quest', races: 'race', talents: 'talent', skills: 'skill', presets: 'ready-made character', places: 'place', routes: 'route', terms: 'term set', ranks: 'rank', crafts: 'craft', meterPresets: 'meter preset', markets: 'market', rpg: 'skill set', rules: 'rules set', cast: 'cast member', names: 'name list' };
 
 /** One line of what a pack holds: "3 items, 1 shop, start state". */
 export function countsLine(counts, hasStart) {
@@ -84,7 +84,7 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
         const first = result.action === 'unchanged' ? `${result.name} is already installed.` : `${result.action === 'updated' ? 'Updated' : 'Installed'} ${result.name}.`;
         const portraits = result.portraits;
         const refused = portraits?.refused ?? [];
-        say([first, portraitLine(portraits) ? `${portraitLine(portraits)}.` : '', refused.length ? `${plural(refused.length, 'image')} not used.` : ''].filter(Boolean).join(' '), refused.map(item => item.message));
+        say([first, portraitLine(portraits) ? `${portraitLine(portraits)}.` : '', refused.length ? `${plural(refused.length, 'image')} not used.` : ''].filter(Boolean).join(' '), [...(result.warnings ?? []).map(item => `Ignored: ${item.message}`), ...refused.map(item => item.message)]);
     }
 
     // A pack as one zip (bundle.js): pack.json and its portraits/ folder, picked alone.
@@ -120,7 +120,7 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
             bad.length ? `${bad.length} ${bad.length === 1 ? 'entry was' : 'entries were'} not imported.` : '',
             marketText.trim(),
         ].filter(Boolean).join(' ');
-        say(text, bad.flatMap(result => errorLines(result.errors).map(line => `${result.title || result.origin}: ${line}`)));
+        say(text, [...good.flatMap(result => (result.warnings ?? []).map(warning => `${result.title || result.origin}: Ignored: ${warning.message}`)), ...bad.flatMap(result => errorLines(result.errors).map(line => `${result.title || result.origin}: ${line}`))]);
     }
 
     const rowOf = id => [...root.querySelectorAll('.ss-packs-row')].find(node => node.dataset.packId === id);
@@ -140,6 +140,7 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
         if (pack.description) main.append(make('span', 'ss-listcard-sub ss-packs-description', pack.description));
         if (pack.problem) main.append(make('span', 'ss-listcard-sub ss-packs-problem', `Not usable: ${pack.problem}`));
         else if (pack.missing.length) main.append(make('span', 'ss-listcard-sub ss-packs-problem', `Needs ${pack.missing.join(', ')}; its content is offered but those parts will not use it.`));
+        for (const warning of pack.warnings ?? []) main.append(make('span', 'ss-listcard-sub ss-packs-problem', `Ignored: ${warning.message}`));
         const toggle = make('button', `ss-switch ss-packs-enabled${pack.enabled ? ' ss-switch-on' : ''}`);
         toggle.type = 'button';
         toggle.setAttribute('role', 'switch');

@@ -239,8 +239,8 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
          * `replacing` (the proof of the blocks being replaced): a proof of the same kind and key at the same place among those keeps the id of its old one.
          * A guarded transaction's result has a `block` too (REPLAY.md), which store.append or replaceStory keeps.
          */
-        run(type, payload, { cause = 'story', seed: seedValue, state, capture, carrier = null, chat = null, again = false, standing = null, standingReceipts = null, reply = null, planned = null, replacing = null, occurrence = null, reusing = null } = {}) {
-            return guarded(() => transact(state ?? store.head(), type, payload, { ...fresh(cause, seedValue), capture, carrier, chat, again: again === true && cause === 'story', standing, standingReceipts, reply, planned, replacing, occurrence, reusing }));
+        run(type, payload, { cause = 'story', seed: seedValue, state, capture, carrier = null, chat = null, again = false, standing = null, standingReceipts = null, reply = null, planned = null, replacing = null, occurrence = null, reusing = null, receiptsBefore = null, receiptId = null } = {}) {
+            return guarded(() => transact(state ?? store.head(), type, payload, { ...fresh(cause, seedValue), ...(typeof receiptId === 'string' ? { receiptId } : {}), capture, carrier, chat, again: again === true && cause === 'story', standing, standingReceipts, reply, planned, replacing, occurrence, reusing, receiptsBefore }));
         },
     };
 }

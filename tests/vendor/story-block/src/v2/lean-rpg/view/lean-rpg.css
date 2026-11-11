@@ -6,7 +6,7 @@
 
 /* ---- Party tab (mockup 21-party) ---- */
 .ss-w-rpg-party { display: grid; gap: 12px; min-width: 0; container-type: inline-size; }
-.rpg-main { display: grid; gap: 12px; }
+.rpg-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .rpg-main[hidden], .rpg-sheet-host:empty { display: none; }
 .rpg-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rpg-head h3 { margin: 0; font-size: 18px; }
@@ -344,7 +344,7 @@
 .rpg-wiz-level { width: 76px; max-width: 100%; }
 
 /* ---- Slot card (Party -> Inventory, only while Gear in fights is on): eight equal tiles in two columns ---- */
-.rpg-slots { display: grid; grid-auto-flow: column; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, 54px); gap: 8px; margin-top: 6px; }
+.rpg-slots { display: grid; grid-auto-flow: column; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(54px, auto)); gap: 8px; margin-top: 6px; }
 .rpg-slot { --rarity: var(--ss-text); position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 12px; box-sizing: border-box; border-radius: 8px; background: var(--ss-tile); border: 1px solid var(--ss-border); overflow: hidden; }
 .rpg-slot.r-uncommon { --rarity: var(--ss-uncommon); }
 .rpg-slot.r-rare { --rarity: var(--ss-rare); }
@@ -357,6 +357,12 @@
 .rpg-slot-place { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ss-muted); }
 .rpg-slot-name { font-size: 13px; font-weight: 600; color: var(--rarity); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rpg-slot-bonus { font-size: 11px; color: var(--rarity); font-variant-numeric: tabular-nums; }
+.rpg-slot-act { justify-self: start; min-height: 32px; margin-top: 3px; padding: 0 10px; font-size: 12px; }
+.rpg-slot-bag { display: grid; gap: 4px; justify-items: start; margin-top: 3px; }
+.rpg-slot-bag[hidden] { display: none; }
+.rpg-slot-pick { min-height: 32px; max-width: 100%; padding: 0 10px; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpg-gear-error { margin: 6px 0 0; color: var(--ss-bad-text, var(--ss-bad)); font-size: 12px; }
+.rpg-gear-error:empty { display: none; }
 .rpg-slot-lock { position: absolute; top: 5px; right: 6px; width: 13px; height: 13px; opacity: 0.95; }
 .rpg-slot-cond { position: absolute; inset: auto 0 0 0; height: 3px; background: transparent; }
 .rpg-slot.w-worn .rpg-slot-cond { background: var(--ss-warn); }
@@ -366,3 +372,12 @@
 /* The card's buttons are a little tighter while Gear in fights is on, and wrap to a second row when a label would not fit its button. */
 .rpg-card-actions-gear { flex-wrap: wrap; gap: 6px; }
 .rpg-card-actions-gear .ss-button { flex: 1 1 auto; min-width: fit-content; justify-content: center; padding-inline: 6px; white-space: nowrap; }
+
+/* ---- Party: the members who left fold into one row under the active cards ---- */
+.rpg-left-fold { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 6px 10px; border: 1px solid var(--ss-border, currentColor); border-radius: 12px; background: transparent; color: var(--ss-muted); font: inherit; text-align: left; cursor: pointer; min-width: 0; overflow: hidden; }
+.rpg-left-fold b { color: var(--ss-text, inherit); white-space: nowrap; flex: none; }
+.rpg-left-line { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.rpg-left-names { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpg-left-chev { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
+.rpg-left-chev svg { width: 12px; height: 12px; display: block; transition: transform 0.15s; }
+.rpg-left-open .rpg-left-chev svg { transform: rotate(90deg); }

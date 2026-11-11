@@ -1,0 +1,166 @@
+/* The number lists and the guild card of the data-module screens, and the Enable all box of Settings → Tabs & Packs → Data modules
+   (REPUI, option B, 7 Nov). Rules here override host.css's .ss-b-* rules (screens/block-layouts.js draws the markup), with more specific
+   selectors, so host.css, glass-*.css and mounts-*.css stay as they are. The classes the wiring step adds are listed in REPUI-A.REPORT.md:
+   .ss-rm-head / .ss-rm-edit-btn (heading + Edit), .ss-rm-editing (on the list's section: reveals the pencils), .ss-rm-pos / .ss-rm-neg
+   (value colour), .ss-rm-scale (the scale line), .ss-rm-fold (the one fold row), .ss-rm-tiles (guild facts as tiles), .ss-rm-badge,
+   .ss-rm-warn, .ss-rm-enable-all, .ss-rm-confirm and its parts, .ss-rm-btn / .ss-rm-btn-pri, .ss-rm-refusal. Nunito 400/600/700 only. */
+
+/* 1. Rows: each its own rounded box with room between, 8px bars, no glass behind the list. */
+.ss-b-map .ss-b-box { padding: 0; background: none; border: 0; box-shadow: none; }
+.ss-b-map .ss-b-list { gap: 8px; }
+.ss-b-map .ss-b-row,
+.ss-b-map .ss-b-row:last-child {
+    padding: 10px 12px;
+    row-gap: 8px;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius, 12px);
+    background: var(--ss-surface, transparent);
+}
+.ss-b-map .ss-b-name { font-size: 14px; font-weight: 600; }
+.ss-b-map .ss-b-val { font-size: 15px; font-weight: 700; }
+.ss-b-map .ss-b-row > .ss-bar-track { height: 8px; border-radius: 4px; }
+
+/* 2. A signed range: the bar leaves a centre line, red below 0, green above; the value takes the same colour. */
+.ss-b-map .ss-b-val.ss-rm-neg { color: var(--ss-bad, #e06464); }
+.ss-b-map .ss-b-val.ss-rm-pos { color: var(--ss-good, #3fbf6f); }
+.ss-b-map .ss-b-track-c .ss-b-mid { width: 2px; top: -3px; bottom: -3px; opacity: .8; border-radius: 1px; }
+.ss-b-map .ss-b-track-c .ss-bar-fill:not(.ss-b-neg) { background: var(--ss-good, #3fbf6f); border-radius: 0 4px 4px 0; }
+.ss-b-map .ss-b-track-c .ss-bar-fill.ss-b-neg { background: var(--ss-bad, #e06464); border-radius: 4px 0 0 4px; }
+.ss-rm-scale {
+    display: flex;
+    justify-content: space-between;
+    margin: 0;
+    padding: 0 12px;
+    color: var(--ss-muted);
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 3. The fold: one row, "N more known · Not known yet (N)", opening in place (the rows open below it). */
+.ss-b-map .ss-rm-fold { margin-top: 0; border-top: 0; }
+.ss-b-map .ss-rm-fold > summary { min-height: 44px; padding: 0 12px; }
+.ss-b-map .ss-rm-fold[open] > .ss-b-list { margin-top: 8px; }
+
+/* 4. Pencils hidden; the section's Edit button (in its heading) shows them for that section only. The pencil column is
+   reserved only while editing, so a row without pencils has no empty 32px gap. */
+.ss-b-map:not(.ss-rm-editing) .ss-b-pen { display: none; }
+.ss-b-map:not(.ss-rm-editing) .ss-b-row { grid-template-columns: minmax(0, 1fr) auto; }
+.ss-b-map:not(.ss-rm-editing) .ss-b-row-plain { grid-template-columns: minmax(0, 1fr); }
+.ss-b-map.ss-rm-editing .ss-b-row-plain { grid-template-columns: minmax(0, 1fr) var(--ss-b-pen); }
+.ss-rm-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ss-rm-head > .ss-section-label { flex: 1 1 auto; min-width: 0; margin: 0; }
+.ss-rm-edit-btn {
+    flex: none;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--ss-border);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ss-text);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.ss-rm-edit-btn[aria-pressed="true"] {
+    border-color: var(--ss-accent, #8b7cf6);
+    background: color-mix(in srgb, var(--ss-accent, #8b7cf6) 22%, transparent);
+}
+
+/* 5. Guild card: the three facts as three small tiles in one row (Rank, Standing, Dues). The card's pencils are not drawn here. */
+.ss-b-card.ss-rm-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+.ss-b-card.ss-rm-tiles .ss-b-line,
+.ss-b-card.ss-rm-tiles .ss-b-line:last-child {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 2px;
+    min-height: 0;
+    padding: 8px 6px;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius, 12px);
+    background: var(--ss-surface, transparent);
+    text-align: center;
+}
+.ss-b-card.ss-rm-tiles .ss-b-line dt { font-size: 11px; font-weight: 600; }
+.ss-b-card.ss-rm-tiles .ss-b-line dd { justify-content: center; font-size: 14px; font-weight: 700; text-align: center; }
+.ss-b-card.ss-rm-tiles .ss-b-line .ss-l-badge { padding: 0; border: 0; background: none; color: inherit; }
+.ss-b-card.ss-rm-tiles .ss-b-pen-cell,
+.ss-b-card.ss-rm-tiles .ss-b-pen { display: none; }
+.ss-b-card.ss-rm-tiles .ss-rm-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--ss-accent, #8b7cf6) 40%, transparent);
+    font-weight: 700;
+}
+.ss-b-card.ss-rm-tiles .ss-rm-warn { color: var(--ss-warn, #e8a33c); }
+
+/* 6. Enable all: the button above the list, and one confirm box that lists only the block names. */
+.ss-rm-enable-all {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 44px;
+    margin: 0 0 8px;
+    padding: 0 12px;
+    border: 1px solid var(--ss-accent, #8b7cf6);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--ss-accent, #8b7cf6) 25%, transparent);
+    color: var(--ss-text);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.ss-rm-enable-all[hidden] { display: none; }
+.ss-rm-confirm {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    margin: 0 0 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--ss-accent, #8b7cf6);
+    border-radius: var(--ss-radius, 12px);
+    background: color-mix(in srgb, var(--ss-accent, #8b7cf6) 8%, transparent);
+}
+.ss-rm-confirm[hidden] { display: none; }
+.ss-rm-confirm-title { margin: 0; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.ss-rm-confirm-names { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; font-size: 13px; }
+.ss-rm-confirm-names li { min-width: 0; padding: 6px 0; border-top: 1px solid var(--ss-border); overflow-wrap: anywhere; }
+.ss-rm-confirm-names li:first-child { padding-top: 0; border-top: 0; }
+.ss-rm-confirm-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ss-rm-btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--ss-border);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--ss-text);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.ss-rm-btn-pri {
+    border-color: var(--ss-accent, #8b7cf6);
+    background: color-mix(in srgb, var(--ss-accent, #8b7cf6) 25%, transparent);
+}
+.ss-rm-refusal { margin: 4px 0 0; color: var(--ss-bad, #e06464); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }

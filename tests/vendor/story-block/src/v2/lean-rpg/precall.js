@@ -3,10 +3,12 @@
 // the narrator how to open one (noFight); canGenerate holds a send until the waiting fight is played or chosen. Old chats keep their planner
 // rolls as records (resolve.js replays them); nothing here asks a model for a plan.
 import { hashText, normalizeType } from '../assist/common.js';
-import { LEAN_RPG_FEATURE, PRACTICE, PRACTICE_SETTING, RESOLVE, ROLLS_SETTING, practiceOf } from './names.js';
+import { DICE, LEAN_RPG_FEATURE, PRACTICE, PRACTICE_SETTING, RESOLVE, ROLLS_SETTING, checksOn, practiceOf } from './names.js';
 import { OPEN_FIGHT_LINE } from './cue.js';
 import { claimKey } from './resolve.js';
 import { readSheet } from './read.js';
+import { dicePayload } from './checks/dice.js';
+import { membersOf } from './practice.js';
 import { knownFoeAction } from './board/action-gate.js';
 import { readRecord } from '../persist.js';
 import { boardKey, boardPayload, boardSession, clearSend, lastBoard, linkBoard, priorBoard, readSend, receiveBoard, reconcileBoard } from './board/session.js';
@@ -163,9 +165,20 @@ export function createPrecall({ chat, metadata = () => null, moduleId = 'story-b
         }
         if (normalizeType(info?.type) === 'normal' && noDice.peek()) return null;
         if (!sheet.characters.length) return null;
-        if (readSettings(view, moduleId)[ROLLS_SETTING] === 'off') return null;
+        // Story checks (checks/dice.js): this reply, which carries no fight, is offered three dice, rolled from its own seed and recorded with it, together with the
+        // rules, difficulty numbers and practice in force now and each member's bonuses (a Re-read and a replay use these, never the settings of the day). The switch is
+        // Story checks alone, as the grammar line is: Rolls (the fights' setting) does not matter, so the static prompt does not move with it.
+        const values = readSettings(view, moduleId);
+        let dice = null;
+        if (checksOn(values)) {
+            let records = null;
+            try { records = view.query?.('packs.content', { kind: 'rpg' }); } catch { /* no pack rules */ }
+            dice = { type: DICE, payload: dicePayload(membersOf(view, sheet), values, records) };
+        }
+        if (values[ROLLS_SETTING] === 'off') return dice ? { commands: [dice] } : null;
         // No model is asked for a plan: with no fight to carry the reply goes out as one the planner once answered "none" to.
-        return noFight(sheet, on);
+        const first = noFight(sheet, on);
+        return dice ? { ...(first ?? {}), commands: [dice] } : first;
     }
 
     // The reply is captured: the one-time "send without the RPG" flag goes.

@@ -1,4 +1,4 @@
-// ss.listcard (view/glass.css): a glass card holding a list of rows: a title, a quieter line under it, and on
+// ss.listcard (view/glass-*.css): a glass card holding a list of rows: a title, a quieter line under it, and on
 // the right a value ("4 silver") or a tag ("new", "turn in"), the tag in a tone. Quests ready to turn in, what
 // can happen here, the people in a place.
 //

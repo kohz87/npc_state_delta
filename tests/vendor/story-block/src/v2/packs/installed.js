@@ -114,7 +114,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
             const result = validator(input, { hostVersion: host(), capabilities: null, limits });
             if (!result.ok) return result;
             const names = have();
-            return { ok: true, pack: result.pack, raw: result.raw, missing: names ? result.pack.requires.capabilities.filter(name => !names.includes(name)) : [] };
+            return { ok: true, pack: result.pack, raw: result.raw, missing: names ? result.pack.requires.capabilities.filter(name => !names.includes(name)) : [], ...(result.warnings ? { warnings: result.warnings } : {}) };
         },
 
         /** → a promise while the checker is being fetched (stored packs, or it was asked for), else undefined: the turn awaits it before a chat is read. */
@@ -138,7 +138,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
                     enabled: entry.enabled !== false,
                     source: SOURCES.includes(entry.source) ? entry.source : 'file',
                     origin: String(entry.origin ?? ''),
-                    counts: pack ? Object.fromEntries(Object.entries(pack.content).map(([kind, list]) => [kind, kind === 'rpg' ? list.filter(record => record?.slug !== 'formula' && record?.slug !== 'ranks').length : list.length])) : {},
+                    counts: pack ? Object.fromEntries(Object.entries(pack.content).map(([kind, list]) => [kind, kind === 'names' ? Object.keys(list).filter(id => id !== 'banned').length : kind === 'rpg' ? list.filter(record => record?.slug !== 'formula' && record?.slug !== 'ranks').length : list.length])) : {},
                     hasStart: Boolean(pack?.start),
                     // What else it adds, beside its content lists: its coins, a money scale, a calendar, weather tables, screens, a theme.
                     extras: pack ? extrasOf(pack) : [],
@@ -146,6 +146,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
                     tag: packTag(pack),
                     missing: pack && names ? pack.requires.capabilities.filter(name => !names.includes(name)) : [],
                     problem: result.ok ? '' : result.errors[0].message,
+                    warnings: result.warnings ?? [],
                 };
             });
         },
@@ -172,7 +173,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
             const list = root().packs;
             const index = list.findIndex(entry => entry?.id === pack.id);
             const entry = { id: pack.id, version: pack.version, enabled: index >= 0 ? list[index].enabled !== false : true, source: SOURCES.includes(source) ? source : 'file', origin: String(origin ?? ''), pack: raw };
-            if (index >= 0 && JSON.stringify(list[index].pack) === JSON.stringify(raw)) return { ok: true, id: pack.id, name: pack.name, action: 'unchanged', ...(await portraitsOf(pack, files)) };
+            if (index >= 0 && JSON.stringify(list[index].pack) === JSON.stringify(raw)) return { ok: true, id: pack.id, name: pack.name, action: 'unchanged', ...(result.warnings ? { warnings: result.warnings } : {}), ...(await portraitsOf(pack, files)) };
             if (index < 0 && list.length >= limits.installed) return { ok: false, errors: [{ code: 'TOO_MANY', path: '', message: `There are already ${limits.installed} packs installed; remove one first.` }] };
             const others = list.reduce((sum, other, at) => sum + (at === index ? 0 : sizeOf(other)), 0);
             if (others + sizeOf(entry) > limits.installedBytes) return { ok: false, errors: [{ code: 'TOO_LARGE', path: '', message: `Installed packs may take ${Math.round(limits.installedBytes / 1024 / 1024)} MB together; remove one first.` }] };
@@ -180,7 +181,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
             if (index >= 0) list[index] = entry;
             else list.push(entry);
             await changed();
-            return { ok: true, id: pack.id, name: pack.name, action: index >= 0 ? 'updated' : 'installed', ...(await portraitsOf(pack, files)) };
+            return { ok: true, id: pack.id, name: pack.name, action: index >= 0 ? 'updated' : 'installed', ...(result.warnings ? { warnings: result.warnings } : {}), ...(await portraitsOf(pack, files)) };
         },
 
         /**

@@ -121,7 +121,7 @@ export function createSession(s, deps) {
         const ordinal = info?.span?.source?.ordinal;
         // The proof of the block being planned again may be given again: the step keeps its ids.
         const replacing = Array.isArray(info?.span?.evidence) ? info.span.evidence : [];
-        const planned = bus.run(plan.type, plan.payload ?? {}, { cause: 'system', state, seed: plan.seed, replacing, reusing: typeof info?.span?.id === 'string' ? info.span : null, ...(Number.isInteger(info?.occurrence) ? { occurrence: info.occurrence } : {}), ...(reply ? { reply: { ...reply, ...(Number.isInteger(ordinal) ? { ordinal } : {}), ...(Number.isInteger(info?.opsBefore) ? { opsBefore: info.opsBefore } : {}) } } : {}) });
+        const planned = bus.run(plan.type, plan.payload ?? {}, { cause: 'system', state, seed: plan.seed, replacing, ...(typeof receipt?.id === 'string' ? { receiptId: receipt.id } : {}), reusing: typeof info?.span?.id === 'string' ? info.span : null, ...(Array.isArray(info?.receiptsBefore) ? { receiptsBefore: info.receiptsBefore } : {}), ...(Number.isInteger(info?.occurrence) ? { occurrence: info.occurrence } : {}), ...(reply ? { reply: { ...reply, ...(Number.isInteger(ordinal) ? { ordinal } : {}), ...(Number.isInteger(info?.opsBefore) ? { opsBefore: info.opsBefore } : {}) } } : {}) });
         // A board fight whose sheet or gear no longer matches is taken back: say so by name, not only as a count of steps taken back.
         if (planned?.ok === false && planned.code === 'NO_LONGER_DONE' && receipt.replan?.payload?.board) {
             problem({ code: 'FIGHT_TAKEN_BACK', message: `A fight on the board was taken back because the story before it changed: ${planned.message ?? 'the sheet or gear is not what it was.'}` });

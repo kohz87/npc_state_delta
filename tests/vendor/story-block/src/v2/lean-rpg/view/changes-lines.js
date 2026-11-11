@@ -4,7 +4,7 @@
 // fields' `names`). They come in the shape `replyCardLines` gives (ui-host.js adds them to the card's `moduleLines`).
 // Pure: no DOM.
 
-import { FIGHT, FORMULA, PRACTICE_STEP, RESOLVE, RANK_NAMES, STATS, USES } from '../index.js';
+import { CHECK_STEP, FIGHT, FORMULA, PRACTICE_STEP, RESOLVE, RANK_NAMES, STATS, USES } from '../index.js';
 import { STANDARD, normalizeRules } from '../rules.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { rpgBlocks, readParty, skillsOf } from './party-data.js';
@@ -102,13 +102,14 @@ export function fightLines(record, problems = []) {
 
 /**
  * The practice code gave for the skills this reply's rolls used (practice.js), one line each: "Astra's Shadow Cut +6 practice (rolled)", from the
- * step's own receipt (`data.v2.result.practice.skills`): a swipe or a delete takes the receipt and so the line away, and a step the replay skipped is not told.
+ * step's own receipt (`data.v2.result.practice.skills`; a story check's `rpg.check` step carries its practice the same way): a swipe or a delete takes the
+ * receipt and so the line away, and a step the replay skipped is not told.
  */
 export function practiceLines(record, problems = []) {
     const skipped = new Set(list(problems).flatMap(problem => list(problem?.receipts)));
     const out = [];
     for (const receipt of list(record?.receipts)) {
-        if (receipt?.type !== PRACTICE_STEP || skipped.has(receipt.id)) continue;
+        if ((receipt?.type !== PRACTICE_STEP && receipt?.type !== CHECK_STEP) || skipped.has(receipt.id)) continue;
         for (const entry of list(receipt.data?.v2?.result?.practice?.skills)) {
             const who = words(entry?.who), skill = words(entry?.skill);
             if (!who || !skill || !Number.isSafeInteger(entry.amount) || entry.amount <= 0) continue;

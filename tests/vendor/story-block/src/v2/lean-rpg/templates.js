@@ -18,7 +18,7 @@ const STAMINA = names(STAGES.stamina);
 const SOUL = names(['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'], 1);
 const RANK = names(['Novice', 'Adept', 'Expert', 'Master']);
 const SKILLS = Array.from({ length: SKILL_SLOTS_MAX }, (_, at) => at + 1);
-const SLOTS = [1, 2, 3, 4];
+const SLOTS = [1, 2, 3, 4, 5, 6];
 
 const text = (label, max = CREATION.skillName) => ({ type: 'text', max, default: '', label });
 const int = (label, min, max, value, extra = {}) => ({ type: 'int', min, max, default: value, label, ...extra });
@@ -221,7 +221,7 @@ const standardCharacter = withRecovery(scaledCharacter(standardCharacterV1, SIZE
 
 const standardFoes = {
     slug: 'foes', name: 'Foes', role: 'foes', schema: 1, stateVersion: 2, scope: 'chat',
-    prompt: 'Up to four foe groups in the fight, one slot each: name, count (0 = empty slot), its level from 1 to 99 and health (words). The narrator sets a slot when a group arrives, hurts it as the fight goes and clears it when the group is down, gone, fled, captured or yielded.',
+    prompt: 'Up to six foe groups in the fight, one slot each: name, count (0 = empty slot), its level from 1 to 99 and health (words). The narrator sets a slot when a group arrives, hurts it as the fight goes and clears it when the group is down, gone, fled, captured or yielded.',
     show: { tab: true, card: false, tabName: 'Foes', icon: 'ph-skull' },
     state: Object.fromEntries(SLOTS.flatMap(n => [
         [`foe${n}`, text(`Foe ${n}`)],

@@ -8,7 +8,7 @@ import { hashJson } from '../../replay.js';
 import { fill } from '../../strings.js';
 import { actorIdOf } from '../../lean-rpg/roster.js';
 import { isTypedSkills } from '../../skill-slots.js';
-import { E, B, J, stateOf, draftOf, activeCount, blockCount, instancePath, checkedTarget, newInstance } from './shared.js';
+import { E, B, J, partyWitness, partyFull, stateOf, draftOf, activeCount, blockCount, instancePath, checkedTarget, newInstance } from './shared.js';
 
 export function createBlocks(deps) {
     const { reader, offers, dependency, guard, finish, defaultSeeds, seededData, restore } = deps;
@@ -35,6 +35,9 @@ export function createBlocks(deps) {
             if (!result.ok) refuse('DM_SCHEMA', result.errors[0].path, result.errors[0].message);
             addition = dataModuleDefaults(result.add);
         }
+        // A standard Character pinned from a pack joins the party like one made here: the live limit and the witness (a pin recorded before has none).
+        const joins = !migrate && definition.role === 'character' && definition.scope === 'chat';
+        if (joins) partyFull(ctx, prefix);
         const pin = { definition, packId: offer.packId, packVersion: offer.packVersion, packHash: offer.packHash, interpreter: 1 };
         draft.pins[offer.hash] = copy(pin);
         draft.active[definition.id] = { hash: offer.hash, generation, subjects };
@@ -43,7 +46,7 @@ export function createBlocks(deps) {
         else for (const subject of subjects) Object.assign(atPath(draft, instancePath(definition.id, subject)).fields, addition);
         const decision = { subjects, inputs, addition, previous: old?.hash ?? null };
         const recorded = guard(ctx, prefix, { kind: migrate ? 'dm.migrate' : 'dm.pin', module: definition.id, hash: offer.hash, generation,
-            imports: Object.keys(definition.imports), decision, pin, bound: true });
+            imports: Object.keys(definition.imports), decision, pin, bound: true, party: joins && partyWitness(ctx) });
         return finish(ctx, prefix, draft, recorded, { pin: true, result: { subjects, generation }, summary: `${definition.name}: ${migrate ? 'migrated' : 'pinned'} for this chat.` });
     }
     function changeBlock(ctx, payload, action, call = {}) {
@@ -54,7 +57,7 @@ export function createBlocks(deps) {
         const old = domain?.active?.[module], previous = activeDefinition(prefix, module);
         if (action === 'define') {
             if (old) refuse('DM_SCHEMA', 'slug', B.exists);
-            if (blockCount(domain) >= L.definitions) refuse('DM_BUDGET', '', B.blockLimit);
+            if (blockCount(domain) >= L.definitions) refuse('DM_BUDGET', '', fill(B.blockLimit, { max: L.definitions }));
             if (activeCount(domain) >= L.pins) refuse('DM_BUDGET', '', B.limit);
         } else if (!previous || previous.pack !== 'chat' || domain.pins[old.hash]?.packId !== 'chat') refuse('REFUSED', 'module', B.chatOnly);
         call.label = previous?.name ?? payload.definition?.name ?? module;
@@ -88,7 +91,13 @@ export function createBlocks(deps) {
         // Each field and each button is a slot the form uses. A block with a role is a template written by hand, whose stats and latches are
         // fields no kind sets: only its kinds count.
         const slots = definition.role ? Object.keys(definition.kinds).length : Object.keys(definition.state).length + Object.values(definition.kinds).filter(kind => kind.ui).length;
-        if (slots > (definition.role === 'skills' && isTypedSkills(definition.state) ? L.skillsKinds : L.kinds)) refuse('DM_BUDGET', 'fields', B.kindLimit);
+        if (slots > (definition.role === 'skills' && isTypedSkills(definition.state) ? L.skillsKinds : definition.role === 'foes' ? L.foesKinds : L.kinds)) refuse('DM_BUDGET', 'fields', B.kindLimit);
+        // A Character made here (the wizard, Edit first, the template) joins the party: the limit is checked now and the party is witnessed for a replay.
+        const joins = action === 'define' && definition.role === 'character';
+        if (joins) partyFull(ctx, prefix);
+        // A Skills block made with its Character (`after`, the Character's module) is replayed only with it.
+        const after = action === 'define' && definition.role === 'skills' && payload.after !== undefined ? payload.after : null;
+        if (payload.after !== undefined && (after === null || activeDefinition(prefix, after)?.role !== 'character')) refuse('DM_SCHEMA', 'after', B.afterCharacter);
         dependency(definition, prefix);
         const inputs = inputsOf(prefix, definition), hash = dataModuleHash(definition);
         const generation = Math.max(ctx.rev, (old?.generation ?? 0) + 1);
@@ -121,7 +130,7 @@ export function createBlocks(deps) {
         if (old && old.hash !== hash && !Object.values(draft.active).some(entry => entry.hash === old.hash)) delete draft.pins[old.hash];
         const recorded = guard(ctx, prefix, { kind: `dm.${action}`, module, hash, generation,
             reads: previous ? [['fields'], ['timers'], ['offers'], ['settled']] : [], imports: Object.keys(definition.imports),
-            decision: { subjects: ['chat'], inputs, previous: old?.hash ?? null }, pin, bound: true });
+            decision: { subjects: ['chat'], inputs, previous: old?.hash ?? null, ...(after ? { after } : {}) }, pin, bound: true, party: joins && partyWitness(ctx) });
         const answer = finish(ctx, prefix, draft, recorded, { pin: true, result: { module, generation },
             summary: fill(action === 'define' ? B.defined : B.redefined, { name: definition.name }) });
         answer.data.edit = true;

@@ -4,7 +4,7 @@
 // * the tokens: `--ss-glass`, `--ss-glass-strong`, `--ss-tile`, `--ss-border`, `--ss-shadow`, `--ss-text`,
 //   `--ss-muted`, `--ss-track`, `--ss-accent`, `--ss-accent-soft`, `--ss-pill`, `--ss-badge`, the bar
 //   colours (`--ss-hp`, `--ss-mp`, `--ss-sp`, `--ss-exp`), tones and rarities, `--ss-radius-*`,
-//   `--ss-space-*`, `--ss-font`, `--ss-blur` and `--ss-motion`. view/glass.css draws the building blocks
+//   `--ss-space-*`, `--ss-font`, `--ss-blur` and `--ss-motion`. view/glass-*.css draws the building blocks
 //   (glass card, tile, bar, status badge, pill, section label) from them; a screen's own `theme` (SPEC
 //   §13.3) still sets any of them on its root, and wins.
 // * light or dark: worked out from SillyTavern's own theme: the body text against the blur tint (light
@@ -132,9 +132,9 @@ const mixTint = base => `color-mix(in srgb, ${TINT} ${TINT_SHARE}%, ${base})`;
 const SHEET_TOKENS = Object.freeze([
     ['--ss-sheet-bg', 'var(--ss-glass-strong)'], ['--ss-sheet-blur', 'var(--ss-blur)'], ['--ss-sheet-layers', 'none'],
     // the same tint with its alpha dropped: the floor under the translucent sheet, so the story behind cannot be read through it
-    // on a phone with blur off (mounts.css stacks the tint over this floor). Relative colours; without them the floor is unset.
+    // on a phone with blur off (mounts-*.css stacks the tint over this floor). Relative colours; without them the floor is unset.
     ['--ss-sheet-floor', 'rgb(from var(--ss-glass-strong) r g b / 1)'],
-    // the phone game view's floor and its three layers of the tint, Glass only (mounts.css, the phone rule); unset for the other styles
+    // the phone game view's floor and its three layers of the tint, Glass only (mounts-*.css, the phone rule); unset for the other styles
     ['--ss-gameview-phone-floor', 'var(--ss-sheet-floor)'],
     ['--ss-gameview-phone-layers', 'linear-gradient(var(--ss-sheet-bg), var(--ss-sheet-bg)), linear-gradient(var(--ss-sheet-bg), var(--ss-sheet-bg)), linear-gradient(var(--ss-sheet-bg), var(--ss-sheet-bg))'],
     ['--ss-sheet-radius', 'var(--ss-radius-l)'], ['--ss-sheet-radius-top', 'var(--ss-radius-l) var(--ss-radius-l) 0 0'],
@@ -338,7 +338,7 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
         ['--ss-info', p.info],
         ['--ss-chatter', p.chatter],
         ['--ss-blur', solid ? 'none' : 'blur(16px) saturate(1.2)'],
-        // The legacy surfaces (`.story-suite-sheet`, `.ss-gameview`: host.css, mounts.css) paint these when they are set,
+        // The legacy surfaces (`.story-suite-sheet`, `.ss-gameview`: host.css, mounts-*.css) paint these when they are set,
         // which they are for Glass only: the page shows through them. Solid and Follow SillyTavern leave them unset, so
         // those surfaces keep SillyTavern's tint exactly as before.
         ...(solid ? [] : SHEET_TOKENS),

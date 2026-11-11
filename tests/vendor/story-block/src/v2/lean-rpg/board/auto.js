@@ -48,7 +48,7 @@ function sheetOf(boardState, setup) {
 // Current virtual bars keep their real group's class and level for the odds.
 function membersOf(boardState, setup, sheet) {
     const explicit = Array.isArray(boardState?.members) ? boardState.members : null;
-    const bars = explicit ?? (setup?.members === 1 ? splitFoes(sheet.foes, { carried: setup.carriedMembers }) : []);
+    const bars = explicit ?? (setup?.members === 1 ? splitFoes(sheet.foes, { carried: setup.carriedMembers, six: setup.foesSix === 1 }) : []);
     if (!bars.length) return null;
     const real = new Map(sheet.foes.map(foe => [Number(foe.group ?? foe.slot), foe]));
     return bars.map(member => {
