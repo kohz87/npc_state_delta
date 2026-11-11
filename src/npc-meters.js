@@ -66,15 +66,18 @@ import {
     socialSettings,
     socialSkill,
 } from './social-check.js';
-import { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, CUSTOM_RANGE, MAX_NPCS, MAX_STAGES_PER_METER, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, MILESTONE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURES, FEATURE_DEFAULTS, NAME_MAX, DISPOSITION_MAX, TRACK_MAX, REASON_LABELS, IMPACT_TIERS, tierOf, isObject, isInt, isReplyId, replyKey, sameReply, clamp, clean, own, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, intOr, bandWord, needMet, rung, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
-import { initialNpcSlice, observeKeyAway, CAST_QUERY, observeCast, validateNpcSlice, findNpcKey, meterValue, moveMeters, rungMet, conflictOn, settle, sentence, result } from './npc-meters-slice.js';
+import { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, CUSTOM_RANGE, MAX_NPCS, MAX_STAGES_PER_METER, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, MILESTONE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURES, FEATURE_DEFAULTS, NAME_MAX, DISPOSITION_MAX, TRACK_MAX, REASON_LABELS, IMPACT_TIERS, tierOf, isObject, isInt, isReplyId, replyKey, sameReply, clamp, clean, own, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, intOr, bandWord, needMet, rung, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
+import { initialNpcSlice, observeKeyAway, CAST_QUERY, observeCast, validateNpcSlice, findNpcKey, meterValue, moveMeters, rungMet, conflictOn, settle, sentence, result, moodStands } from './npc-meters-slice.js';
+import { applyEvents, eventsFromMoves } from '../npc-mood.js';
 import { SETTINGS_DEFAULTS, SETTINGS_SCHEMA } from './npc-meters-schema.js';
 import { createNpcCommands } from './npc-meters-commands.js';
 import { createNpcQueries } from './npc-meters-queries.js';
 import { createNpcPrompt } from './npc-meters-prompt.js';
 import { normalizeAllowance, pacedTier, spendFlatEvent } from './relationship-pacing.js';
 import { askedOf, cutToTier, nextEvent, pacingNote } from './npc-meters-pacing.js';
-export { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, BUILT_IN_RANGE, CUSTOM_RANGE, MAX_CUSTOM_METERS, MAX_NPCS, MAX_METERS_PER_NPC, MAX_STAGES_PER_METER, MAX_SECRETS, MAX_GENERATED_SECRETS, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, MAX_TRACKS, MAX_BANDS, MAX_NEEDS, DEFAULT_CHANGE_CAP, MAX_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, SECRET_WHEN_MAX, NOTE_SOURCES, MILESTONE_MAX, DESCRIBE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURES, replyKey, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, parseBands, bandWord, parseNeeds, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
+import { gateStoryLine } from '../npc-meters-gate.js';
+import { noteKinds } from './npc-notes-kinds.js';
+export { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, BUILT_IN_RANGE, CUSTOM_RANGE, MAX_CUSTOM_METERS, MAX_NPCS, MAX_METERS_PER_NPC, MAX_STAGES_PER_METER, MAX_SECRETS, MAX_GENERATED_SECRETS, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, MAX_TRACKS, MAX_BANDS, MAX_NEEDS, DEFAULT_CHANGE_CAP, MAX_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, SECRET_WHEN_MAX, NOTE_SOURCES, MILESTONE_MAX, DESCRIBE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, FEATURES, replyKey, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, parseBands, bandWord, parseNeeds, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
 export { normalizeSecrets, secretId, normalizeGeneratedSecrets, secretsToLines, secretsFromLines, limitsToLines, limitsFromLines } from './npc-meters-secrets.js';
 export { initialNpcSlice, observeKeyAway, CAST_QUERY, CAST_MADE_MAX, observeCast, validateNpcSlice, findNpcKey, meterValue, rungMet } from './npc-meters-slice.js';
 export { SETTINGS_DEFAULTS, SETTINGS_SCHEMA } from './npc-meters-schema.js';
@@ -126,10 +129,11 @@ export function createNpcPart(hooks = {}) {
         const value = call(hooks.allowance, null);
         return isObject(value) ? normalizeAllowance(value) : null;
     };
-    const clockDay = at => {
-        if (call(hooks.calendarOwn, false) === true) return null;
-        const minutes = call(hooks.startTime, null, at);
-        return isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
+    const clockMinutes = at => (call(hooks.calendarOwn, false) === true ? null : (m => (isInt(m) ? m : null))(call(hooks.startTime, null, at)));
+    const clockDay = at => { const minutes = clockMinutes(at); return minutes === null ? null : Math.floor(minutes / DAY_MINUTES); };
+    // The story minute by the host's clock now (a scan's change names no reply); null without a clock.
+    const timeMinutes = ctx => {
+        try { const minutes = ctx.time(); return isInt(minutes) ? minutes : null; } catch { return null; }
     };
     const rulesFor = (name, aliases = []) => {
         const value = call(hooks.secretRules, [], name, aliases);
@@ -315,7 +319,7 @@ export function createNpcPart(hooks = {}) {
     }
 
     // `milestone`: { add: [{ key, name }], remove: [key] } (the reader's or a story line's).
-    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false, scanTier = null }) {
+    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false, scanTier = null, via = null, reason = '', leaf = null }) {
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         if (!changes.length && disposition === undefined && !allowEmpty) {
@@ -333,7 +337,7 @@ export function createNpcPart(hooks = {}) {
         const setup = setupFor(record.name, who.labels);
         // Delta's scan of a reply whose story line already moved a meter leaves that meter to the line (one move, not two).
         const left = yieldToStory && limit && record.turn && sameReply(record.turn, reply) && Array.isArray(record.turn.story) ? record.turn.story : [];
-        const mine = left.length ? changes.filter(change => !left.includes(change.meter)) : changes;
+        let mine = left.length ? changes.filter(change => !left.includes(change.meter)) : changes;
         // Pacing (relationship-pacing.js): one event per line or scanner change, counted once whatever number of meters it names.
         // A story line (`impact`) and a forwarded scanner change (`scanTier`) share the record's count; a change with neither is not paced.
         const asked = impact?.tier ?? pacedTier(scanTier);
@@ -341,14 +345,26 @@ export function createNpcPart(hooks = {}) {
         if (spent?.next) record.impactDay = spent.next;
         const pace = spent ? pacingNote(asked, spent.used, spent.skipped) : '';
         const askedNow = spent ? askedOf(mine, id => meterValue(record, defs.find(def => def.id === id))) : null;
+        // The anti-lever gate (npc-meters-gate.js): a story line's named approach, repeated to this person within the window, gives
+        // less, then backfires; the ring is written with the move. Not a scan's, not a line the day's allowance held, not without a story day.
+        const gated = via && story && limit && featureOn(FEATURE_GATE, ctx) && !(spent && !spent.used) ? gateStoryLine({
+            changes: mine, read: id => meterValue(record, defs.find(def => def.id === id)), via, day: clockDay(at), reply: replyKey(reply, reply), name: record.name, settings: ctx.settings(), stored: record.via, cap: impact ? normalizeRelationshipCaps(impact.caps)[spent?.used ?? impact.tier] : null,
+        }) : null;
+        if (gated) { mine = gated.changes; if (gated.ring) record.via = gated.ring; }
         let stepped = mine;
         if (spent && !spent.used) stepped = [];
         else if (impact) stepped = tiered(record, mine, defs, { ...impact, tier: spent?.used ?? impact.tier });
         else if (spent?.used && spent.used !== asked) stepped = cutToTier(mine, spent.used, normalizeRelationshipCaps(tierCaps() ?? {}), id => meterValue(record, defs.find(def => def.id === id)));
         const moved = moveMeters(record, stepped, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup), story });
+        // Mood (npc-mood.js; feature mood-pull): the trust this line moved, as code reads it, is a trust drop or a betrayal.
+        if (limit && moved.length && featureOn(FEATURE_MOOD_PULL, ctx) && moodStands(ctx, who.key)) {
+            const day = clockMinutes(at) ?? timeMinutes(ctx);
+            const events = day === null ? [] : eventsFromMoves(moved.map(item => ({ meter: item.meter, change: item.after - item.before })), { reason, impact: spent?.used ?? asked });
+            if (events.length) record.mood = applyEvents(record.mood, day, events);
+        }
         // This event's outcome, written whole on the record (display only; the card's tier, held and asked).
         if (spent && replyKey(reply, reply) !== null) {
-            const text = nextEvent(record.lastEvent, { reply: replyKey(reply, reply), date: clockDay(at) === null ? '' : call(hooks.startDate, '', at), src: impact ? 'story' : 'scan', ask: askedNow, tier: spent.used ?? asked, held: !spent.used, note: pace });
+            const text = nextEvent(record.lastEvent, { reply: replyKey(reply, reply), date: clockDay(at) === null ? '' : call(hooks.startDate, '', at), src: impact ? 'story' : 'scan', ask: askedNow, tier: spent.used ?? asked, held: !spent.used, note: pace, via: gated?.via, gate: gated?.event });
             if (text) record.lastEvent = text;
         }
         if (!limit) {
@@ -360,6 +376,8 @@ export function createNpcPart(hooks = {}) {
             if (disposition) record.disposition = disposition;
             else delete record.disposition;
         }
+        // A note kind's new leaf (npc-notes-kinds.js), written whole in this line's op; an empty text drops the leaf.
+        if (leaf?.field) { if (leaf.text) record[leaf.field] = leaf.text; else delete record[leaf.field]; }
         let marked = null;
         if (milestone) {
             const had = isObject(record.milestones) ? record.milestones : {};
@@ -406,6 +424,7 @@ export function createNpcPart(hooks = {}) {
         kinds: {
             [NPC_KIND]: { grammar: '~ npc Name | trust: +N | affection: -N', apply: captureLine },
             [MILESTONE_KIND]: { grammar: '+ milestone Name — the turning point that just happened between you (once)', apply: captureLine, feature: FEATURE_STAGES },
+            ...noteKinds(captureLine),
         },
         context: { static: staticText, tail, budget: CONTEXT_BUDGET },
         redact,
@@ -419,7 +438,8 @@ export function createNpcPart(hooks = {}) {
         tickWanted: () => {
             const settings = storedSettings();
             return (featureOn(FEATURE_STAGES) && Object.keys(settings.ladder).length > 0)
-                || (featureOn(FEATURE_DRIFT) && settings.custom.some(def => def.drift));
+                || (featureOn(FEATURE_DRIFT) && settings.custom.some(def => def.drift))
+                || featureOn(FEATURE_MOOD_PULL);
         },
         ladder: record => (isObject(record) ? ladderView(record, storedSettings(), defsFrom(storedSettings())) : null),
         notes: record => (isObject(record) ? notesView(record, defsFrom(storedSettings())) : { locked: [], opened: [] }),

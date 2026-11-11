@@ -1,0 +1,201 @@
+
+/* Extensions-tab settings panel. index.js builds the grouped structure once; optional owners
+   mount into [data-delta-settings-slot] placeholders. This is the panel's only stylesheet. */
+#npc_state_delta_settings .npc-state-delta-drawer { container: npc-delta-settings / inline-size; }
+#npc_state_delta_settings .delta-settings-slot { display: contents; }
+#npc_state_delta_settings .delta-settings-quickbar { display: grid; gap: 8px; margin: 0 0 10px; padding: 8px 12px 10px; border: 1px solid var(--npc-line); border-radius: 10px; background: rgba(255,255,255,.03); }
+#npc_state_delta_settings .delta-settings-quick-toggles { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 16px; }
+#npc_state_delta_settings .delta-settings-quick-toggles .npc-state-delta-setting-row { border-bottom: 0; padding: 5px 0; }
+#npc_state_delta_settings .delta-settings-quick-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0; }
+#npc_state_delta_settings .delta-settings-experience { display: grid; gap: 8px; }
+#npc_state_delta_settings .delta-settings-group { margin: 0; border: 1px solid rgba(218,193,148,.14); border-radius: 9px; overflow: hidden; background: rgba(255,255,255,.018); }
+#npc_state_delta_settings .delta-settings-group > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; padding: 10px 12px; cursor: pointer; list-style: none; background: rgba(255,255,255,.028); }
+#npc_state_delta_settings .delta-settings-group > summary::-webkit-details-marker { display: none; }
+#npc_state_delta_settings .delta-settings-group > summary::before { content: ""; align-self: center; width: 6px; height: 6px; margin-right: 2px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; opacity: .55; transform: rotate(-45deg); transition: transform .15s ease; }
+#npc_state_delta_settings .delta-settings-group[open] > summary::before { transform: rotate(45deg); }
+#npc_state_delta_settings .delta-settings-group > summary b { font-size: .95rem; }
+#npc_state_delta_settings .delta-settings-group > summary small { opacity: .55; font-weight: 400; }
+#npc_state_delta_settings .delta-settings-group-body { display: grid; gap: 0; padding: 4px 12px 12px; min-width: 0; }
+#npc_state_delta_settings .delta-settings-group[hidden] { display: none; }
+/* The Expert fold holds the rarely needed groups, each still a fold of its own. */
+#npc_state_delta_settings .delta-settings-group-body > .delta-expert-note { margin: 6px 0 8px; }
+#npc_state_delta_settings .delta-settings-group-body > .delta-settings-group + .delta-settings-group { margin-top: 8px; }
+/* The meter presets block sits in the "Meter presets" fold: the fold's title says what its own heading said. */
+#npc_state_delta_settings .delta-settings-slot .npc-state-delta-v2-presets-head { display: none; }
+#npc_state_delta_settings .delta-settings-slot .npc-state-delta-v2-presets { margin-bottom: 0; }
+#npc_state_delta_settings .delta-settings-subhead { margin: 14px 0 2px; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--npc-gold); opacity: .85; }
+#npc_state_delta_settings .delta-settings-subhead:first-child { margin-top: 6px; }
+#npc_state_delta_settings .npc-state-delta-suite-warning { display: block; margin: 2px 0 6px; padding: 6px 8px; border-left: 3px solid var(--npc-gold); font-weight: 600; }
+#npc_state_delta_settings .npc-state-delta-suite-warning[hidden] { display: none; }
+#npc_state_delta_settings .npc-state-delta-suite-manage { display: flex; justify-content: flex-start; margin: 0 0 6px; }
+#npc_state_delta_settings .npc-state-delta-suite-manage[hidden] { display: none; }
+#npc_state_delta_settings .delta-settings-subsection + .delta-settings-subsection { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(218,193,148,.12); }
+#npc_state_delta_settings .delta-settings-subsection > h4 { margin: 4px 0 6px; color: #e3c985; }
+#npc_state_delta_settings .delta-settings-group-body > p.npc-state-delta-muted,
+#npc_state_delta_settings .delta-settings-subsection > p.npc-state-delta-muted { margin: 6px 0 4px; }
+
+/* Rows: text column + bounded control column. Units sit beside numbers instead of wrapping under them. */
+#npc_state_delta_settings .npc-state-delta-setting-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 14px; margin: 0; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.055); }
+#npc_state_delta_settings .npc-state-delta-setting-row:last-child { border-bottom: 0; }
+#npc_state_delta_settings .npc-state-delta-setting-row > span:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#npc_state_delta_settings .npc-state-delta-setting-row > span:first-child small { overflow-wrap: break-word; line-height: 1.3; }
+#npc_state_delta_settings .npc-state-delta-setting-row > select { width: auto; min-width: 150px; max-width: min(250px, 46vw); margin: 0; }
+#npc_state_delta_settings .delta-setting-number { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+#npc_state_delta_settings .delta-setting-number input { margin: 0; }
+#npc_state_delta_settings .delta-setting-number small { opacity: .6; font-size: .76rem; min-width: 4.6em; }
+#npc_state_delta_settings .delta-setting-number small:first-child { min-width: 0; }
+#npc_state_delta_settings #npc_state_delta_scanner_max_output_tokens { width: 84px !important; }
+
+/* Boolean rows paint a status pill on the label Delta owns; the real checkbox stays semantic and focusable. */
+@supports selector(label:has(> input[type="checkbox"]:checked)) {
+  #npc_state_delta_settings .npc-state-delta-setting-row:has(> input[type="checkbox"]){
+    position:relative;cursor:pointer;
+  }
+  #npc_state_delta_settings .npc-state-delta-setting-row>input[type="checkbox"]{
+    position:absolute!important;width:1px!important;height:1px!important;min-width:1px!important;max-width:1px!important;
+    margin:-1px!important;padding:0!important;border:0!important;clip:rect(0 0 0 0)!important;clip-path:inset(50%)!important;
+    overflow:hidden!important;white-space:nowrap!important;opacity:0!important;box-shadow:none!important;background:none!important;
+    pointer-events:none!important;
+  }
+  #npc_state_delta_settings .npc-state-delta-setting-row:has(> input[type="checkbox"])::after{
+    content:"Disabled"!important;display:inline-flex!important;align-items:center!important;justify-content:flex-start!important;
+    min-width:78px!important;height:24px!important;flex:0 0 auto!important;box-sizing:border-box!important;
+    margin:0!important;padding:0 8px 0 22px!important;border:1px solid rgba(255,255,255,.18)!important;border-radius:999px!important;
+    background:radial-gradient(circle at 10px 50%,rgba(190,195,202,.62) 0 3.5px,transparent 4px),rgba(255,255,255,.045)!important;
+    box-shadow:inset 0 1px 1px rgba(0,0,0,.18)!important;color:rgba(255,255,255,.68)!important;
+    font:600 11.5px/1 inherit!important;letter-spacing:.01em!important;white-space:nowrap!important;overflow:hidden!important;
+    vertical-align:middle!important;
+  }
+  #npc_state_delta_settings .npc-state-delta-setting-row:has(> input[type="checkbox"]:checked)::after{
+    content:"Enabled"!important;border-color:rgba(87,209,123,.42)!important;
+    background:radial-gradient(circle at 10px 50%,#57d17b 0 3.5px,transparent 4px),rgba(54,91,64,.26)!important;
+    color:rgba(239,255,243,.94)!important;
+  }
+  #npc_state_delta_settings .npc-state-delta-setting-row:has(> input[type="checkbox"]:focus-visible)::after{
+    outline:2px solid rgba(111,214,139,.9)!important;outline-offset:2px!important;
+  }
+  #npc_state_delta_settings .npc-state-delta-setting-row:has(> input[type="checkbox"]:disabled){cursor:not-allowed!important}
+  #npc_state_delta_settings .npc-state-delta-setting-row:has(> input[type="checkbox"]:disabled)::after{opacity:.45!important}
+}
+
+/* Action rows. SillyTavern's own .menu_button is width:min-content, which wraps every word onto
+   its own line inside a grid cell; panel buttons fill their cell or size to their label instead. */
+#npc_state_delta_settings .delta-settings-quick-actions .menu_button,
+#npc_state_delta_settings .npc-state-delta-custom-preset-actions .menu_button,
+#npc_state_delta_settings .delta-settings-maintenance-actions > .menu_button { width: 100%; }
+#npc_state_delta_settings .npc-state-delta-tuning-actions > .menu_button,
+#npc_state_delta_calendar_settings .npc-state-delta-calendar-actions > .menu_button,
+#npc_state_delta_settings .delta-settings-danger > .menu_button { width: auto; white-space: nowrap; }
+#npc_state_delta_settings .npc-state-delta-actions .menu_button { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 36px; margin: 0; white-space: normal; overflow-wrap: break-word; text-align: center; line-height: 1.25; box-sizing: border-box; }
+#npc_state_delta_settings .npc-state-delta-tuning-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 10px 0 0; }
+#npc_state_delta_settings .npc-state-delta-tuning-actions > .menu_button { flex: 1 1 170px; }
+#npc_state_delta_settings .npc-state-delta-tuning-actions > #npc_state_delta_portrait_settings_status { flex: 1 0 100%; }
+#npc_state_delta_settings .npc-state-delta-custom-preset-actions .menu_button { margin: 0; min-height: 34px; }
+#npc_state_delta_settings .delta-settings-maintenance-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 8px 0; }
+#npc_state_delta_settings .delta-settings-maintenance-actions > .menu_button { width: 100%; min-height: 40px; }
+#npc_state_delta_settings .delta-settings-current-roster { margin-top: 4px; border-top: 1px solid rgba(218,193,148,.12); padding-top: 6px; }
+#npc_state_delta_settings .delta-settings-current-roster > summary { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; cursor: pointer; padding: 6px 0; }
+#npc_state_delta_settings .delta-settings-current-roster > summary small { opacity: .55; }
+#npc_state_delta_settings .delta-settings-danger { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 9px 11px; border: 1px solid rgba(214,92,92,.3); border-radius: 8px; background: rgba(214,92,92,.06); }
+#npc_state_delta_settings .delta-settings-danger > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#npc_state_delta_settings .delta-settings-danger small { opacity: .62; font-size: .72rem; }
+#npc_state_delta_settings .delta-settings-danger > .menu_button { flex: 0 0 auto; justify-content: center; margin: 0; }
+
+/* Relationship tuning and calendar blocks inside their groups */
+#npc_state_delta_settings .npc-state-delta-tuning-group label { font-size: .82rem; }
+#npc_state_delta_settings .npc-state-delta-tuning-group input { margin: 0; }
+#npc_state_delta_settings .npc-state-delta-custom-preset-library { margin: 8px 0 4px; }
+#npc_state_delta_calendar_settings { display: contents; }
+#npc_state_delta_calendar_settings .npc-state-delta-calendar-heading { margin: 6px 0 2px; }
+#npc_state_delta_calendar_settings textarea { min-height: 7.5em; min-width: min(220px, 46vw); resize: vertical; }
+/* suite.css sizes a row's textarea; the calendar's months box keeps text_pole's full width. */
+#npc_state_delta_calendar_settings .story-suite-row > textarea { width: 100%; }
+#npc_state_delta_calendar_settings .npc-state-delta-calendar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+#npc_state_delta_calendar_settings .npc-state-delta-calendar-actions > .menu_button { margin: 0; }
+#npc_state_delta_calendar_settings #npc_state_delta_calendar_status { opacity: .78; }
+#npc_state_delta_calendar_settings #npc_state_delta_calendar_status[data-error="1"] { font-weight: 600; }
+
+/* Breakpoints follow the panel's own width, not the viewport: the Extensions column is narrow on desktop too. */
+@container npc-delta-settings (min-width: 720px) {
+  #npc_state_delta_settings .delta-settings-quick-toggles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #npc_state_delta_settings .delta-settings-quick-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@container npc-delta-settings (max-width: 500px) {
+  #npc_state_delta_settings .npc-state-delta-tuning-grid { grid-template-columns: minmax(0, 1fr); }
+  #npc_state_delta_settings .delta-settings-maintenance-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #npc_state_delta_settings .npc-state-delta-custom-preset-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #npc_state_delta_settings .npc-state-delta-setting-row:has(> select),
+  #npc_state_delta_settings .npc-state-delta-setting-row:has(> textarea) { grid-template-columns: minmax(0, 1fr); row-gap: 7px; }
+  #npc_state_delta_settings .npc-state-delta-setting-row > select,
+  #npc_state_delta_calendar_settings textarea { width: 100%; max-width: none; }
+  #npc_state_delta_settings .delta-settings-danger { flex-direction: column; align-items: stretch; }
+  #npc_state_delta_settings .npc-state-delta-actions .menu_button,
+  #npc_state_delta_calendar_settings .npc-state-delta-calendar-actions > .menu_button { min-height: 44px; }
+}
+@container npc-delta-settings (max-width: 380px) {
+  @supports selector(label:has(> input[type="checkbox"]:checked)) {
+    #npc_state_delta_settings .npc-state-delta-setting-row:has(> input[type="checkbox"])::after{
+      min-width:72px!important;height:22px!important;padding:0 6px 0 20px!important;font-size:10.5px!important;
+    }
+  }
+}
+
+/* (1.2.13) What's sent: the next reply's injected text, as sent. */
+.delta-whats-sent-head {
+    margin: 0.5rem 0 0.2rem;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.delta-whats-sent-text {
+    max-height: 16rem;
+    overflow: auto;
+    margin: 0;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.35));
+    border-radius: 6px;
+    background: var(--black30a, rgba(0, 0, 0, 0.2));
+    font-size: 0.8em;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.delta-whats-sent-empty {
+    opacity: 0.7;
+}
+
+/* (1.2.14) A long setting hint: its first sentence, then "more" for the rest. */
+#npc_state_delta_settings .delta-hint-rest { display: none; }
+#npc_state_delta_settings small.is-open .delta-hint-rest { display: inline; }
+#npc_state_delta_settings .delta-hint-more { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; opacity: .9; white-space: nowrap; }
+#npc_state_delta_settings .delta-hint-more:focus-visible { outline: 1px solid currentColor; }
+/* Story Block v2 hosting (src/storysuite-v2.js sets the flag): the v2 launcher setting shows only
+   then, and v1's Story Block launcher setting steps aside. The wrappers add no box of their own. */
+.npc-state-delta-v2-hosted-only, .npc-state-delta-v2-hosted-hide { display: contents; }
+html:not([data-npc-state-delta-story-block-v2="1"]) .npc-state-delta-v2-hosted-only { display: none !important; }
+html[data-npc-state-delta-story-block-v2="1"] .npc-state-delta-v2-hosted-hide { display: none !important; }
+#npc_state_delta_settings .npc-state-delta-v2-hosted-only > .npc-state-delta-setting-row,
+#npc_state_delta_settings .npc-state-delta-v2-hosted-hide > .npc-state-delta-setting-row { border-bottom: 1px solid rgba(255,255,255,.055); }
+
+/* (v2) Delta's panel in Story Block v2's settings, right in the NPC State Delta fold: its drawer held
+   open with no header (the fold names it), so its groups are the second level, never a third. Story
+   Block 2's own host.css says the same; this keeps it with a host that does not. */
+.story-suite-section .story-suite-drawer > .inline-drawer-content { display: block !important; }
+.story-suite-section .story-suite-drawer > .inline-drawer-header { display: none !important; }
+
+/* World → Here (the present card, storysuite-v2.js): Mood, Condition and Look inside the card, one line each, clamped with
+   an ellipsis (the full line is in its title); the chatter under the card, 10px below it and outside its box; no meters. */
+.npc-state-delta-world-cell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.npc-state-delta-world-cell > .npc-state-delta-present-card .npc-state-delta-present-now { display: grid; gap: 2px; min-width: 0; margin-top: 4px; }
+.npc-state-delta-world-cell > .npc-state-delta-present-card .npc-state-delta-present-now-part { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ss-text, #f6e7c4); }
+.npc-state-delta-world-cell > .npc-state-delta-chatter .npc-state-delta-bubble { margin-top: 0; }
+/* World → Now → People here (storysuite-v2.js, the page API's render): portrait, name, the standing as a chip and the description on one
+   line (two on a phone); the whole row opens the dossier. Look, Next, fields and notes are not drawn here (the dossier has them). */
+.npc-state-delta-world-people { cursor: pointer; }
+.npc-state-delta-world-people:hover > .npc-state-delta-present-card { border-color: var(--ss-accent, rgba(216,190,145,.58)); }
+.npc-state-delta-world-people .npc-state-delta-present-card-stage { padding: 0 9px; border: 1px solid color-mix(in srgb, var(--ss-accent, #d8bc78) 60%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--ss-accent, #d8bc78) 12%, transparent); line-height: 1.55; }
+.npc-state-delta-world-people .npc-state-delta-present-card-role { -webkit-line-clamp: 1; line-clamp: 1; }
+@media (max-width: 599px) {
+  .npc-state-delta-world-people .npc-state-delta-present-card-role { -webkit-line-clamp: 2; line-clamp: 2; }
+}

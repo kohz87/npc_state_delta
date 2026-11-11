@@ -32,8 +32,9 @@ def mount_fixture(page):
     html = (ROOT / 'tests/fixtures/stage9-browser.html').read_text()
     entry = re.search(r'<script type="module">([\s\S]*)</script>', html).group(1)
     shell = re.sub(r'<script type="module">[\s\S]*</script>', '', html)
-    shell = shell.replace('<link rel="stylesheet" href="/delta/style.css">',
-                          '<style>' + (ROOT / 'style.css').read_text() + '</style>')
+    # style.css holds only @import lines; the page gets the imported parts joined in cascade order.
+    css = ''.join((ROOT / name).read_text() for name in re.findall(r"^@import url\('\./([^']+\.css)'\);$", (ROOT / 'style.css').read_text(), re.M))
+    shell = shell.replace('<link rel="stylesheet" href="/delta/style.css">', '<style>' + css + '</style>')
     modules = {'delta:' + file.name: rewrite_local_imports(file.read_text())
                for file in ROOT.glob('*.js')}
     modules['host:extensions'] = ('export const extension_settings=window.settings; '

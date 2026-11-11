@@ -454,7 +454,7 @@ test('the twelve Ersveil entries all make a dossier: profile whole, fields, thre
 test('a person\'s pack stages are reached by the numbers alone, in order, with the preset\'s meters from the first meeting', async () => {
     const tansy = ERSVEIL.find(entry => entry.id === 'tansy-millrace');
     const records = { npc_tansy: { id: 'npc_tansy', name: 'Tansy Millrace', aliases: [], present: true, archived: false, castFrom: { key: 'ersveil:tansy-millrace', stages: normalizeEntry(tansy).stages } } };
-    const host = await createHost({ settings: { modules: { [MODULE_ID]: { presets: ['companion'] } }, features: { [FEATURE_STAGES]: true } }, modules: [director()] });
+    const host = await createHost({ settings: { modules: { [MODULE_ID]: { presets: ['companion'] } }, features: { [FEATURE_STAGES]: true, ...OLD_DEFAULTS } }, modules: [director()] });
     const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
     const api = {
         isEnabled: () => true, getNpc: id => (records[id] ? structuredClone(records[id]) : null),
@@ -527,6 +527,9 @@ const director = () => ({
 });
 const castRow = (extra = {}) => ({ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: null, alive: true, entry: structuredClone(FENNA_ENTRY), ...extra });
 
+// The three features that are on by default now (gate, mood and pull, notes) switched off: tests of the step as it was before them.
+const OLD_DEFAULTS = { 'npc-state-delta.anti-lever': false, 'npc-state-delta.mood-pull': false, 'npc-state-delta.notes': false };
+
 async function suite({ settings = {}, features = null, modules = [director()], castSync, castPortraitDue } = {}) {
     const records = {};
     const host = await createHost({ settings: { modules: { [MODULE_ID]: structuredClone(settings) }, ...(features ? { features: { ...features } } : {}) }, modules });
@@ -574,7 +577,7 @@ test('Story Director\'s cast is read through the adapter: cleaned, entry for the
 
 test('the meeting is recorded in the slice at the reply it is first seen: the first numbers, the problem line, the stage; unmet people leave no trace', async () => {
     const settings = { customMeters: [{ name: 'Loyalty', min: 0, max: 100, start: 20 }], ladder: [] };
-    const s = await suite({ settings, features: { [FEATURE_STAGES]: true } });
+    const s = await suite({ settings, features: { [FEATURE_STAGES]: true, ...OLD_DEFAULTS } });
     await s.world([castRow(), castRow({ key: 'ersveil:sera', id: 'sera', name: 'Sera' })]);
     await s.say();
     assert.deepEqual(s.made(), {}, 'nobody met: nothing recorded, nobody synced');
@@ -659,7 +662,7 @@ test('the person\'s own stages work like a ladder: reached by the numbers, only 
 });
 
 test('with no Story Director the per-reply step and the slice are exactly as before', async () => {
-    const s = await suite({ modules: [] });
+    const s = await suite({ modules: [], features: OLD_DEFAULTS });
     await s.say(['~ npc Ren | trust: +5']);
     assert.equal(s.host.head().domains.npc.cast, undefined);
     assert.deepEqual(s.synced, []);
@@ -984,11 +987,12 @@ test('runtime: the dossier view offers the Pin button while Story Director offer
     assert.equal(out.noDirector, false, 'no Story Director: no button');
 });
 
-test('the section bar after the cast box starts where the box ends, and the "Next:" line has its own space under the meters', () => {
+test('the cast box sits in Right now, and the "Next:" line has its own space under the meters', () => {
     const ui = dossierUiSource();
-    // The bar's -26px margin collapsed with the box's 10px: it pulled its opaque padding over the box's bottom edge.
-    assert.match(ui, /\.delta-cast-from \+ \.delta-section-nav \{ margin-top:-10px; \}/, 'on the desktop the box margin and this one cancel: the bar starts at the box end');
-    assert.match(ui, /@media \(max-width: 650px\)[\s\S]*\.delta-cast-from \+ \.delta-section-nav \{ margin-top:-4px; \}/, 'on a phone the same, with that layout\'s -4px');
+    // The section bar is gone with the one long page: the cast and away blocks head the Right now section.
+    assert.doesNotMatch(ui, /delta-section-nav/);
+    assert.match(ui, /castFromHtml\(npc\.cast, npc\.id\)/, 'the cast block (with its Pin button) is drawn in Right now');
+    assert.match(ui, /keyAwayHtml\(npc\.key\)/, 'so is the away block');
     // `.delta-section p { margin:0 }` outranks a bare class: the 6px of the rank, next and milestones lines never applied.
     assert.match(ui, /\.delta-section p\.delta-v2-next, [^\n]*\.delta-section p\.delta-v2-note \{ margin:6px 0 0;/);
     assert.doesNotMatch(ui, /#\$\{ROOT_ID\} \.delta-v2-next/, 'no bare-class rule for the lines (it loses to .delta-section p)');
@@ -997,13 +1001,9 @@ test('the section bar after the cast box starts where the box ends, and the "Nex
 
 // ---- the opaque panel and section bar (a follow-up from the mockup) ----
 
-test('the dossier panel and its sticky section bar are opaque: a floor under the tint, the tint over it', () => {
+test('the dossier panel is opaque: a floor under the tint, the tint over it', () => {
     const ui = dossierUiSource();
     assert.match(ui, /\.delta-panel \{[^}]*background-color:var\(--delta-floor\); background-image:linear-gradient\(var\(--delta-bg\),var\(--delta-bg\)\);/s);
-    assert.match(ui, /\.delta-section-nav \{[^}]*background-color:var\(--delta-floor\); background-image:linear-gradient\(var\(--delta-bg\),var\(--delta-bg\)\);/s);
-    // The bar reaches up over the panel's 22px top padding, so nothing scrolls into view above it (the chips stay where they were).
-    assert.match(ui, /\.delta-section-nav \{ position:sticky; top:-22px;[^}]*margin:-26px 0 12px; padding:30px 0 8px;/);
-    assert.match(ui, /@media \(max-width: 650px\)[\s\S]*\.delta-section-nav \{ top:0; margin-top:-4px; padding-top:8px; \}/, 'on a phone the scrolling parent has no padding: as before');
     assert.doesNotMatch(ui, /\.delta-panel \{[^}]*background:var\(--delta-bg\)/s, 'the translucent tint alone is gone');
     assert.match(ui, /--delta-floor: var\(--ss-sheet-floor, #18191d\)/, 'a fixed floor where the host gives none');
     assert.match(ui, /@supports \(color: rgb\(from red r g b\)\)[\s\S]*--delta-floor: var\(--ss-sheet-floor, rgb\(from var\(--delta-bg\) r g b \/ 1\)\)/, 'the tint with its alpha dropped where relative colours exist');
@@ -1071,7 +1071,7 @@ test('a restore from a checkpoint keeps the mark that the reader removed a cast 
 
 test('the adapter asks for the picture sync when the step has nothing to do, only when there is a picture to give', async () => {
     let due = false;
-    const s = await suite({ castPortraitDue: () => due });
+    const s = await suite({ castPortraitDue: () => due, features: OLD_DEFAULTS });
     await s.world([castRow({ entry: { ...structuredClone(FENNA_ENTRY), stages: [] } })]);
     await s.say(['~ meet Fenna']);
     assert.equal(s.synced.length, 1, 'the meeting: the sync runs for the new dossier, once');
@@ -1086,7 +1086,7 @@ test('the adapter asks for the picture sync when the step has nothing to do, onl
     await s.say();
     assert.equal(s.synced.length, before, 'and it stops when there is none');
     // Without the option (older callers) nothing is asked.
-    const plain = await suite();
+    const plain = await suite({ features: OLD_DEFAULTS });
     await plain.world([castRow({ entry: { ...structuredClone(FENNA_ENTRY), stages: [] } })]);
     await plain.say(['~ meet Fenna']);
     await plain.say();
@@ -1495,4 +1495,34 @@ test('the adapter reads Story Block\'s party.levels as it answers, and null when
     assert.deepEqual((await suite({ modules: [party(rows)] })).adapter.partyLevelsAnswer(), rows, 'members who left are in the answer; the hosted part drops them');
     assert.equal((await suite({ modules: [party(null)] })).adapter.partyLevelsAnswer(), null, 'RPG off: null');
     assert.equal((await suite({ modules: [director()] })).adapter.partyLevelsAnswer(), null, 'no such query: as today');
+});
+
+test('mood: a person met from the cast starts at the resting mood their pack personality gives (temperament, not 0), stored with the record', async () => {
+    const calm = await suite({ features: { 'npc-state-delta.mood-pull': true } });
+    await calm.world([castRow({ entry: { ...structuredClone(FENNA_ENTRY), personality: 'Calm, confident and unhurried.' } })]);
+    await calm.say(['~ meet Fenna']);
+    const mood = Object.values(calm.host.head().domains.npc.npcs).find(record => record.name === 'Fenna')?.mood;
+    assert.deepEqual([mood?.v, mood?.a, mood?.d, mood?.rest], [0, -2, 1, { v: 0, a: -2, d: 1 }]);
+    assert.deepEqual(validateNpcSlice(calm.host.head().domains.npc), []);
+    const plain = await suite({ features: { 'npc-state-delta.mood-pull': true } });
+    await plain.world([castRow({ entry: { ...structuredClone(FENNA_ENTRY), personality: 'Likes ferries.' } })]);
+    await plain.say(['~ meet Fenna']);
+    assert.equal(Object.values(plain.host.head().domains.npc.npcs).find(record => record.name === 'Fenna')?.mood, undefined, 'no temperament words: no mood until an event');
+});
+
+test('defaults on: a meeting written with gate, mood and pull, and notes off is read again identically after they are switched on (the tick is kept, no tastes, drives or mood are added)', async () => {
+    const s = await suite({ features: OLD_DEFAULTS });
+    await s.world([castRow()]);
+    await s.say();
+    await s.say(['~ meet Fenna']);
+    const meeting = s.host.store.headIndex();
+    await s.say(['~ npc Fenna | trust: -3 | impact: major']);
+    const bare = () => JSON.stringify(s.host.head().domains.npc).replace(/sw_[a-z0-9]+/g, 'sw');
+    const written = bare();
+    for (const id of Object.keys(OLD_DEFAULTS)) s.host.features.set(id, true);
+    s.host.store.rebuild();
+    assert.equal(bare(), written, 'rebuild under the new defaults');
+    const again = await s.host.sdk.reread(meeting);
+    assert.equal(again.ok, true, JSON.stringify(again));
+    assert.equal(bare(), written, 'the meeting reply read again: the same state (no mood, tastes, drives, track or pull added)');
 });

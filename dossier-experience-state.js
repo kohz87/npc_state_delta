@@ -28,9 +28,16 @@ export function lifeStateChoice(npc = {}) {
 }
 
 
+// The dossier on screen, or '' on the library: the controller's own selection (the board, profile and sections all
+// belong to one NPC). The library keeps a highlighted id but shows no dossier, so it counts as none.
+export function screenNpcId(root = uiRoot()) {
+    const ui = root?.__npcStateDeltaStage1Ui;
+    if (!ui) return '';
+    return ui.screen?.name && ui.screen.name !== 'library' ? plain(ui.selectedNpcId) : '';
+}
+
 export function selectedNpcId(root = uiRoot()) {
-    return plain(root?.querySelector?.('.delta-hero .delta-edit[data-npc-id]')?.dataset?.npcId
-        || root?.querySelector?.('.delta-cast-card.selected')?.dataset?.npcId);
+    return plain(root?.__npcStateDeltaStage1Ui?.selectedNpcId);
 }
 
 export function currentNpc(npcId = selectedNpcId()) {

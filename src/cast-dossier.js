@@ -183,6 +183,17 @@ export function castMannerisms(raw) {
     return out;
 }
 
+// A pack's tastes: [{ sign '+' (likes) | '-' (dislikes), item, from? }], up to 6 likes and 4 dislikes (the notes feature's limits); anything else is dropped.
+export function castTastes(raw) {
+    const out = [];
+    for (const item of Array.isArray(raw) ? raw : []) {
+        const text = clip(isObject(item) ? item.item : '', 60);
+        const sign = isObject(item) ? (item.sign === '-' || item.sign === 'dislikes' ? '-' : item.sign === '+' || item.sign === 'likes' ? '+' : '') : '';
+        if (text && sign && out.filter(row => row.sign === sign).length < (sign === '+' ? 6 : 4)) out.push({ sign, item: text, from: clip(item.from, 60) });
+    }
+    return out;
+}
+
 /** The pack entry, cleaned (texts cut and flattened, lists bounded), or null without a usable name. */
 export function normalizeEntry(raw) {
     if (!isObject(raw)) return null;
@@ -210,6 +221,8 @@ export function normalizeEntry(raw) {
         stages: normalizeStages(raw.stages),
         fields: normalizeFields(raw.fields),
         secrets: castSecrets(raw.secrets),
+        tastes: castTastes(raw.tastes),
+        drives: isObject(raw.drives) || Array.isArray(raw.drives) ? raw.drives : undefined,
         packVersion: clip(raw.packVersion, 40),
     };
 }

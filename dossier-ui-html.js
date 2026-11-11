@@ -61,7 +61,7 @@ function portraitMark(src, refs) {
 
 function portraitHtml(npc, className, { alt = true, refs = null } = {}) {
     const src = plain(npc?.portrait);
-    if (src) return `<img class="${className}" ${imageSourceAttribute(src, refs)} alt=""${alt ? `${escapeHtml(npc?.name || 'NPC')} portrait` : ''}" loading="lazy" decoding="async">`;
+    if (src) return `<img class="${className}" ${imageSourceAttribute(src, refs)} alt="${alt ? `${escapeHtml(npc?.name || 'NPC')} portrait` : ''}" loading="lazy" decoding="async">`;
     const initial = escapeHtml(String(npc?.name || '?').trim().charAt(0).toUpperCase() || '?');
     return `<div class="${className} delta-portrait-placeholder" aria-hidden="true"><span>${initial}</span></div>`;
 }
@@ -150,17 +150,6 @@ function reconcileDocumentSections(parent, markup, reset = false) {
     while (parent.children.length > children.length) parent.lastElementChild.remove();
 }
 
-const DOSSIER_SECTIONS = Object.freeze([
-    ['player', 'Player'], ['identity', 'Identity'], ['current', 'Current'], ['profile', 'Profile'],
-    ['dynamic', 'Dynamic'], ['bonds', 'Bonds & memories'], ['history', 'History'],
-]);
-
-function sectionNavHtml(secrets = false) {
-    // "Secrets" sits right after History, and only for a dossier that has notes.
-    const sections = secrets ? [...DOSSIER_SECTIONS, ['secrets', 'Secrets']] : DOSSIER_SECTIONS;
-    return `<nav class="delta-section-nav" aria-label="Dossier sections">${sections.map(([key, label]) => `<button type="button" class="delta-section-jump" data-delta-jump="${key}">${escapeHtml(label)}</button>`).join('')}</nav>`;
-}
-
 function countsFor(rows) {
     const counts = { all: 0, active: 0, archived: 0 };
     for (const row of Array.isArray(rows) ? rows : []) {
@@ -175,4 +164,4 @@ function visibleElement(element) {
     return Boolean(element && element.isConnected && element.getClientRects?.().length);
 }
 
-export { listHtml, proseHtml, portraitMark, portraitHtml, identityLine, changedMark, currentCard, birthdayCard, reconcileDocumentSections, sectionNavHtml, countsFor, visibleElement };
+export { listHtml, proseHtml, portraitMark, portraitHtml, identityLine, changedMark, currentCard, birthdayCard, reconcileDocumentSections, countsFor, visibleElement };

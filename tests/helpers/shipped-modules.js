@@ -19,3 +19,13 @@ export function shippedModulePaths() {
     }
     return [...modules, ...split];
 }
+
+// The stylesheet's parts: style.css holds only @import lines, so tests that pin CSS rules read the parts joined in cascade order.
+export function shippedStylePaths() {
+    const entry = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
+    return [...entry.matchAll(/^@import url\('\.\/([^']+\.css)'\);$/gm)].map(match => match[1]);
+}
+
+export function styleSource() {
+    return shippedStylePaths().map(name => fs.readFileSync(path.join(root, name), 'utf8')).join('');
+}

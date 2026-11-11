@@ -33,6 +33,7 @@ import {
 import { buildInjection, getActiveCalendarConfig, normalizeNpcRecord, setNpcArchived, setActiveCalendarConfig, setExternalCalendarSource, stripUiNoise } from '../core.js';
 import { deterministicCalendarBirthday } from '../calendar.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { styleSource } from './helpers/shipped-modules.js';
 
 // Story Suite handshake (docs/STORY_SUITE.md): the shared registry in suite.js, Delta's
 // announcement and the three defers (scene, calendar, stats), plus World State read from inside
@@ -618,7 +619,7 @@ test('v1.2.1 the settings panel starts with a hidden Manage all in Story Suite l
     assert.match(index, /const UI_ID = 'npc_state_delta_settings';/);
     assert.equal((html.match(/data-story-suite-link/g) || []).length, 1, 'the line carries data-story-suite-link so the overlay can hide it while the panel is inside');
     assert.match(html, /<div [^>]*data-story-suite-link[^>]*>\s*<button [^>]*data-delta-open-suite>/, 'on the element that holds the link');
-    const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    const css = styleSource();
     assert.match(css, /\.npc-state-delta-suite-manage\[hidden\] \{ display: none; \}/);
 });
 

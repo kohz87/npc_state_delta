@@ -107,6 +107,9 @@ export function resolveMapBonds(npcs = [], shownIds = new Set()) {
             const key = [npc.id, other.id].sort().join('|');
             const bond = bonds.get(key) || { a: [npc.id, other.id].sort()[0], b: [npc.id, other.id].sort()[1], relation: {} };
             bond.relation[npc.id] = parsed.relation;
+            // Tie tags (ally, rival, owes) either person has toward the other, from the notes feature (npc.v2Meters.ties, by dossier id).
+            const tags = Array.isArray(npc.v2Meters?.ties?.[other.id]) ? npc.v2Meters.ties[other.id] : [];
+            if (tags.length) bond.tags = [...new Set([...(bond.tags || []), ...tags])];
             bonds.set(key, bond);
         }
     }
@@ -159,7 +162,7 @@ export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth
     const lines = resolveMapBonds(npcs, new Set(positions.keys()))
         .map(bond => ({ ...bond, touches: bond.a === selectedId || bond.b === selectedId }))
         .filter(bond => bond.touches || allBonds)
-        .map(bond => ({ touches: bond.touches, from: positions.get(bond.a), to: positions.get(bond.b) }));
+        .map(bond => ({ touches: bond.touches, a: bond.a, b: bond.b, relation: bond.relation, from: positions.get(bond.a), to: positions.get(bond.b) }));
     const change = selected?.lastRelationshipChange || {};
     return {
         turn,

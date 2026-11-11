@@ -19,6 +19,7 @@ import {
 } from '../present-scene.js';
 import { ensureSuiteStylesheet, SUITE_STYLESHEET_ID } from '../suite-handshake.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { styleSource } from './helpers/shipped-modules.js';
 
 // Present NPCs view (1.2.2), display only: the now line and NPC Inner Chatter bubbles.
 
@@ -229,7 +230,7 @@ test('v1.2.3 the card shows labelled now lines that wrap to two lines, the name 
     assert.doesNotMatch(html, /Curious|starlit/, 'the story text still arrives by textContent');
     assert.equal(model.texts[model.now.astral.parts[0].text], 'Curious; wary of the strangers at the gate');
 
-    const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    const css = styleSource();
     const rule = selector => css.match(new RegExp(`\\n${selector.replace(/[.-]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] || '';
     // UI 4c: the stage line and the now lines are short. The side's now parts wrap to two lines; the name is one line
     // with an ellipsis, so a long unbroken name never makes the row taller or wider.
@@ -245,7 +246,7 @@ test('v1.2.3 the card shows labelled now lines that wrap to two lines, the name 
 });
 
 test('v1.2.4 (UI 4c) present cards are one compact row at every size: a 44px portrait, the name, the now lines and chatter under it', () => {
-    const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    const css = styleSource();
     // No container split any more: a narrow pane and a wide one show the same single column.
     assert.doesNotMatch(css, /@container npc-present/, 'the card row needs no container query');
     const rule = selector => css.match(new RegExp(`\\n${selector.replace(/[.-]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] || '';
@@ -280,7 +281,7 @@ test('v1.2.2 the present cards render now/chatter slots and the Story Block tab 
     assert.match(index, /areaOwner\('scene', settings\.sourceOfTruth\)\?\.id === 'story-block'/, 'World State only while Story Block keeps the scene');
     assert.match(tabs, /pane\.innerHTML = html;[\s\S]*api\.fillPresentCast\?\.\(pane\)/);
     assert.match(tabs, /storyBlock\.onUpdate\?\.\(\(\) => api\.renderInline\?\.\(\)\)/);
-    const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    const css = styleSource();
     assert.doesNotMatch(css, /grid-column: span 2/, 'wide: the bubble sits under its card, not in a stretched two-column cell');
     assert.match(index, /const side = chatter \? chatter\s*: \(now \? `<div class="npc-state-delta-present-side npc-state-delta-present-side-now">\$\{now\}<\/div>`\s*: `<div class="npc-state-delta-present-side npc-state-delta-present-side-idle">[^`]*No changes this turn[^`]*`\);/, 'right half: chatter, else the now lines, else role + no changes');
     assert.match(index, /return `<div class="npc-state-delta-present-cell npc-state-delta-present-cell-\$\{kind\}" data-npc-id="\$\{escapeHtml\(npc\.id\)\}"[^`]*>\$\{card\}\$\{side\}<\/div>`/, 'one cell per NPC: card, then its right half');
@@ -321,7 +322,7 @@ test('v1.2.2 the settings panel carries the shared story-suite-* classes beside 
     assert.match(fs.readFileSync(new URL('../scripts/package.py', import.meta.url), 'utf8'), /support_files = \['style\.css', 'suite\.css'/);
     assert.match(index, /suiteConnected = true;\s*ensureSuiteStylesheet\(\);/);
     // Delta's own panel rules stay and win where they differ (#npc_state_delta_settings is more specific).
-    const own = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    const own = styleSource();
     assert.match(own, /#npc_state_delta_settings \.delta-settings-group \{ margin: 0; border: 1px solid rgba\(218,193,148,\.14\)/);
     assert.match(own, /#npc_state_delta_settings \.npc-state-delta-drawer \{ container: npc-delta-settings \/ inline-size; \}/);
 });

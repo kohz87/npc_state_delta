@@ -36,8 +36,8 @@ export const clockModule = {
     queries: { 'director.time': state => ({ minutes: state?.domains?.director?.time?.minutes ?? null }) },
 };
 
-export async function suite({ records = dossiers(), clock = true, allowance, calendarOwn = false } = {}) {
-    const host = await createHost({ settings: { modules: { [MODULE_ID]: {} } }, modules: clock ? [clockModule] : [] });
+export async function suite({ records = dossiers(), clock = true, allowance, calendarOwn = false, features = null, settings = {}, modules = [] } = {}) {
+    const host = await createHost({ settings: { modules: { [MODULE_ID]: { ...settings } }, ...(features ? { features: { ...features } } : {}) }, modules: [...(clock ? [clockModule] : []), ...modules] });
     const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
     const delta = { records };
     const api = {

@@ -2,6 +2,7 @@
 // lower tier, and the reply's last-event record (lastEvent: readEvent, nextEvent, eventSummary, askedOf). A pure part of the pacing rule (src/relationship-pacing.js, which holds the count); never imports npc-meters.js.
 import { RELATIONSHIP_KEYS, RELATIONSHIP_MILESTONE_REQUIREMENTS, RELATIONSHIP_MILESTONE_THRESHOLDS } from '../core-relationship-model.js';
 import { PACING_TIERS } from './relationship-pacing.js';
+import { describeGate, gateEventProblems, normalizeApproachKind } from '../npc-meters-gate.js';
 
 const list = words => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : words[0]);
 
@@ -40,7 +41,7 @@ export function cutToTier(changes, used, caps, value) {
 // replaces it; another event of the same reply writes the whole longer list. Display only: nothing that decides meters reads it.
 const AXES = ['trust', 'affection', 'desire', 'tension'];
 export const EVENT_MAX = 4;
-const EVENT_TEXT_MAX = 900;
+const EVENT_TEXT_MAX = 1300;
 const NOTE_MAX = 120;
 const DATE_MAX = 40;
 const SOURCES = ['story', 'scan'];
@@ -50,6 +51,9 @@ const replyOk = value => (typeof value === 'string' && value.length > 0 && value
 function validEvent(item) {
     if (!item || typeof item !== 'object' || Array.isArray(item) || !SOURCES.includes(item.src) || !PACING_TIERS.includes(item.tier)) return false;
     if (typeof item.held !== 'boolean' || typeof item.note !== 'string' || item.note.length > NOTE_MAX) return false;
+    // The anti-lever gate's part (npc-meters-gate.js): the approach the story line named, and the outcome when the gate fired.
+    if (item.via !== undefined && !normalizeApproachKind(item.via)) return false;
+    if (item.gate !== undefined && (!item.via || gateEventProblems(item.gate).length)) return false;
     const ask = item.ask;
     return Boolean(ask) && typeof ask === 'object' && !Array.isArray(ask) && Object.keys(ask).every(axis => AXES.includes(axis) && wholeInt(ask[axis]) && ask[axis] !== 0);
 }
@@ -65,12 +69,12 @@ export function readEvent(text) {
 }
 
 /** What a hosted run records for one paced event: the whole new text for the record (`prior`: the stored text), or null when it need not change. */
-export function nextEvent(prior, { reply, date, src, ask, tier, held, note }) {
+export function nextEvent(prior, { reply, date, src, ask, tier, held, note, via, gate }) {
     const old = readEvent(prior);
     const events = old && old.at === reply ? old.events : [];
     if (events.length >= EVENT_MAX) return null;
     const mine = Object.fromEntries(AXES.filter(axis => wholeInt(ask?.[axis]) && ask[axis] !== 0).map(axis => [axis, ask[axis]]));
-    const item = { src, ask: mine, tier, held: Boolean(held), note: String(note || '').slice(0, NOTE_MAX) };
+    const item = { src, ask: mine, tier, held: Boolean(held), note: String(note || '').slice(0, NOTE_MAX), ...(via ? { via, ...(gate ? { gate } : {}) } : {}) };
     const text = JSON.stringify({ at: reply, date: String(date || '').slice(0, DATE_MAX), events: [...events, item] });
     return validEvent(item) && text.length <= EVENT_TEXT_MAX ? text : null;
 }
@@ -95,7 +99,10 @@ export function eventSummary(event) {
     for (const item of event.events.filter(entry => entry.held)) {
         for (const [axis, value] of Object.entries(item.ask)) if (item.src === 'story' || !named.has(axis)) ask[axis] = (ask[axis] || 0) + value;
     }
-    return { tier: top(countedSpent.length ? countedSpent : counted), held, note: held ? event.events[0].note : '', ask, date: event.date };
+    // The anti-lever gate's words for the last story line that named an approach: "via praise · 3rd in 2 days · backfired".
+    const approach = event.events.findLast(item => item.src === 'story' && item.via);
+    const gate = approach ? describeGate(approach.gate ? { via: approach.via, ...approach.gate } : null) || `via ${approach.via}` : '';
+    return { tier: top(countedSpent.length ? countedSpent : counted), held, note: held ? event.events[0].note : '', ask, date: event.date, ...(gate ? { gate } : {}) };
 }
 
 /** What `changes` ask of the four built-in axes, per axis: an add is its value, a set the distance from the value now (`now(meter)`). */

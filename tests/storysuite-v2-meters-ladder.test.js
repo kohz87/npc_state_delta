@@ -244,7 +244,7 @@ test('limits as editor lines read back; bad lines are problems', () => {
 
 test('custom meters: the rule line goes in the static part only while presets and rules are on; band words go in the tail', () => {
     const settings = { customMeters: [{ name: 'Loyalty', min: 0, max: 100, describe: 'rises when you keep promises.', bands: 'doubtful 25, steady 60, devoted' }] };
-    const make = presets => createNpcPart({ settings: () => settings, present: () => ['Mira'], feature: id => (id === FEATURE_PRESETS ? presets : undefined) });
+    const make = presets => createNpcPart({ settings: () => settings, present: () => ['Mira'], feature: id => (id === FEATURE_PRESETS ? presets : id === 'npc-state-delta.anti-lever' ? false : undefined) });
     const on = make(true).context.static();
     const off = make(false).context.static();
     assert.match(on, / Meter rules: loyalty rises when you keep promises\.$/);

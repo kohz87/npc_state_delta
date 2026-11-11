@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { lifeStateChoice, setNodeTextIfChanged } from '../dossier-experience.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { faceRingVar, keyFirstRows, libraryFaceHtml, libraryRows } from '../dossier-ui-library.js';
 
 const source = [
     fs.readFileSync(fileURLToPath(new URL('../dossier-experience.js', import.meta.url)), 'utf8'),
@@ -77,25 +78,23 @@ test('launcher remains direct-to-dossier and is presented as a circular 48px flo
     assert.match(source, /delta-open-settings/);
 });
 
-test('dossier library is a full-portrait cast carousel with overlaid text and hidden scrollbar', () => {
-    assert.match(source, /\.delta-cast-card\{position:relative!important[^}]*height:132px!important/);
-    assert.match(source, /\.delta-cast-portrait\{position:absolute!important[^}]*inset:0!important[^}]*height:100%!important/);
-    assert.match(source, /\.delta-cast-copy\{position:absolute!important[^}]*bottom:0[^}]*linear-gradient/);
-    assert.match(source, /\.delta-cast-list::-webkit-scrollbar\{display:none!important/);
-    assert.match(source, /delta-cast-rail-wrap/);
+test('dossier library is a grid of tone-ringed faces; the old collapsible cast rail is gone', () => {
+    const styles = fs.readFileSync(fileURLToPath(new URL('../dossier-ui-styles-board.js', import.meta.url)), 'utf8');
+    assert.match(styles, /\.delta-library-faces \{ display:grid; grid-template-columns:repeat\(auto-fill,minmax\(140px,1fr\)\)/);
+    assert.match(styles, /\.delta-library-av \{[^}]*box-shadow:0 0 0 2px var\(--dsk-tile\), 0 0 0 3\.5px var\(--rc\)/);
+    assert.doesNotMatch(source, /delta-cast-card|delta-cast-rail-wrap|delta-rail-arrow|libraryCollapsed|ensureLibraryChrome/);
+    assert.doesNotMatch(source, /delta-library-collapsed|data-delta-library-toggle/);
 });
 
-test('dossier library starts collapsed and expands from its heading', () => {
-    assert.match(source, /heading = document\.createElement\('button'\)/);
-    assert.match(source, /heading\.dataset\.deltaLibraryToggle = '1'/);
-    assert.match(source, /setAttribute\('aria-expanded', expanded\)/);
-    assert.match(source, /classList\?\.toggle\?\.\('delta-library-collapsed', libraryCollapsed\)/);
-    assert.match(source, /\.delta-library\.delta-library-collapsed\{grid-template-rows:minmax\(0,1fr\) auto!important\}/);
-    assert.match(source, /\.delta-library-collapsed \.delta-search-label,[^{]*\.delta-library-collapsed \.delta-filters,[^{]*\.delta-library-collapsed \.delta-cast-rail-wrap\{display:none!important\}/);
-    // Collapsed by default and again whenever the panel closes; presentation only, never stored.
-    assert.match(source, /let libraryCollapsed = true;/);
-    assert.match(source, /observe\(panel, \{ attributes: true, attributeFilter: \['hidden'\] \}\)/);
-    assert.doesNotMatch(source, /LIBRARY_COLLAPSED_KEY|npc_state_delta_library_collapsed/);
+test('the library puts key people first and keeps the search and dead rules', () => {
+    const rows = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B', key: true }, { id: 'c', name: 'C' }, { id: 'd', name: 'D', key: true }];
+    assert.deepEqual(keyFirstRows(rows).map(row => row.id), ['b', 'd', 'a', 'c'], 'a stable partition: key people first, the order inside each group kept');
+    const index = [{ id: 'x', name: 'Xen', bucket: 'active', aliases: [] }, { id: 'y', name: 'Yara', bucket: 'dead', aliases: [] }];
+    assert.deepEqual(libraryRows(index).map(row => row.id), ['x'], 'the dead only by search');
+    assert.deepEqual(libraryRows(index, { query: 'yara' }).map(row => row.id), ['y']);
+    assert.match(libraryFaceHtml({ id: 'z', name: '<b>', bucket: 'active', tone: 'rival' }), /&lt;b&gt;[\s\S]*--rc:var\(--bad\)|--rc:var\(--bad\)[\s\S]*&lt;b&gt;/, 'escaped name, red ring for a rival');
+    assert.equal(faceRingVar('ally'), 'var(--good)');
+    assert.equal(faceRingVar('nonsense'), 'var(--dial)');
 });
 
 test('editor uses one scroll body and task-grouped form sections', () => {
@@ -132,10 +131,13 @@ test('settings are grouped by task and extension-wide backup diagnostics live in
 });
 
 test('cohesive experience keeps selected dossier actions routed through the maintained Portrait tool', () => {
-    assert.match(source, /delta-dossier-actions-primary/);
-    assert.match(source, /npc-state-delta-refresh-chat/);
-    assert.match(source, /npc-state-delta-scan-dossier/);
-    assert.match(source, /Archive dossier/);
+    const header = fs.readFileSync(fileURLToPath(new URL('../dossier-ui-header.js', import.meta.url)), 'utf8');
+    assert.match(source, /delta-header-slot/);
+    assert.match(source, /dossierMenuHtml\(npcId/);
+    assert.match(header, /npc-state-delta-refresh-chat/);
+    assert.match(header, /npc-state-delta-scan-dossier/);
+    assert.match(header, /delta-experience-portrait/);
+    assert.match(header, /Archive dossier/);
     assert.match(source, /openPortraitTools/);
     assert.doesNotMatch(source, /\/imagine/);
 });

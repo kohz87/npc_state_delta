@@ -122,6 +122,15 @@ test('production request bytes, retry counts, output allowances and flags match 
     execFileSync(process.execPath, ['scripts/measure-stage9.mjs'], { cwd: new URL('..', import.meta.url), stdio: 'pipe' });
 });
 
+test('the new hosted features off: the npc static line is the one from before the batch (no via sentence); on adds only the gate sentence', async () => {
+    const { createNpcPart } = await import('../src/npc-meters.js');
+    const lineOf = on => { const part = createNpcPart({ settings: () => ({}), present: () => [], feature: () => on }); return `${part.kinds.npc.grammar}\n${part.kinds.milestone.grammar}\n${part.context.static()}`; };
+    const off = lineOf(false);
+    assert.doesNotMatch(off, /via:/, 'features off: no gate wording in the static part');
+    assert.equal(off.length, 342, 'the static part is the pre-batch size (measure:prompts v2-npc-meters-builtIns)');
+    assert.equal(lineOf(true).replace(/ Add \| via:[^.]*\./, ''), off, 'on differs only by the gated sentence');
+});
+
 function uncheckedBundle(manifest) {
     const text = new TextEncoder().encode(JSON.stringify(manifest));
     const result = new Uint8Array(12 + text.length);
