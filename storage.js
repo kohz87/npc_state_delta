@@ -2,7 +2,7 @@
    live in focused parts; this file owns writer locking, the durability queue, sidecar writes and the
    recovery/retire/read/delete operations. Every public name previously exported here remains exported. */
 import { createStorageIdentity } from './storage-identity.js';
-import { bytesToBase64, decodeStateFilePayload, encodeRetiredStateFilePayload as encodeRetiredStateFilePayloadFile, encodeStateFilePayload as encodeStateFilePayloadFile, NPC_STATE_FILE_FORMAT, NPC_STATE_FILE_FORMAT_VERSION, pruneFormPortraitAssetsForState, prunePortraitAssetsForState, prunePortraitAssetsInPlace, retainedPortraitAssetIds } from './storage-payload.js';
+import { bytesToBase64, decodeStateFileHead, decodeStateFilePayload, encodeRetiredStateFilePayload as encodeRetiredStateFilePayloadFile, encodeStateFilePayload as encodeStateFilePayloadFile, NPC_STATE_FILE_FORMAT, NPC_STATE_FILE_FORMAT_VERSION, pruneFormPortraitAssetsForState, prunePortraitAssetsForState, prunePortraitAssetsInPlace, retainedPortraitAssetIds } from './storage-payload.js';
 import { dataFileExists, uploadPayload } from './storage-files.js';
 import { createStorageInspection } from './storage-inspection.js';
 
@@ -10,7 +10,7 @@ export { dataFileExists, dataFilesExist, deleteNpcStateDataFile, readPortraitFil
 
 const identity = createStorageIdentity();
 const { fnv1a } = identity;
-const inspection = createStorageInspection({ dataFileExists, decodeStateFilePayload, makeNpcStateDataFileName: identity.makeNpcStateDataFileName });
+const inspection = createStorageInspection({ dataFileExists, decodeStateFilePayload, decodeStateFileHead, makeNpcStateDataFileName: identity.makeNpcStateDataFileName });
 const { adoptNpcStateDataFileMetadata, inspectNpcStateDataFile, probeNpcStateDataFilePointer, remoteRevision } = inspection;
 
 export const NPC_STATE_WRITE_RETRY_DELAYS_MS = Object.freeze([0, 1000, 2000, 5000, 15000, 30000]);
@@ -26,7 +26,7 @@ const writerId = identity.currentWriterId();
 export const currentWriterId = identity.currentWriterId;
 export const makeNpcStateDataFileName = identity.makeNpcStateDataFileName;
 export const makeNpcStateRecoveryFileName = identity.makeNpcStateRecoveryFileName;
-export { NPC_STATE_FILE_FORMAT, NPC_STATE_FILE_FORMAT_VERSION, bytesToBase64, decodeStateFilePayload, pruneFormPortraitAssetsForState, prunePortraitAssetsForState, prunePortraitAssetsInPlace, retainedPortraitAssetIds };
+export { NPC_STATE_FILE_FORMAT, NPC_STATE_FILE_FORMAT_VERSION, bytesToBase64, decodeStateFileHead, decodeStateFilePayload, pruneFormPortraitAssetsForState, prunePortraitAssetsForState, prunePortraitAssetsInPlace, retainedPortraitAssetIds };
 export { adoptNpcStateDataFileMetadata, inspectNpcStateDataFile, probeNpcStateDataFilePointer };
 
 export function encodeStateFilePayload(chatKey, state, appVersion = '', metadata = {}) {
