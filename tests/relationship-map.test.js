@@ -12,6 +12,7 @@ import {
     PHONE_NODE_CAP,
     relationshipDelta,
     resolveMapBonds,
+    ringWordSpot,
     selectMapNpcs,
 } from '../relationship-map-core.js';
 import { runtimeSource } from './helpers/runtime-source.js';
@@ -240,4 +241,16 @@ test('the map card: ties without Focus, the numbers line, a portrait or initials
     assert.match(adapter, /libraryFootHtml\(count\)/, 'the map ends in the same Dossier library bar');
     assert.match(adapter, /closest\('\.delta-library-foot'\)\) return void setMode\(ui, 'dossier'\)/);
     assert.match(adapter, /class="ss-tap-pill" data-map-mode="map"/);
+});
+
+test('the outer ring word sits where no face or label is, and moves out of the way of a face at the bottom', () => {
+    const at = (x, y) => ({ x, y });
+    const empty = ringWordSpot([]);
+    assert.ok(Math.abs(empty.x - 390) < 1 && empty.y > 700, 'with no face it keeps the old bottom place');
+    const crowded = ringWordSpot([at(50, 92)]);   // a face right where the word used to be written
+    assert.ok(Math.abs(crowded.x - 390) > 90 || crowded.y < 690, 'the word moved off the face');
+    for (const spot of [empty, crowded]) assert.ok(['start', 'middle', 'end'].includes(spot.anchor));
+    assert.deepEqual(ringWordSpot([at(50, 92), at(20, 60)]), ringWordSpot([at(50, 92), at(20, 60)]), 'deterministic');
+    const source = fs.readFileSync(new URL('../relationship-map-focus.js', import.meta.url), 'utf8');
+    assert.match(source, /ringWordSpot\(model\.nodes\)/);
 });

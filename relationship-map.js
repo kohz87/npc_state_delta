@@ -285,7 +285,7 @@ const STYLES = `
 #${DOSSIER_ROOT_ID} .delta-map-outer { fill:none; stroke:var(--delta-line); stroke-dasharray:3 4; vector-effect:non-scaling-stroke; }
 #${DOSSIER_ROOT_ID} .delta-map-ring { fill:none; stroke:var(--delta-line); vector-effect:non-scaling-stroke; }
 #${DOSSIER_ROOT_ID} .delta-map-ring-zero { stroke:var(--delta-line-strong); }
-#${DOSSIER_ROOT_ID} .delta-map-outer-word { fill:var(--delta-muted); font:italic 17px system-ui,sans-serif; letter-spacing:.08em; text-anchor:middle; }
+#${DOSSIER_ROOT_ID} .delta-map-outer-word { fill:var(--delta-muted); font:italic 17px system-ui,sans-serif; letter-spacing:.08em; }
 #${DOSSIER_ROOT_ID} .delta-map-bond-selected { stroke-width:2; }
 #${DOSSIER_ROOT_ID} .delta-map-you { position:absolute; left:50%; top:50%; width:clamp(54px,11%,72px); aspect-ratio:1/1; transform:translate(-50%,-50%); display:grid; place-items:center; overflow:hidden; padding:4px; border:1.5px solid var(--delta-text); border-radius:50%; color:var(--delta-text); background:color-mix(in srgb, var(--delta-text) 16%, var(--delta-floor)); font:700 .82rem/1.1 system-ui,sans-serif; text-align:center; text-overflow:ellipsis; white-space:nowrap; }
 #${DOSSIER_ROOT_ID} .delta-map-node { --node:8.6cqw; position:absolute; z-index:1; width:max(44px,var(--node)); height:max(44px,var(--node)); padding:0; transform:translate(-50%,-50%); display:grid; place-items:center; border:0; border-radius:50%; background:transparent; cursor:pointer; }

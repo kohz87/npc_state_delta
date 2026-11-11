@@ -197,3 +197,36 @@ export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth
         } : null,
     };
 }
+
+// Where the outer ring's word ("cold · hostile") is written: in the widest free stretch of the ring, so no face's label
+// is ever written over it. Candidate spots every 3 degrees on the ring just inside the dashed circle; each is tested against
+// the box of every face and its label (in the map's own 780-unit space, sized for the largest label) and the free spot nearest
+// the bottom wins (the old, fixed place); with none free, the spot with the most room. Pure: a function of the nodes' places.
+const WORD_RADIUS = -80;
+const WORD_BOX = Object.freeze({ half: 62, up: 15, down: 6 });
+const NODE_BOX = Object.freeze({ half: 58, up: 34, down: 66 });
+export function ringWordSpot(nodes = [], size = MAP_SPAN) {
+    const r = mapRadius(WORD_RADIUS, size);
+    const k = size / MAP_SPAN;
+    const places = nodes.map(node => ({ x: (node.x / 100) * size, y: (node.y / 100) * size }));
+    let best = null;
+    for (let deg = 0; deg < 360; deg += 3) {
+        const rad = deg * Math.PI / 180;
+        const cos = Math.cos(rad);
+        const anchor = cos > 0.5 ? 'end' : (cos < -0.5 ? 'start' : 'middle');
+        const x = size / 2 + r * cos;
+        const y = size / 2 + r * Math.sin(rad);
+        const left = anchor === 'end' ? x - 2 * WORD_BOX.half * k : (anchor === 'start' ? x : x - WORD_BOX.half * k);
+        const box = { l: left, r: left + 2 * WORD_BOX.half * k, t: y - WORD_BOX.up * k, b: y + WORD_BOX.down * k };
+        if (box.l < 0 || box.r > size || box.t < 0 || box.b > size) continue;
+        // The room left to the nearest face box (negative when they overlap), the smallest gap on either axis.
+        const room = Math.min(Infinity, ...places.map(at => Math.max(
+            at.x - NODE_BOX.half * k - box.r, box.l - (at.x + NODE_BOX.half * k),
+            at.y - NODE_BOX.up * k - box.b, box.t - (at.y + NODE_BOX.down * k))));
+        const away = Math.abs(((deg - 90 + 540) % 360) - 180);
+        const free = room > 0;
+        if (!best || (free && !best.free) || (free === best.free && (free ? away < best.away : room > best.room))) best = { x, y, anchor, room, away, free };
+    }
+    const spot = best || { x: size / 2, y: size / 2 + r, anchor: 'middle' };
+    return { x: spot.x, y: spot.y, anchor: spot.anchor };
+}

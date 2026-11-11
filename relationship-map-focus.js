@@ -2,7 +2,7 @@
    bonds stay lit, each tied person's relation word and tone, the "Focus: Name ✕" chip) and the markup of the
    map's rings, faces, bond lines and person card. Layout and bond resolution stay in relationship-map-core.js.
    No host or state access; the markup is strings, portraits go through the dossier's portrait refs. */
-import { MAP_CENTER, MAP_LENSES, MAP_SPAN, mapRadius, plain, resolveMapBonds, signed } from './relationship-map-core.js';
+import { MAP_CENTER, MAP_LENSES, MAP_SPAN, mapRadius, plain, resolveMapBonds, ringWordSpot, signed } from './relationship-map-core.js';
 import { portraitHtml } from './dossier-ui-html.js';
 import { KNOWN_SOCIAL_RELATION_FAMILIES, socialRelationFamily } from './social-relations.js';
 import { escapeHtml } from './src/util/html.js';
@@ -148,8 +148,10 @@ export function mapSvgHtml(model, focus, opts = {}) {
         const cls = `delta-map-bond${line.touches ? ' delta-map-bond-selected' : ''}${focus.active ? ' delta-map-bond-solid' : ''}`;
         return `<line class="${cls}" data-tone="${tone}" x1="${line.from.x.toFixed(1)}" y1="${line.from.y.toFixed(1)}" x2="${line.to.x.toFixed(1)}" y2="${line.to.y.toFixed(1)}"></line>`;
     }).join('');
+    // The ring's word sits where no face or label is (ringWordSpot), not at a fixed place.
+    const spot = ringWordSpot(model.nodes);
     return `<svg class="delta-map-svg" viewBox="0 0 ${MAP_SPAN} ${MAP_SPAN}" aria-hidden="true" focusable="false">${circle(mapRadius(-100), 'delta-map-outer')}${rings}`
-        + `<text class="delta-map-outer-word" x="${MAP_CENTER}" y="${(MAP_CENTER + mapRadius(-80)).toFixed(1)}">${escapeHtml(lens.negative)}</text>${bonds}</svg>`;
+        + `<text class="delta-map-outer-word" x="${spot.x.toFixed(1)}" y="${spot.y.toFixed(1)}" text-anchor="${spot.anchor}">${escapeHtml(lens.negative)}</text>${bonds}</svg>`;
 }
 
 // One face: portrait through the refs (never a raw data URL), ring by tone, name, then the number
