@@ -7,6 +7,17 @@ import { addLie } from '../src/npc-notes-lies.js';
 import { addKnow } from '../src/npc-notes-knows.js';
 import { tastesText } from '../src/npc-notes-tastes.js';
 import { tiesText } from '../src/npc-notes-ties.js';
+import { suite } from './helpers/pacing-suite.js';
+import { MODULE_ID } from '../src/storysuite-v2.js';
+import { validateNpcSlice } from '../src/npc-meters.js';
+import { FEATURE_NOTES, RECORD_FIELDS } from '../src/npc-meters-config.js';
+import { seedNotes, driveScale, foldTies, aliasCanon, tieRows, dossierNotes } from '../src/npc-notes-kinds.js';
+import { stepPull } from '../npc-instincts.js';
+import { setDrives } from '../src/npc-notes-drives.js';
+import { normalizeEntry } from '../src/cast-dossier.js';
+import { bondToneOf } from '../relationship-map-focus.js';
+import { resolveMapBonds } from '../relationship-map-core.js';
+import { tieTone } from '../dossier-ui-bond-tone.js';
 
 const said = "I didn't sell a spell.";
 
@@ -145,4 +156,146 @@ test('notesTail: nobody present, or a person with no notes, adds no lines', () =
     assert.deepEqual(notesTail({ rika: { name: 'Rika' } }, { present: ['rika'] }), []);
     assert.deepEqual(notesTail({ rika: { name: 'Rika', tastes: tastesText([{ sign: '+', item: 'bread', day: 1, r: 'r1' }]) } }, { present: [] }), []);
     assert.deepEqual(notesTail(undefined, { present: ['rika'] }), []);
+});
+
+
+// ---- through the host: the capture, the leaf in the line's own op, the tail, the views (feature notes) ----
+
+const ON = { [FEATURE_NOTES]: true };
+const oren = s => s.host.head().domains.npc.npcs.oren;
+const cast = async (s, name = 'Oren') => (await s.host.sdk.query('npc.cast', {})).find(item => item.name === name);
+const optional = s => s.host.registry.module(MODULE_ID).context.tail({ state: s.host.head(), chat: { length: s.host.ctx.chat.length } }).optional;
+const shape = s => JSON.stringify(s.host.head()).replace(/sw_[a-z0-9]+/g, 'sw');
+
+test('notes host: the record fields are the kinds file\'s NOTE_FIELDS, and a lie told is one leaf in the line\'s own op, hidden in the tail', async () => {
+    for (const field of NOTE_FIELDS) assert.ok(RECORD_FIELDS.includes(field), field);
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ lie Oren | to: Astra | said: I never sold the spell']);
+    assert.equal(JSON.parse(oren(s).lies).length, 1);
+    assert.ok(optional(s).some(line => /^Oren \(hidden\): told Astra "I never sold the spell"/.test(line)), JSON.stringify(optional(s)));
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    assert.equal((await cast(s)).notes.lies[0].said, null, 'the player\'s view of an uncaught lie has no words of it');
+});
+
+test('notes host: only a story line catches a lie: six trust, in the day\'s allowance, the mood cause, and a second catch with none left moves nothing', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.say(['~ lie Oren | to: Astra | said: I never sold the spell']);
+    await s.say(['~ lie Oren | to: Astra | caught: yes']);
+    assert.equal(s.npc('Oren').meters.trust, -5, 'trust 1 - 6');
+    assert.match(oren(s).mood.cause, /caught lying to Astra/);
+    assert.ok(JSON.parse(oren(s).lies)[0].caught);
+    assert.equal((await cast(s)).notes.lies[0].said, 'I never sold the spell', 'a caught lie is shown');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    await s.say(['~ lie Oren | to: Astra | caught: yes']);
+    assert.equal(s.npc('Oren').meters.trust, -5, 'no uncaught lie left: the line is refused and nothing moves');
+});
+
+test('notes host: know lines of one reply are kept together, a secret reads as hidden until told, a bad line writes nothing', async () => {
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ know Oren | about: Astra | fact: copies the gate-logs | how: saw | secret: yes', '~ know Oren | about: Temiwa | fact: is ill | how: heard']);
+    assert.equal(JSON.parse(oren(s).knows).length, 2);
+    assert.equal((await cast(s)).notes.knows.find(item => item.about === 'Astra').hidden, true);
+    assert.doesNotMatch(JSON.stringify((await cast(s)).notes), /gate-logs/);
+    assert.ok(optional(s).some(line => /^Oren \(hidden\): knows Astra's copies the gate-logs/.test(line)));
+    await s.say(['~ know Oren | about: Astra | fact: copies the gate-logs | told: yes']);
+    assert.equal((await cast(s)).notes.knows.find(item => item.about === 'Astra').hidden, false);
+    const before = oren(s).knows;
+    await s.say(['~ know Oren | about: Astra | how: saw']);
+    assert.equal(oren(s).knows, before, 'a line with no fact is refused: the leaf is as it was');
+});
+
+test('notes host: a taste is fixed (a swap needs why:), an echo of the player\'s words is kept and flagged; ties keep several tags and drop one', async () => {
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.host.send('I love burnt toffee', 'Fine.\n\n<Changes>\n~ taste Oren | likes: burnt toffee\n</Changes>');
+    await s.adapter.ticked();
+    assert.equal(JSON.parse(oren(s).tastes)[0].mirrored, true);
+    assert.ok(s.host.head().domains.npc.problems.some(item => /echoes/.test(item.text)));
+    await s.say(['~ taste Oren | dislikes: stamped paperwork | from: the charter']);
+    await s.say(['~ taste Oren | likes: stamped paperwork']);
+    assert.equal(JSON.parse(oren(s).tastes).filter(item => item.sign === '+').length, 1, 'refused without why:');
+    await s.say(['~ tie Oren | with: Sister Temiwa | tag: +ally, +owes']);
+    assert.deepEqual(Object.values(JSON.parse(oren(s).ties)), [['ally', 'owes']]);
+    await s.say(['~ tie Oren | with: Sister Temiwa | tag: -ally']);
+    assert.deepEqual(Object.values(JSON.parse(oren(s).ties)), [['owes']]);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('notes host: feature off: the note lines write nothing and the static text is the same', async () => {
+    const off = await suite({ allowance: null, features: { [FEATURE_NOTES]: false } });
+    await off.setDay(1);
+    await off.say(['~ lie Oren | to: Astra | said: x']);
+    assert.equal(oren(off), undefined);
+    const on = await suite({ allowance: null, features: ON });
+    const text = x => x.host.registry.module(MODULE_ID).context.static();
+    assert.equal(text(off), text(on), 'the npc static line has no notes text: the grammar goes through the kinds, behind the feature');
+});
+
+test('notes host: replay equals live: rebuild, a swipe, a Re-read, a middle delete and a cold reload (the leaves are part of the reply\'s op)', async () => {
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ lie Oren | to: Astra | said: first']);
+    const middle = await s.say(['~ know Oren | about: Astra | fact: a thing | how: saw', '~ tie Oren | with: Sister Temiwa | tag: +rival']);
+    await s.say(['~ taste Oren | likes: tea']);
+    await s.swipe(['~ taste Oren | likes: coffee']);
+    const index = await s.say(['~ lie Oren | to: Astra | caught: yes']);
+    assert.equal((await s.host.sdk.reread(index)).ok, true);
+    let live = shape(s);
+    s.host.store.rebuild();
+    assert.equal(shape(s), live, 'rebuild equals live');
+    await s.host.st.loadChat(s.host.ctx.chat);
+    await s.adapter.ticked();
+    assert.equal(shape(s), live, 'a cold reload equals live');
+    await s.host.st.deleteMessage(middle);
+    await s.host.st.deleteMessage(middle - 1);
+    live = shape(s);
+    s.host.store.rebuild();
+    assert.equal(shape(s), live, 'rebuild equals live after the delete');
+    assert.deepEqual(s.host.store.problems(), []);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('notes host: npc.flag stamps the first look once and the reader\'s button is refused', async () => {
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    assert.equal((await s.host.sdk.command('npc.flag', { name: 'Oren', lock: true })).ok, false, 'not from a button');
+    await s.adapter.flag({ name: 'Oren', lock: true, reply: s.host.store.headIndex(), cue: 'Oren\'s look is fixed: grey hair.' });
+    const stamp = oren(s).lookLockedAt;
+    assert.ok(stamp && Number.isInteger(stamp.day));
+    await s.adapter.flag({ name: 'Oren', lock: true, reply: s.host.store.headIndex() });
+    assert.deepEqual(oren(s).lookLockedAt, stamp, 'kept once');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('notes pure: drives scale the pull, a muted instinct gives none; tie rows derive from the relation word without storing; aliases fold', () => {
+    const facts = { day: 5, party: false, threads: [], here: '', present: true, awayDay: null };
+    const benched = stepPull({ party: 1 }, facts);
+    assert.equal(benched.pull?.kind, 'belonging');
+    const muted = stepPull({ party: 1 }, { ...facts, scale: driveScale(setDrives('', { belo: 0 }, {})) });
+    assert.equal(muted.pull, null, 'belonging muted: no pull');
+    assert.deepEqual(stepPull({ party: 1 }, { ...facts, scale: driveScale(setDrives('', { belo: 2 }, {})) }).pull, benched.pull, 'normal strength leaves the pull as it is');
+    const rows = tieRows({}, ['Mira — rival of the house | cold', 'Tomas — friend | warm'], []);
+    assert.deepEqual(rows.map(row => [row.name, row.tags, row.derived]), [['Mira', ['rival'], true], ['Tomas', ['ally'], true]]);
+    assert.deepEqual(foldTies({ 'old-name': ['ally'], 'new-name': ['owes'] }, aliasCanon([{ name: 'New Name', aliases: ['Old Name'] }])), { 'new-name': ['ally', 'owes'] });
+    assert.equal(dossierNotes({ lies: addLie('', { to: 'A', said: 'x', day: 1, r: 'sw_a' }).text }).lies[0].said, null);
+});
+
+test('notes pure: a pack entry\'s tastes and drives are the person\'s first; the map line takes its tone from a tie tag', () => {
+    const entry = normalizeEntry({ name: 'Rika', about: 'a calm clerk', personality: 'Wants closure above all.', tastes: [{ sign: '+', item: 'toffee', from: 'barge crews' }, { sign: 'x', item: 'bad' }], drives: { closure: 3 } });
+    assert.deepEqual(entry.tastes, [{ sign: '+', item: 'toffee', from: 'barge crews' }]);
+    const seeded = seedNotes(entry);
+    assert.equal(JSON.parse(seeded.tastes)[0].item, 'toffee');
+    assert.ok(seeded.drives, 'a pack drive is a stored leaf');
+    assert.deepEqual(seedNotes(normalizeEntry({ name: 'Plain' })), {}, 'nothing for a default');
+    assert.equal(tieTone(['ally', 'rival']), 'hostile');
+    assert.equal(tieTone(['owes']), 'duty');
+    assert.equal(bondToneOf('friend', 'friend', { tags: ['rival'] }), 'bad');
+    assert.equal(bondToneOf('friend', 'friend', { tags: ['owes'] }), 'gold');
+    const npcs = [{ id: 'a', name: 'Rika', keyRelationships: ['Joren — friend'], v2Meters: { ties: { b: ['owes'] } } }, { id: 'b', name: 'Joren', keyRelationships: [] }];
+    assert.deepEqual(resolveMapBonds(npcs, new Set(['a', 'b']))[0].tags, ['owes']);
 });

@@ -10,6 +10,7 @@ import { readEvent } from './npc-meters-pacing.js';
 import { readApproachRing } from '../npc-meters-gate.js';
 import { normalizeMood } from '../npc-mood.js';
 import { INSTINCT_KINDS } from '../npc-instincts.js';
+import { validateNotes } from './npc-notes-kinds.js';
 
 /** The slice of a chat with no NPC meters yet. */
 export function initialNpcSlice() {
@@ -196,6 +197,7 @@ export function validateNpcSlice(slice) {
         if (record.low !== undefined && (!isInt(record.low) || record.low < 1 || record.low > 1000)) errors.push(`${where} has an unusable count of replies below its stage.`);
         if (record.day !== undefined && !isInt(record.day)) errors.push(`${where} has an unusable story day.`);
         errors.push(...moodPullProblems(record).map(problem => `${where} ${problem}.`));
+        { const bad = validateNotes(record); if (bad) errors.push(`${where} ${bad}`); }
         for (const field of Object.keys(record)) {
             if (!RECORD_FIELDS.includes(field)) errors.push(`${where} has an unknown field "${field}".`);
         }

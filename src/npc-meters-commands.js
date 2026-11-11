@@ -4,14 +4,15 @@ import { storyMinuteText } from '../calendar.js';
 import { isAway, labelKey, labelsOf, normalizeKeyPeople } from './key-people.js';
 import { normalizeCast } from './cast-dossier.js';
 import { normalizeApproachKind } from '../npc-meters-gate.js';
-import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
+import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
+import { runKind, noteLine, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
 import { applyEvents, restMood, restingMood } from '../npc-mood.js';
 import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence } from './npc-meters-slice.js';
 
 export function createNpcCommands({
     featureOn, normalized, defsFrom, tierCaps, ownOrModule, readerAction, headReply, commandReply,
-    identify, ensure, note, changesFrom, setupFor, limitsFor, resolve, settleRecord, run, presentNames,
+    identify, ensure, note, changesFrom, setupFor, limitsFor, resolve, settleRecord, run, presentNames, clockDay,
 }) {
     // ---- the change lines ----
 
@@ -24,8 +25,35 @@ export function createNpcCommands({
         return run(ctx, { label: line.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, milestone: { add: [{ key, name }] } });
     }
 
+    // A note line (lie, know, taste, tie; feature notes): the kind's handler works out the new leaf and any trust drop of a caught lie,
+    // then ONE run() writes both in the line's own op (so the day's allowance, the mood and a swipe all follow). A refusal writes nothing.
+    function captureNote(ctx, line) {
+        if (!featureOn(FEATURE_NOTES, ctx)) ctx.fail('FEATURE_OFF', 'Dossier notes are turned off.');
+        const labels = Object.fromEntries(Object.entries(isObject(line.labels) ? line.labels : {}).map(([label, raw]) => [slug(label), clean(String(raw ?? ''), 200)]));
+        const at = isInt(ctx.carrier?.index) ? ctx.carrier.index : null;
+        const reply = replyKey(ctx.carrier?.sid, at);
+        const slice = ctx.draft(NPC_DOMAIN);
+        const who = identify(isObject(slice.npcs) ? slice.npcs : {}, line.name);
+        if (!who) ctx.fail('INVALID', 'The line does not name anyone.');
+        const day = clockDay(at);
+        const current = (isObject(slice.npcs) && isObject(slice.npcs[who.key]) ? slice.npcs[who.key][noteField(line.kind)] : '') ?? '';
+        const changes = [];
+        const problems = [];
+        const cues = [];
+        const notes = { run: change => changes.push(...change.changes), flag: (text, cue) => (cue ? (problems.push(text), cues.push(cue)) : cues.push(text)) };
+        const out = runKind(line.kind, current, noteLine(line.kind, labels, { current, r: reply, day }), { name: who.name, day, r: reply, userText: ctx.chat?.lastUser ?? '', tier: CAUGHT_TIER, drop: CAUGHT_DROP, notes });
+        if (out.problem) ctx.fail('REFUSED', out.problem);
+        const moves = changes.length > 0;
+        const done = run(ctx, {
+            label: line.name, changes, problems, limit: moves, reply: moves ? reply : null, at: moves ? at : null, allowEmpty: true, story: moves,
+            impact: moves && tierCaps() ? { tier: CAUGHT_TIER, caps: tierCaps() } : null, reason: moves ? `caught lying to ${clean(labels.to, 40)}` : '', leaf: { field: out.field, text: out.text },
+        });
+        return cues.length ? { ...done, summary: sentence(moves ? [...cues, done.summary] : cues), narrate: true } : done;
+    }
+
     function captureLine(ctx, line = {}) {
         if (line.kind === MILESTONE_KIND) return captureMilestone(ctx, line);
+        if (isNoteKind(line.kind)) return captureNote(ctx, line);
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         const byLabel = new Map(defs.flatMap(def => [[def.id, def], [slug(def.label), def]]));
@@ -91,6 +119,8 @@ export function createNpcCommands({
             day, party: world.party ? has([...world.party]) : null, here: world.here, present: has([...world.present]),
             awayDay: isInt(gone?.away?.since) ? Math.floor(gone.away.since / DAY_MINUTES) : null,
             threads: world.threads.filter(thread => has(thread.names)),
+            // Drives (notes feature): the person's instinct strengths scale what pulls at them; none stored: the scores as they are.
+            scale: featureOn(FEATURE_NOTES) && record.drives ? driveScale(record.drives) : undefined,
         });
         if (isObject(record.mood) && isInt(minutes)) record.mood = applyEvents(record.mood, minutes, []);
         const set = (field, value, empty) => { if (empty) delete record[field]; else record[field] = value; };
@@ -157,6 +187,26 @@ export function createNpcCommands({
             if (!open.length && !close.length) ctx.fail('INVALID', 'It names no note to open or shut.');
             // Someone with notes but no meters yet gets an entry here, from their dossier's numbers.
             return run(ctx, { label: payload?.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, notes: { open, close, story } });
+        },
+        /**
+         * npc.flag { name, text?, cue?, lock?: true, reply? }: Delta's own scan tells the slice about a person's look (feature notes): `lock` stamps the
+         * day and reply the first durable look was set (kept once), `text` is a Problem line (the same text is not written twice in a row) and `cue`
+         * the one-reply words the story is told (narrate). Only Delta's own scan or another module's command may send it.
+         */
+        'npc.flag'(ctx, payload = {}) {
+            if (!ownOrModule(ctx, 'npc.flag', payload)) ctx.fail('REFUSED', 'A look flag comes only from NPC State Delta\'s own scan.');
+            if (!featureOn(FEATURE_NOTES, ctx)) ctx.fail('FEATURE_OFF', 'Dossier notes are turned off.');
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            const slice = ctx.read(NPC_DOMAIN);
+            const who = identify(slice?.npcs ?? {}, payload?.name);
+            const have = who ? slice?.npcs?.[who.key] : null;
+            const text = clean(payload?.text, 200);
+            const cue = clean(payload?.cue, 240);
+            const stamp = payload?.lock === true && !readLookStamp(have?.lookLockedAt) ? lookStamp(clockDay(at), commandReply(ctx, at)) : null;
+            const fresh = text && !(Array.isArray(slice?.problems) && slice.problems.some(item => item?.text === text));
+            if (!fresh && !stamp) ctx.fail('REFUSED', 'Nothing to flag.');
+            const done = run(ctx, { label: payload?.name, changes: [], problems: fresh ? [text] : [], limit: false, reply: null, allowEmpty: true, leaf: stamp ? { field: 'lookLockedAt', text: stamp } : null });
+            return cue ? { ...done, summary: sentence([cue]), narrate: true } : done;
         },
         /**
          * npc.milestone { name, add?: [words], remove?: [words or keys] }: the reader's own milestones
@@ -226,6 +276,8 @@ export function createNpcCommands({
                 // Temperament (feature mood-pull): a person whose pack words give a resting mood starts at it, so it is stored with the record.
                 const rest = moodPull && isInt(minutes) && slice.npcs[who.key] ? restingMood(person.entry.personality, person.entry.about) : null;
                 if (rest && (rest.v || rest.a || rest.d)) slice.npcs[who.key].mood = restMood(rest, minutes);
+                // Notes (feature notes): the pack's tastes and drives are the person's first, kept in the record's leaves.
+                if (slice.npcs[who.key] && featureOn(FEATURE_NOTES, ctx)) Object.assign(slice.npcs[who.key], seedNotes(person.entry));
                 note(slice, ctx.rev, unknown);
             }
             if (castSeen.fresh.length) slice.cast = castSeen.cast;

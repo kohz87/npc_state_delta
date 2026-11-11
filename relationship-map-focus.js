@@ -6,6 +6,7 @@ import { MAP_CENTER, MAP_LENSES, MAP_SPAN, mapRadius, plain, resolveMapBonds, si
 import { portraitHtml } from './dossier-ui-html.js';
 import { KNOWN_SOCIAL_RELATION_FAMILIES, socialRelationFamily } from './social-relations.js';
 import { escapeHtml } from './src/util/html.js';
+import { tieTone } from './dossier-ui-bond-tone.js';
 
 export const FOCUS_TONES = Object.freeze({ good: 'good', bad: 'bad', gold: 'gold', grey: 'grey' });
 export const FOCUS_STATES = Object.freeze({ focus: 'focus', tied: 'tied', dim: 'dim', plain: 'plain' });
@@ -54,7 +55,10 @@ export function localBondTone(word = '') {
 
 // A bondTone(word, relation) passed in through options wins when it returns a known tone; otherwise
 // the local rule decides. No bondTone helper exists in this repository yet, so callers pass none.
-export function bondToneOf(word = '', relation = '', { bondTone } = {}) {
+export function bondToneOf(word = '', relation = '', { bondTone, tags } = {}) {
+    // A tie tag the story gave (ally, rival, owes) wins over the relation word's tone (dossier-ui-bond-tone.js).
+    const tied = { hostile: FOCUS_TONES.bad, duty: FOCUS_TONES.gold, close: FOCUS_TONES.good }[tieTone(tags)];
+    if (tied) return tied;
     if (typeof bondTone === 'function') {
         const tone = bondTone(word, relation);
         if (Object.values(FOCUS_TONES).includes(tone)) return tone;
@@ -98,7 +102,7 @@ export function buildFocusModel(projection = {}, map = {}, focusId = '', { bondT
         // The focused person's own wording wins; the other side's wording is the fallback.
         const relation = plain(bond.relation?.[id]) || plain(bond.relation?.[other]);
         const word = relationWord(relation);
-        return { id: other, name: names.get(other) || '', relation, word, tone: bondToneOf(word, relation, { bondTone }) };
+        return { id: other, name: names.get(other) || '', relation, word, tone: bondToneOf(word, relation, { bondTone, tags: bond.tags }) };
     }).sort((a, b) => a.name.localeCompare(b.name) || String(a.id).localeCompare(String(b.id)));
 
     const litIds = [id, ...ties.map(tie => tie.id)];
@@ -129,7 +133,7 @@ export function bondLine(bond = {}, { bondTone, prefer = '' } = {}) {
     const ids = [prefer, bond.a, bond.b].filter(Boolean);
     const relation = ids.map(id => plain(bond.relation?.[id])).find(Boolean) || '';
     const word = relationWord(relation);
-    return { word, tone: bondToneOf(word, relation, { bondTone }) };
+    return { word, tone: bondToneOf(word, relation, { bondTone, tags: bond.tags }) };
 }
 
 const RING_VALUES = Object.freeze([75, 25, 0, -50]);

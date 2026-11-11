@@ -27,6 +27,14 @@ export function bondTone(relationText) {
     return 'neutral';
 }
 
+// A bond's tone from its tie tags (ally, rival, owes): rival is hostile, then owes is duty, then ally is close; none: null.
+export function tieTone(tags) {
+    const list = Array.isArray(tags) ? tags : [];
+    if (list.includes('rival')) return 'hostile';
+    if (list.includes('owes')) return 'duty';
+    return list.includes('ally') ? 'close' : null;
+}
+
 // The short word to show under the name. A recognised family is shown by its name ("aunt/uncle",
 // "parent in law"); otherwise the enemy or duty word itself; otherwise the first two words, capped in length.
 export function bondWord(relationText) {

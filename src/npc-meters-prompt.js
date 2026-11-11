@@ -1,10 +1,11 @@
 // The NPC meter prompt line, tail and redaction. A pure part of npc-meters.js (same owner, moved without change);
 // npc-meters.js re-exports every public name it exported before. Never imports npc-meters.js.
-import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_GATE, FEATURE_PRESETS, FEATURE_MOOD_PULL, RECENT_MESSAGES, SECRET_TEXT_MAX, TAIL_SECRETS_PER_NPC, isInt, clean, bandWord } from './npc-meters-config.js';
+import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_GATE, FEATURE_PRESETS, FEATURE_MOOD_PULL, FEATURE_NOTES, RECENT_MESSAGES, SECRET_TEXT_MAX, TAIL_SECRETS_PER_NPC, isInt, clean, bandWord } from './npc-meters-config.js';
 import { meterValue } from './npc-meters-slice.js';
 import { APPROACH_KINDS, gateCue } from '../npc-meters-gate.js';
 import { readEvent } from './npc-meters-pacing.js';
 import { moodWord, normalizeMood } from '../npc-mood.js';
+import { notesTail } from './npc-notes-kinds.js';
 
 export function createNpcPrompt({
     call, hooks, storedSettings, tierCaps, tierAllowance, featureOn, defsFrom, setupFor, rungsFor, rulesFor,
@@ -134,6 +135,8 @@ export function createNpcPrompt({
         // The wording rides on the nearest note (the host drops the farthest first, so it stays while any note does).
         const optional = [...cues, ...hidden.map((item, i) => (i ? item.short : `${HIDDEN_ONCE}\n${item.short}`))];
         if (featureOn(FEATURE_MOOD_PULL)) optional.push(...moodPullLines(npcs, here));
+        // Notes (npc-notes-kinds.js): at most two lines a person and four in all, after the meters, opened notes and mood (optional).
+        if (featureOn(FEATURE_NOTES)) optional.push(...notesTail(npcs, { present: Object.keys(npcs).sort().filter(key => here.has(key)) }));
         return { lines: [...lines, ...notes], optional };
     }
 

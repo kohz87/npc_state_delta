@@ -22,7 +22,20 @@ export function v2MetersProjection(view) {
         next: plain(view.next),
         milestones: stringList(view.milestones, 16),
         secrets: secretsProjection(view.secrets),
+        ...(tiesProjection(view.ties) ? { ties: tiesProjection(view.ties) } : {}),
     };
+}
+
+// Tie tags toward other people by dossier id ({ id: ['ally', 'rival', 'owes'] }): the relationship map colours its lines with them.
+const TIE_WORDS = new Set(['ally', 'rival', 'owes']);
+function tiesProjection(map) {
+    if (!map || typeof map !== 'object' || Array.isArray(map)) return null;
+    const out = {};
+    for (const [id, tags] of Object.entries(map).slice(0, 24)) {
+        const kept = (Array.isArray(tags) ? tags : []).filter(tag => TIE_WORDS.has(tag));
+        if (id && kept.length) out[id] = kept;
+    }
+    return Object.keys(out).length ? out : null;
 }
 
 // The notes of a dossier for its Secrets section, in the order written: an opened one { state: 'open', title, text,

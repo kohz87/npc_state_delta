@@ -6,16 +6,22 @@
 // or receipt. The handlers do not store anything; the host writes the leaves inside the reply's own op. NOTE_FIELDS lists the
 // record fields these kinds own; validateNotes(record) checks them; notesTail(record, ctx) builds the optional tail lines.
 // Pure: no storage, never imports npc-meters.js.
-import { readLies, addLie, catchLie, lieTail, caughtSummary } from './npc-notes-lies.js';
-import { readKnows, addKnow, openKnow, knowsTail, KNOWS_MAX, KNOWS_TEXT_MAX } from './npc-notes-knows.js';
+import { FEATURE_NOTES, npcKey } from './npc-meters-config.js';
+import { readLies, addLie, catchLie, lieTail, lieRows, caughtSummary } from './npc-notes-lies.js';
+import { readKnows, addKnow, openKnow, knowsTail, knowsView, KNOWS_MAX, KNOWS_TEXT_MAX } from './npc-notes-knows.js';
 import { readTastes, addTaste, tastesText, tasteTail, TASTE_LIMITS } from './npc-notes-tastes.js';
-import { readTies, applyTags, tiesText } from './npc-notes-ties.js';
-import { readDrives } from './npc-notes-drives.js';
-import { readLookStamp } from './npc-notes-look.js';
+import { readTies, applyTags, tiesText, tiesView, tagsFromRelation, owedBy } from './npc-notes-ties.js';
+import { readDrives, driveRows, setDrives, applyStrength } from './npc-notes-drives.js';
+import { readLookStamp, lookStamp } from './npc-notes-look.js';
+export { lookStamp, readLookStamp };
 
 export const NOTE_FIELDS = Object.freeze(['lies', 'knows', 'tastes', 'ties', 'drives', 'lookLockedAt']);
 export const NOTES_TAIL_PER_NPC = 2;
 export const NOTES_TAIL_MAX = 4;
+// A caught lie costs about six trust (owner decision); only the extreme tier's cap lets a step that big land, and it is counted
+// in that tier's events per story day.
+export const CAUGHT_TIER = 'extreme';
+export const CAUGHT_DROP = 6;
 
 const NO_NOTES = Object.freeze({ run() {}, flag() {} });
 
@@ -130,6 +136,121 @@ export function notesTail(record, { present = [] } = {}) {
             tasteTail(name, person.tastes),
         ].filter(Boolean);
         out.push(...lines.slice(0, Math.min(NOTES_TAIL_PER_NPC, NOTES_TAIL_MAX - out.length)));
+    }
+    return out;
+}
+
+// ---- the host's side: grammar lines, the label parser and the player's view ----
+
+// One short grammar line per kind, sent only while the notes feature is on (the host leaves a kind's grammar out when its feature is off).
+const GRAMMAR = Object.freeze({
+    lie: '~ lie Name | to: Astra | said: the false claim (| caught: yes once the story exposes it)',
+    know: '~ know Name | about: Other | fact: what they learned | how: saw or heard (| secret: yes; later | told: yes)',
+    taste: '~ taste Name | likes: or dislikes: an item | from: why',
+    tie: '~ tie Name | with: Other | tag: +ally, +rival or +owes (-tag drops it)',
+});
+
+/** The `kinds` entries for the host: every note kind handled by `capture` and behind the notes feature. */
+export const noteKinds = capture => Object.fromEntries(Object.keys(KINDS).map(kind => [kind, { grammar: GRAMMAR[kind], apply: capture, feature: FEATURE_NOTES }]));
+export const isNoteKind = kind => Object.hasOwn(KINDS, kind);
+export const noteField = kind => KINDS[kind]?.field ?? null;
+
+const yes = value => /^(yes|true)$/i.test(String(value ?? '').trim());
+
+/** A parsed line's labels ({ slugged label: text }) as the handler's line shape. `ctx`: { current, r, day } (the stored leaf, the reply key, the story day). */
+export function noteLine(kind, labels, { current = '', r = null, day = null } = {}) {
+    if (kind === 'lie') return { to: labels.to, said: labels.said, catch: yes(labels.caught) };
+    if (kind === 'know') {
+        if (yes(labels.told)) return { open: true, about: labels.about, fact: labels.fact };
+        // One call per line, but addKnow keeps one reply's entries as a set: hand it the reply's earlier lines too.
+        const same = readKnows(current).filter(entry => entry.r === r).map(({ about, fact, how, day: at, secret }) => ({ about, fact, how, day: at, secret }));
+        return { lines: [...same, { about: labels.about, fact: labels.fact, how: labels.how, day, secret: yes(labels.secret) }] };
+    }
+    if (kind === 'taste') {
+        const sign = labels.likes !== undefined ? '+' : labels.dislikes !== undefined ? '-' : '';
+        return { sign, item: labels.likes ?? labels.dislikes, from: labels.from, why: labels.why };
+    }
+    const tags = String(labels.tag ?? '').split(',').map(tag => tag.trim()).filter(Boolean).map(tag => (/^[+-]/.test(tag) ? tag : `+${tag}`));
+    return { with: labels.with, tags };
+}
+
+/**
+ * What the dossier shows of a record's notes: { lies, knows, tastes, ties, drives } as plain rows. A lie the story has not caught and a
+ * secret it has not told are redacted (no words of them) unless `show`; `bonds` are the person's bond strings (ties rows follow them).
+ */
+export function dossierNotes(record, { bonds = null, show = false } = {}) {
+    const source = record && typeof record === 'object' ? record : {};
+    return {
+        lies: lieRows(source.lies, { redact: !show }),
+        knows: knowsView(source.knows ?? '', { show }),
+        tastes: readTastes(source.tastes).map(({ sign, item, from, mirrored }) => ({ sign, item, from: from ?? '', mirrored: mirrored === true })),
+        ties: Array.isArray(bonds) ? tieRows(readTies(source.ties) ?? {}, bonds, []) : (readTies(source.ties) ?? {}),
+        drives: driveRows(readDrives(source.drives) ?? undefined),
+    };
+}
+
+/** The pack entry's (cast-dossier normalizeEntry) tastes and drives as the record's first leaves: { tastes?, drives? } (nothing for a default). */
+export function seedNotes(entry) {
+    const out = {};
+    const rows = (Array.isArray(entry?.tastes) ? entry.tastes : []).map(({ sign, item, from }) => ({ sign, item, from, day: 0, r: 'pack' }));
+    const tastes = rows.length ? tastesText(readTastes(rows)) : '';
+    if (tastes) out.tastes = tastes;
+    const drives = setDrives('', {}, { pack: { drives: entry?.drives }, description: `${entry?.personality ?? ''} ${entry?.about ?? ''}` });
+    if (drives && drives !== setDrives('', {}, {})) out.drives = drives;
+    return out;
+}
+
+/** The scale function for npc-instincts' readInstincts: a score scaled by this person's drive for that instinct key (belo, clos, awe). */
+export function driveScale(leaf) {
+    const drives = readDrives(leaf);
+    return drives ? (key, score) => applyStrength(score, drives[key]) : undefined;
+}
+
+/**
+ * The Ties rows for a person's bond list (bond strings "Name — relation | dynamic"): the stored tags, and for a bond with none the
+ * tags its relation word implies (read-time only, never stored; `derived: true`). `owedByKeys`: owedBy(key, everyone's ties).
+ */
+export function tieRows(ties, bonds, owedByKeys = []) {
+    const rows = tiesView(ties, bonds, owedByKeys);
+    const have = new Set(rows.map(row => row.key));
+    for (const entry of Array.isArray(bonds) ? bonds : []) {
+        const [head, relation = ''] = String(entry ?? '').split(/\s+[—-]\s+/, 2);
+        const name = head.split('|')[0].trim();
+        const key = npcKey(name);
+        const tags = key && !have.has(key) ? tagsFromRelation(relation.split('|')[0]) : [];
+        if (!tags.length) continue;
+        have.add(key);
+        rows.push({ key, name, tags, owes: tags.includes('owes'), owedBy: false, derived: true });
+    }
+    return rows;
+}
+
+export { owedBy };
+
+/**
+ * Folds tie keys written under an alias into the person's own key (an alias merge in Delta leaves the slice's keys as they were):
+ * `canon` maps an alias's key to the key of the name it now answers to. Tags of keys that meet are joined, in the canonical order.
+ */
+export function foldTies(ties, canon = {}) {
+    const out = {};
+    for (const [key, tags] of Object.entries(ties && typeof ties === 'object' ? ties : {})) {
+        const to = Object.hasOwn(canon, key) ? canon[key] : key;
+        out[to] = [...new Set([...(out[to] ?? []), ...(Array.isArray(tags) ? tags : [])])];
+    }
+    for (const [key, tags] of Object.entries(out)) out[key] = ['ally', 'rival', 'owes'].filter(tag => tags.includes(tag));
+    return out;
+}
+
+/** { aliasKey: nameKey } for Delta's dossiers (`npcs`: [{ name, aliases }]), for foldTies. */
+export function aliasCanon(npcs) {
+    const out = {};
+    for (const npc of Array.isArray(npcs) ? npcs : []) {
+        const to = npcKey(npc?.name);
+        if (!to) continue;
+        for (const alias of Array.isArray(npc.aliases) ? npc.aliases : []) {
+            const key = npcKey(alias);
+            if (key && key !== to && !Object.hasOwn(out, key)) out[key] = to;
+        }
     }
     return out;
 }

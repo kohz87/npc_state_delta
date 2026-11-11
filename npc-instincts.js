@@ -91,8 +91,11 @@ export function readInstincts(input) {
     const signals = [readBelonging(input), readClosure(input), readAwe(input)];
     const inst = { belo: 0, clos: 0, awe: 0 };
     let top = null;
-    for (const signal of signals) {
-        if (!signal) continue;
+    // `input.scale(key, score)` (optional): the person's drive for that instinct scales the score before it is read (a muted drive: no pull).
+    const scale = typeof input?.scale === 'function' ? input.scale : null;
+    for (const found of signals) {
+        if (!found) continue;
+        const signal = scale ? { ...found, score: scale(INSTINCT_KEYS[found.kind], found.score) } : found;
         inst[INSTINCT_KEYS[signal.kind]] = Math.max(0, Math.min(3, Math.floor(signal.score)));
         if (signal.score < 1) continue;
         if (!top || signal.score > top.score || (signal.score === top.score && INSTINCT_KINDS.indexOf(signal.kind) < INSTINCT_KINDS.indexOf(top.kind))) top = signal;
@@ -140,7 +143,7 @@ export function stepPull(before, facts) {
         benched: track.bench !== undefined && track.party === 0 ? [{ id: SELF, since: track.bench }] : [],
         keyPeople: dayOf(facts.awayDay) !== null ? [{ id: SELF, away: true, since: facts.awayDay }] : [],
         joins: track.join !== undefined ? [{ id: SELF, day: track.join }] : [],
-        threads,
+        threads, scale: facts.scale,
     });
     return { track, inst, pull: pressure };
 }

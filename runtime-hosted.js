@@ -274,8 +274,14 @@ export function createHostedPart(rt, deps) {
             const fresh = last && JSON.stringify(last) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange);
             if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}) });
         }
-        if (!changes.length) return;
+        // A person's look set for the first time by this scan: its day and reply are stamped (the notes feature's locked look).
+        const looks = (after || []).filter(npc => npc?.id && !npc.archived && String(npc.overallAppearance ?? '').trim() && !String(prior.get(npc.id)?.overallAppearance ?? '').trim());
+        if (!changes.length && !looks.length) return;
         void (async () => {
+            for (const npc of looks) {
+                if (!chatHeadUnchanged(head)) return dropped();
+                await adapter.flag?.({ name: npc.name, lock: true, reply: messageId });
+            }
             for (const change of changes) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.adjust(change);
