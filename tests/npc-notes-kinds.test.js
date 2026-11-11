@@ -1,6 +1,10 @@
 // NPC notes, the kinds (src/npc-notes-kinds.js): NOTE_FIELDS, the lie / know / taste / tie handlers through the notes option (run and
 // flag), unknown kinds, validateNotes on stored leaves, and notesTail with its cap (2 per present person, 4 in all). Pure functions only.
 import test from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { NOTE_FIELDS, KINDS, runKind, validateNotes, notesTail, NOTES_TAIL_PER_NPC, NOTES_TAIL_MAX } from '../src/npc-notes-kinds.js';
 import { addLie } from '../src/npc-notes-lies.js';
@@ -300,4 +304,55 @@ test('notes pure: a pack entry\'s tastes and drives are the person\'s first; the
     assert.equal(bondToneOf('friend', 'friend', { tags: ['owes'] }), 'gold');
     const npcs = [{ id: 'a', name: 'Rika', keyRelationships: ['Joren — friend'], v2Meters: { ties: { b: ['owes'] } } }, { id: 'b', name: 'Joren', keyRelationships: [] }];
     assert.deepEqual(resolveMapBonds(npcs, new Set(['a', 'b']))[0].tags, ['owes']);
+});
+
+test('locked look: the scan forwards a refused durable look as a flag (Problem + cue), and nothing when it is accepted or unchanged', async () => {
+    // runtime-hosted.js imports the host's extensions.js: load a copy of the runtime beside a stub of it.
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-look-flag-'));
+    const ext = path.join(temp, 'a', 'b', 'ext');
+    fs.mkdirSync(ext, { recursive: true });
+    for (const file of fs.readdirSync(root).filter(name => name.endsWith('.js'))) fs.copyFileSync(path.join(root, file), path.join(ext, file));
+    fs.cpSync(path.join(root, 'src'), path.join(ext, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(temp, 'extensions.js'), 'export const getContext = () => ({ chat: [] });\nexport const extension_settings = {};\n');
+    globalThis.document = { documentElement: { dataset: { npcStateDeltaStoryBlockV2: '1' } } };
+    const sent = [];
+    try {
+        const { createHostedPart } = await import(pathToFileURL(path.join(ext, 'runtime-hosted.js')).href);
+        const adapter = { hosted: () => true, flag: async item => { sent.push(item); }, adjust: async () => {} };
+        const part = createHostedPart({ storySuiteV2: adapter }, { chatHydrationStatus: () => ({}), getChatKey: () => 'k', getChatState: () => ({}), latestMessageId: () => 0, latestReplyIndex: () => 0 });
+        const rika = overall => ({ id: 'n1', name: 'Rika', overallAppearance: overall });
+        const held = 'White hair, yellow-green eyes.';
+        const tick = () => new Promise(resolve => setTimeout(resolve, 5));
+        part.forwardRelationshipChangesToHost([rika(held)], [rika(held)], 7, null, [{ id: 'n1', overallAppearance: 'Black hair, brown eyes.' }]);
+        await tick();
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0].name, 'Rika');
+        assert.equal(sent[0].reply, 7);
+        assert.deepEqual(sent[0].drift, { before: held, incoming: 'Black hair, brown eyes.' });
+        sent.length = 0;
+        part.forwardRelationshipChangesToHost([rika(held)], [rika('Black hair, brown eyes.')], 8, null, [{ id: 'n1', overallAppearance: 'Black hair, brown eyes.' }]);
+        part.forwardRelationshipChangesToHost([rika(held)], [rika(held)], 9, null, [{ id: 'n1', overallAppearance: held }]);
+        part.forwardRelationshipChangesToHost([rika(held)], [rika(held)], 9, null, []);
+        await tick();
+        assert.deepEqual(sent, []);
+    } finally { delete globalThis.document; fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
+test('notes host: a refused look reaches npc.flag as a Problem, written once; the same look sends nothing', async () => {
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    const drift = { before: 'Grey hair, grey eyes.', incoming: 'Black hair.' };
+    const head = () => s.host.store.headIndex();
+    const done = await s.adapter.flag({ name: 'Oren', drift, reply: head() });
+    assert.ok(done);
+    const problems = s.host.store.problems().concat(s.host.head().domains.npc.problems ?? []);
+    assert.ok(problems.some(item => /Look drift refused: "Black hair\." does not match the fixed look "Grey hair, grey eyes\."/.test(item?.text ?? item)));
+    const count = () => (s.host.head().domains.npc.problems ?? []).length;
+    const once = count();
+    await s.adapter.flag({ name: 'Oren', drift, reply: head() });
+    assert.equal(count(), once, 'the same text is not written twice');
+    assert.equal(await s.adapter.flag({ name: 'Oren', drift: { before: 'Grey hair.', incoming: 'grey hair' }, reply: head() }), null, 'the same look sends nothing');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });

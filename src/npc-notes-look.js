@@ -39,7 +39,7 @@ export function lookFlagWording(name, before) {
     const locked = lookText(before);
     if (!locked) return '';
     const who = clean(name, NAME_MAX) || 'The NPC';
-    return `${possessive(who)} look is fixed: ${locked}. Keep it unless the story shows why it changed.`;
+    return `${possessive(who)} look is fixed: ${locked.replace(/[.;,\s]+$/, '')}. Keep it unless the story shows why it changed.`;
 }
 
 /**

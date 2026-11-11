@@ -345,3 +345,15 @@ test('scanner prompt treats current outfit and explicit visual corrections as Ap
     assert.match(prompt, /Correction\/reveal/i);
     assert.doesNotMatch(prompt, /Ignore transient visual state/i);
 });
+
+test('rejectedOverallLook: a refused durable look is reported, an accepted or unchanged one is not', async () => {
+    const { rejectedOverallLook } = await import('../appearance-update.js');
+    const held = 'White hair, yellow-green eyes.';
+    assert.deepEqual(rejectedOverallLook(held, held, { overallAppearance: 'Black hair, brown eyes.' }), { incoming: 'Black hair, brown eyes.' });
+    assert.deepEqual(rejectedOverallLook(held, held, { overall_appearance: 'Black hair.' }), { incoming: 'Black hair.' });
+    assert.equal(rejectedOverallLook(held, 'Black hair, brown eyes.', { overallAppearance: 'Black hair, brown eyes.' }), null, 'accepted');
+    assert.equal(rejectedOverallLook(held, held, { overallAppearance: 'white hair, yellow-green eyes' }), null, 'same look');
+    assert.equal(rejectedOverallLook('', '', { overallAppearance: 'Black hair.' }), null, 'no lock yet');
+    assert.equal(rejectedOverallLook(held, held, { appearance: 'A red coat.' }), null, 'not a durable look');
+    assert.equal(rejectedOverallLook(held, held, null), null);
+});

@@ -11,6 +11,7 @@ import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNot
 import { castView, findCastPerson, normalizeCast } from './src/cast-dossier.js';
 import { getSettings, setRpgProbe } from './runtime-settings.js';
 import { sheetLevelOf } from './core-record.js';
+import { rejectedOverallLook } from './appearance-update.js';
 import { stage1Refresh } from './dossier-tools-core.js';
 
 export function createHostedPart(rt, deps) {
@@ -252,7 +253,7 @@ export function createHostedPart(rt, deps) {
     // taken when the scan started): when the reader swiped, or a reply was added or deleted, since
     // then, nothing is sent; the changes belonged to a reply that is no longer the one Story Block
     // would write them on, and the reply now shown gets its own scan.
-    function forwardRelationshipChangesToHost(before, after, messageId, head = null) {
+    function forwardRelationshipChangesToHost(before, after, messageId, head = null, updates = []) {
         if (replayScope()) return;   // Story Block already holds these changes in its own per-reply records
         const adapter = storySuiteV2Meters();
         if (!adapter) return;
@@ -276,11 +277,25 @@ export function createHostedPart(rt, deps) {
         }
         // A person's look set for the first time by this scan: its day and reply are stamped (the notes feature's locked look).
         const looks = (after || []).filter(npc => npc?.id && !npc.archived && String(npc.overallAppearance ?? '').trim() && !String(prior.get(npc.id)?.overallAppearance ?? '').trim());
-        if (!changes.length && !looks.length) return;
+        // A durable look the scan refused (the story did not explain a change): a Problem and a next-reply cue, never a silent change.
+        const refused = [];
+        const afterBy = new Map((after || []).map(npc => [npc?.id, npc]));
+        for (const row of Array.isArray(updates) ? updates : []) {
+            const was = prior.get(row?.id);
+            const now = afterBy.get(row?.id);
+            if (!was || !now || now.archived) continue;
+            const rejected = rejectedOverallLook(was.overallAppearance, now.overallAppearance, row);
+            if (rejected && !refused.some(item => item.id === now.id)) refused.push({ id: now.id, name: now.name, before: was.overallAppearance, incoming: rejected.incoming });
+        }
+        if (!changes.length && !looks.length && !refused.length) return;
         void (async () => {
             for (const npc of looks) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.flag?.({ name: npc.name, lock: true, reply: messageId });
+            }
+            for (const item of refused) {
+                if (!chatHeadUnchanged(head)) return dropped();
+                await adapter.flag?.({ name: item.name, drift: { before: item.before, incoming: item.incoming }, reply: messageId });
             }
             for (const change of changes) {
                 if (!chatHeadUnchanged(head)) return dropped();

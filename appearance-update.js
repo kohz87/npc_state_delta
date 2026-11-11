@@ -51,6 +51,20 @@ export function carryOmittedPhysicalTraits(previous = {}, next = {}) {
     return appearance === after ? next : { ...next, appearance };
 }
 
+/**
+ * The durable look the scan refused (NSDMAP2 §5): `before`/`after` are a person's overallAppearance before and after the scan's
+ * update, `rawUpdate` the scanner's row. → { incoming } when a look was already set, the row offered a different one and the
+ * record still holds the old one (no accepted refinement, no grounded `change`); otherwise null. Forms never count.
+ */
+export function rejectedOverallLook(before, after, rawUpdate = {}) {
+    const held = appearanceText(before);
+    if (!held || !rawUpdate || typeof rawUpdate !== 'object') return null;
+    if (!hasOwn(rawUpdate, 'overallAppearance') && !hasOwn(rawUpdate, 'overall_appearance')) return null;
+    const incoming = appearanceText(rawUpdate.overallAppearance ?? rawUpdate.overall_appearance);
+    if (!incoming || normalizeName(incoming) === normalizeName(held)) return null;
+    return normalizeName(appearanceText(after)) === normalizeName(held) ? { incoming } : null;
+}
+
 export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '', seedContext = '', fillBlank = false } = {}) {
     const next = normalizeAppearanceModel(record, { locked });
     if (locked || !rawUpdate || typeof rawUpdate !== 'object') return { ...next, appearance: resolveNpcAppearance(next) };
