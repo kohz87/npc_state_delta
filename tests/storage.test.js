@@ -357,3 +357,12 @@ test('inspecting a changed sidecar parses only the head; the whole file is parse
         assert.equal(big, 1, 'once per result');
     } finally { JSON.parse = realParse; }
 });
+
+test('head decode: a retired flag written after the state is not missed (the whole file is decoded)', () => {
+    const payload = JSON.parse(encodeStateFilePayload('chat:r', { npcs: [] }, '1.0.0', { revision: 2, writerId: 'w' }));
+    payload.retired = true;
+    payload.state = {};
+    const text = JSON.stringify(payload);
+    assert.equal(decodeStateFileHead(text), null);
+    assert.equal(decodeStateFilePayload(text).retired, true);
+});

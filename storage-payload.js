@@ -146,6 +146,8 @@ export function decodeStateFileHead(text) {
     try { head = JSON.parse(`${raw.slice(0, at)}}`); } catch { return null; }
     if (!head || head.format !== NPC_STATE_FILE_FORMAT || head.formatVersion !== NPC_STATE_FILE_FORMAT_VERSION) return null;
     if (raw.charCodeAt(raw.length - 1) !== 125) return null;   // a cut-off file is decoded in full (and refused there)
+    // A writer that adds `retired` after the state (another session's tool) is read by the full decode: one cheap scan, not a parse.
+    if (raw.indexOf('"retired"', at) !== -1) return null;
     head.retired = head.retired === true;
     head.revision = Math.max(0, Math.trunc(Number(head.revision) || 0));
     head.writerId = String(head.writerId || '');
