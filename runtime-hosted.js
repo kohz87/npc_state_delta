@@ -10,6 +10,7 @@ import { defersArea, resolveDossierTarget } from './suite-handshake.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
 import { castView, findCastPerson, normalizeCast } from './src/cast-dossier.js';
 import { getSettings, setRpgProbe } from './runtime-settings.js';
+import { sheetLevelOf } from './core-record.js';
 import { stage1Refresh } from './dossier-tools-core.js';
 
 export function createHostedPart(rt, deps) {
@@ -175,12 +176,27 @@ export function createHostedPart(rt, deps) {
         }
         return Object.keys(views).length ? views : null;
     }
+    // (hosted) Active party members with a whole-number sheet level, [{ name, level }] (Story Block's `party.levels`); [] when the host
+    // cannot say (no host, no query, RPG off), and members who left are not in it: their stored Level is left to the scanner rules.
+    function partyLevelList() {
+        let answer = null;
+        try { answer = storySuiteV2Meters()?.partyLevelsAnswer?.() ?? null; } catch { answer = null; }
+        return (answer || []).filter(row => row && row.left !== true && typeof row.name === 'string' && Number.isInteger(row.level)).map(row => ({ name: row.name, level: row.level }));
+    }
+    // The dossiers whose Level follows the party sheet now: { dossier id: true }; null with none.
+    function dossierSheetLevels(state) {
+        const levels = partyLevelList();
+        const marked = {};
+        for (const npc of levels.length ? state?.npcs || [] : []) if (npc?.id && sheetLevelOf(npc, levels) !== null && String(npc.customFields?.Level ?? '') === String(sheetLevelOf(npc, levels))) marked[npc.id] = true;
+        return Object.keys(marked).length ? marked : null;
+    }
     // What the dossier view reads from the host beside the dossiers: v2 meters, key-person and living-cast views.
     function dossierHostViews(state) {
         const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
         const keyViews = dossierKeyViews(state);
         const castViews = dossierCastViews(state);
-        return { meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}) };
+        const sheetLevels = dossierSheetLevels(state);
+        return { meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}), ...(sheetLevels ? { sheetLevels } : {}) };
     }
     // (perf) The dossiers as the views read them: a copy, except that a portrait's picture (its data URL, an immutable string of up to
     // a few hundred KB) is shared rather than copied; the portrait record itself is still a copy.
@@ -374,5 +390,5 @@ export function createHostedPart(rt, deps) {
         return { text: 'The latest scan found no NPC in the scene.', scan: true };
     }
 
-    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
+    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
 }

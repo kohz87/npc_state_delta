@@ -337,4 +337,5 @@ export function applyStaleNpcLifecycle(state = {}, options = {}) {
 export { NPC_ADMISSION_MODES, IMPORTANT_MEMORY_LIMIT, PORTRAIT_SEED_MAX, normalizePortraitSeed, normalizeNpcAdmissionMode, normalizeLifeStateCertainty, CAST_APPEARANCE_WIDE, castAppearanceKept, NPC_CANDIDATE_TTL_TURNS, NPC_CANDIDATE_LIMIT, npcMatchesLabel, normalizeStoredMemories, stripRecordCitations } from './core-record-shared.js';
 export { normalizeScanNpc, normalizeNpcCandidate, candidateRecordMatches, makeNpcCandidate, shouldCreateDossierImmediately, shouldPromoteCandidate } from './core-record-scan.js';
 export { CUSTOM_FIELD_LIMIT, normalizeCustomFieldNames, normalizeCustomFields, customFieldValues } from './core-record-custom-fields.js';
+export { applySheetLevels, sheetLevelOf, withoutSheetLevels } from './core-record-custom-fields.js';
 export { PROFILE_UPDATE_TEXT_FIELDS, durableTextAccepted, incomingCustomFields, incomingKeyRelationships, mergeLists, mergeImportantMemories, scanLabelsMatch, candidateMatches } from './core-record-merge.js';

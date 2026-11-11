@@ -152,7 +152,7 @@ export class DossierUiRender extends DossierUiPanel {
                     ${birthdayCard(selected)}
                     ${currentCard('Home Base / Usual Location', selected.homeBase, 'Unknown', changedMark(selected, 'homeBase'))}
                     ${selected.aliases.length ? currentCard('Also known as', selected.aliases.join(' · '), '') : ''}
-                    ${selected.customFields.map(([name, value]) => currentCard(name, value, '')).join('')}
+                    ${selected.customFields.map(([name, value]) => currentCard(name, value, '', '', selected.levelFromSheet && name.toLowerCase() === 'level' ? 'from the party sheet' : '')).join('')}
                 </div>
             </section>
             <section class="delta-section" data-delta-section="current">

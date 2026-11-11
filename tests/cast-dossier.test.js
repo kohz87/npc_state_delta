@@ -1488,3 +1488,11 @@ test('People never overwrites a value the record already has, and unparsable Peo
     assert.deepEqual([plain.species, plain.gender, plain.age, plain.apparentAge], ['', '', '', '']);
     assert.equal(plain.customFields.People, 'Roams the hills');
 });
+
+test('the adapter reads Story Block\'s party.levels as it answers, and null when the query is not there or answers null', async () => {
+    const party = answer => ({ id: 'zz-party', name: 'Party (stand-in)', version: '0.0.0-test', queries: { 'party.levels': () => answer } });
+    const rows = [{ id: 'a', name: 'Mira', level: 5, left: false }, { id: 'b', name: 'Bo', level: 3, left: true }];
+    assert.deepEqual((await suite({ modules: [party(rows)] })).adapter.partyLevelsAnswer(), rows, 'members who left are in the answer; the hosted part drops them');
+    assert.equal((await suite({ modules: [party(null)] })).adapter.partyLevelsAnswer(), null, 'RPG off: null');
+    assert.equal((await suite({ modules: [director()] })).adapter.partyLevelsAnswer(), null, 'no such query: as today');
+});
