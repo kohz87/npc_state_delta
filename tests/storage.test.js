@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     decodeStateFilePayload,
+    decodeStateFileHead,
     encodeStateFilePayload,
     makeNpcStateDataFileName,
     readNpcStateDataFile,
@@ -322,4 +323,37 @@ test('guarded write verifies writer ownership after upload', async () => {
             && error.actualWriterId === 'competing-writer',
     );
     assert.ok(reads >= 2, 'write path must verify the durable owner after upload');
+});
+
+// ---- inspection hot path: a boundary check reads the file's head, not its megabytes of checkpoints ----
+test('head decode gives the same meta as the full decode, and refuses what is not the compact layout', () => {
+    const state = { npcs: [], checkpoints: Array.from({ length: 50 }, (_, i) => ({ messageId: i, pad: 'x'.repeat(200) })) };
+    const text = encodeStateFilePayload('chat:head,"state":{x', state, '1.0.0', { revision: 7, writerId: 'w1', updatedAt: '2026-11-12T00:00:00.000Z' });
+    const full = decodeStateFilePayload(text);
+    const head = decodeStateFileHead(text);
+    for (const key of ['chatKey', 'revision', 'writerId', 'updatedAt', 'retired']) assert.equal(head[key], full[key], key);
+    assert.equal(head.state, undefined, 'the state is not read');
+    assert.equal(decodeStateFileHead(JSON.stringify(JSON.parse(text), null, 2)), null, 'pretty layout: decode in full');
+    assert.equal(decodeStateFileHead(text.slice(0, -5)), null, 'cut-off file: decode in full');
+    assert.equal(decodeStateFileHead('{"format":"other","state":{}}'), null);
+    assert.equal(decodeStateFileHead('not json'), null);
+});
+
+test('inspecting a changed sidecar parses only the head; the whole file is parsed once, when payload is read', async () => {
+    const state = { npcs: [], checkpoints: Array.from({ length: 100 }, (_, i) => ({ messageId: i, pad: 'y'.repeat(300) })) };
+    const text = encodeStateFilePayload('chat:hot', state, '1.0.0', { revision: 3, writerId: 'w2', updatedAt: '2026-11-12T00:00:00.000Z' });
+    assert.ok(text.length > 20000);
+    const fetchFn = async () => ({ ok: true, status: 200, headers: { get: name => (name === 'etag' ? '"e1"' : '') }, text: async () => text });
+    const realParse = JSON.parse; let big = 0;
+    JSON.parse = (value, ...rest) => { if (typeof value === 'string' && value.length > 20000) big += 1; return realParse(value, ...rest); };
+    try {
+        const inspected = await inspectNpcStateDataFile({ path: '/user/files/hot.json' }, { fetchFn, expectedChatKey: 'chat:hot' });
+        assert.equal(inspected.revision, 3);
+        assert.equal(inspected.writerId, 'w2');
+        assert.equal(big, 0, 'no whole-file parse for the boundary check');
+        assert.equal(inspected.payload.state.checkpoints.length, 100);
+        assert.equal(big, 1);
+        void inspected.payload;
+        assert.equal(big, 1, 'once per result');
+    } finally { JSON.parse = realParse; }
 });

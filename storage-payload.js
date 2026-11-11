@@ -131,3 +131,23 @@ export function decodeStateFilePayload(text) {
     payload.writerId = String(payload.writerId || '');
     return payload;
 }
+
+// (inspection hot path) A boundary check wants only the revision, writer, chat key, time and retired flag. encodeStateFilePayload writes those
+// scalar keys first and `state` last, and a quote inside a string value is always escaped, so the first `,"state":` is the real one: the head
+// alone is parsed (a few hundred bytes) instead of the whole file (megabytes of checkpoints). Any file that does not look like that (older
+// layout, pretty-printed, damaged) answers null and the caller decodes the whole file exactly as before. The state itself is not read here.
+const HEAD_LIMIT = 4096;
+export function decodeStateFileHead(text) {
+    const raw = String(text ?? '');
+    if (raw.charCodeAt(0) !== 123 || raw.charCodeAt(1) !== 34) return null;   // `{"`: compact JSON object
+    const at = raw.indexOf(',"state":{');
+    if (at < 1 || at > HEAD_LIMIT) return null;
+    let head;
+    try { head = JSON.parse(`${raw.slice(0, at)}}`); } catch { return null; }
+    if (!head || head.format !== NPC_STATE_FILE_FORMAT || head.formatVersion !== NPC_STATE_FILE_FORMAT_VERSION) return null;
+    if (raw.charCodeAt(raw.length - 1) !== 125) return null;   // a cut-off file is decoded in full (and refused there)
+    head.retired = head.retired === true;
+    head.revision = Math.max(0, Math.trunc(Number(head.revision) || 0));
+    head.writerId = String(head.writerId || '');
+    return head;
+}
