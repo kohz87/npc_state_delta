@@ -3627,3 +3627,58 @@ test('stale pass at the roster cap: archives what matters, deletes the incidenta
     const nonStale = staleAfterScan({ turn: 100, npcs: [recent, { ...heldA, lastSeenTurn: 99 }] }, {}, '', settings, { onlyWhenAtCap: true });
     assert.equal(nonStale.state.npcs.length, 2, 'only protected and recent: nothing is deleted, the cap simply holds (a new candidate waits)');
 });
+
+// ---- Keep dossiers, second round: form portraits, fail safe, starting-value meters, replay clock, snapshot size ----
+import { snapshotBranchState as snapshotOf } from '../branch-core.js';
+import { utf8Bytes as bytesOf } from '../branch-util.js';
+import { BRANCH_SNAPSHOT_MAX_BYTES as SNAPSHOT_MAX } from '../branch-constants.js';
+import { RETAINED_STALE_ARCHIVE_MAX } from '../core-record.js';
+
+test('stale pass: a dossier with only a form portrait is archived, and its form image stays', () => {
+    const formOnly = awayNpc('Fay');
+    const state = { turn: 100, npcs: [formOnly, awayNpc('Inc')], formPortraitAssets: { [formOnly.id]: { wolf: { dataUrl: PNG_1PX } } } };
+    const result = applyStaleNpcLifecycle(state, { turn: 100, archiveAfter: 30, deleteAfter: 50 });
+    assert.deepEqual(result.removed.map(item => item.name), ['Inc']);
+    assert.equal(result.state.npcs.find(npc => npc.id === formOnly.id).archived, true);
+    assert.equal(result.state.formPortraitAssets[formOnly.id].wolf.dataUrl, PNG_1PX);
+});
+
+test('stale pass: with the host unreadable (noDelete) nothing is deleted, the stale ones are archived', () => {
+    const inc = awayNpc('Inc');
+    const archivedBefore = setNpcArchived(awayNpc('Old'), true, { reason: 'stale' });
+    const result = staleRun([inc, archivedBefore], { noDelete: true });
+    assert.equal(result.removed.length, 0);
+    assert.equal(result.state.npcs.length, 2);
+    assert.equal(result.state.npcs.find(npc => npc.id === inc.id).archived, true);
+    const viaScan = staleAfterScan({ turn: 100, npcs: [inc] }, {}, '', { autoPruneStale: true, maxNpcs: 40, staleArchiveAfter: 30, staleDeleteAfter: 50 }, { noDelete: true });
+    assert.equal(viaScan.removed.length, 0);
+});
+
+test('stale pass: a meter equal to a non-zero starting value does not protect; one off it does', () => {
+    const baseline = { trust: 10, affection: 5, desire: 0, tension: 0 };
+    const rel = { ...createNpcRecord('x').relationship, trust: 10, affection: 5 };
+    const fresh = awayNpc('Fre', { relationship: rel });
+    const moved = awayNpc('Mov', { relationship: { ...rel, trust: 11 } });
+    const result = staleRun([fresh, moved], { baseline });
+    assert.deepEqual(result.removed.map(item => item.name), ['Fre']);
+    assert.equal(result.state.npcs.find(npc => npc.id === moved.id).archived, true);
+});
+
+test('stale pass: the archive timestamps are the supplied clock, so a replay stores the same bytes as the live scan', () => {
+    const npcs = [awayNpc('Cas', { castFrom: { key: 'pack:cas' } }), awayNpc('Mid', { memories: ['x'], lastSeenTurn: 60 })];
+    const run = () => staleRun(npcs, { now: 1234567 });
+    const first = run();
+    assert.equal(JSON.stringify(first.state), JSON.stringify(run().state));
+    assert.ok(first.state.npcs.every(npc => npc.archivedAt === 1234567 && npc.updatedAt === 1234567));
+    assert.equal(setNpcArchived(awayNpc('Z'), true, { reason: 'stale', now: 9 }).archivedAt, 9);
+});
+
+test('stale pass: retained archives are bounded, so a branch snapshot with them still fits a full checkpoint', () => {
+    const many = Array.from({ length: RETAINED_STALE_ARCHIVE_MAX + 30 }, (_, i) => awayNpc(`N${i}`, { memories: ['m'], lastSeenTurn: i % 20 }));
+    const kept = staleRun(many).state.npcs;
+    assert.equal(kept.length, RETAINED_STALE_ARCHIVE_MAX, 'the oldest beyond the cap are deleted by the ordinary rule');
+    const bytes = bytesOf(snapshotOf({ npcs: kept }));
+    assert.ok(bytes < SNAPSHOT_MAX, `snapshot ${bytes} bytes fits ${SNAPSHOT_MAX}`);
+    const keyed = staleRun(many, { keepIds: many.map(npc => npc.id) });
+    assert.equal(keyed.state.npcs.length, many.length, 'key people are never dropped by the cap');
+});

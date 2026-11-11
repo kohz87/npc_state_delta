@@ -199,6 +199,12 @@ export function createHostedPart(rt, deps) {
         const list = keyPeopleList();
         return list?.length ? (state?.npcs || []).filter(npc => isKey(findKeyEntry(list, npc))).map(npc => npc.id) : [];
     }
+    // True while hosted and the host cannot answer the key list or the meter read (error, null, not a list): the stale pass then only archives.
+    function hostedReadsFailed() {
+        const adapter = storySuiteV2Meters();
+        if (!adapter) return false;
+        try { return !Array.isArray(adapter.keyPeopleAnswer?.()) || !Array.isArray(adapter.meterEntries?.()); } catch { return true; }
+    }
     function keyAwayScanOptions(state) {
         const list = keyPeopleList();
         if (!list?.length) return {};
@@ -367,5 +373,5 @@ export function createHostedPart(rt, deps) {
         return { text: 'The latest scan found no NPC in the scene.', scan: true };
     }
 
-    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, keyKeepIds, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
+    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
 }

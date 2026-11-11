@@ -18,7 +18,7 @@ import { createScanReplyPart } from './runtime-scan-reply.js';
 import { createAssistantHandlerPart } from './runtime-scan-handler.js';
 import { normalizeAllowance } from './src/relationship-pacing.js';
 export function createScanPart(rt, deps) {
-    const { attachGeneratedSecrets, beginScanOperation, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, keyKeepIds, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanOperationCurrent, scanScenePresent, scenePresentAt, setChatState, takeNarrationCapture, updateInjection } = deps;
+    const { attachGeneratedSecrets, beginScanOperation, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, keyKeepIds, hostedReadsFailed, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanOperationCurrent, scanScenePresent, scenePresentAt, setChatState, takeNarrationCapture, updateInjection } = deps;
     // Events per story day while Delta works alone (the pass counts them on the dossier). The day is Story Director's clock, which
     // there is not without a host: no day, no limit (relationship-pacing.js). Hosted, the slice counts them when the change is forwarded
     // and Delta's numbers are set from the slice afterwards (runtime-hosted.js), so the pass does not count (null).
@@ -223,7 +223,7 @@ export function createScanPart(rt, deps) {
             const parsedForMerge = suppressPrimaryRelationshipForFocusedDecisions(fullWindowRelationship.mergeSafe, relationshipPass.decisions, () => getChatState().npcs);
             // If the registry is already full, free truly stale slots before admission so a new
             // current NPC is not rejected just because a long-gone dossier still occupies the cap.
-            const preCleanup = applyStaleLifecycleAfterScan(state, parsedForMerge, currentTranscript || transcript, settings, { onlyWhenAtCap: true, keepIds: keyKeepIds(state) });
+            const preCleanup = applyStaleLifecycleAfterScan(state, parsedForMerge, currentTranscript || transcript, settings, { onlyWhenAtCap: true, keepIds: keyKeepIds(state), noDelete: hostedReadsFailed(), now: clockNow() });
             const mergeBaseState = structuredClone(preCleanup.state);
             for (const npc of mergeBaseState.npcs || []) {
                 npc.present = false;
@@ -315,7 +315,7 @@ export function createScanPart(rt, deps) {
                 console.info('[NPC State Delta] dossier scan metrics', rt.lastScanMetrics);
             }
             applyFocusedRelationshipDecisions(merged.state, relationshipPass.decisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings));
-            const postCleanup = applyStaleLifecycleAfterScan(merged.state, parsedForMerge, currentTranscript || transcript, settings, { keepIds: keyKeepIds(merged.state) });
+            const postCleanup = applyStaleLifecycleAfterScan(merged.state, parsedForMerge, currentTranscript || transcript, settings, { keepIds: keyKeepIds(merged.state), noDelete: hostedReadsFailed(), now: clockNow() });
             const staleArchived = [...preCleanup.archived, ...postCleanup.archived]
                 .filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index);
             const stalePruned = [...preCleanup.removed, ...postCleanup.removed]

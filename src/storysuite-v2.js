@@ -237,6 +237,8 @@ export function createStorySuiteV2Adapter({
         },
         /** While hosted: Story Director's key people (`director.keyPeople`) as it answers, or null when it cannot. */
         keyPeopleAnswer,
+        /** While hosted: the slice's entries (npc.meters) at the head, or null when the host cannot answer. */
+        meterEntries: sliceEntries,
         /** While hosted: the memory of key people's last absences (npc.keyAway), {} without one. */
         keyAwayMemory,
         /** The same, cleaned (normalizeKeyPeople), without dates written. */
