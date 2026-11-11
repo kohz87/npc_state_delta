@@ -44,7 +44,7 @@ ${PANEL} .delta-library-search input { flex:1 1 auto; min-width:0; min-height:30
 ${PANEL} .delta-library-faces { display:grid; grid-template-columns:repeat(auto-fill,minmax(clamp(150px,17cqw,260px),1fr)); gap:clamp(8px,1.4cqw,16px); padding:clamp(10px,1.8cqw,18px); }
 ${PANEL} .delta-library-face { --rc:var(--dial); display:grid; justify-items:center; align-content:start; gap:4px; width:100%; min-width:0; padding:14px 8px 12px; border:1px solid var(--delta-line); border-radius:14px; background:var(--dsk-tile); color:var(--delta-text); font:inherit; text-align:center; cursor:pointer; }
 ${PANEL} .delta-library-face.selected { outline:2px solid var(--delta-accent); outline-offset:-1px; }
-${PANEL} .delta-library-av { display:block; width:clamp(56px,6.5cqw,92px); height:clamp(56px,6.5cqw,92px); margin-bottom:10px; overflow:hidden; border-radius:var(--dsk-face-radius); box-shadow:0 0 0 2px var(--dsk-tile), 0 0 0 3.5px var(--rc); }
+${PANEL} .delta-library-av { display:block; width:clamp(70px,6.5cqw,92px); height:clamp(70px,6.5cqw,92px); margin-bottom:10px; overflow:hidden; border-radius:var(--dsk-face-radius); box-shadow:0 0 0 2px var(--dsk-tile), 0 0 0 3.5px var(--rc); }
 ${PANEL} .delta-library-portrait { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 4%; }
 ${PANEL} .delta-library-portrait.delta-portrait-placeholder { display:grid; place-items:center; background:var(--face-flat); color:var(--delta-muted); font:700 clamp(15px,2.2cqw,26px)/1 var(--ss-font, system-ui, -apple-system, "Segoe UI", sans-serif); letter-spacing:.04em; }
 ${PANEL} .delta-tile-face.delta-portrait-placeholder { background:var(--face-flat); font-size:0; }
@@ -72,7 +72,7 @@ ${PANEL} .delta-board-hero { display:grid; align-content:start; min-width:0; }
 ${PANEL} .delta-board-dial { display:grid; min-width:0; padding:clamp(10px,2.4cqw,20px) 12px 6px; border-radius:12px; cursor:pointer; }
 ${PANEL} .delta-board-name { padding:0 14px 6px; text-align:center; min-width:0; }
 /* the name has its own class and explicit resets: a host theme's heading rules (a coloured bar at the left, an indent, a left alignment) cannot restyle it */
-${PANEL} .delta-board-name .delta-board-title { display:block; margin:0 !important; padding:0 !important; border:0 !important; border-left:0 !important; border-radius:0; background:none !important; box-shadow:none !important; text-align:center !important; text-transform:none; letter-spacing:0; text-indent:0; font-family:inherit; font-size:clamp(24px,2.4cqw + 15px,34px); line-height:1.05; font-weight:700; color:var(--delta-accent-soft); overflow-wrap:anywhere; }
+${PANEL} .delta-board-name .delta-board-title { display:block; margin:0 !important; padding:0 !important; border:0 !important; border-left:0 !important; border-radius:0; background:none !important; box-shadow:none !important; text-align:center !important; text-transform:none; letter-spacing:0; text-indent:0; font-family:inherit; font-size:clamp(28px,2.4cqw + 15px,34px); line-height:1.05; font-weight:700; color:var(--delta-accent-soft); overflow-wrap:anywhere; }
 ${PANEL} .delta-board-name p { margin:4px 0 0; font-size:var(--dt-meta); }
 ${PANEL} .delta-board-pills { display:flex; flex-wrap:wrap; justify-content:center; gap:6px; margin-top:6px; }
 ${PANEL} .delta-pill { padding:1px 9px; border:1px solid var(--delta-line); border-radius:999px; font-size:var(--dt-pill); font-weight:700; color:var(--delta-text); white-space:nowrap; }

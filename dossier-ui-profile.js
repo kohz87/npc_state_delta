@@ -72,7 +72,7 @@ function appearanceBody(npc, portraitRefs) {
 
 // Personality as plain prose, then label / value rows (Speech, Levers) as the mockup draws it: no sub-headings.
 function characterBody(npc) {
-    const levers = Array.isArray(npc.behaviorProfile) ? npc.behaviorProfile.filter(Boolean).join('; ') : plain(npc.behaviorProfile);
+    const levers = Array.isArray(npc.behaviorProfile) ? npc.behaviorProfile.filter(Boolean).map(item => String(item).trim().replace(/[.;]+$/, '')).join('; ') : plain(npc.behaviorProfile);
     const row = (label, text, mark = '') => (plain(text) ? `<dt>${label}${mark}</dt><dd>${escapeHtml(plain(text))}</dd>` : '');
     const rows = row('Speech', npc.speech, changedMark(npc, 'speech')) + row('Levers', levers, changedMark(npc, 'behaviorProfile'));
     return `${proseHtml(npc.personality)}${changedMark(npc, 'personality') ? `<p class="delta-muted">${changedMark(npc, 'personality')}</p>` : ''}${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : ''}`;
@@ -102,7 +102,7 @@ function headBlock(npc, desktop) {
 // details in two columns on the right). `portraitRefs` is the view's createPortraitRefs() instance.
 export function dossierProfileHtml(npc = {}, { layout = 'phone', portraitRefs = null } = {}) {
     const desktop = layout === 'desktop';
-    const identity = block('identity', 'Identity', identityBody(npc), { heading: desktop });
+    const identity = block('identity', 'Identity', identityBody(npc), { heading: false });
     const appearance = block('appearance', 'Appearance', appearanceBody(npc, portraitRefs));
     const character = block('character', 'Character', characterBody(npc));
     const notes = npc.v2Meters?.notes;

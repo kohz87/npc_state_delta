@@ -562,8 +562,26 @@ test('round 2 fix 6-11: gate words, pronouns, the Pull ring at three quarters, t
   const npc = { ...dossierDetailProjection({ id: 'r', name: 'Rika', personality: 'Proud', speech: 'Sharp', behaviorProfile: ['Bickers', 'Hides fear'] }, {}, {}), birthday: 'Emberwane 17', birthdaySource: 'established' };
   const phone = dossierProfileHtml(npc, { layout: 'phone' });
   const desktop = dossierProfileHtml(npc, { layout: 'desktop' });
-  assert.doesNotMatch(phone, /<h3>Identity<\/h3>/, 'no Identity heading on a phone'); assert.match(desktop, /<h3>Identity<\/h3>/);
+  assert.doesNotMatch(phone, /<h3>Identity<\/h3>/, 'no Identity heading on a phone'); assert.doesNotMatch(desktop, /<h3>Identity<\/h3>/, 'none on the desktop either: the rows sit under Profile');
   assert.match(desktop, /<p>Proud<\/p><dl class="delta-kv delta-profile-kv"><dt>Speech<\/dt><dd>Sharp<\/dd><dt>Levers<\/dt><dd>Bickers; Hides fear<\/dd>/);
   assert.doesNotMatch(desktop, /<h4>Personality|<h4>Speech/);
   assert.match(desktop, /<span>Emberwane 17<small class="delta-continuity-source">Story established<\/small><\/span>/, 'the note is in the value column, not a cell of its own');
+});
+
+test('round 3 fix 2-6: no tier line under a change row, a muted secrets intro, Levers joined without a doubled full stop, no Identity heading, the card dial without labels', async () => {
+  const { recentChangeRowHtml } = await import('../dossier-ui-relationship.js');
+  const { secretsSectionHtml } = await import('../dossier-ui-sections.js');
+  const earlier = recentChangeRowHtml({ event: { impact: 'meaningful', reason: 'She shared the map.', axes: ['Trust'] } });
+  assert.doesNotMatch(earlier, /meaningful change|ordinary change/);
+  assert.match(earlier, /She shared the map\./);
+  const latest = recentChangeRowHtml({ change: { impact: 'meaningful', reason: 'A kept promise.', delta: { trust: 3 } } });
+  assert.doesNotMatch(latest, /meaningful change/);
+  assert.match(secretsSectionHtml({ v2Meters: { secrets: [{ state: 'hidden', opens: 'opens at Trust 60', width: 10 }] } }), /<p class="delta-muted delta-secrets-intro">/);
+  const npc = dossierDetailProjection({ id: 'r', name: 'Rika', personality: 'Proud', behaviorProfile: ['Never rushes before concluding business.', 'Honesty: high'] }, {}, {});
+  assert.match(dossierProfileHtml(npc, { layout: 'desktop' }), /<dd>Never rushes before concluding business; Honesty: high<\/dd>/);
+  const css = dossierUiSource();
+  const mapCss = fs.readFileSync(new URL('../relationship-map-focus.js', import.meta.url), 'utf8');
+  assert.match(mapCss, /\.delta-map-card-dial \.dial-label \{ display:none; \}/);
+  assert.match(mapCss, /\.delta-map-ties-focus \.delta-map-ties-head \{ font-size:var\(--dt-kick\); letter-spacing:\.12em; text-transform:uppercase/);
+  assert.match(css, /\.delta-section p\.delta-secrets-intro \{[^}]*color:var\(--delta-muted\)/);
 });

@@ -86,10 +86,10 @@ export function recentChangeRowHtml({ change = null, event = null } = {}) {
                 const good = axis === 'tension' ? value < 0 : value > 0;
                 return `<span class="delta-chg-d" data-good="${good ? 'yes' : 'no'}">${escapeHtml(label)} ${value > 0 ? '+' : '−'}${Math.abs(value)}</span>`;
             }).join(' · ') || '<span class="delta-chg-d" data-good="muted">Progress only</span>';
-        lines = [hosted?.held ? `Held: ${hosted.note || 'the day\'s allowance is used'}` : gateWords(hosted?.gate, { row: true }), change.reason, hosted && hosted.tier ? `${impactLabel(hosted.tier).toLocaleLowerCase()} change` : (change.impact && !['net', 'none', 'manual'].includes(change.impact) ? `${change.impact} change` : '')];
+        lines = [hosted?.held ? `Held: ${hosted.note || 'the day\'s allowance is used'}` : gateWords(hosted?.gate, { row: true }), change.reason];
     } else {
         head = `<span class="delta-chg-d" data-good="muted">${escapeHtml((event.axes || []).length ? event.axes.join(' · ') : impactLabel(event.impact))}</span>`;
-        lines = [event.reason, event.axes?.length ? `${event.impact} change` : ''];
+        lines = [event.reason];
     }
     const via = lines.filter(Boolean).map(line => `<div class="delta-chg-via">${escapeHtml(line)}</div>`).join('');
     return `<li class="delta-chg">${whenHtml}<div><b>${head}</b>${via}</div></li>`;

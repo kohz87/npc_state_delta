@@ -288,6 +288,8 @@ ${root} .delta-map-card-empty .delta-map-card-line { margin:0; }
   ${root} .delta-map-card .delta-map-beside { display:block; }
   ${root} .delta-map-card-dial { display:grid; width:min(100%,clamp(150px,18cqw,270px)); padding:0; border:0; background:none; color:inherit; font:inherit; cursor:pointer; }
   ${root} .delta-map-card-dial .dossier-dial { width:100%; }
+  ${root} .delta-map-card-dial .dial-label { display:none; }   /* the card's numbers line carries the values; the board's labels would draw at 4-5px here */
+  ${root} .delta-map-ties-focus .delta-map-ties-head { font-size:var(--dt-kick); letter-spacing:.12em; text-transform:uppercase; color:var(--aff, var(--delta-accent)); }   /* beside the map: the small coloured caps like Bonds on the map */
   ${root} .delta-map-card-name { margin:2px 0 0 !important; padding:0 !important; border:0 !important; text-align:center !important; font-size:clamp(20px,1.2cqw + 12px,30px); line-height:1.1; font-weight:600; color:var(--delta-text); text-transform:none; letter-spacing:0; overflow-wrap:anywhere; }
   ${root} .delta-map-card-pills { display:flex; flex-wrap:wrap; justify-content:center; gap:6px; }
   ${root} .delta-map-card-line { margin:0; color:var(--delta-muted); font-size:var(--dt-meta); }
