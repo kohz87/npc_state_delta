@@ -80,7 +80,7 @@ Generated 2026-11-07.
 - `branch-reconcile.js`: `reconcileBranchState` and its exact journal/checkpoint recovery split from `branch.js`.
 - `branch-ancestry.js`: Cross-chat `bestAncestorState` and explicit-parent matching split from `branch.js`.
 - `dossier-skin.js`: Dossier style setting (Neutral, Fantasy, Modern): normalization, the data-skin attribute on the dossier root and its settings row.
-- `dossier-ui-board.js`: The Board screen: dial, name and status, and the tiles, as markup from the view model.
+- `dossier-ui-board.js`: The Board screen: dial, name and status, and the tiles, as markup from the view model. Mood bars, pull ring, tie faces with initials and Past dots from the phase-2 data.
 - `dossier-ui-catalog.js`: Index filtering, selection, key/cast projections and dossier-state shaping split from `dossier-ui.js`.
 - `dossier-ui-constants.js`: Dossier root, settings, style and observer constants shared by the split UI modules.
 - `dossier-ui-controller.js`: Dossier controller actions, refresh orchestration, editor and settings bridges split from `dossier-ui.js`.
@@ -91,15 +91,15 @@ Generated 2026-11-07.
 - `npc-instincts.js`: Pure pull core: Belonging, Closure and Awe signal readers, per-NPC inst values (belo/clos/awe) and the top pressure {kind, cause, since}; no host access.
 - `npc-mood.js`: Pure mood (VAD) core: the mood {v,a,d,day,cause} clamp and shape, trust-drop/betrayal/rest/safe deltas, decay per story day, the 3x3 word table, Energy/Control bars and cause text; no host access.
 - `dossier-ui-library.js`: Library screen: tone-ringed faces, search box, key-first ordering and face markup (replaces the cast rail's `renderRail`).
-- `dossier-ui-meters.js`: Hosted meter bars, rank, milestones and Secrets-section projections and markup split from `dossier-ui.js`.
+- `dossier-ui-meters.js`: Hosted meter bars, rank, milestones and Secrets-section projections and markup split from `dossier-ui.js`. Also projects the mood, pull and notes rows for the screens (an uncaught lie carries no words; a secret not opened is dropped).
 - `dossier-ui-model.js`: Dossier record lookups, change stamps and index/detail projections split from `dossier-ui.js`.
 - `dossier-ui-mount.js`: Singleton dossier UI mounting and open-dossier request forwarding split from `dossier-ui.js`.
 - `dossier-ui-panel.js`: Dossier panel lifecycle, shell, screen clicks and Esc order, observers and portrait lightbox split from `dossier-ui.js`.
-- `dossier-ui-profile.js`: The Profile screen: portrait, identity, appearance forms, character and background (phone full screen, desktop two columns).
+- `dossier-ui-profile.js`: The Profile screen: portrait, identity, appearance forms, character and background (phone full screen, desktop two columns). Tastes, Drives and the locked-look note (only with data).
 - `dossier-ui-relationship.js`: Relationship meter steps, latest change and history markup split from `dossier-ui.js`.
 - `dossier-ui-render.js`: Draws the current screen (library, board, profile or section) from the projection, with signature caching; split from `dossier-ui.js`.
 - `dossier-ui-screens.js`: Screen state machine (library | board | profile | section), back and Esc order, swipe steps and the shared 650px phone query.
-- `dossier-ui-sections.js`: The five section screens (Right now, With the player, Ties, Past, Secrets) with their arrows-and-dots header.
+- `dossier-ui-sections.js`: The five section screens (Right now, With the player, Ties, Past, Secrets) with their arrows-and-dots header. Ties tags (ally, rival, owes, owed by), lies told and knows about others (redacted), the Past timeline.
 - `dossier-ui-styles-board.js`: CSS-in-JS for the library faces, the dial, the board and tiles, with the Neutral, Fantasy and Modern skin tokens on the panel root.
 - `dossier-ui-styles-sections.js`: CSS-in-JS for the header menu, section screens, profile and the desktop pane layout.
 - `dossier-ui-styles.js`: The dossier panel's scoped stylesheet split from `dossier-ui.js`.
