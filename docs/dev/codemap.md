@@ -42,6 +42,13 @@ Generated 2026-11-07.
 - `src/relationship-pacing.js`: Events-per-story-day allowance by impact tier: the used-tier rule, the per-NPC `impactDay` count, pacing defaults and migration. Pure.
 - `src/npc-meters-pacing.js`: The reader's words for a held event and the cut of a forwarded scanner change to a lower tier, split from `src/npc-meters.js`.
 - `src/npc-meters-prompt.js`: The NPC meter prompt line, reminder tail and locked-note redaction split from `src/npc-meters.js`.
+- `src/npc-notes-kinds.js`: NPC note kinds (lie, know, taste, tie): the handlers that call run() through a notes option, NOTE_FIELDS, validateNotes for the record, and notesTail with the cap (2 per present NPC, 4 in all). The only file that imports the six npc-notes-* files (pure).
+- `src/npc-notes-tastes.js`: NPC tastes: the JSON leaf reader and caps, the first-mention rule (why: to change), the deterministic mirror check (flags, never blocks), and its wording and tail line. Pure.
+- `src/npc-notes-lies.js`: NPC lies told: the `lies` slice leaf (readLies, addLie with re-read and no-op rules, catchLie with the trust change at a tier), the hidden tail line, dossier rows with a redact option and the caught receipt (pure).
+- `src/npc-notes-knows.js`: NPC "knows about others" (`~ know` lines): the per-reply stored list, input check, secret redaction until opened, one tail line per present person, dossier rows (pure).
+- `src/npc-notes-look.js`: Locked NPC look: the drift text for a refused durable look, the npc.flag cue wording, the flag dedupe key and the lookLockedAt stamp helpers (pure).
+- `src/npc-notes-ties.js`: NPC ties: ally, rival and owes tags between any two people (the `ties` slice leaf: readTies, applyTags for `~ tie` +/- tags, tiesText, the read-time tagsFromRelation fallback, owedBy and the bond-list rows in tiesView) (pure).
+- `src/npc-notes-drives.js`: NPC drives (instinct strengths 0..3, default 2): the JSON leaf reader and writer, the first-time seed from a cast pack entry or the first description, the strength multiplier the pull applies and the dossier rows (pure).
 - `src/adapter/queries-dossier.js`: Dossier field copies and portrait URL safety helpers split from `src/adapter/queries.js`.
 - `src/adapter/queries-director.js`: Story Director and pack lookups split from `src/adapter/queries.js`.
 - `src/adapter/cast-ui/cast-render.js`: Action binding, key-person pin, present-cast and dossier-list rendering.
