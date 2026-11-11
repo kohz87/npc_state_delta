@@ -1,7 +1,7 @@
 // NPC meters, the per-reply slice: the initial slice, key-person absence and cast memory, slice validation, meter moves, the stage
 // and ladder settling, and the change text. A pure part of npc-meters.js (same owner, moved without change); npc-meters.js
 // re-exports every name it exported before. Never imports npc-meters.js.
-import { clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KEYS, isInt, isObject, isReplyId, KEY_MAX, MAX_METERS_PER_NPC, MAX_MILESTONES, MAX_NPCS, MAX_PROBLEMS, MAX_RUNGS, MAX_UNLOCKED, METER_ID_MAX, MILESTONE_MAX, NAME_MAX, needMet, npcKey, own, RECORD_FIELDS, replyKey, sameReply, signed, STAGE_NAME_MAX, stageAt, thresholdReached, WORDS } from './npc-meters-config.js';
+import { readLeaf, leafText, clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KEYS, isInt, isObject, isReplyId, KEY_MAX, MAX_METERS_PER_NPC, MAX_MILESTONES, MAX_NPCS, MAX_PROBLEMS, MAX_RUNGS, MAX_UNLOCKED, METER_ID_MAX, MILESTONE_MAX, NAME_MAX, needMet, npcKey, own, RECORD_FIELDS, replyKey, sameReply, signed, STAGE_NAME_MAX, stageAt, thresholdReached, WORDS } from './npc-meters-config.js';
 import { isKey, memoryKey, RECENT_REPLIES } from './key-people.js';
 import { CAST_KEY, metWithEntry } from './cast-dossier.js';
 import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
@@ -115,10 +115,12 @@ function validateKeyAway(memory) {
 }
 
 // The mood and pull fields (feature mood-pull): small whole numbers and short plain text, as the cores write them.
+const LEAF_TEXT_MAX = 1200;
 const shortText = (value, max) => typeof value === 'string' && value.length <= max && !/[\u0000-\u001f]/.test(value);
 export function moodPullProblems(record) {
     const out = [];
-    const { mood, inst, pull, track } = record;
+    const [mood, inst, pull, track] = [record.mood, record.inst, record.pull, record.track].map(readLeaf);
+    if ([record.mood, record.inst, record.pull, record.track].some(raw => typeof raw === 'string' && (raw.length > LEAF_TEXT_MAX || readLeaf(raw) === undefined))) out.push('has an unreadable text leaf');
     if (mood !== undefined && (!isObject(mood) || JSON.stringify(normalizeMood(mood)) !== JSON.stringify(Object.fromEntries(Object.keys(normalizeMood(mood)).map(key => [key, mood[key]]))))) out.push('has an unusable mood');
     if (inst !== undefined && (!isObject(inst) || Object.keys(inst).some(key => !['belo', 'clos', 'awe'].includes(key)) || Object.values(inst).some(value => !isInt(value) || value < 0 || value > 3))) out.push('has unusable instincts');
     if (pull !== undefined && (!isObject(pull) || !INSTINCT_KINDS.includes(pull.kind) || !shortText(pull.cause, 120) || !isInt(pull.since) || pull.since < 0 || Object.keys(pull).length !== 3)) out.push('has an unusable pull');
@@ -366,7 +368,10 @@ export function settle(record, { defs, stages, rules, name, rungs = [], conflict
 // A Re-read of a reply (the host gives ctx.standing: the story as it stood after that reply's earlier read) gives the reply's mood only where that
 // state already had one on this person: a reply written before the feature was on is read again as it was; a reply written with it on keeps
 // its mood. A first read (no standing) always may.
-export const moodStands = (ctx, key) => !ctx.standing || isObject(ctx.standing.domains?.npc?.npcs?.[key]?.mood);
+// A leaf is written in the form the reply's earlier read stored it: an object where the standing holds one (a chat written under 1.16.0, whose later
+// per-field ops need the object), text otherwise (a first read, a new reply). So a Re-read of an old reply stores the same ops.
+export const asStored = (ctx, key, field, value) => (isObject(ctx?.standing?.domains?.npc?.npcs?.[key]?.[field]) ? value : leafText(value));
+export const moodStands = (ctx, key) => !ctx.standing || isObject(readLeaf(ctx.standing.domains?.npc?.npcs?.[key]?.mood));
 
 export const sentence = parts => parts.filter(Boolean).map(part => (/[.!?]$/.test(part) ? part : `${part}.`)).join(' ');
 
