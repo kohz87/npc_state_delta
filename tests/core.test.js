@@ -3573,3 +3573,57 @@ test('v0.2.12 hidden social graph affects salience but never leaks graph machine
     assert.match(injection, /Brina/);
     assert.doesNotMatch(injection, /socialGraph|unresolved|groupId|slot_|family_brina/i);
 });
+
+// ---- Dossiers that matter are archived, never auto-deleted by the stale pass ----
+import { applyStaleLifecycleAfterScan as staleAfterScan } from '../runtime-scan-stale.js';
+
+const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const awayNpc = (name, extra = {}) => ({ ...createNpcRecord(name), id: `npc_${name.toLowerCase()}`, lastSeenTurn: 1, ...extra });
+const staleRun = (npcs, options = {}) => applyStaleNpcLifecycle({ turn: 100, npcs }, { turn: 100, archiveAfter: 30, deleteAfter: 50, ...options });
+
+test('stale pass: a dossier that matters, away past the delete age, is archived with its portrait; an incidental one is deleted as before', () => {
+    const cases = {
+        portrait: awayNpc('Pia', { portrait: { dataUrl: PNG_1PX } }),
+        cast: awayNpc('Cas', { castFrom: { key: 'pack:cas' } }),
+        meter: awayNpc('Mel', { relationship: { ...createNpcRecord('x').relationship, trust: 2 } }),
+        memory: awayNpc('Mem', { memories: ['Shared a secret.'] }),
+        director: awayNpc('Dir'),
+    };
+    const incidental = awayNpc('Inc');
+    const result = staleRun([...Object.values(cases), incidental], { keepIds: [cases.director.id] });
+    assert.deepEqual(result.removed.map(item => item.id), [incidental.id], 'only the incidental dossier is deleted');
+    for (const [label, npc] of Object.entries(cases)) {
+        const kept = result.state.npcs.find(item => item.id === npc.id);
+        assert.ok(kept, `${label}: kept`);
+        assert.equal(kept.archived, true, `${label}: archived`);
+        assert.equal(kept.archiveReason, 'stale');
+    }
+    assert.equal(result.state.npcs.find(item => item.id === cases.portrait.id).portrait.dataUrl, PNG_1PX, 'the portrait stays');
+    // An already stale-archived one that matters stays through later passes (no timed delete).
+    const again = staleRun(result.state.npcs.filter(npc => npc.id !== cases.director.id));
+    assert.equal(again.removed.length, 0, 'matter-bearing archives stay on later passes');
+});
+
+test('stale pass: a stale archive that matters is never timed out, and the director criterion needs the id', () => {
+    const kept = setNpcArchived(awayNpc('Cas', { castFrom: { key: 'pack:cas' } }), true, { reason: 'stale' });
+    assert.equal(staleRun([kept]).removed.length, 0);
+    const plain = setNpcArchived(awayNpc('Dir'), true, { reason: 'stale' });
+    assert.equal(staleRun([plain], { keepIds: [plain.id] }).removed.length, 0, 'key person / away: kept');
+    assert.equal(staleRun([plain]).removed.length, 1, 'not named by the director: deleted as before');
+});
+
+test('stale pass at the roster cap: archives what matters, deletes the incidental one first, and never deletes a protected dossier', () => {
+    const settings = { autoPruneStale: true, maxNpcs: 2, staleArchiveAfter: 30, staleDeleteAfter: 50 };
+    const heldA = awayNpc('Cas', { castFrom: { key: 'pack:cas' } });
+    const heldB = awayNpc('Pia', { portrait: { dataUrl: PNG_1PX } });
+    const onlyProtected = staleAfterScan({ turn: 100, npcs: [heldA, heldB] }, {}, '', settings, { onlyWhenAtCap: true });
+    assert.equal(onlyProtected.removed.length, 0);
+    assert.equal(onlyProtected.state.npcs.length, 2, 'the cap is never met by deleting a protected dossier');
+    assert.ok(onlyProtected.state.npcs.every(npc => npc.archived), 'they are archived, which frees the active slots for a new candidate');
+    const incidental = awayNpc('Inc');
+    const mixed = staleAfterScan({ turn: 100, npcs: [heldA, incidental] }, {}, '', settings, { onlyWhenAtCap: true });
+    assert.deepEqual(mixed.removed.map(item => item.id), [incidental.id]);
+    const recent = awayNpc('Rec', { lastSeenTurn: 99, castFrom: { key: 'pack:rec' } });
+    const nonStale = staleAfterScan({ turn: 100, npcs: [recent, { ...heldA, lastSeenTurn: 99 }] }, {}, '', settings, { onlyWhenAtCap: true });
+    assert.equal(nonStale.state.npcs.length, 2, 'only protected and recent: nothing is deleted, the cap simply holds (a new candidate waits)');
+});

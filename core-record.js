@@ -12,6 +12,7 @@ import { PORTRAIT_NPC_PROMPT_LIMIT } from './core-portrait.js';
 import { emptyProfileEvidence, normalizeProfileEvidence } from './core-evidence.js';
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
 import { CAST_APPEARANCE_WIDE, castAppearanceKept, normalizeAppearanceCanon, normalizeLifeStateCertainty, normalizePortraitSeed, normalizeStoredMemories, stripRecordCitations } from './core-record-shared.js';
+import { portraitHasImage } from './src/portrait-file.js';
 import { impactDayProblems } from './src/relationship-pacing.js';
 import { normalizeCustomFields } from './core-record-custom-fields.js';
 export function setNpcArchived(npc, archived, { reason = 'manual', sourceMessageId = null, lifeState = null } = {}) {
@@ -248,11 +249,20 @@ export function createNpcRecord(name, existingIds = [], baseline = DEFAULT_RELAT
 }
 
 
+// A dossier that matters is archived by the stale pass, never deleted: it holds a portrait image, comes from the cast pack, has a
+// non-zero relationship meter or a stored memory, or its id is in options.keepIds (Story Director's key people and away list).
+export function npcMattersForRetention(npc, keepIds = new Set()) {
+    return portraitHasImage(npc?.portrait) || Boolean(npc?.castFrom && typeof npc.castFrom === 'object')
+        || RELATIONSHIP_KEYS.some(key => Number(npc?.relationship?.[key]) !== 0 && Number.isFinite(Number(npc?.relationship?.[key])))
+        || (Array.isArray(npc?.memories) && npc.memories.length > 0) || keepIds.has(npc?.id);
+}
+
 export function applyStaleNpcLifecycle(state = {}, options = {}) {
     const turn = Math.max(0, Math.round(Number(options.turn ?? state?.turn ?? 0) || 0));
     const archiveAfter = Math.max(1, Math.round(Number(options.archiveAfter) || 30));
     const deleteAfter = Math.max(archiveAfter + 1, Math.round(Number(options.deleteAfter) || 50));
     const protectedIds = new Set((options.protectedIds || []).map(value => String(value || '').trim()).filter(Boolean));
+    const keepIds = new Set((options.keepIds || []).map(value => String(value || '').trim()).filter(Boolean));
     const next = { ...state };
     const archived = [];
     const removed = [];
@@ -270,8 +280,9 @@ export function applyStaleNpcLifecycle(state = {}, options = {}) {
 
         // Only stale-auto-archives participate in timed deletion. Manual and death archives are
         // durable records and remain until the player explicitly removes them.
+        const matters = npcMattersForRetention(npc, keepIds);
         if (npc.archived) {
-            if (npc.archiveReason === 'stale' && age >= deleteAfter) {
+            if (npc.archiveReason === 'stale' && age >= deleteAfter && !matters) {
                 removed.push({ id: npc.id, name: npc.name, age, activityTurn, archiveReason: 'stale' });
                 removedIds.add(npc.id);
                 continue;
@@ -280,14 +291,14 @@ export function applyStaleNpcLifecycle(state = {}, options = {}) {
             continue;
         }
 
-        if (age >= deleteAfter) {
+        if (age >= deleteAfter && !matters) {
             // On upgrades or very long gaps, a dossier may already be beyond both thresholds.
             // Delete it directly rather than creating a one-scan zombie archive.
             removed.push({ id: npc.id, name: npc.name, age, activityTurn, archiveReason: 'stale' });
             removedIds.add(npc.id);
             continue;
         }
-        if (age >= archiveAfter) {
+        if (age >= archiveAfter) { // (also a dossier that matters past the delete age: archived, kept)
             npc = setNpcArchived(npc, true, { reason: 'stale' });
             archived.push({ id: npc.id, name: npc.name, age, activityTurn });
         }
