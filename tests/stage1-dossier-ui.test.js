@@ -142,21 +142,14 @@ test('Stage 1 UI loads after the canonical legacy runtime and remains package-re
   assert.ok(ui > engine, 'Stage 1 UI must load after the canonical runtime API exists');
 });
 
-test('bond tone and word: close, hostile, duty and neutral relations; the bond list shows word and tone', async () => {
-  const { bondTone, bondWord, bondsListHtml } = await import('../dossier-ui-bond-tone.js');
+test('bond tone: close, hostile, duty and neutral relations', async () => {
+  const { bondTone } = await import('../dossier-ui-bond-tone.js');
   assert.equal(bondTone('mother'), 'close');
-  assert.equal(bondWord('aunt'), 'aunt/uncle');
   assert.equal(bondTone('rival'), 'hostile');
   assert.equal(bondTone('former friend turned enemy'), 'hostile');
-  assert.equal(bondWord('sworn enemy'), 'enemy');
   assert.equal(bondTone('owes him a debt'), 'duty');
   assert.equal(bondTone('colleague'), 'neutral');
   assert.equal(bondTone(''), 'neutral');
-  const html = bondsListHtml(['Ilse — sister | loyal', 'Rook — sworn enemy', 'Plain note'], 'none');
-  assert.match(html, /delta-bond-close">sibling<\/span> Ilse — sister \| loyal/);
-  assert.match(html, /delta-bond-hostile">enemy<\/span>/);
-  assert.match(html, /<li>Plain note<\/li>/);
-  assert.match(bondsListHtml([], 'No bonds'), /No bonds/);
 });
 
 const rika = {

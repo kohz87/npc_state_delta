@@ -87,7 +87,7 @@ Generated 2026-11-07.
 - `dossier-ui-dial.js`: The Board dial: portrait under an SVG ring with the four meter arcs and their numbers.
 - `dossier-ui-header.js`: Dossier header ⋯ menu markup (Edit, Refresh, More) with the existing action classes and `data-npc-id` hooks.
 - `dossier-ui-html.js`: Escaped dossier markup, cards, appearance forms, portrait references and section helpers split from `dossier-ui.js`.
-- `dossier-ui-bond-tone.js`: Bond tone (close, hostile, duty, neutral) and short relation word for the dossier bond line, from `social-relations.js` families plus enemy/duty words.
+- `dossier-ui-bond-tone.js`: Bond tone (close, hostile, duty, neutral) of a relation word and of tie tags, from `social-relations.js` families plus enemy/duty words.
 - `npc-instincts.js`: Pure pull core: Belonging, Closure and Awe signal readers, per-NPC inst values (belo/clos/awe) and the top pressure {kind, cause, since}; no host access.
 - `npc-mood.js`: Pure mood (VAD) core: the mood {v,a,d,day,cause} clamp and shape, trust-drop/betrayal/rest/safe deltas, decay per story day, the 3x3 word table, Energy/Control bars and cause text; no host access.
 - `dossier-ui-library.js`: Library screen: tone-ringed faces, search box, key-first ordering and face markup (replaces the cast rail's `renderRail`).
