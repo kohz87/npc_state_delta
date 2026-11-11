@@ -253,7 +253,7 @@ test('without a v2 host the same turns send nothing, and the sidecar and the inj
     assert.equal(alone.hosted, null);
     assert.equal(alone.sent, 0, 'nothing is sent without a host');
     assert.equal(hosted.hosted, '1');
-    assert.equal(hosted.sent, 1);
+    assert.equal(hosted.sent, 2, 'the forwarded change (npc.adjust) and the meeting of the person this scan admitted (npc.meet)');
     assert.ok(alone.relationship.trust > 0);
     assert.deepEqual(alone.relationship, hosted.relationship, 'the sidecar numbers follow v1 rules either way');
     assert.deepEqual(alone.lastChange, hosted.lastChange);

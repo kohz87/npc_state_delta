@@ -247,7 +247,7 @@ export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
                 metrics[profileId ? 'profileRoute' : 'defaultRoute'] += 1;
             }
             const since = sendYield ? sendYield.epoch() : 0;
-            const call = invoke();
+            const call = Promise.resolve(invoke());
             void call.catch(() => {});   // a yielded call's late answer or error is discarded
             const yielded = sendYield ? sendYield.pressed(since).then(() => YIELDED) : new Promise(() => {});
             response = await aroundWait(Promise.race([call, stopped, yielded]));
