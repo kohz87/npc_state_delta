@@ -77,6 +77,8 @@ Generated 2026-11-07.
 - `dossier-ui-controller.js`: Dossier controller actions, refresh orchestration, editor and settings bridges split from `dossier-ui.js`.
 - `dossier-ui-html.js`: Escaped dossier markup, cards, appearance forms, portrait references and section helpers split from `dossier-ui.js`.
 - `dossier-ui-bond-tone.js`: Bond tone (close, hostile, duty, neutral) and short relation word for the dossier bond line, from `social-relations.js` families plus enemy/duty words.
+- `npc-instincts.js`: Pure pull core: Belonging, Closure and Awe signal readers, per-NPC inst values (belo/clos/awe) and the top pressure {kind, cause, since}; no host access.
+- `npc-mood.js`: Pure mood (VAD) core: the mood {v,a,d,day,cause} clamp and shape, trust-drop/betrayal/rest/safe deltas, decay per story day, the 3x3 word table, Energy/Control bars and cause text; no host access.
 - `dossier-ui-meters.js`: Hosted meter bars, rank, milestones and Secrets-section projections and markup split from `dossier-ui.js`.
 - `dossier-ui-model.js`: Dossier record lookups, change stamps and index/detail projections split from `dossier-ui.js`.
 - `dossier-ui-mount.js`: Singleton dossier UI mounting and open-dossier request forwarding split from `dossier-ui.js`.

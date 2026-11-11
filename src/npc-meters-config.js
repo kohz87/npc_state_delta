@@ -53,6 +53,7 @@ export const FEATURE_PRESETS = 'npc-state-delta.presets';
 export const FEATURE_SCAN_EVERY_REPLY = 'npc-state-delta.scan-every-reply';
 // The anti-lever gate (npc-meters-gate.js): off by default, so the static prompt and every old chat stay as they were.
 export const FEATURE_GATE = 'npc-state-delta.anti-lever';
+export const FEATURE_MOOD_PULL = 'npc-state-delta.mood-pull';
 
 // "How much to track" (Story Block): the Lean preset turns this feature off; Standard is its default.
 const LEAN_OFF = Object.freeze({ lean: false });
@@ -67,6 +68,9 @@ export const FEATURES = Object.freeze([
     Object.freeze({ id: FEATURE_SCAN_EVERY_REPLY, label: 'Scan after every reply', describe: 'Off: the automatic scan runs every 3 replies (or the "Scan every" setting if larger) and that scan reads every reply since the last one, so a reply in between is read, not lost. A manual scan always runs.', default: true, presets: LEAN_OFF }),
     // A story line may say `| via: praise`; the same approach to the same person again soon gives less and then backfires (npc-meters-gate.js).
     Object.freeze({ id: FEATURE_GATE, label: 'Anti-lever: repeated approaches give less', describe: 'A story line may name its approach (praise, gift, help, flirt, threat, shared danger); repeating it to one person within a few days gives less, then backfires. Story lines only.', default: false, prompt: true, presets: LEAN_OFF }),
+    // Mood and pull (npc-mood.js, npc-instincts.js): code-set state on each record plus tail lines for present NPCs. Off by default, so an
+    // old chat's prompt and state stay byte-identical; a new chat turns it on in the feature list (the same gate as the anti-lever feature).
+    Object.freeze({ id: FEATURE_MOOD_PULL, label: 'Mood and pull', describe: 'Each person has a mood (how a betrayal or a trust drop left them) and a pull (an instinct such as wanting closure or belonging); the narrator is told both for people present.', default: false, prompt: true, presets: LEAN_OFF }),
 ]);
 export const FEATURE_DEFAULTS = Object.freeze(Object.fromEntries(FEATURES.map(feature => [feature.id, feature.default])));
 
@@ -85,7 +89,7 @@ export const REASON_LABELS = new Set(['reason', 'why', 'because', 'note', 'cause
 const RESERVED_IDS = new Set(['stage', 'stages', 'disposition', 'name', 'meter', 'meters', 'milestone', 'milestones', ...REASON_LABELS]);
 export const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 export const WORDS = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u;
-export const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day', 'held', 'progress', 'impactDay', 'lastEvent', 'via']);
+export const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day', 'held', 'progress', 'impactDay', 'lastEvent', 'via', 'mood', 'inst', 'pull', 'track']);
 // The impact tiers of a story line (`| impact: major`), the scanner's own: the line's step is held to the tier's cap
 // (the reader's relationshipCaps). A missing or unknown tier is the smallest.
 export const IMPACT_TIERS = Object.freeze(['ordinary', 'meaningful', 'major', 'extreme']);

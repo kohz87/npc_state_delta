@@ -3,6 +3,8 @@
 import { NPC_DOMAIN, MAX_STAGES_PER_METER, SECRET_TITLE_MAX, NAME_MAX, isObject, isInt, isReplyId, sameReply, clean, own, bandWord, needMet, thresholdReached, stageAt, clamp, intOr } from './npc-meters-config.js';
 import { initialNpcSlice, findNpcKey, meterValue, rungMet, conflictOn } from './npc-meters-slice.js';
 import { readEvent } from './npc-meters-pacing.js';
+import { INSTINCT_KEYS } from '../npc-instincts.js';
+import { moodBars, moodWord, normalizeMood } from '../npc-mood.js';
 import { FEATURE_SOCIAL, SOCIAL_QUERY, socialModifier, socialSettings, socialSkill } from './social-check.js';
 
 export function createNpcQueries({
@@ -130,6 +132,17 @@ export function createNpcQueries({
     }
     const presentKeys = npcs => new Set(presentNames().map(name => findNpcKey(npcs, [name, ...(resolve(name)?.aliases ?? [])])).filter(Boolean));
 
+    // The dossier's mood and pull (feature mood-pull; only a record that has them): `mood` { word, valence, energy, control, bars,
+    // cause } and `pull` { kind, cause, since, days, level (1..3, the top item's score), inst }. Plain data: the UI escapes the text.
+    function moodPullView(record) {
+        const mood = normalizeMood(record.mood);
+        const pull = isObject(record.pull) ? record.pull : null;
+        return {
+            ...(mood ? { mood: { word: moodWord(mood), valence: mood.v, energy: mood.a, control: mood.d, bars: moodBars(mood), cause: mood.cause, day: mood.day } } : {}),
+            ...(pull ? { pull: { kind: pull.kind, cause: pull.cause, since: pull.since, days: isInt(record.day) ? Math.max(0, record.day - pull.since) : 0, level: isObject(record.inst) && isInt(record.inst[INSTINCT_KEYS[pull.kind]]) ? record.inst[INSTINCT_KEYS[pull.kind]] : 0, inst: { ...(isObject(record.inst) ? record.inst : {}) } } } : {}),
+        };
+    }
+
     const queries = {
         /**
          * npc.meters({ name }) → { key, name, meters, stages, unlocked, disposition?, reply?,
@@ -171,6 +184,7 @@ export function createNpcQueries({
                         key, name: record.name, present: here.has(key), bars: list, still: list.map(({ delta, ...bar }) => bar),
                         ...(ladder?.rank ? { rank: ladder.rank } : {}),
                         ...(ladder?.text ? { next: ladder.text } : {}),
+                        ...(record.mood || record.pull ? moodPullView(record) : {}),
                         locked: notes.locked.map(({ id, meter, at, event, opens, text }) => ({ id, ...(meter ? { meter, at } : {}), event, opens, text })),
                         opened: notes.opened.map(({ id, title, text }) => ({ id, title, text })),
                     };

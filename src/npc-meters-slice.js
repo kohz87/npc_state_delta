@@ -8,6 +8,8 @@ import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
 import { flatDayProblems } from './relationship-pacing.js';
 import { readEvent } from './npc-meters-pacing.js';
 import { readApproachRing } from '../npc-meters-gate.js';
+import { normalizeMood } from '../npc-mood.js';
+import { INSTINCT_KINDS } from '../npc-instincts.js';
 
 /** The slice of a chat with no NPC meters yet. */
 export function initialNpcSlice() {
@@ -111,6 +113,25 @@ function validateKeyAway(memory) {
     return errors;
 }
 
+// The mood and pull fields (feature mood-pull): small whole numbers and short plain text, as the cores write them.
+const shortText = (value, max) => typeof value === 'string' && value.length <= max && !/[\u0000-\u001f]/.test(value);
+export function moodPullProblems(record) {
+    const out = [];
+    const { mood, inst, pull, track } = record;
+    if (mood !== undefined && (!isObject(mood) || JSON.stringify(normalizeMood(mood)) !== JSON.stringify(Object.fromEntries(Object.keys(normalizeMood(mood)).map(key => [key, mood[key]]))))) out.push('has an unusable mood');
+    if (inst !== undefined && (!isObject(inst) || Object.keys(inst).some(key => !['belo', 'clos', 'awe'].includes(key)) || Object.values(inst).some(value => !isInt(value) || value < 0 || value > 3))) out.push('has unusable instincts');
+    if (pull !== undefined && (!isObject(pull) || !INSTINCT_KINDS.includes(pull.kind) || !shortText(pull.cause, 120) || !isInt(pull.since) || pull.since < 0 || Object.keys(pull).length !== 3)) out.push('has an unusable pull');
+    if (track !== undefined) {
+        const ok = isObject(track) && Object.keys(track).every(key => ['party', 'join', 'bench', 'threads', 'places'].includes(key))
+            && [track.party].every(value => value === undefined || value === 0 || value === 1)
+            && [track.join, track.bench].every(value => value === undefined || (isInt(value) && value >= 0))
+            && (track.threads === undefined || (isObject(track.threads) && Object.keys(track.threads).length <= 6 && Object.entries(track.threads).every(([id, day]) => id.length > 0 && id.length <= 40 && isInt(day) && day >= 0)))
+            && (track.places === undefined || (Array.isArray(track.places) && track.places.length <= 6 && track.places.every(name => shortText(name, 60) && name.length > 0)));
+        if (!ok) out.push('has an unusable pull memory');
+    }
+    return out;
+}
+
 /** Problems with the slice (§2.5): [] when fine. Any problem rejects the command that made it. */
 export function validateNpcSlice(slice) {
     const errors = [];
@@ -174,6 +195,7 @@ export function validateNpcSlice(slice) {
         if (record.rank !== undefined && (typeof record.rank !== 'string' || !WORDS.test(record.rank) || record.rank.length > METER_ID_MAX)) errors.push(`${where} has an unusable stage on its ladder.`);
         if (record.low !== undefined && (!isInt(record.low) || record.low < 1 || record.low > 1000)) errors.push(`${where} has an unusable count of replies below its stage.`);
         if (record.day !== undefined && !isInt(record.day)) errors.push(`${where} has an unusable story day.`);
+        errors.push(...moodPullProblems(record).map(problem => `${where} ${problem}.`));
         for (const field of Object.keys(record)) {
             if (!RECORD_FIELDS.includes(field)) errors.push(`${where} has an unknown field "${field}".`);
         }
