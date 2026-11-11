@@ -213,7 +213,12 @@ test('the board shows the tiles in order with the player\'s name, escapes text a
   assert.match(html, /data-delta-portrait="\d+"/);
   assert.match(html, /data-delta-screen="profile"/);
   for (const section of ['with', 'now', 'ties', 'past', 'secrets']) assert.match(html, new RegExp(`data-delta-section="${section}"`), section);
-  assert.match(html, /human · female · mage/);
+  assert.match(html, /Human · Female · Mage/, 'each identity part keeps its words with the first letter capitalised');
+  // Mood tile: the word plus both bars, also for a person with no hosted mood (a mid-step rest) and no scanner word (the resting word).
+  assert.match(html, /Energy[\s\S]*Control/);
+  const rest = boardHtml({ ...rika, mood: '', v2Meters: undefined }, {});
+  assert.match(rest, /delta-tile-bar"><span>Energy<\/span><i><b style="width:50%">[\s\S]*Control<\/span><i><b style="width:50%">/);
+  assert.match(boardHtml({ id: 'x', name: 'Marrit', gender: 'male', role: 'bargemaster' }, {}), /Male · Bargemaster/);
 });
 
 test('sections: five screens with arrows and dots; hidden secrets never show their words; bond tones', () => {
@@ -447,4 +452,13 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
   assert.doesNotMatch(sectionScreenHtml('ties', bare), /Lies told|Knows about/);
   assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /Tastes|Drives|look was set/);
+});
+
+test('the dial\'s no-portrait fallback is small initials in the suite font stack, and the desktop layout fits a narrow panel and sizes to its content', () => {
+  const html = boardHtml({ id: 'm', name: 'Marrit' }, {});
+  assert.match(html, /delta-portrait-placeholder[^>]*><span>M<\/span>/);
+  const css = dossierUiSource();
+  assert.doesNotMatch(css.match(/dossier-dial-portrait \.delta-portrait-placeholder \{[^}]*\}/)?.[0] || '', /Georgia|serif;|font-size:48px/);
+  assert.match(css, /\.delta-board \{ grid-template-columns:clamp\(250px,32%,340px\)/);
+  assert.match(css, /@media \(min-width: 651px\) \{\s*#\$\{ROOT_ID\} \.delta-panel \{ height:auto;/);
 });

@@ -1,6 +1,7 @@
 /* NPC State Delta dossier surface: the phase-1 board's view model (data only, no HTML) and the bond-tone / library-ring helpers. The section screens read the projection directly. */
 import { changeStamp, plain, RELATIONSHIP_AXES, relationshipValue, stringList } from './dossier-ui-model.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
+import { moodBars, moodWord } from './npc-mood.js';
 import { bondTone as bondToneOf, tieTone } from './dossier-ui-bond-tone.js';
 
 // Tile titles for the two sections the board names. The label "{{user}}" is kept literal here; the renderer substitutes the player's name.
@@ -132,10 +133,13 @@ function secretsModel(npc) {
     };
 }
 
-// Mood: the meters' word with the Energy and Control bars when the feature has a mood, else the scanner's mood word.
+// Mood: the word with the Energy and Control bars, always (all three mood fields are kept). The meters' mood gives the word and the
+// bar steps; a person with none yet shows the scanner's word (or the resting word) with both bars at the middle step.
 function moodTile(npc) {
     const mood = object(npc.v2Meters).mood;
-    return mood ? { title: 'Mood', text: mood.word, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause } : { title: 'Mood', text: plain(npc.mood) };
+    if (mood) return { title: 'Mood', text: mood.word, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause };
+    const rest = moodBars(null);
+    return { title: 'Mood', text: plain(npc.mood) || moodWord(null), energy: rest.energy, control: rest.control, max: rest.max };
 }
 
 // Pull: the instinct word with a strength ring and "high · 2 days". Null (no tile) without one.

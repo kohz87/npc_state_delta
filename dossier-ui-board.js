@@ -117,7 +117,8 @@ export function boardHtml(npc = {}, { refs = null, userName = 'you', peers = nul
         model.isKey ? { text: '★ Key person', kind: 'key' } : null,
         model.tiles?.mood?.text ? { text: model.tiles.mood.text, kind: 'mood' } : null,
     ].filter(Boolean);
-    const identity = [model.species, model.gender, model.role].filter(Boolean).join(' · ');
+    // As written in the dossier, with the first letter of each part capitalised ("male · bargemaster" reads "Male · Bargemaster").
+    const identity = [model.species, model.gender, model.role].filter(Boolean).map(part => `${[...part][0].toUpperCase()}${[...part].slice(1).join('')}`).join(' · ');
     const tiles = boardTiles(model, { userName, facesHtml: tieFacesHtml(model.tiles?.ties?.faces, { peers, refs }) }).map(boardTileHtml).join('');
     const profile = `<div class="delta-board-dial" role="button" tabindex="0" data-delta-screen="profile" aria-label="${esc(name)} profile">${dialHtml(npc, { refs })}</div>`;
     const nameBlock = `<div class="delta-board-name"><h3>${esc(name)}</h3>`

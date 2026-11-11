@@ -66,11 +66,14 @@ function portraitHtml(npc, className, { alt = true, refs = null } = {}) {
     return `<div class="${className} delta-portrait-placeholder" aria-hidden="true"><span>${initial}</span></div>`;
 }
 
+// As written in the dossier, with the first letter of each part capitalised.
+const capFirst = value => { const text = plain(value); return text ? `${[...text][0].toUpperCase()}${[...text].slice(1).join('')}` : ''; };
+
 function identityLine(npc) {
     return [
-        npc?.species,
-        npc?.gender,
-        npc?.role,
+        capFirst(npc?.species),
+        capFirst(npc?.gender),
+        capFirst(npc?.role),
         npc?.age ? `Age ${npc.age}` : '',
         npc?.apparentAge ? `Looks ${npc.apparentAge}` : '',
     ].filter(Boolean).join(' · ') || 'Identity details not established';

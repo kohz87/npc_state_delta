@@ -182,10 +182,30 @@ export const STYLES = `
 #${ROOT_ID} .delta-lightbox-close { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); }
 #${SETTINGS_ID}.npc-state-delta-stage1-settings-target { outline:2px solid #d8bc78; outline-offset:4px; }
 @supports (color: rgb(from red r g b)) {
-  #${ROOT_ID} .delta-panel { --delta-floor: var(--ss-sheet-floor, rgb(from var(--delta-bg) r g b / 1)); }
+  #${ROOT_ID} .delta-panel, #${ROOT_ID} .delta-panel.ss-cards { --delta-floor: var(--ss-sheet-floor, rgb(from var(--delta-bg) r g b / 1)); }
 }
 @media (max-width: 900px) {
   #${ROOT_ID} .delta-panel { width:calc(100vw / var(--ss-zoomed, 1)); height:calc(100dvh / var(--ss-zoomed, 1)); border-radius:0; border-left:0; border-right:0; }
+}
+/* Desktop (above the phone breakpoint): the panel sizes to its screen, up to its old height, so the board's tiles are not left above an empty pane.
+   The document is the one scroller (a column that fills the stage); the library bar sits at its foot. */
+@media (min-width: 651px) {
+  #${ROOT_ID} .delta-panel { height:auto; max-height:min(940px,96dvh); min-height:min(520px,96dvh); }
+  #${ROOT_ID} .delta-panel-body, #${ROOT_ID} .delta-stage, #${ROOT_ID} .delta-spread { display:flex; flex-direction:column; height:auto; }
+  #${ROOT_ID} .delta-stage, #${ROOT_ID} .delta-spread { flex:1 1 auto; }
+  #${ROOT_ID} .delta-document { flex:1 1 auto; display:flex; flex-direction:column; }
+  #${ROOT_ID} .delta-document > .delta-panes { flex:1 0 auto; height:auto; }
+  #${ROOT_ID} .delta-document > .delta-library-foot { margin-top:auto; flex:none; }
+  /* the relationship map sizes its circle from the stage, so a map screen keeps the panel's full height and a grid spread */
+  #${ROOT_ID} .delta-panel:has(.delta-spread.delta-map-mode) { height:min(940px,96dvh); }
+  #${ROOT_ID} .delta-spread.delta-map-mode { display:grid; flex:1 1 auto; height:auto; }
+  /* Where the panel is forced to the whole screen (launcher-ui.js, up to 1100px) a short board sits in the middle of it, not at the top
+     above a void; a section or profile page fills the height with its panes. */
+  #${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="board"] { align-content:center; }
+  #${ROOT_ID} .delta-panes[data-layout="desktop"]:is([data-screen="section"], [data-screen="profile"]) { align-content:stretch; }
+}
+@media (min-width: 651px) and (max-width: 900px) {
+  #${ROOT_ID} .delta-panel { max-height:calc(100dvh / var(--ss-zoomed, 1)); }
 }
 @media (max-width: 650px) {
   #${ROOT_ID} .delta-launcher { right:10px; bottom:66px; }

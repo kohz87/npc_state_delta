@@ -131,6 +131,9 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-section-screen[data-delta-section="secrets"] { --c:var(--held); }
 #${ROOT_ID} .delta-section-title b { color:var(--c); }
 #${ROOT_ID} .delta-section-dot.on { background:var(--c); }
+/* the dots keep their size where a host's touch rule gives every button a 44-50px minimum (it made them big squares in SillyTavern) */
+#${ROOT_ID} .delta-section-dot { box-sizing:border-box; min-width:0 !important; min-height:0 !important; width:6px !important; height:6px !important; flex:none; }
+#${ROOT_ID} .delta-section-dot.on { width:16px !important; }
 #${ROOT_ID} .delta-sheet h4 { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--c, var(--delta-accent-soft)); }
 #${ROOT_ID} .delta-sheet-track { height:5px; border-radius:3px; }
 #${ROOT_ID} .delta-sheet-track b { border-radius:3px; }

@@ -6,7 +6,8 @@ const PANEL = `#${ROOT_ID}`;
 export const BOARD_STYLES = `
 /* Skin tokens. Neutral (the default, and any unknown value) keeps the panel's own --delta-* vars, so light and dark SillyTavern themes both read.
    Fantasy and Modern are fixed looks: they set the --delta-* palette too, so the whole panel follows the look. */
-${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"] {
+/* (also on the ss-cards panel inside the root: the mixes read --delta-floor / --delta-text where the host's light or dark tokens exist, not the root's fallbacks) */
+${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"], ${PANEL}:not([data-skin]) .delta-panel.ss-cards, ${PANEL}[data-skin="neutral"] .delta-panel.ss-cards {
   --good: #9cc49a; --bad: #d98a83; --held: #d4b56e;
   --dial: color-mix(in srgb, var(--delta-text) 22%, var(--delta-floor));
   --tick: color-mix(in srgb, var(--delta-text) 32%, var(--delta-floor));
@@ -15,7 +16,7 @@ ${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"] {
   --dsk-tile-bg: var(--dsk-tile);
   --dsk-tile-shadow: none; --dsk-tile-radius: 12px; --dsk-face-radius: 50%; --dsk-glow: none;
 }
-${PANEL} { --face-flat: color-mix(in srgb, var(--delta-text) 16%, var(--delta-floor)); }
+${PANEL}, ${PANEL} .delta-panel.ss-cards { --face-flat: color-mix(in srgb, var(--delta-text) 16%, var(--delta-floor)); }
 ${PANEL}[data-skin="fantasy"], ${PANEL}[data-skin="fantasy"] .delta-panel.ss-cards {
   --delta-bg: #18130d; --delta-floor: #18130d; --delta-text: #efe5cf; --delta-muted: #b3a37f; --delta-warn: #e0bf63;
   --delta-surface: #221b12; --delta-surface-strong: #2a2116; --delta-line: #5a4a2c; --delta-line-strong: #9a7c42;
@@ -55,7 +56,8 @@ ${PANEL} .dossier-dial-img, ${PANEL} .dossier-dial-portrait .delta-portrait-plac
 /* head and shoulders: the picture is shown at 150% from the top, as in the mockup */
 ${PANEL} .dossier-dial-img, ${PANEL} .delta-library-portrait:not(.delta-portrait-placeholder), ${PANEL} .delta-tile-face:not(.delta-portrait-placeholder) { transform:scale(1.5); transform-origin:50% 4%; }
 ${PANEL} .dossier-dial-portrait::after { content:"Profile ›"; position:absolute; left:50%; bottom:10px; transform:translateX(-50%); padding:1px 9px; border-radius:999px; background:rgba(0,0,0,.55); color:#fff; font-size:10.5px; font-weight:700; white-space:nowrap; }
-${PANEL} .dossier-dial-portrait .delta-portrait-placeholder { display:grid; place-items:center; font-size:48px; color:var(--delta-accent); background:var(--face-flat); }
+/* no portrait: small initials in the suite font, centred in the disc (the Profile pill sits at its foot, clear of them) */
+${PANEL} .dossier-dial-portrait .delta-portrait-placeholder { display:grid; place-items:center; padding-bottom:14%; font:700 clamp(16px,2.2vw,22px)/1 var(--ss-font, system-ui, -apple-system, "Segoe UI", sans-serif); letter-spacing:.04em; color:var(--delta-muted); background:var(--face-flat); }
 ${PANEL} .dossier-dial-svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
 ${PANEL} .dossier-dial-svg path:not(.dial-arc), ${PANEL} .dossier-dial-svg circle { stroke:var(--dial); }
 ${PANEL} .dossier-dial-svg g { stroke:var(--tick); }
@@ -65,7 +67,7 @@ ${PANEL} .dial-key { font-family:inherit; font-size:7.2px; font-weight:700; lett
 /* Board: the dial, then the name and identity, the pills, the status, then the tiles (two columns on phone and desktop). */
 ${PANEL} .delta-board { display:grid; color:var(--delta-text); }
 ${PANEL} .delta-board-hero { display:grid; align-content:start; min-width:0; }
-${PANEL} .delta-board-dial { display:grid; padding:18px 0 6px; border-radius:12px; cursor:pointer; }
+${PANEL} .delta-board-dial { display:grid; min-width:0; padding:18px 12px 6px; border-radius:12px; cursor:pointer; }
 ${PANEL} .delta-board-name { padding:0 14px 6px; text-align:center; min-width:0; }
 ${PANEL} .delta-board-name h3 { margin:0; font-size:30px; line-height:1.05; font-weight:700; color:var(--delta-accent-soft); overflow-wrap:anywhere; }
 ${PANEL} .delta-board-name p { margin:4px 0 0; font-size:11.5px; }
@@ -113,12 +115,20 @@ ${PANEL} .delta-library-foot { position:sticky; bottom:0; display:block; width:1
 
 /* Desktop: the dial and name are a pane of their own beside the tiles. */
 @media (min-width: 651px) {
-  ${PANEL} .delta-board { grid-template-columns:340px minmax(0,1fr); align-items:start; }
-  ${PANEL} .delta-panes[data-screen="section"] .delta-board { grid-template-columns:300px minmax(0,1fr); }
-  ${PANEL} .delta-board-hero { border-right:1px solid var(--delta-line); padding-bottom:14px; }
+  ${PANEL} .delta-board { grid-template-columns:clamp(250px,32%,340px) minmax(0,1fr); align-items:stretch; }
+  ${PANEL} .delta-panes[data-screen="section"] .delta-board { grid-template-columns:clamp(230px,40%,300px) minmax(0,1fr); }
+  ${PANEL} .delta-board-hero { border-right:1px solid var(--delta-line); padding-bottom:14px; overflow:hidden; }
+  ${PANEL} .delta-board-tiles { align-content:start; }
   ${PANEL} .delta-board-tiles { padding:12px; }
   ${PANEL} .delta-library-faces { grid-template-columns:repeat(5,minmax(0,1fr)); gap:14px; padding:16px; }
   ${PANEL} .delta-library-search { max-width:380px; margin:16px 16px 0; }
+}
+
+/* A narrow desktop panel with a section open: the board pane is the dial and name alone, the section takes the rest. */
+@media (min-width: 651px) and (max-width: 900px) {
+  ${PANEL} .delta-panes[data-screen="section"] .delta-board { grid-template-columns:minmax(0,1fr); }
+  ${PANEL} .delta-panes[data-screen="section"] .delta-board-tiles { display:none; }
+  ${PANEL} .delta-panes[data-layout="desktop"][data-screen="section"] { grid-template-columns:minmax(230px,.8fr) minmax(0,1.4fr); }
 }
 
 /* Phone: the library faces stay two across by their minimum width; the tiles keep two columns. Nothing else changes by width. */
