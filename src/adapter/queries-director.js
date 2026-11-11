@@ -117,11 +117,21 @@ export function createDirectorQueriesPart(session, deps, { hostFeature }) {
             return null;
         }
     }
+    // Story Block's `party.levels` ([{ id, name, level, left }], left members too), or null: not hosted, no host query, or the RPG off.
+    function partyLevelsAnswer() {
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
+        try {
+            const answer = session.sdkRef.query('party.levels', {});
+            return Array.isArray(answer) ? answer : null;
+        } catch {
+            return null;
+        }
+    }
     // The key people, cleaned (src/key-people.js normalizeKeyPeople); the dates are left to the caller (they are not needed for names).
     function keyPeople() {
         const answer = keyPeopleAnswer();
         return answer ? normalizeKeyPeople(answer) : null;
     }
 
-    return { worldShown, keyPeopleAnswer, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople };
+    return { worldShown, partyLevelsAnswer, keyPeopleAnswer, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople };
 }

@@ -21,7 +21,7 @@ Generated 2026-11-07.
 ## Split files
 - `core-record-shared.js`: Admission/portrait constants, cast-appearance preservation, appearance canon, stored-memory normalization, label matching and citation stripping split from `core-record.js`.
 - `core-record-scan.js`: Scan-row normalization, candidate records, admission/promotion and candidate matching split from `core-record.js`.
-- `core-record-custom-fields.js`: Custom-field parsing, value projection and grounded merge split from `core-record.js`.
+- `core-record-custom-fields.js`: Custom-field parsing, value projection and grounded merge split from `core-record.js`.  Also the hosted party-sheet Level (`sheetLevelOf`, `applySheetLevels`, `withoutSheetLevels`).
 - `core-record-merge.js`: Label/place matching, list and Important Memory merging, and durable-text acceptance split from `core-record.js`.
 - `core-prompts-criteria.js`: Default scanner criteria, relationship stripping, payload preparation, prompt-name flattening and rubric compaction split from `core-prompts.js`.
 - `core-prompts-relationship.js`: The focused relationship-pass prompt split from `core-prompts.js`.

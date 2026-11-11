@@ -103,6 +103,7 @@ export const STYLES = `
 #${ROOT_ID} .delta-current-card { min-width:0; padding:10px 11px; border:1px solid rgba(255,255,255,.075); border-radius:8px; background:rgba(0,0,0,.12); }
 #${ROOT_ID} .delta-current-card b { display:block; margin-bottom:3px; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--delta-muted); }
 #${ROOT_ID} .delta-current-card span { display:block; overflow-wrap:anywhere; }
+#${ROOT_ID} .delta-current-card .delta-from { display:inline; margin-left:6px; font-size:.72rem; font-style:normal; color:var(--delta-accent, #8a9bff); }
 #${ROOT_ID} .delta-prose-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px 18px; }
 #${ROOT_ID} .delta-prose-grid .delta-wide { grid-column:1/-1; }
 #${ROOT_ID} .delta-list { margin:0; padding-left:20px; }

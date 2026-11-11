@@ -83,8 +83,8 @@ function changedMark(npc, field) {
     return ` <em class="delta-changed-mark${stamp.legacy ? ' delta-legacy-turn' : ''}" title="${escapeHtml(stamp.title)}">• ${escapeHtml(stamp.mark)}</em>`;
 }
 
-function currentCard(label, value, fallback = 'Unknown', mark = '') {
-    return `<div class="delta-current-card${mark ? ' delta-changed' : ''}"><b>${escapeHtml(label)}${mark}</b><span>${escapeHtml(plain(value, fallback))}</span></div>`;
+function currentCard(label, value, fallback = 'Unknown', mark = '', from = '') {
+    return `<div class="delta-current-card${mark ? ' delta-changed' : ''}"><b>${escapeHtml(label)}${mark}</b><span>${escapeHtml(plain(value, fallback))}${from ? `<em class="delta-from">${escapeHtml(from)}</em>` : ''}</span></div>`;
 }
 
 export function changeSummaryHtml(npc, current = {}) {

@@ -159,3 +159,42 @@ test('the adapter answers rpgOn from the host feature (hosted), false when off',
     s.host.features.set('story-block.rpg', false);
     assert.equal(s.adapter.rpgOn(), false, 'switched off mid-chat: the next read sees it');
 });
+
+// ---- (hosted) an active party member's Level follows their sheet (Story Block's `party.levels`) ----
+test('active party member: stored Level follows the sheet and the scanner\'s Level is ignored; after leaving the last sheet level stays until the scanner states another', async () => {
+    const reason = 'Level: "far beyond anything I can sense"';
+    const story = 'The captain whispers: he is far beyond anything I can sense. Mira is level 3.';
+    const mira = { ...createNpcRecord('Mira'), id: 'npc_mira', aliases: ['the Ranger'], customFields: { Level: '4' } };
+    const scan = (state, fields, party) => mergeScanResult(state, { npcs: [{ id: 'npc_mira', name: 'Mira', customFields: fields, customFieldsReason: reason }] },
+        { turn: 2, customFieldNames: ['Level'], developmentContext: story, ...(party ? { partyLevels: party } : {}) });
+    const active = [{ name: 'Mira', level: 5 }];
+    const a = scan({ npcs: [mira], candidates: [], turn: 1 }, { Level: '40' }, active);
+    assert.equal(a.state.npcs[0].customFields.Level, '5', 'the sheet level, not the scanner\'s 40');
+    assert.deepEqual(a.report.sheetLevels, [{ id: 'npc_mira', reason: 'Level: from the party sheet' }]);
+    assert.equal(scan(a.state, { Level: '40' }, [{ name: 'the ranger', level: 6 }]).state.npcs[0].customFields.Level, '6', 'an alias matches, in any case');
+    assert.equal(scan(a.state, { Level: '40' }, [{ name: 'Mira', level: 5 }]).report.sheetLevels.length, 0, 'unchanged: nothing written');
+    // Left the party: no override; the last sheet level stays, then the scanner's quoted Level wins.
+    const away = scan(a.state, {}, []);
+    assert.equal(away.state.npcs[0].customFields.Level, '5', 'after leaving: the last sheet level stays');
+    assert.equal(scan(away.state, { Level: '40' }, []).state.npcs[0].customFields.Level, '40', 'a later scanner Level wins');
+    // Not hosted / query absent or null: as today.
+    for (const party of [undefined, null, []]) {
+        assert.equal(scan({ npcs: [mira], candidates: [], turn: 1 }, { Level: '40' }, party).state.npcs[0].customFields.Level, '40', `no sheet (${JSON.stringify(party)}): the scanner's Level, as before`);
+    }
+    // Level not configured, or a hand-locked custom fields set: untouched.
+    assert.equal(mergeScanResult({ npcs: [mira], candidates: [], turn: 1 }, { npcs: [] }, { turn: 2, customFieldNames: ['Class'], partyLevels: active }).state.npcs[0].customFields.Level, '4');
+    assert.equal(scan({ npcs: [{ ...mira, manualProfileFields: ['customFields'] }], candidates: [], turn: 1 }, {}, active).state.npcs[0].customFields.Level, '4', 'a hand-set value is never overwritten');
+});
+
+test('the adapter reads party.levels (null without the query), the dossier marks Level "from the party sheet" only for those people', async () => {
+    assert.equal((await suite({})).adapter.partyLevelsAnswer(), null, 'a host without the query: as today (the answer with the query: cast-dossier.test.js)');
+    const { projectDossierState } = await import('../dossier-ui-catalog.js');
+    const { currentCard } = await import('../dossier-ui-html.js');
+    const people = [normalizeNpcRecord({ id: 'npc_mira', name: 'Mira', customFields: { Level: '5' } }), normalizeNpcRecord({ id: 'npc_bo', name: 'Bo', customFields: { Level: '2' } })];
+    const marked = projectDossierState({ npcs: people, customFieldNames: ['Level'], sheetLevels: { npc_mira: true } }, { chatKey: 'c1' }).npcs;
+    assert.equal(marked[0].levelFromSheet, true);
+    assert.equal(marked[1].levelFromSheet, undefined, 'a person off the sheet (or left) has no mark');
+    assert.equal(projectDossierState({ npcs: people, customFieldNames: ['Level'] }, { chatKey: 'c1' }).npcs[0].levelFromSheet, undefined, 'standalone: no mark');
+    assert.match(currentCard('Level', '5', '', '', 'from the party sheet'), /5<em class="delta-from">from the party sheet<\/em>/);
+    assert.doesNotMatch(currentCard('Level', '5', ''), /delta-from/);
+});

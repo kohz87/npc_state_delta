@@ -142,12 +142,13 @@ export function projectDossierState(state = {}, status = {}) {
     const meterViews = state?.meterViews && typeof state.meterViews === 'object' ? state.meterViews : {};
     const keyViews = state?.keyViews && typeof state.keyViews === 'object' ? state.keyViews : {};
     const castViews = state?.castViews && typeof state.castViews === 'object' ? state.castViews : {};
+    const sheetLevels = state?.sheetLevels && typeof state.sheetLevels === 'object' ? state.sheetLevels : {};
     const details = records.map(npc => {
         const detail = dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames });
         const meters = v2MetersProjection(Object.hasOwn(meterViews, String(npc?.id ?? '')) ? meterViews[npc.id] : null);
         const key = keyProjection(Object.hasOwn(keyViews, String(npc?.id ?? '')) ? keyViews[npc.id] : null);
         const cast = castProjection(Object.hasOwn(castViews, String(npc?.id ?? '')) ? castViews[npc.id] : null);
-        return { ...detail, ...(meters?.relChange ? { lastRelationshipChange: ownRelationshipChange(detail.lastRelationshipChange, meters.relChange) } : {}), ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}) };
+        return { ...detail, ...(meters?.relChange ? { lastRelationshipChange: ownRelationshipChange(detail.lastRelationshipChange, meters.relChange) } : {}), ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}), ...(Object.hasOwn(sheetLevels, String(npc?.id ?? '')) ? { levelFromSheet: true } : {}) };
     }).filter(npc => npc.id);
     return {
         chatKey: plain(status?.chatKey, 'no-chat'),
