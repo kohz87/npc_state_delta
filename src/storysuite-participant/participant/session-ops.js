@@ -149,9 +149,10 @@ export function createSessionOps({
     async function verified(id, hash, { lineage, adopt = false } = {}) {
         const doc = await vault.get(id);
         if (!doc) return fail('SNAPSHOT_UNAVAILABLE', `The native checkpoint ${id} is gone, so its dossiers cannot be put back.`);
-        const problem = checkpointProblem(doc, doc?.kind ? hashJson(doc) : '');
+        const actual = doc?.kind ? hashJson(doc) : '';
+        const problem = checkpointProblem(doc, hash, actual);
         if (problem && /newer|not a native|missing|plain/.test(problem)) return fail('SNAPSHOT_UNAVAILABLE', problem);
-        if (hashJson(doc) !== hash) return fail('CONFLICT', `The native checkpoint ${id} is not the one that was saved (another hash).`);
+        if (actual !== hash) return fail('CONFLICT', `The native checkpoint ${id} is not the one that was saved (another hash).`);
         const line = lineage === undefined ? getSession()?.lineage : lineage;
         if (adopt ? !LINEAGE_ID.test(String(doc.lineage)) : doc.lineage !== line && !await formerLine(doc)) return fail('CONFLICT', `The native checkpoint ${id} belongs to another story line.`);
         return { ok: true, doc };

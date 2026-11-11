@@ -122,11 +122,12 @@ export function createParticipantHandlers({
                     // The state now is the selected bytes (the timeline block aside, which keeps both timelines' reserved ids): read back and compared,
                     // then recorded as handed over so the probe `current` answers for it like for any checkpoint. Not acknowledged otherwise.
                     const now = port.readState();
-                    hand(entry.checkpoint, entry.hash, hashJson(now));
+                    const nowHash = hashJson(now);
+                    hand(entry.checkpoint, entry.hash, nowHash);
                     if (!standsOnBytes(got.doc) || !stands(entry.checkpoint, entry.hash)) {
                         return fail('STALE', 'NPC State Delta could not confirm that the selected native state is installed; it is tried again.');
                     }
-                    idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: hashJson(now) };
+                    idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: nowHash };
                 } else {
                     idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: entry.stateHash ?? idx.base?.stateHash ?? '' };
                 }
