@@ -414,6 +414,21 @@ test('notes host: npc.meet gives a scan-admitted person an entry with the dossie
     assert.deepEqual(s.host.store.problems(), []);
 });
 
+test('notes host: npc.meet takes the reply the scan read (as npc.adjust does); rebuild equals live', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    const older = s.host.store.headIndex();
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.adapter.meet({ name: 'Mara', personality: 'cheerful, warm and kind', reply: older });   // a scan of the older reply admitted her
+    const slice = () => s.host.head().domains.npc;
+    assert.ok(slice().npcs.mara && slice().npcs.mara.meters, 'met');
+    assert.deepEqual(validateNpcSlice(slice()), []);
+    const live = JSON.stringify(slice());
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(slice()), live, 'rebuild equals live');
+});
+
 test('scan-admitted people: the scan sends npc.meet for a dossier it just made, not for a known or archived one, and an older host without meet gets nothing', async () => {
     const root = fileURLToPath(new URL('../', import.meta.url));
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-meet-'));
@@ -427,14 +442,28 @@ test('scan-admitted people: the scan sends npc.meet for a dossier it just made, 
     try {
         const { createHostedPart } = await import(pathToFileURL(path.join(ext, 'runtime-hosted.js')).href);
         const deps = { chatHydrationStatus: () => ({}), getChatKey: () => 'k', getChatState: () => ({}), latestMessageId: () => 0, latestReplyIndex: () => 0 };
-        const adapter = { hosted: () => true, flag: async () => {}, adjust: async () => {}, meet: async item => { sent.push(item); } };
+        const order = [];
+        const adapter = { hosted: () => true, flag: async () => { order.push('flag'); }, adjust: async () => { order.push('adjust'); }, meet: async item => { order.push('meet'); sent.push(item); } };
         const part = createHostedPart({ storySuiteV2: adapter }, deps);
         const old = { id: 'o1', name: 'Oren' };
         const fresh = { id: 'n2', name: 'Coram', personality: 'calm and stoic', background: 'a ferryman' };
         const tick = () => new Promise(resolve => setTimeout(resolve, 5));
         part.forwardRelationshipChangesToHost([old], [old, fresh, { id: 'n3', name: 'Gone', archived: true }], 4, null, []);
         await tick();
-        assert.deepEqual(sent, [{ name: 'Coram', personality: 'calm and stoic', about: 'a ferryman' }]);
+        assert.deepEqual(sent, [{ name: 'Coram', personality: 'calm and stoic', about: 'a ferryman', reply: 4 }], 'the meeting names the reply the scan read');
+        sent.length = 0;
+        // Not the dead and not incidental extras (the slice holds 80 people); an ordinary, living, meaningful one is met.
+        const extras = [{ id: 'd1', name: 'Raider', lifeState: 'deceased' }, { id: 'd2', name: 'Raider Two', lifeState: 'dead' }, { id: 'i1', name: 'Passer-by', dossierSignal: 'incidental' }, { id: 'm1', name: 'Wren', dossierSignal: 'meaningful', lifeState: 'alive' }];
+        part.forwardRelationshipChangesToHost([old], [old, ...extras], 4, null, []);
+        await tick();
+        assert.deepEqual(sent.map(item => item.name), ['Wren']);
+        sent.length = 0;
+        // Order: the slice entry first (adjust, else meet), then the look lock, which never makes an entry itself.
+        order.length = 0;
+        const moved = { id: 'n4', name: 'Tarn', relationship: { trust: 5 }, overallAppearance: 'a tall man in grey' };
+        part.forwardRelationshipChangesToHost([old], [old, moved, { id: 'n5', name: 'Lis', overallAppearance: 'a short woman' }], 4, null, []);
+        await tick();
+        assert.deepEqual(order, ['adjust', 'meet', 'meet', 'flag', 'flag'], 'meters and meetings before the look flags');
         sent.length = 0;
         part.forwardRelationshipChangesToHost([old, fresh], [old, fresh], 5, null, []);
         await tick();
