@@ -35,16 +35,19 @@ export function createDirectorQueriesPart(session, deps, { hostFeature }) {
             return null;
         }
     }
-    // Whether the key list can be trusted: true when Story Director answers a list, or is absent (no such query: NOT_FOUND; or its
-    // feature is off and the query answers null), because then there is simply no key list; false for a real failure (any other
-    // error, an answer that is neither a list nor null) or when not hosted-capable. The stale pass deletes nothing while this is false.
+    // Whether the key list can be trusted: true when Story Director is not registered on the host (read from the host's modules, as
+    // worldShown does, never from an error code: then there is simply no key list), or when it answers a list or null (its feature off);
+    // false when a registered Story Director throws or answers a non-list, or when the host cannot say. The stale pass deletes nothing while false.
     function keyPeopleReadable() {
         if (!session.hosted || typeof session.sdkRef?.query !== 'function') return true;
         try {
+            if (!(session.sdkRef.modules?.() ?? []).some(module => module?.id === 'story-director')) return true;
+        } catch { return false; }
+        try {
             const answer = session.sdkRef.query(KEY_PEOPLE_QUERY, {});
             return answer === null || answer === undefined || Array.isArray(answer);
-        } catch (error) {
-            return error?.code === 'NOT_FOUND';
+        } catch {
+            return false;
         }
     }
     // The memory of key people's last absences (npc.keyAway; the slice's `keyAway`), {} when there is none or no host.
