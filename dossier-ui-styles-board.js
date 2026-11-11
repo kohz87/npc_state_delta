@@ -40,7 +40,8 @@ ${PANEL}[data-skin="modern"], ${PANEL}[data-skin="modern"] .delta-panel.ss-cards
 ${PANEL} .delta-library-search { display:flex; align-items:center; gap:8px; margin:12px 12px 0; padding:7px 10px; border:1px solid var(--delta-line); border-radius:10px; color:var(--delta-muted); font-size:12.5px; }
 ${PANEL} .delta-library-search input { flex:1 1 auto; min-width:0; padding:0; border:0; background:transparent; color:var(--delta-text); outline:none; }
 ${PANEL} .delta-library-faces { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; padding:12px; }
-${PANEL} .delta-library-face { --rc:var(--dial); display:grid; justify-items:center; align-content:start; gap:4px; width:100%; min-width:0; padding:14px 8px 12px; border:1px solid var(--delta-line); border-radius:14px; background:var(--dsk-tile); color:var(--delta-text); font:inherit; text-align:center; cursor:pointer; }
+${PANEL} .delta-library-face { --rc:var(--dial); display:grid; justify-items:center; align-content:start; gap:4px; width:100%; min-width:0; padding:14px 8px 12px; border:1px solid var(--delta-line); border-radius:14px; background:var(--dsk-tile); color:var(--delta-text); font:inherit; text-align:center; cursor:pointer; content-visibility:auto; contain-intrinsic-size:auto 150px; }
+${PANEL} .delta-library-face:focus, ${PANEL} .delta-library-face:focus-visible { content-visibility:visible; }
 ${PANEL} .delta-library-face.selected { outline:2px solid var(--delta-accent); outline-offset:-1px; }
 ${PANEL} .delta-library-av { display:block; width:72px; height:72px; margin-bottom:10px; overflow:hidden; border-radius:var(--dsk-face-radius); box-shadow:0 0 0 2px var(--dsk-tile), 0 0 0 3.5px var(--rc); }
 ${PANEL} .delta-library-portrait { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 4%; }

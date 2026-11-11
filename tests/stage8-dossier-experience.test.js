@@ -82,6 +82,9 @@ test('dossier library is a grid of tone-ringed faces; the old collapsible cast r
     const styles = fs.readFileSync(fileURLToPath(new URL('../dossier-ui-styles-board.js', import.meta.url)), 'utf8');
     assert.match(styles, /\.delta-library-faces \{ display:grid; grid-template-columns:repeat\(auto-fill,minmax\(140px,1fr\)\)/);
     assert.match(styles, /\.delta-library-av \{[^}]*box-shadow:0 0 0 2px var\(--dsk-tile\), 0 0 0 3\.5px var\(--rc\)/);
+    // Off-screen faces skip layout and paint (speed only); a focused face stays fully drawn so its focus ring is not clipped.
+    assert.match(styles, /\.delta-library-face \{[^}]*content-visibility:auto; contain-intrinsic-size:auto 150px;/);
+    assert.match(styles, /\.delta-library-face:focus-visible \{ content-visibility:visible; \}/);
     assert.doesNotMatch(source, /delta-cast-card|delta-cast-rail-wrap|delta-rail-arrow|libraryCollapsed|ensureLibraryChrome/);
     assert.doesNotMatch(source, /delta-library-collapsed|data-delta-library-toggle/);
 });
