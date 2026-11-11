@@ -25,11 +25,7 @@ export function createMemo(s, deps) {
         const key = headKey(arr);
         if (s.guardSeen) {
             const mark = markNow();
-            if (mark !== s.lastMark) {
-                s.lastMark = mark;
-                s.cache = null;
-                forgetMemos();
-            }
+            if (mark !== s.lastMark) markFlipped(mark);
         }
         if (s.cache && !sameKey(s.cache.key, key) && stillHolds(arr, key)) {
             s.cache = { ...s.cache, key };
@@ -43,15 +39,61 @@ export function createMemo(s, deps) {
             const { state, problems, applied = [], from = -1 } = key.index < 0 ? { state: null, problems: [] } : replay(arr, key.index);
             const kept = !state && s.fallback ? preservedAt(arr, true) : null;
             s.cache = { key, state: kept ? s.fallback : state, problems, applied, from, ...(kept ? { readOnly: kept } : {}) };
+            s.cacheEnv = envNow();      // the Features the head was replayed under (they change with a module held, so a bank is kept per mark and env)
             if (state) s.known = carrierIndexes(arr).map(i => arr[i]);
         }
         return s.cache;
+    }
+
+    // The guards' mark changed (a module held or released, a barrier flip) with no write: the chat's data is the same, so what was read
+    // under the old mark is stashed in `s.banks` (with `writeSeq` and the chat's fingerprint) and the new mark's bank, when it was stashed
+    // since the last data change and the chat still is what it was, comes back. The bank's key is the mark and the replay environment (the Features
+    // a held module switches off) the head was read under; both must be the same again. A data change (forgetMemos, write) drops every bank.
+    // `s.prefixes` and the witness answers are keyed by the mark and stay. → true when a bank came back.
+    const BANKS_MAX = 4;
+    const bankKey = (mark, env) => `${mark}\u0000${env ?? ''}`;
+    function markFlipped(mark) {
+        const arr = list();
+        const old = s.lastMark;
+        if (s.cache && s.cache.state) {
+            const fingerprint = [];
+            walkChat(arr, value => { fingerprint.push(value); return true; });
+            const was = bankKey(old, s.cacheEnv);
+            s.banks.delete(was);
+            s.banks.set(was, { seq: s.writeSeq, arr, fingerprint, chatId: chatId(), marked: marked(), archived: archive().size, meta: metaNow(),
+                cache: s.cache, cacheEnv: s.cacheEnv, known: s.known, replanFrom: s.replanFrom, atMemo: s.atMemo, lineMemo: s.lineMemo, tail: s.tail });
+            while (s.banks.size > BANKS_MAX) s.banks.delete(s.banks.keys().next().value);
+        }
+        s.lastMark = mark;
+        s.epoch++;          // open scopes check again
+        s.cache = null;
+        s.tail = null;
+        s.lineMemo = null;
+        s.atMemo = new Map();
+        s.witnessGen = null;
+        const want = bankKey(mark, envNow());
+        const bank = s.banks.get(want);
+        if (!bank) return false;
+        s.banks.delete(want);
+        let at = 0;
+        if (bank.seq !== s.writeSeq || bank.arr !== arr || bank.chatId !== chatId() || bank.marked !== marked() || bank.archived !== archive().size
+            || bank.meta !== metaNow() || !sameKey(bank.cache.key, headKey(arr))
+            || !walkChat(arr, value => bank.fingerprint[at++] === value) || at !== bank.fingerprint.length) return false;
+        s.cache = bank.cache;
+        s.cacheEnv = bank.cacheEnv;
+        s.known = bank.known;
+        s.replanFrom = bank.replanFrom;
+        s.atMemo = bank.atMemo;
+        s.lineMemo = bank.lineMemo ? { ...bank.lineMemo, epoch: s.epoch } : null;
+        s.tail = bank.tail;
+        return true;
     }
 
     // After a write that changed the head carrier's record: keep the cache, with the new key.
     // `applied`: the proof of the blocks that applied since the replay began (cache.applied), as it is after this write: undefined
     // keeps it, null says it is not known (the next read works it out again).
     function retain(arr, state, problems = s.cache?.problems ?? [], applied = s.cache?.applied ?? null) {
+        s.cacheEnv = envNow();
         s.cache = { key: headKey(arr), state, problems, applied, from: s.cache?.from ?? -1, ...(s.cache?.readOnly && s.cache.state === state ? { readOnly: s.cache.readOnly } : {}) };
     }
 
@@ -99,6 +141,8 @@ export function createMemo(s, deps) {
     // Forgets the memos (a rebuild, or a write that is not on the head carrier alone).
     function forgetMemos() {
         s.epoch++;
+        s.writeSeq++;      // a data change: no bank kept under another mark can hold any more
+        s.banks.clear();
         s.tail = null;
         s.lineMemo = null;
         s.atMemo = new Map();
@@ -350,5 +394,5 @@ export function createMemo(s, deps) {
         };
     }
 
-    return { current, retain, carrierAt, memoAt, frozenReceipts, forgetMemos, witnessKeyOf, markSeen, witnessGeneration, lineOf, baseFor, stateBefore, take, sidFor, carriedTo, spansOf, spansFor, blockParts, receiptsOf, asOps, prefixWitnessUncached };
+    return { current, retain, markFlipped, carrierAt, memoAt, frozenReceipts, forgetMemos, witnessKeyOf, markSeen, witnessGeneration, lineOf, baseFor, stateBefore, take, sidFor, carriedTo, spansOf, spansFor, blockParts, receiptsOf, asOps, prefixWitnessUncached };
 }

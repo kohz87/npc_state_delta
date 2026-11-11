@@ -98,6 +98,7 @@ export function normalizeEvents(list) {
         if (!isRecord(raw)) { reject('An event must be a record.'); continue; }
         const fire = normalizeFire(raw);
         if (fire.why) { reject(fire.why); continue; }
+        if (raw.decision !== undefined && (checkId(raw.decision, 'A decision') || fire.value.once === false)) { reject('A decision needs an id and a once event.'); continue; }
         if (seen.has(id)) { reject(`Two events share the id "${id}"; the first one is kept.`); continue; }
         if (typeof raw.when !== 'string' || !raw.when.trim()) { reject(`The event "${id}" has no condition ("when").`); continue; }
         const parsed = compile(raw.when);
@@ -109,7 +110,7 @@ export function normalizeEvents(list) {
             if (after === id) { reject(`The event "${id}" waits for itself.`); continue; }
         }
         seen.add(id);
-        defs.push({ id, pack, when: raw.when, ...fire.value, after });
+        defs.push({ id, pack, when: raw.when, ...fire.value, after, ...(raw.decision === undefined ? {} : { decision: raw.decision }) });
     }
     // `after` must name a once event (only those leave a claim), and chains must not loop.
     const byId = new Map(defs.map(def => [def.id, def]));
@@ -206,15 +207,27 @@ export function createFireEvent(events = () => []) {
         const view = { state: { domains }, query: (name, args) => ctx.query(name, args) };
         let list;
         try { list = events(view); } catch { list = []; }
-        const def = normalizeEvents(Array.isArray(list) ? list : []).defs.find(entry => entry.id === payload.id);
+        const defs = normalizeEvents(Array.isArray(list) ? list : []).defs;
+        let def = defs.find(entry => entry.id === payload.id);
         if (!def) ctx.fail('REFUSED', `No enabled pack has an event "${payload.id}".`);
+        if (def.decision) {
+            const snapshot = ctx.query('events.replayState');
+            const state = { domains, meta: { claims: snapshot.claims } };
+            const group = defs.filter(entry => entry.pack === def.pack && entry.decision === def.decision);
+            const report = inspect({ ...view, state }, group);
+            if (report.events.some(row => row.status === 'error')) ctx.fail('FAILED', 'The event decision could not be checked.');
+            def = group.find(entry => report.due.includes(entry.id));
+            if (!def) ctx.fail('NO_LONGER_DONE', 'No event in this decision is due on this line of the story.');
+            const predicate = { kind: 'events.decision', pack: def.pack, decision: def.decision };
+            ctx.replayGuard({ owner: 'story-block', version: 2, epoch: ctx.epoch, rulesHash: null, inputHash: snapshot.hash, predicate });
+        }
         const met = evaluateCondition(def.when, view);
         if (met.error || !met.met) ctx.fail('REFUSED', `The event "${def.id}" is not due: its condition is not met.`);
         const at = Number.isSafeInteger(payload.at) && payload.at >= 0 ? payload.at : null;
         if (def.once && !ctx.claim(claimKey(def.id))) ctx.fail('CLAIMED', `The event "${def.id}" has already happened on this line of the story.`);
         if (!def.once && at !== null && !ctx.claim(repeatKey(def.id, at))) ctx.fail('CLAIMED', `The event "${def.id}" has already happened for this reply.`);
         for (const step of def.then) ctx.call(step.command, step.payload, { as: `event:${def.id}` });
-        return { summary: def.cue, narrate: true, data: { event: def.id, then: def.then.map(step => step.command) } };
+        return { summary: def.cue, narrate: true, data: { event: def.id, then: def.then.map(step => step.command) }, ...(def.decision ? { replan: true } : {}) };
     }
     // An internal command (registry.js): the bus refuses it with cause 'ui' and the public sdk never sends it.
     Object.defineProperty(fireEvent, 'internal', { value: true, enumerable: true });

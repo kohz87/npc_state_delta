@@ -89,7 +89,7 @@ export function createStore({
     chat, save, now = null, apply = applyOps, onSaveError = null, timers = globalThis,
     checkpointEvery = CHECKPOINT_EVERY, checkpointBytes = CHECKPOINT_BYTES, recordId = newRecordId, validate = null,
     chatId = () => undefined, place = () => null, rescue = null, scratch = null, receiptKeep = RECEIPT_KEEP,
-    confirm = null, memo = null, metadata = () => null, marked = () => false, replayEnv = () => '',
+    confirm = null, memo = null, metadata = () => null, marked = () => false, replayEnv = () => '', witnessPrefixMax = null,
 } = {}) {
     if (typeof chat !== 'function') throw new TypeError('createStore needs a chat() function.');
     if (typeof apply !== 'function') throw new TypeError('createStore needs an apply(state, ops) function.');
@@ -107,10 +107,14 @@ export function createStore({
         unsaved: new Map(),  // message → { index, chatId, n }: records written since their chat was saved
         reserved: new WeakMap(),  // message → { swipe, sid }: a record ID handed out before the record
         epoch: 0,
+        cacheEnv: null,  // the replay environment the cached head was read under (store/memo.js)
+        writeSeq: 0,  // bumped by every data change (a write, forgetMemos); a bank under another mark only holds while it is the same
+        banks: new Map(),  // mark → what was read under it, stashed on a mark flip with no write (store/memo.js markFlipped)
         lineMemo: null,  // { epoch, key, receipts?, untold? }
         atMemo: new Map(),  // index → { arr, epoch, from, refs: [message, record, swipe, mes][], state }
         witnessGen: null,  // the generation of timeline witnesses kept now (see witnessGeneration)
         prefixes: new Map(),  // states after prefixes, keyed by spine hash + replay environment (store/prefix-memo.js)
+        witnessByPrefix: null,  // Map: witness answers by the identity of their own prefix (store/read.js prefixKey), kept across writes, capped
         scopeSpines: null,  // { arr, epoch, run }: the spine run of the witnessScope now open
         counts: { replays: 0, recordsRead: 0, lineScans: 0, witnessMisses: 0, prefixHits: 0, prefixSteps: 0, prefixReplays: 0 },
         guardCheck: null,
@@ -146,6 +150,8 @@ export function createStore({
         const kind = rawKind(there);
         if (KEPT_ASIDE.has(kind)) throw new Error(`The story record on this reply ${WHY[kind](there)}; it is kept as it is and not written over.`);
         s.epoch++;
+        s.writeSeq++;
+        s.banks.clear();
         if (s.holding) s.held.add(message);
         const keep = keeps(message);
         if (s.tail && s.tail.arr[s.tail.upTo] !== message) s.tail = null;      // a reply before the head changed
@@ -322,7 +328,7 @@ export function createStore({
     // that look them up when they run (`current`, `forgetMemos`, `asOps`, `blockParts`, `receiptsOf`, `lineOf`), because createMemo needs their
     // results and is wired after them, where `sameKey` exists. `api` is only used for `api.sourceAt(...)`, which is looked up when it runs.
     const { spineRun, stateAfterPrefix } = createPrefixMemo(s, { chain, chatId, markNow, marked, replay, replayEnv, replayRecord, spineStep });
-    const { current, retain, carrierAt, memoAt, frozenReceipts, forgetMemos, witnessKeyOf, markSeen, witnessGeneration, lineOf, baseFor, stateBefore, take, sidFor, carriedTo, spansOf, spansFor, blockParts, receiptsOf, asOps, prefixWitnessUncached } = createMemo(s, {
+    const { current, retain, markFlipped, carrierAt, memoAt, frozenReceipts, forgetMemos, witnessKeyOf, markSeen, witnessGeneration, lineOf, baseFor, stateBefore, take, sidFor, carriedTo, spansOf, spansFor, blockParts, receiptsOf, asOps, prefixWitnessUncached } = createMemo(s, {
         KEPT_ASIDE, WHY, api: { sourceAt: (...args) => api.sourceAt(...args) }, appliedOf, archive, blocksBefore, chain, chainHash, chatId, checkpointBytes,
         checkpointEvery, checkpointState, headKey, list, markNow, marked, metadata, packOwners, packProblems, preservedAt, proofBefore, proofsBefore,
         rawKind, rawSidAt, recordId, replay, replayEnv, replayRecord, sameKey, settleBehind, sourceFor, spineBefore, stateAfterPrefix, stillHolds, windowHash,
@@ -330,12 +336,12 @@ export function createStore({
     const { head, at, headIndex, opsAt, changesAt, problems, readOnly, startOver, keepEarliest, ensureInitial, proofs, blockAt, replansFrom, boundaryProblems, payloadHashAt, boundary, timelineMarkers, prefixWitness, witnessScope, witnessMemoSize, witnessFresh } = createRead(s, {
         api: { sourceAt: (...args) => api.sourceAt(...args) }, blockParts, blocksBefore, carriedTo, chainHash, current, faultsNow, forgetMemos, idsOf, keptNow,
         list, listProofs, markSeen, memoAt, prefixWitnessUncached, preservedAt, rawKind, readOnlyMessage, reservedSid, saver, sidFor, sourceFor, spansFor,
-        spineRun, witnessGeneration, witnessKeyOf, write,
+        spineRun, witnessGeneration, witnessKeyOf, write, archive, chatId, marked, replayEnv, witnessPrefixMax,
     });
     // The write part (store/write.js): the methods of `api` that change the chat's records. Wired last, after every part and function it
     // calls; nothing here is looked up before it runs.
     const { touch, lifecycleChanged, append, before, replaceStory, reconcile, setNarrated, setPracticeRule, setFoeCap, setRuleMarks, receipts, truncate, untold, work, rebuild, archived, archiveList, batch, renamed, saveIdle, saveLate, idleSaves } = createWrite(s, {
-        advanced, archive, asOps, baseFor, blockParts, bury2, carrierAt, current, forgetMemos, frozenReceipts, guardHolds, headKey, idsOf,
+        advanced, archive, asOps, baseFor, blockParts, bury2, carrierAt, current, forgetMemos, markFlipped, frozenReceipts, guardHolds, headKey, idsOf,
         intactReason, isGuardedBlock, keeps, lineOf, list, marked, markNow, ORPHAN, ownedAlready, place, publish, quarantined, receiptsFor,
         receiptsOf, replay, replayGuarded, replayLegacy, replayRecord, rerunBlock, rescue, retain, sameKey, saver, settleAll, skipped,
         spansFor, spansOf, stamp, stateBefore, step, take, walkSuffix, withSource, writable, write,

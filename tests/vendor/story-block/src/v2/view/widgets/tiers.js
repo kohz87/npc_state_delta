@@ -1,4 +1,4 @@
-// ss.tiers (view/glass.css): the tiered grid. Tiers top to bottom, each a label over a glass card of ss.tile
+// ss.tiers (view/glass-*.css): the tiered grid. Tiers top to bottom, each a label over a glass card of ss.tile
 // tiles, and a connector (a dot and a line) joining one tier to the next: a skill ladder (Basic, Advanced,
 // Finisher), a bag by kind, a crafting chain.
 //

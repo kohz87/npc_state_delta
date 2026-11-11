@@ -1,12 +1,11 @@
 // The Standard formula's sheet reader: every character, foe group and skill resource as a bar (id, kind, name, module, field,
 // value, size); `maxOf` caps a bar by the block field it came from.
 import { blocksFor, foeHealthBlocks } from '../formula.js';
-import { FOE_SLOTS } from '../names.js';
 import { foeBlocksByLevel } from '../foes.js';
 
 export const charId = character => `c:${character.key}`;
 export const foeId = slot => `f:${slot}`;
-const hurtField = slot => `hurt${((slot - 1) % FOE_SLOTS) + 1}`;
+const hurtField = foe => `hurt${foe?.local ?? (((foe?.slot ?? 1) - 1) % 4) + 1}`;
 
 // ---- the sheet, as bars -----------------------------------------------------------------------------------------------
 
@@ -19,7 +18,7 @@ export function rosterOf(sheet, maxOf) {
         return { at, id: charId(character), kind: 'char', character, name: character.who, module: character.module, field: 'health', value, size };
     });
     const foes = sheet.foes.filter(foe => foe.filled).map(foe => {
-        const field = hurtField(foe.slot), size = Math.max(1, Math.min(foe.levelled ? foe.size ?? foeBlocksByLevel(foe.level) : foeHealthBlocks(foe.class), maxOf(foe.module, field)));
+        const field = hurtField(foe), size = Math.max(1, Math.min(foe.levelled ? foe.size ?? foeBlocksByLevel(foe.level) : foeHealthBlocks(foe.class), maxOf(foe.module, field)));
         const value = Number.isInteger(foe.hurt) ? Math.max(0, Math.min(size, foe.hurt)) : size;
         return { at: foe.slot, id: foeId(foe.slot), kind: 'foe', foe, name: foe.name, module: foe.module, field, value, size, slot: foe.slot };
     });

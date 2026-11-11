@@ -12,7 +12,7 @@ const freeze = value => {
 
 export const DATA_MODULES_CAPABILITY = 'data-modules-v1';
 export const DM_LIMITS = freeze({
-    interpreter: 1, definitions: 8, pins: 16, subjects: 16,
+    interpreter: 1, definitions: 20, pins: 28, subjects: 16,
     definitionBytes: 32768, pinsBytes: 262144, instanceBytes: 16384,
     fields: 32, kinds: 16, rules: 32, timers: 8, templates: 16,
     expressionDepth: 6, expressionNodes: 64, effects: 16, imports: 8, offers: 64,
@@ -31,6 +31,8 @@ export const DM_LIMITS = freeze({
     // A Skills block made with the types holds eleven slots (eight combat, three utility) of seven fields each (a `type` per slot), their `who` and the mark: 79 fields and a learn and
     // a practice line per slot, so `skillsFields` 80 and `skillsKinds` 22 (a block of the earlier eight slots is far inside both).
     skillsLegacyFields: 56, skillsFields: 80, skillsKinds: 22, skillTailTokens: 47,
+    // A Foes block (role `foes`) holds up to six groups of three kinds each (set, hurt, clear): 18 kinds, two over the others' 16 (its fields, 24, are inside 32).
+    foesKinds: 18,
     // The most stages a role block's bar field (health, mana, stamina, a foe's health) may have, counted up from 0.
     stages: 10,
     // The same for a character's bar that carries `scale: 2` (the doubled sizes, lean-rpg/templates-bars.js): the most it holds is 2 x (4 + 20/5) = 16 at the stat
@@ -160,6 +162,14 @@ export function dmKindWrites(definition, kind) {
     visit(kind?.effects);
     return { fields, computed };
 }
+
+/**
+ * The room a story has for blocks: its own (`definitions`) and all active (`pins`). A reply captured before the `partyRoom` rule mark
+ * (turn/rule-marks.js) keeps the earlier 8 and 16 on a Re-read, so an old refused join stays refused; every other caller gets the current room.
+ * Bytes (`pinsBytes` 262144) cap it too: a companion's two blocks are about 29 KB, so about 8 fit by size before the block counts.
+ */
+export const DM_OLD_ROOM = freeze({ definitions: 8, pins: 16 });
+export const dmRoom = ctx => (ctx?.cause === 'story' && ctx?.carrier && !ctx.carrier.rules?.includes('partyRoom') ? DM_OLD_ROOM : freeze({ definitions: DM_LIMITS.definitions, pins: DM_LIMITS.pins }));
 
 /** Whether a kind writes a hidden field (or might, through a computed path while some field is hidden). */
 export function dmKindWritesHidden(definition, kind) {

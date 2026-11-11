@@ -10,6 +10,7 @@
 
 import { FIRE, createEngine, createFireEvent } from './engine.js';
 import { EVENTS_NOTE, renderEventsSection } from './section.js';
+import { stateHash } from '../timeline/host-block.js';
 
 export { CALLS, LIMITS, compile, evaluate, evaluateCondition, parse, tokenize } from './condition.js';
 export { FIRE, claimKey, createEngine, createFireEvent, fireEvent, inspect, normalizeEvents, repeatKey } from './engine.js';
@@ -44,7 +45,7 @@ export function createEventsPart({
     return {
         domains: {},
         commands: { [FIRE]: createFireEvent(events) },
-        queries: { 'events.status': status },
+        queries: { 'events.status': status, 'events.replayState': state => ({ hash: stateHash(state), claims: state?.meta?.claims ?? {} }) },
         kinds: {},
         hooks: { beforeGenerate: (view, info) => engine.beforeGenerate(view, info) },
         settings: {

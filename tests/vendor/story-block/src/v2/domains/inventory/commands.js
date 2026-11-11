@@ -185,17 +185,18 @@ export function createInventoryCommands(env) {
                 const editPiece = payload.name !== undefined || payload.note !== undefined;
                 const pieces = Object.values(inv.stacks).filter(item => item.def === stack.def && item.owner === stack.owner);
                 guardReaderEdit(ctx, 'inventory.edit', editStack(stack), editPieces(inv, stack), decision);
-                // If this edit also changes the selected piece, keep that piece when reducing the group.
-                const loose = pieces.filter(item => item.equipped === null && !boundId(ctx, item) && (!editPiece || item.id !== stack.id)).reverse();
+                // The selected piece is never the one removed (the equip that follows in the same Save names it): other loose pieces go, the last added first.
+                const spare = pieces.filter(item => item.equipped === null && !boundId(ctx, item));
+                const loose = spare.filter(item => item.id !== stack.id).reverse();
                 const remove = pieces.length - qty;
-                if (remove > loose.length) ctx.fail('REFUSED', E.itemGroupEquipped);
+                if (remove > loose.length) ctx.fail('REFUSED', spare.length > loose.length ? E.itemGroupSelected : E.itemGroupEquipped);
                 if (remove > 0) for (const item of loose.slice(0, remove)) delete inv.stacks[item.id];
                 if (remove < 0) {
                     readerCarry(ctx, [{ defId: original.id, qty: -remove }], stack.owner);
                     grantInto(ctx, inv, original, -remove, stack.owner, stack.note);
                 }
                 if (!editPiece) {
-                    const remaining = Object.values(inv.stacks).find(item => item.def === original.id && item.owner === stack.owner);
+                    const remaining = inv.stacks[stack.id] ?? Object.values(inv.stacks).find(item => item.def === original.id && item.owner === stack.owner);
                     return { summary: fill(E.itemSet, { detail: fill(E.itemCount, { name: original.name, qty }) }),
                         data: { edit: true, stack: remaining.id, told: TOLD.editKit }, narrate: true };
                 }

@@ -5,7 +5,7 @@ import { validateDataMigration, dataModuleDefaults } from '../check.js';
 import { copy } from '../interpreter.js';
 import { activeDefinition, actorsOf, inputsOf, instanceOf, publicView } from '../adapters.js';
 import { rpgLib } from '../../rpg-lazy.js';
-import { LEAN_RPG_FEATURE, ROLLS_SETTING, practiceFromRollsOnly } from '../../lean-rpg/names.js';
+import { CHECK_GRAMMAR, LEAN_RPG_FEATURE, ROLLS_SETTING, checksOn, practiceFromRollsOnly } from '../../lean-rpg/names.js';
 import { readSheet } from '../../lean-rpg/read.js';
 import { createCore } from './core.js';
 import { createSkills } from './skills.js';
@@ -38,10 +38,23 @@ export function createDataModulesPart(opts = {}) {
             'dm.attach': wrap(d.attach), 'dm.set': wrap(setField), 'dm.act': wrap((ctx, payload, call) => act(ctx, payload, null, call)), 'dm.capture': { internal: true, handler: wrap((ctx, line, call) => act(ctx, {}, line, call)) },
             'dm.tick': { internal: true, handler: wrap(tick) }, 'dm.settle': { internal: true, handler: wrap(settle) },
             // The Ask card's "Add to party" (rpg only: the feature gate leaves it out while the RPG is off).
-            'dm.join': Object.assign(wrap(d.addParty), { feature: LEAN_RPG_FEATURE }) },
+            'dm.join': Object.assign(wrap(d.addParty), { feature: LEAN_RPG_FEATURE }),
+            // A full party's card: the member the reader picked steps out and the newcomer joins (one reader action).
+            'dm.bench': Object.assign(wrap(d.benchParty), { feature: LEAN_RPG_FEATURE }) },
         // `+ party Name | about: … | class: I | best: int` and `- party Name`: under the RPG feature, out of the grammar while Companions who join is Off, and
         // until the story has a Character block (a party line means something only once there is a party).
-        kinds: { dm: kind, party: { grammar: () => rpgLib()?.joinGrammar() ?? '', feature: LEAN_RPG_FEATURE, get enabled() { const lib = rpgLib(); return lib !== null && lib.joinMode(settings()) !== 'off' && lib.partyOf(state()).length > 0; }, apply: wrap(d.party) } },
+        // `? roll Name | skill or stat | difficulty | die`: story checks (lean-rpg/checks; Story Director owns `check`). Here the line is only read and kept; the reply's step after its
+        // lines (practice.js checkStep) works it against the dice recorded with the reply and the sheet. Which replies use it is the reply's own rule mark (`checks`, rule-marks.js),
+        // not today's switch: Story checks Off takes the grammar line and the dice away from new replies only (Rolls does not matter: it is for fights), and an earlier reply's lines keep their results on a Re-read.
+        // The grammar line is constant text: it does not depend on the party.
+        kinds: { roll: { grammar: () => (checksOn(settings()) ? CHECK_GRAMMAR : ''), feature: LEAN_RPG_FEATURE,
+            apply(ctx, line) {
+                if (!ctx.carrier?.rules?.includes('checks')) return ctx.fail('INVALID', `This reply was written before story checks, so "${line?.raw}" was not used.`);
+                const parsed = rpgLib()?.parseCheckLine(line?.raw) ?? { ok: false, reason: 'the RPG is still loading' };
+                if (!parsed.ok) return ctx.fail('INVALID', `"${line?.raw}" was not used: ${parsed.reason}.`);
+                return { summary: '', narrate: false, data: { check: { raw: String(line.raw).slice(0, 200) } } };
+            } },
+            dm: kind, party: { grammar: () => rpgLib()?.joinGrammar() ?? '', feature: LEAN_RPG_FEATURE, get enabled() { const lib = rpgLib(); return lib !== null && lib.joinMode(settings()) !== 'off' && lib.partyOf(state()).length > 0; }, apply: wrap(d.party) } },
         queries: { 'dataModules.offers': offers, 'dataModules.view': moduleView, 'dataModules.public': publicView,
             'dataModules.replayInputs': replayInputs, 'dataModules.actors': actorsOf,
             'dataModules.setup': prefix => {

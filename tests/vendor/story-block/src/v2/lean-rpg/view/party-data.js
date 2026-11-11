@@ -17,7 +17,7 @@ import { levelLabel, playerRankValue } from '../levels.js';
 import { soulLabelOf } from '../soul.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 
-export const FOE_SLOTS = 4;
+export const FOE_SLOTS = 6;
 export const BARS = Object.freeze(['health', 'mana', 'stamina']);
 const ROMAN = Object.freeze(['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX']);
 const RANKS = Object.freeze(['Novice', 'Adept', 'Expert', 'Master']);

@@ -2,7 +2,9 @@
 // modules this chat uses. Everything here is read-only until a button is pressed twice: "Enable for this chat" opens
 // a preview of the exact hashes, subjects and clock baseline and writes nothing; its second button sends `dm.pin` with
 // the hashes that were displayed, so a changed library answers STALE. Cancel and inspect write nothing. No narrator
-// line or pack install enables a module.
+// line or pack install enables a module. "Enable all N for this chat" (above the list, only while a block is available) opens
+// one confirm box with the block names; its Enable all sends the same `dm.pin` each single button sends, one per block, a block
+// that imports another's public query after it; a refusal is shown on that block and the rest still enable; Cancel writes nothing.
 //
 // Pack-written text (names, versions, reasons) goes in through textContent only. `api`: { query(name, args),
 // command(type, payload) } or { sdk }. Returns { refresh() }.
@@ -45,6 +47,8 @@ export function renderDataModules(root, api = {}) {
     let shown = '';
     let notes = {};
     let previewing = '';
+    let confirmingAll = false, enabling = false;
+    const refused = new Set();
     const chosen = new Map();
     let editors = [];
 
@@ -189,20 +193,95 @@ export function renderDataModules(root, api = {}) {
             go.addEventListener('click', () => { item.querySelector('.ss-dm-preview')?.remove(); preview(row, type, item); });
             bar.appendChild(go);
         }
-        if (notes[row.module]) make('p', 'ss-dm-result', notes[row.module], item);
+        if (notes[row.module]) make('p', refused.has(row.module) ? 'ss-dm-result ss-rm-refusal' : 'ss-dm-result', notes[row.module], item);
         if (previewing.startsWith(`${row.module}/`)) preview(row, previewing.slice(row.module.length + 1), item);
         return item;
+    }
+
+    // The blocks Enable all would pin: installed, not enabled, and available (what the single button needs), or waiting only for another
+    // block in this same list to be enabled first (a block that imports another's public query reads it after it: the imports are named
+    // by module id; a cycle keeps the list's own order).
+    const enableable = rows => {
+        const publicOf = row => Object.values(row.definition?.imports ?? {}).filter(entry => entry.query === 'dataModules.public');
+        const active = new Set(rows.filter(row => row.pinned).map(row => row.module));
+        const wanted = rows.filter(row => !row.pinned && row.available !== false);
+        for (let grown = true; grown;) {
+            grown = false;
+            for (const row of rows) {
+                const reads = publicOf(row);
+                if (row.pinned || wanted.includes(row) || row.status !== 'Waiting' || !reads.length || reads.length !== Object.keys(row.definition.imports).length) continue;
+                if (reads.every(entry => active.has(entry.args?.module) || wanted.some(other => other.module === entry.args?.module))) { wanted.push(row); grown = true; }
+            }
+        }
+        const ids = new Set(wanted.map(row => row.module)), done = new Set(), out = [];
+        const visit = (row, trail) => {
+            if (done.has(row.module) || trail.has(row.module)) return;
+            trail.add(row.module);
+            for (const entry of publicOf(row)) {
+                const need = ids.has(entry.args?.module) ? wanted.find(other => other.module === entry.args.module) : null;
+                if (need) visit(need, trail);
+            }
+            done.add(row.module); out.push(row);
+        };
+        for (const row of rows) if (ids.has(row.module)) visit(row, new Set());
+        return out;
+    };
+    // A character block attaches to the reader's own character by default (the one the party roster marks as theirs, matched by name).
+    const readerSubjects = row => {
+        if (row.definition.scope !== 'character') return [];
+        const own = (ask('party.actors') ?? []).find?.(actor => actor?.pc === true)?.name;
+        const match = own ? (row.actors ?? []).find(actor => String(actor.name).toLowerCase() === String(own).toLowerCase()) : null;
+        return match ? [match.id] : [];
+    };
+    // A character block with nobody to attach says so (the box and its note), never silently.
+    const unattached = (row, subjects) => row.definition.scope === 'character' && !subjects.length;
+    async function enableAll(rows) {
+        enabling = true;
+        try {
+            for (const row of enableable(rows)) {
+                const subjects = chosen.get(row.module)?.size ? [...chosen.get(row.module)] : readerSubjects(row);
+                let result;
+                try { result = await run('dm.pin', { module: row.module, hash: row.hash, packHash: row.packHash, subjects }); }
+                catch (error) { result = { ok: false, code: 'ERROR', message: error?.message || 'The command failed.' }; }
+                notes[row.module] = result?.ok ? `${result.receipt?.summary || 'Done.'}${unattached(row, subjects) ? ' No character of yours was found to attach: attach them afterwards.' : ''}` : `${result?.code ?? 'REFUSED'}: ${result?.message ?? 'Not applied.'}`;
+                if (result?.ok) refused.delete(row.module); else refused.add(row.module);
+                chosen.delete(row.module);
+            }
+        } finally { confirmingAll = false; enabling = false; }
+        draw(true);
+    }
+    function enableAllBox(rows) {
+        const todo = enableable(rows);
+        if (!todo.length) { confirmingAll = false; return; }
+        if (confirmingAll) {
+            const box = make('div', 'ss-rm-confirm', '', root);
+            box.setAttribute('role', 'group');
+            make('p', 'ss-rm-confirm-title', `Enable ${todo.length} block${todo.length === 1 ? '' : 's'} for this chat?`, box);
+            const names = make('ul', 'ss-rm-confirm-names', '', box);
+            for (const row of todo) make('li', '', unattached(row, chosen.get(row.module)?.size ? [...chosen.get(row.module)] : readerSubjects(row)) ? `${row.definition.name} (no character of yours found)` : row.definition.name, names);
+            const actions = make('div', 'ss-rm-confirm-actions', '', box);
+            const apply = button('ss-rm-btn ss-rm-btn-pri', { text: 'Enable all' });
+            const cancel = button('ss-rm-btn', { text: 'Cancel' });
+            cancel.addEventListener('click', () => { confirmingAll = false; draw(true); });
+            apply.addEventListener('click', () => { apply.disabled = true; cancel.disabled = true; enableAll(rows); });
+            actions.append(apply, cancel);
+            return;
+        }
+        const open = button('ss-rm-enable-all', { text: `Enable all ${todo.length} for this chat` });
+        open.addEventListener('click', () => { confirmingAll = true; draw(true); });
+        root.appendChild(open);
     }
 
     function draw(force = false) {
         const rows = ask('dataModules.setup') ?? [];
         const signature = signatureOf(rows);
-        if (!force && signature === shown) return rows.length;
+        if (!force && (enabling || signature === shown)) return rows.length;
         shown = signature;
         for (const editor of editors) editor.handle.destroy();
         editors = [];
         root.replaceChildren();
         if (!rows.length) { make('p', 'ss-dm-empty', 'No data modules are installed or enabled for this chat.', root); return 0; }
+        enableAllBox(rows);
         const ul = make('ul', 'ss-listcard-list ss-dm-list-rows', '', root);
         for (const row of rows) ul.appendChild(card(row));
         return rows.length;

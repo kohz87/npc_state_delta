@@ -2,10 +2,13 @@
 // data-modules/part.js unchanged): pin/instance paths, budgets, and the checked target.
 import { validateDataModules, dataModuleDefaults, dataModuleHash } from '../check.js';
 import { bytes, refuse } from '../interpreter.js';
-import { activeDefinition } from '../adapters.js';
+import { activeDefinition, instanceOf } from '../adapters.js';
+import { oneLine } from '../../../text.js';
 import { hashJson } from '../../replay.js';
-import { STRINGS } from '../../strings.js';
+import { STRINGS, fill } from '../../strings.js';
 import { rpgLib } from '../../rpg-lazy.js';
+import { DM_OLD_ROOM, dmRoom } from '../schema.js';
+import { PARTY_ACTIVE, PARTY_MAX } from '../../lean-rpg/names.js';
 
 const E = STRINGS.editMessages;
 const B = STRINGS.blocks;
@@ -34,6 +37,32 @@ const subjectsOf = (state, id) => state.domains.dataModules?.active?.[id]?.subje
 const activeCount = domain => Object.keys(domain?.active ?? {}).length;
 const blockCount = domain => Object.values(domain?.active ?? {})
     .filter(active => domain?.pins?.[active.hash]?.packId === 'chat').length;
+// Every way a Character joins or comes back (a story `+ party` / `- party` line, the reader's Add to party, the wizard's and the template's Character) records the
+// party it relied on and keeps the active limit (4, or 8 on a reply with only the `partyRoom` mark): `partyWitness` says a guard records it (a story reply from before the `partyRoom` mark does not), `partyFull` refuses live.
+// The value is what the guard records as `selector.party`: PARTY_ACTIVE (a story reply with the `partyFour` mark) when the 4-active limit is in force,
+// `true` for a reply with only the `partyRoom` mark (8 active), PARTY_ACTIVE for the reader's own actions (they follow the current rule), false for an older reply.
+const partyWitness = ctx => (ctx.cause === 'ui' ? PARTY_ACTIVE : ctx.carrier?.rules?.includes('partyFour') ? PARTY_ACTIVE : ctx.cause === 'story' && dmRoom(ctx) !== DM_OLD_ROOM);
+// The active limit that witness stands for (a story reply from before `partyRoom` has none: the old count in checkJoin).
+const partyLimit = witness => (witness === PARTY_ACTIVE ? PARTY_ACTIVE : PARTY_MAX);
+// (the party is read from this domain's own blocks, never from the lazy RPG library: a chat with the RPG off must replay the same witness; it is lean-rpg/join.js partyOf's
+// [module, left] pairs, a chat-scope Character with a name)
+const partyPairs = state => {
+    const out = [], active = state?.domains?.dataModules?.active;
+    for (const module of Object.keys(active !== null && typeof active === 'object' ? active : {})) {
+        const definition = activeDefinition(state, module);
+        if (definition?.role !== 'character' || definition.scope !== 'chat') continue;
+        const fields = instanceOf(state, module)?.fields;
+        if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) continue;
+        if (oneLine(fields.who) || oneLine(definition.name)) out.push([module, fields.left === true]);
+    }
+    return out;
+};
+// The only thing a join, creation or return relied on from the party: was there room (fewer than the limit in force active) before it. Replay witnesses just this boolean,
+// so removing an unrelated earlier member below the cap leaves later members as they were.
+const partyRoomOf = (state, limit = PARTY_MAX) => partyPairs(state).filter(pair => !pair[1]).length < limit;
+const partyFull = (ctx, prefix) => {
+    if (ctx.cause === 'ui' && !partyRoomOf(prefix, PARTY_ACTIVE)) refuse('REFUSED', '', fill(B.partyFull, { max: PARTY_ACTIVE }));
+};
 const instancePath = (id, subject) => ['instances', id, ...(subject === 'chat' ? ['chat'] : ['characters', subject])];
 const rawDefinition = definition => Object.fromEntries(Object.entries(definition).filter(([key]) => !['id', 'pack'].includes(key)));
 // Clock/actor identities and inputs used for eligibility are live prerequisites even when the
@@ -64,4 +93,4 @@ function newInstance(definition, inputs) {
 }
 
 export { E, B, rpg, J, SET_FIELDS, initial, kept, hashOf, sizeOf, draftOf, stateOf, pairKey, subjectsOf,
-    activeCount, blockCount, instancePath, rawDefinition, prefixImports, checkedTarget, newInstance };
+    activeCount, blockCount, partyWitness, partyLimit, partyPairs, partyRoomOf, partyFull, instancePath, rawDefinition, prefixImports, checkedTarget, newInstance };

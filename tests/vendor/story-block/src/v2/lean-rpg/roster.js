@@ -2,6 +2,7 @@
 // each member of the party is an actor who can own and wear things.
 //
 //   party.actors  [{ id, name, pc? }]  (null while there is no Character: nothing answers, the `party` domain is looked at as before) one per Character block in the party (a companion who left is not on it), in block order; `pc: true` on the reader's own.
+//   party.levels  [{ id, name, level, left }]  read only; every Character, those who left too (`left: true`); `level` the sheet's, null when it states none; needs the RPG only.
 //   party.pc      { id }               the reader's own Character: the one named like the persona (an exact name, else a first name that means only them), or the
 //                                      only Character; null when there are several and none is named so. Only the id: the header keeps the persona's name.
 //
@@ -57,3 +58,11 @@ export function rosterQueries({ persona = () => '', on = () => true } = {}) {
         'party.pc': Object.assign((state, args) => { if (!answering(args)) return null; const { pc } = rosterOf(state, who()); return pc ? { id: pc } : null; }, { fallback: true }),
     };
 }
+
+/** Members with sheet levels, left ones too, in block order; [] with no Character. */
+export function levelsOf(state) {
+    return readSheet(state, { withLeft: true }).characters.map(found => ({ id: actorIdOf(found.module), name: found.who, level: found.sheetLevel ?? null, left: found.left === true }));
+}
+
+/** The `party.levels` query (the RPG's feature gates it where registered). */
+export const levelsQuery = state => levelsOf(state);

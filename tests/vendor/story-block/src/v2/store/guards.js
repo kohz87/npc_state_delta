@@ -165,6 +165,7 @@ export function createGuards(s, deps) {
         s.guardMark = typeof mark === 'function' ? mark : null;
         s.lastMark = markNow();
         s.cache = null;
+        s.witnessByPrefix?.clear();      // (answers kept by prefix were worked out under the old checker)
         forgetMemos();
     }
 

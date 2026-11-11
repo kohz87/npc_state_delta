@@ -221,15 +221,37 @@ function barNode(doc, value, min, max) {
 
 const signed = (value, min) => (min < 0 && value > 0 ? `+${value}` : String(value));
 
+const TOP_KNOWN = 3;
+
+/** A signed range's scale, shown once under the first row: the field's own names for its ends and middle, else "−100 … 0 … +100". */
+function scaleNode(doc, row) {
+    const named = value => (row.names ? dmNameOf({ type: 'int', names: row.names }, value) : null);
+    const out = h(doc, 'li', 'ss-rm-scale');
+    for (const value of [row.min, 0, row.max]) out.appendChild(h(doc, 'span', '', named(value) ?? (value < 0 ? `\u2212${-value}` : value > 0 ? `+${value}` : '0')));
+    return out;
+}
+
 /**
  * rows: [{ key, name, value, min, max, def, names, payload, label }] (`payload` is the dm.set payload minus value; null = not editable).
- * Rows at a default of 0 (or the minimum) are folded under "Not known yet (n)"; the others run highest first.
+ * The top three known rows (highest first) show; the other known ones and the rows at a default of 0 (or the minimum) fold into one row,
+ * "N more known · Not known yet (N)", that opens in place. A signed range (min < 0) runs its bar from a centre line (red below 0, green above) and
+ * shows its scale once under the first row. Pencils are hidden until the section's Edit button is pressed (kept in `env.memory` only).
  */
 export function drawNumberMap(env, parent, { title, rows, memoryKey }) {
     const { doc } = env;
     const section = h(doc, 'section', 'ss-b-map'); parent.appendChild(section);
     section.setAttribute('data-map', memoryKey);
-    if (title) section.appendChild(h(doc, 'h4', 'ss-section-label', title));
+    const editKey = `${memoryKey}:editing`;
+    if (rows.some(row => row.payload)) {
+        const head = h(doc, 'div', 'ss-rm-head'); section.appendChild(head);
+        if (title) head.appendChild(h(doc, 'h4', 'ss-section-label', title));
+        const edit = h(doc, 'button', 'ss-rm-edit-btn', V.edited);
+        edit.setAttribute('type', 'button');
+        const reflect = on => { section.classList.toggle('ss-rm-editing', on); edit.setAttribute('aria-pressed', String(on)); };
+        reflect(env.memory.get(editKey) === true);
+        edit.addEventListener('click', () => { const on = !section.classList.contains('ss-rm-editing'); env.memory.set(editKey, on); reflect(on); });
+        head.appendChild(edit);
+    } else if (title) section.appendChild(h(doc, 'h4', 'ss-section-label', title));
     // A row is "not known yet" when it sits at a default that means nothing (0 or the minimum); a default of 40 is a value that is known.
     const unknown = row => row.value === row.def && (row.def === 0 || row.def === row.min);
     const known = rows.filter(row => !unknown(row)), rest = rows.filter(unknown);
@@ -240,26 +262,29 @@ export function drawNumberMap(env, parent, { title, rows, memoryKey }) {
         const mark = { module: row.payload.module, field: row.payload.field, key: row.payload.key ?? '', who: row.payload.who ?? '' };
         pencilFor(env, li, { kind: 'number', min: row.min, max: row.max, label: row.label ?? row.name, command: 'dm.set', payload: row.payload }, mark);
     };
-    const list = h(doc, 'ul', 'ss-b-list'); box.appendChild(list);
-    const sorted = known.map((row, at) => ({ row, at })).sort((a, b) => b.row.value - a.row.value || a.at - b.at).map(entry => entry.row);
-    for (const row of sorted) {
+    const knownRow = (list, row) => {
         const li = h(doc, 'li', 'ss-b-row'); list.appendChild(li);
         li.setAttribute('data-key', row.key);
         li.appendChild(h(doc, 'span', 'ss-b-name', row.name));
         const word = row.names ? dmNameOf({ type: 'int', names: row.names }, row.value) : null;
-        const value = h(doc, 'span', 'ss-b-val', word ?? signed(row.value, row.min));
+        const value = h(doc, 'span', `ss-b-val${row.min < 0 && row.value !== 0 ? (row.value < 0 ? ' ss-rm-neg' : ' ss-rm-pos') : ''}`, word ?? signed(row.value, row.min));
         if (word) value.setAttribute('title', String(row.value));
         li.appendChild(value);
         pencil(li, row);
         li.appendChild(barNode(doc, row.value, row.min, row.max));
-    }
-    if (rest.length) {
-        const fold = h(doc, 'details', 'ss-b-fold');
+    };
+    const list = h(doc, 'ul', 'ss-b-list'); box.appendChild(list);
+    const sorted = known.map((row, at) => ({ row, at })).sort((a, b) => b.row.value - a.row.value || a.at - b.at).map(entry => entry.row);
+    sorted.slice(0, TOP_KNOWN).forEach((row, at) => { knownRow(list, row); if (at === 0 && row.min < 0) list.appendChild(scaleNode(doc, row)); });
+    const more = sorted.slice(TOP_KNOWN);
+    if (more.length || rest.length) {
+        const fold = h(doc, 'details', 'ss-b-fold ss-rm-fold');
         const label = `${memoryKey}:unknown`;
         if (env.memory.get(label) === true) fold.setAttribute('open', '');
         fold.addEventListener('toggle', () => env.memory.set(label, fold.open === true));
-        fold.appendChild(h(doc, 'summary', '', fill(V.unknown, { n: rest.length })));
+        fold.appendChild(h(doc, 'summary', '', [more.length ? fill(V.moreKnown, { n: more.length }) : '', rest.length ? fill(V.unknown, { n: rest.length }) : ''].filter(Boolean).join(' \u00b7 ')));
         const inner = h(doc, 'ul', 'ss-b-list'); fold.appendChild(inner);
+        for (const row of more) knownRow(inner, row);
         for (const row of rest) {
             const li = h(doc, 'li', 'ss-b-row ss-b-row-plain'); inner.appendChild(li);
             li.setAttribute('data-key', row.key);
@@ -295,12 +320,12 @@ export function numberRows({ definition, module, who, values, field, fields, nam
 
 // ---- a record of fields ------------------------------------------------------------------------------------------------------------------
 
-/** lines: [{ field, label, schema, value, tones?, unit? }]; a choice is a chip when it has tones, else a pill; the pencil edits the field. */
-export function drawRecordCard(env, parent, { title, lines, module, who }) {
+/** lines: [{ field, label, schema, value, tones?, unit? }]; a choice is a chip when it has tones, else a pill; the pencil edits the field. `tiles`: the lines as small tiles in one row, no pencils. */
+export function drawRecordCard(env, parent, { title, lines, module, who, tiles = false }) {
     const { doc } = env;
     const section = h(doc, 'section', 'ss-b-recsec ss-l-root'); parent.appendChild(section);
     if (title) section.appendChild(h(doc, 'h4', 'ss-section-label', title));
-    const dl = h(doc, 'dl', 'ss-glass ss-b-card'); section.appendChild(dl);
+    const dl = h(doc, 'dl', `ss-glass ss-b-card${tiles ? ' ss-rm-tiles' : ''}`); section.appendChild(dl);
     for (const line of lines) {
         const row = h(doc, 'div', 'ss-b-line'); dl.appendChild(row);
         row.setAttribute('data-field', line.field);
@@ -309,11 +334,14 @@ export function drawRecordCard(env, parent, { title, lines, module, who }) {
         const { schema, value } = line;
         if (schema.type === 'enum') {
             const tone = line.tones?.[value];
-            if (tone) dd.appendChild(chip(doc, String(value), tone));
+            // As a tile a choice is a plain word (an amber one for a warn tone) and a short code like a rank letter a round badge: no pill.
+            if (tiles) dd.appendChild(h(doc, 'span', tone === 'warn' ? 'ss-rm-warn' : schema.values.every(item => String(item).length <= 2) ? 'ss-rm-badge' : '', String(value)));
+            else if (tone) dd.appendChild(chip(doc, String(value), tone));
             else dd.appendChild(h(doc, 'span', 'ss-pill ss-pill-soft', String(value)));
         } else if (schema.type === 'bool') dd.textContent = value ? 'Yes' : 'No';
         else if (schema.type === 'int') dd.textContent = [dmNameOf(schema, value) ?? String(value), line.unit].filter(Boolean).join(' ');
         else dd.textContent = String(value ?? '');
+        if (tiles) continue;   // (a tile has no pencil; the block's own Edit changes the field)
         const edit = h(doc, 'dd', 'ss-b-pen-cell'); row.appendChild(edit);
         if (schema.edit !== false) pencilFor(env, edit, editorProps(module, line.field, null, schema, line.label, who), { module, field: line.field, key: '', who: who ?? '' });
     }

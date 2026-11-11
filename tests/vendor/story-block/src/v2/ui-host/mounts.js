@@ -2,7 +2,7 @@
 // Get the RPG view at render time because it can load or unload while the page remains mounted.
 
 import { createMounts } from '../view/mounts/index.js';
-import { gameHeroProps, readHeroContext } from '../view/game-header.js';
+import { gameHeroProps, headerControlItems, readHeroContext } from '../view/game-header.js';
 import { formatStoryTime, storyCalendar } from '../view/clock.js';
 import { isHiddenNav, isInBar } from '../view/tab-order.js';
 import { CHANGES_CARD_SCREEN_ID, changesSummary } from '../screens/index.js';
@@ -49,7 +49,10 @@ export function createUiMounts({ screens, renderer, registry, ctx, store, sdk, q
             // The RPG keeps its character in a block, not behind `party.pc`: its stage bars are the header's (lean-rpg/view/hero-data.js).
             rpgLead: getRpg()?.heroLead?.(state) ?? null,
         }),
-        on: (name, fn) => events.on(name, fn),
+        // A module's header toggle (registry `headerControls`): the pill's state is the module's own query, read at the same head state.
+        headerControls: state => headerControlItems({ controls: registry.headerControls?.() ?? [], query: (name, args) => queryAt(name, args, state) }),
+        // (the same held `committed` as the panel's: a form's combined Save redraws the game view once, after its last step)
+        on: api.on,
         carriers,
         hasCard,
         swipeAt: index => ctx.chat?.[index]?.swipe_id ?? 0,

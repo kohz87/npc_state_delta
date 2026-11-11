@@ -6,7 +6,7 @@
 //              xp, down (the death latch, hidden), alive
 //   skills:    who, then per slot 1…5: skillN (name), aboutN (what it does), statN (one of the seven stats), usesN (stamina |
 //              mana), rankN (0–3), practiceN (0–100)
-//   foes:      foe1…foe4 (text), count1…count4, level1…level4 (1–99; a block of the earlier rules has class1…class4, 1–9), hurt1…hurt4 (0–5)
+//   foes:      foe1…foe6 (text; an older block has 1…4), count1…count6, level1…level6 (1–99; a block of the earlier rules has class1…class6, 1–9), hurt1…hurt6 (0–5)
 // Pure and read-only: it takes a state (or anything shaped `{ domains: { dataModules } }`) and answers plain data. It
 // never validates the definitions (the data-module checker did when they were pinned); a block it cannot read is left
 // out, with a plain `problems` line.
@@ -147,12 +147,15 @@ function skillsOf(fields, hidden = new Set()) {
     return out;
 }
 
-// A block's four slots. `offset`: where its numbering starts (the first Foes block is 1…4, the next 5…8, and so on), so every
+// A block's slots (six; an older block has 1…4). `offset`: where its numbering starts (the first Foes block is 1…6, the next 7…12, and so on; an older four-slot block is 1…4), so every
 // slot of every Foes block has a number of its own in the plan.
 // A hidden foe name is the slot's ("Foe 2"); a hidden count, class or health still counts for the rules and is listed in `hidden`.
 function foesOf(id, fields, offset = 0, hidden = new Set(), state = null) {
     const out = [];
+    // A six-group block has `foe5`/`foe6` and marks each slot `local` (its field number); an older one reads as always (the fight's witness hashes this sheet).
+    const six = Object.hasOwn(fields, 'foe5') || Object.hasOwn(fields, 'foe6');
     for (let n = 1; n <= FOE_SLOTS; n += 1) {
+        if (n > 4 && !Object.hasOwn(fields, `foe${n}`)) continue;
         // A Standard group's Health is blocks left, out of foeHealthBlocks(class): `size` says how many (a stage-field slot has none).
         const size = barOf(state?.[`hurt${n}`]) ? sizeOf(state[`hurt${n}`], fields, `hurt${n}`) : null;
         const name = hidden.has(`foe${n}`) ? (text(fields[`foe${n}`]) ? `Foe ${offset + n}` : '') : text(fields[`foe${n}`]);
@@ -160,7 +163,7 @@ function foesOf(id, fields, offset = 0, hidden = new Set(), state = null) {
         // A block of the Levels rules has `level{n}`; one of the earlier rules has `class{n}` (kept as it was), whose level is worked out from it.
         const levelled = Object.hasOwn(fields, `level${n}`), soulClass = int(fields[`class${n}`]) ?? 1;
         const level = levelled ? Math.max(1, Math.min(99, int(fields[`level${n}`]) ?? 1)) : levelOfClass(soulClass) ?? 1;
-        out.push({ slot: offset + n, module: id, name, count, class: levelled ? classOfLevel(level) : soulClass, level, ...(levelled ? { levelled } : {}), hurt: int(fields[`hurt${n}`]) ?? 0, ...(size ? { size } : {}), filled: Boolean(name) && count > 0,
+        out.push({ slot: offset + n, ...(six ? { local: n } : {}), module: id, name, count, class: levelled ? classOfLevel(level) : soulClass, level, ...(levelled ? { levelled } : {}), hurt: int(fields[`hurt${n}`]) ?? 0, ...(size ? { size } : {}), filled: Boolean(name) && count > 0,
             hidden: ['count', 'class', 'level', 'hurt'].filter(part => hidden.has(`${part}${n}`)) });
     }
     return out;
@@ -172,12 +175,12 @@ function foesOf(id, fields, offset = 0, hidden = new Set(), state = null) {
  *                  skills: [{ slot, name, about, rank, practice, stat, uses }] }]   (a Skills block joins the character its `who` names;
  *                  stat is one of STATS and uses 'stamina' | 'mana', or null for a block that has neither)
  *                  `size`: { health, stamina, mana } only for a Standard Character block, where those three are the blocks left)
- *   foes: the four slots of every Foes block in block order, [{ slot, module, name, count, level, class, hurt, size?, filled }] ([] without one; `level` 1–99, worked out from `class` for a block of the earlier rules, which has no `levelled`; `class` of a levelled group is the Soul Class its level stands for, which the fight XP table of the earlier rules still reads); `size`: the
+ *   foes: the slots (six; an older block has four) of every Foes block in block order, [{ slot, module, name, count, level, class, hurt, size?, filled }] ([] without one; `level` 1–99, worked out from `class` for a block of the earlier rules, which has no `levelled`; `class` of a levelled group is the Soul Class its level stands for, which the fight XP table of the earlier rules still reads); `size`: the
  *         blocks a Standard group's Health has (`hurt` is the blocks left); `slot`
  *         counts on across blocks (1–4, then 5–8, …), `filled` = a name and a count above 0
  *   problems: plain sentences for blocks left out (no `who`, two characters of one name)
  */
-export function readSheet(state) {
+export function readSheet(state, { withLeft = false } = {}) {
     const sheet = { characters: [], foes: [], problems: [] };
     const domain = state?.domains?.dataModules;
     if (!isObject(domain) || !isObject(domain.active)) return sheet;
@@ -191,10 +194,13 @@ export function readSheet(state) {
         const hidden = hiddenOf(definition), fields = shownFields(raw, hidden);
         if (role === 'character') {
             // A companion who left the party (`left`) is kept on the Party tab but is not on the sheet the dice are rolled for.
-            if (fields.left === true) continue;
-            const found = character(id, fields, hidden.has('who') ? definition.name : '', hidden, definition);
+            // (`withLeft`, for `party.levels`: read too, `left: true`; `sheetLevel` is the stated level or null.)
+            const gone = fields.left === true;
+            if (gone && !withLeft) continue;
+            const found = character(id, fields, hidden.has('who') || withLeft ? definition.name : '', hidden, definition);   // (`withLeft`: a blank Name uses the block's name, as the Party card does)
+            if (found && withLeft) Object.assign(found, { left: gone, sheetLevel: int(fields.level) !== null || Object.hasOwn(fields, 'soul') ? found.level : null });   // (the level the card shows: clamped 1–99)
             if (!found) sheet.problems.push(`The Character block "${id}" has no name in its Who field, so it is left out.`);
-            else if (sheet.characters.some(other => other.key === found.key)) sheet.problems.push(`Two Character blocks are called ${found.who}; only the first is used.`);
+            else if (!withLeft && sheet.characters.some(other => other.key === found.key)) sheet.problems.push(`Two Character blocks are called ${found.who}; only the first is used.`);
             else sheet.characters.push(found);
         } else if (role === 'skills') {
             const who = text(fields.who) || (hidden.has('who') ? text(definition.name) : '');

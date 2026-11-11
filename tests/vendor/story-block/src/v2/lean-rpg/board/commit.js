@@ -19,6 +19,8 @@ const shape = board => isObject(board) && isObject(board.setup) && Array.isArray
     && Array.isArray(board.groups) && board.groups.length > 0 && board.groups.length <= 64
     && board.groups.every(slot => Number.isInteger(slot) && slot >= 1 && slot <= 64)
     && (board.setup.bars === undefined || board.setup.bars === 2)
+    && (board.setup.foesSix === undefined || (board.setup.foesSix === 1 && board.setup.members === 1))
+    && (board.setup.areaAll === undefined || (board.setup.areaAll === 1 && board.setup.aoe === 1))
     && (board.setup.soak === undefined || (board.setup.soak === 1 && board.setup.bars === 2))
     && (board.setup.witness === undefined ? board.exchanges.length === 0
         : isObject(board.setup.witness) && board.setup.witness.offset === board.setup.offset && /^[0-9a-f]{64}$/u.test(board.setup.witness.hash));

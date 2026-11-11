@@ -1489,12 +1489,12 @@ test('People never overwrites a value the record already has, and unparsable Peo
     assert.equal(plain.customFields.People, 'Roams the hills');
 });
 
-test('the adapter reads Story Block\'s party.levels as it answers, and null when the query is not there or answers null', async () => {
-    const party = answer => ({ id: 'zz-party', name: 'Party (stand-in)', version: '0.0.0-test', queries: { 'party.levels': () => answer } });
-    const rows = [{ id: 'a', name: 'Mira', level: 5, left: false }, { id: 'b', name: 'Bo', level: 3, left: true }];
-    assert.deepEqual((await suite({ modules: [party(rows)] })).adapter.partyLevelsAnswer(), rows, 'members who left are in the answer; the hosted part drops them');
-    assert.equal((await suite({ modules: [party(null)] })).adapter.partyLevelsAnswer(), null, 'RPG off: null');
-    assert.equal((await suite({ modules: [director()] })).adapter.partyLevelsAnswer(), null, 'no such query: as today');
+test('the adapter reads Story Block\'s own party.levels as it answers: an array with the RPG on, null with it off', async () => {
+    const off = await suite({ features: { 'story-block.rpg': false } });
+    assert.equal(off.adapter.partyLevelsAnswer(), null, 'RPG off: null');
+    const on = await suite({ features: { 'story-block.rpg': true } });
+    const answer = on.adapter.partyLevelsAnswer();
+    assert.ok(answer === null || Array.isArray(answer), 'RPG on: the host\'s answer (an array, or null while no party exists)');
 });
 
 test('mood: a person met from the cast starts at the resting mood their pack personality gives (temperament, not 0), stored with the record', async () => {

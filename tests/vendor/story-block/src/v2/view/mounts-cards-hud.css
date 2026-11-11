@@ -1,0 +1,201 @@
+/* mounts-cards-hud.css: inline cards under replies and the HUD strip (split from mounts.css, same rules in the same order). */
+
+/* ---- Inline cards under replies ---- */
+
+.ss-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+/* SillyTavern's swipe row (the arrows and the 1/1 counter) sits at the bottom right of the last message, over its cards:
+   the last message's cards keep clear of it (the row is SillyTavern's; it shows on .last_mes only). */
+.last_mes .ss-cards {
+    margin-bottom: 52px;
+}
+
+.ss-card {
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius);
+    background: var(--ss-chat-surface);
+    overflow: hidden;
+}
+
+/* A card is a glass card under a reply, as Reply.dc.html's "Changed this reply" (the card is a theme root: its own
+   tokens, so Solid and Follow SillyTavern take their colours from the look). The shape of Glass: a larger radius,
+   the blur and the soft shadow. */
+.ss-card {
+    border-radius: var(--ss-radius-l, var(--ss-radius));
+    background: var(--ss-glass, var(--ss-chat-surface));
+    -webkit-backdrop-filter: var(--ss-blur, none);
+    backdrop-filter: var(--ss-blur, none);
+    box-shadow: var(--ss-shadow, none);
+}
+
+.ss-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ss-gap);
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 14px;
+    border: 0;
+    color: var(--ss-text, inherit);
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ss-card-title {
+    font-weight: 700;
+    font-size: 1.05em;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+/* The summary line of the header, muted, on the right: every section's part joined with " · " ("+1 Wolf Pelt · 1:30 pm, …").
+   It is one line and ends in an ellipsis (its title holds the whole text); the header is one line on a phone too (below). */
+.ss-card-summary {
+    flex: 1 1 160px;
+    min-width: 0;
+    display: block;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    color: var(--ss-muted, inherit);
+    font-size: 0.85em;
+    text-align: right;
+}
+
+/* A phone: the header stays one line (icon, title, summary, chevron); the summary takes the room left and ends in an ellipsis. */
+@media (max-width: 759.98px) {
+    .ss-card-head {
+        flex-wrap: nowrap;
+    }
+
+    .ss-card-head > :not(.ss-card-summary) {
+        flex: none;
+    }
+
+    .ss-card-summary {
+        flex: 1 1 0;
+        display: block;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+}
+
+.ss-card-chevron {
+    transition: transform 0.15s ease;
+}
+
+.ss-card-open .ss-card-chevron {
+    transform: rotate(180deg);
+}
+
+.ss-card-body {
+    padding: 12px 14px 14px;
+    border-top: 1px solid var(--ss-border);
+    overflow-x: auto;
+}
+
+/* The open card: each module's card is a section under a small heading, with a hairline between sections. */
+.ss-card-sec + .ss-card-sec {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--ss-border);
+}
+
+.ss-card-sec-title {
+    margin: 0 0 8px;
+    color: var(--ss-muted, inherit);
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+/* ---- HUD strip above the message box ---- */
+
+.ss-hud {
+    display: flex;
+    /* Items 10px apart; 8px of air above and below, so a bar, a badge's tag or a pill that reaches past its item is not cut
+       by the strip's own edge (`overflow-x: auto` also clips vertically). */
+    gap: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 8px 10px;
+    color: var(--ss-text);
+    /* Under Glass the theme sets --ss-sheet-*: the glass strip with its edge, radius, blur and shadow. Solid and
+       Follow SillyTavern leave them unset: the opaque strip with a hairline on top, as before. */
+    background: var(--ss-sheet-bg, var(--ss-surface));
+    -webkit-backdrop-filter: var(--ss-sheet-blur, none);
+    backdrop-filter: var(--ss-sheet-blur, none);
+    border: var(--ss-sheet-edge, 0);
+    border-top: var(--ss-sheet-edge, 1px solid var(--ss-border));
+    border-radius: var(--ss-sheet-radius, 0);
+    box-shadow: var(--ss-sheet-shadow, none);
+    font-size: 0.85em;
+    /* 8px of clear space between the strip and SillyTavern's message box (#send_form, the strip sits right above it) */
+    margin: 0 0 8px;
+}
+
+.ss-hud::-webkit-scrollbar {
+    display: none;
+}
+
+/* A strip wider than the screen (a phone): it scrolls sideways, and the side with more fades, a shorter
+   fade than the navigation's since the strip is one thin line (scroll-cue.js sets data-ss-more). */
+.ss-hud[data-ss-more="end"] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+}
+.ss-hud[data-ss-more="start"] {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+}
+.ss-hud[data-ss-more="both"] {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--ss-hud-fade, 24px), #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--ss-hud-fade, 24px), #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+}
+
+.ss-hud[hidden],
+.ss-hud-empty {
+    display: none;
+}
+
+.ss-hud-item {
+    /* keeps its own width (its content's, max-content): a full strip scrolls sideways (the phone's strip does) rather than
+       squeezing an item so its bars and badges run past its edge, where the overflow cut them (a long place is cut in its pill) */
+    flex: 0 0 auto;
+    /* the item takes its content's width, but never more than the strip: a long place is cut inside the item (its own ellipsis),
+       not pushed past the strip's edge (min-width: min-content did that: an unbroken 80-character place scrolled the strip) */
+    width: max-content;
+    max-width: 100%;
+    /* a full screen of content (a portrait, two bars, a badge and its tag) is about 44px; the cap is for a runaway item, not a
+       normal one, so it sits above that rather than clipping a bar at the bottom */
+    max-height: 64px;
+    /* room for what a badge hangs out of its own square (its time tag: 5px past the right and the bottom), inside the cut */
+    padding: 0 5px 5px 0;
+    overflow: hidden;
+}
+
+/* A screen's css can make its root (this item) a size container (`:root { container: x / inline-size }`), and a size container
+   gets no width from its content: the strip keeps its items plain boxes (container-type normal), and the width above comes from
+   the content. Containers further in still work. */
+.ss-hud > .ss-hud-item {
+    container-type: normal;
+    min-width: 0;
+}
+/* the items keep their content on a wide strip; a full strip shrinks them, and each cuts its own text (overflow hidden) */
+
+/* The HUD strip on a phone, under Glass: the tint layered over itself, so the story behind does not read through the name and
+   the level (the full-screen window's rule, for the strip). Solid and Follow SillyTavern leave the token unset: no layers. */
+@media (max-width: 759.98px) {
+    .ss-hud {
+        background-image: var(--ss-sheet-hud-layers, none);
+    }
+}

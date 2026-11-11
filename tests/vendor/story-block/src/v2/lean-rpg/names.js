@@ -1,7 +1,7 @@
-import { spreadWord } from './blocks.js';
-
 // The RPG's shared names (re-exported by index.js, which is where the other pieces import them from).
 // They live in a file of their own so the pieces that index.js imports can use them without an import cycle.
+
+import { spreadWord } from './blocks.js';
 
 /** The feature that switches all of it. */
 export const LEAN_RPG_FEATURE = 'story-block.rpg';
@@ -13,6 +13,18 @@ export const BOARD_SKILL = 'rpg.boardSkill';
 export const BOARD_SKILL_CARRY = 'rpg.boardSkillCarry';
 /** The prelude that records, with the reply, that a live fight's roll planner (gone; old records only) gave nothing usable (noroll.js): the note under the reply is drawn from it. */
 export const NOROLL = 'rpg.noroll';
+
+/** The prelude that rolls a reply's three story-check dice and records them with it (checks/dice.js; the narrator's note is drawn from it, cue.js). */
+export const DICE = 'rpg.dice';
+/** The step after a reply's lines that records its story checks' results (practice.js `checkStep`). */
+export const CHECK_STEP = 'rpg.check';
+/** The narrator's kind word for a story check (`? roll …`): Story Director owns `check`, so this one is Story Block's own. */
+export const ROLL_KIND = 'roll';
+/** The setting (Fight & checks): story checks outside a fight, on unless set to false. Off: no dice and no grammar line from then on; results already recorded stay. Independent of Rolls (which is for fights): the dice and the grammar line follow this switch alone. */
+export const CHECKS_SETTING = 'rpgChecks';
+export const checksOn = values => values?.[CHECKS_SETTING] !== false;
+/** The static grammar line of the `? roll` kind: constant text, shown while the RPG and Story checks are on, whatever the party or Rolls say (the dice follow the same switch). */
+export const CHECK_GRAMMAR = '? roll Who | skill or stat | easy, normal, hard or very hard | die (Who rolls: {{user}} or a party member, by name, never the action; an attempt that can fail, with one of this reply\'s dice, in order; at most 3; e.g. ? roll {{user}} | Obscure | normal | 14)';
 
 /** The step after a reply's lines that gives the party its XP for a won fight (fight.js); also the kind of its replay guard. */
 export const FIGHT = 'rpg.fight';
@@ -60,8 +72,8 @@ export const FORMULA = Object.freeze({ die: 20, statDivisor: 2, classWeight: 2, 
 /** Pacing: exchanges per reply. (From the second flow, FLOW_VERSION in resolve.js, only `careful` limits a reply: 1 exchange; the others run to the cap.) */
 export const PACE = Object.freeze({ careful: 1, normal: 5, all: 8 });
 
-/** Foe slots of a Foes block: `foe1`…`foe4` (skill slots: ../skill-slots.js). */
-export const FOE_SLOTS = 4;
+/** Foe slots of a Foes block: `foe1`…`foe6` (an older block has 1…4). */
+export const FOE_SLOTS = 6;
 
 /**
  * What bounds a reply's rolls (SPEC_RPG_v1 §4.5.3): at most `roundCap` rounds whatever the pace says, a round that
@@ -110,8 +122,9 @@ export const practiceFromRollsOnly = (rpgOn, values) => rpgOn === true && values
  * base = count × max(1, ceil(foeLevel / `perLevels`)) × `perBand`, times clamp(100 + `gapPercent` × (foeLevel − memberLevel), 0, `maxPercent`) per cent. The groups
  * are added (whole per cents, so no rounding error) and rounded down; a total above 0 is held to `min` .. `max`, a total of 0 gives nothing.
  * Level 5 against six level 5 crawlers: 6 × 1 × 2 = 12.
+ * A fight captured with `xp: 2` (flat XP, 11 Nov) pays every foe `flatBase` × the same per cent (no band, no count bonus), added, rounded down, 1..`flatMax`.
  */
-export const FIGHT_XP = Object.freeze({ markedFirst: 15, markedMore: 2, perBand: 2, perLevels: 10, gapPercent: 10, maxPercent: 200, min: 1, max: 60 });
+export const FIGHT_XP = Object.freeze({ markedFirst: 15, markedMore: 2, flatBase: 15, flatMax: 100, perBand: 2, perLevels: 10, gapPercent: 10, maxPercent: 200, min: 1, max: 60 });
 
 /** The line the narrator writes where the fight is told (the battle log is drawn there). */
 export const BATTLE_MARKER = '[battle]';
@@ -150,11 +163,13 @@ export const CREATION = Object.freeze({
 /**
  * Companions who join (mockup section 8): the setting `rpgJoin` says what the story's `+ party Name | …` line does. 'ask' (the default)
  * puts a card under the reply and makes nothing until the reader says so; 'auto' makes the companion at once; 'off' leaves the line out
- * of the narrator's grammar. A party holds at most PARTY_MAX characters (the ones who left count: their sheets are kept).
+ * of the narrator's grammar. A party holds at most PARTY_MAX active characters (the ones who left do not count; a reply from before the `partyRoom` mark counts them, as it did).
  */
 export const JOIN_SETTING = 'rpgJoin';
 export const JOINS = Object.freeze(['ask', 'auto', 'off']);
 export const PARTY_MAX = 8;
+/** The active limit of a reply captured under the `partyFour` mark: four, the reader's own character included. A full party asks who to bench (join.js benchCard). */
+export const PARTY_ACTIVE = 4;
 
 /** A roll's rules mark (`fix` in `rpg.resolve`; 2: stage 65, 3: `then:`); none replays as before. */
 export const FIX_VERSION = 3;

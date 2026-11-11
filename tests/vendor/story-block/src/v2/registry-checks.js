@@ -31,7 +31,7 @@ export const STANDARD_PREFIX = 'ss.';
 const SETTINGS_KEYS = ['defaults', 'schema', 'section', 'render', 'folds', 'place', 'rules'];
 export const SETTINGS_PLACES = Object.freeze(['diagnostics']);
 export const placeOf = value => (SETTINGS_PLACES.includes(value) ? value : null);
-const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'replayQueries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features', 'cards', 'participant', 'batchResults', 'capabilities'];
+const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'replayQueries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features', 'cards', 'headerControls', 'participant', 'batchResults', 'capabilities'];
 const CONTEXT_KEYS = ['static', 'tail', 'budget', 'feature', 'parts'];
 // What `requires` may name: the Story Block it needs, and the peers (modules) it needs registered.
 const REQUIRES_KEYS = ['storyBlock', 'peers'];
@@ -264,6 +264,17 @@ export function definitionProblems(def) {
             if (!isObject(card)) problems.push(`card "${id}" is not an object`);
             else fn(card.for, `card "${id}" for`);
         }
+    }
+    // The game view header's one toggle (view/game-header.js headerControlItems): { id, label, icon, query, command, args?, payload?, feature? }.
+    if (def.headerControls !== undefined) {
+        if (!Array.isArray(def.headerControls)) problems.push('headerControls is not a list');
+        else if (def.headerControls.length > 1) problems.push('a module may add one header control, not several');
+        else def.headerControls.forEach(control => {
+            if (!isObject(control)) { problems.push('the header control is not an object'); return; }
+            if (typeof control.id !== 'string' || !FOLD_ID.test(control.id)) problems.push('the header control has no usable id');
+            for (const key of ['label', 'icon', 'query', 'command']) if (typeof control[key] !== 'string' || !control[key].trim()) problems.push(`the header control has no ${key}`);
+            for (const key of ['args', 'payload']) if (control[key] !== undefined && !isObject(control[key])) problems.push(`the header control's ${key} is not an object`);
+        });
     }
     if (map(def.settings, 'settings')) {
         const { defaults, schema, section, render, folds } = def.settings;

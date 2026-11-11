@@ -51,8 +51,8 @@ export function createNative(s, deps) {
         const was = registry.restore();
         if (was.state !== 'pending') return fn();
         registry.setRestore('idle', '', { temporary: true });
-        try { store.lifecycleChanged?.(); return fn(); }
-        finally { registry.setRestore(was.state, was.reason, { temporary: true }); store.lifecycleChanged?.(); }
+        try { store.lifecycleChanged?.({ barrier: true }); return fn(); }
+        finally { registry.setRestore(was.state, was.reason, { temporary: true }); store.lifecycleChanged?.({ barrier: true }); }
     }
     // (a module that fell to an earlier point is settled where the journal left it, not planned again at every look)
     const selectionNeeded = () => hashJson(settledPlan(selectionPlan(), archive.selection(), archive.entries())) !== hashJson(archive.selection());

@@ -101,14 +101,15 @@ export function createReplace(s, deps) {
                         }
                         publish(span, index);     // the lines applied to the state before this point
                         storySpans.push(span);
-                        nextParts.push({ ops: own, span });
+                        nextParts.push({ ops: own, span, receipts: piece.receipt ? [piece.receipt] : [] });
                     } else if (storySpans.length && storySpans.at(-1).story === story && !isMetaSpan(storySpans.at(-1))) {
                         storySpans.at(-1).n += piece.n;
                         nextParts.at(-1).ops = [...nextParts.at(-1).ops, ...own];
+                        if (piece.receipt) nextParts.at(-1).receipts.push(piece.receipt);
                     } else {
                         const span = { n: piece.n, story };
                         storySpans.push(span);
-                        nextParts.push({ ops: own, span });
+                        nextParts.push({ ops: own, span, receipts: piece.receipt ? [piece.receipt] : [] });
                     }
                     upTo = step(upTo, own);
                     offset += piece.n;
@@ -116,7 +117,7 @@ export function createReplace(s, deps) {
             } else {
                 const span = { n: fresh.length, story: true };
                 storySpans.push(span);
-                nextParts.push({ ops: fresh, span });
+                nextParts.push({ ops: fresh, span, receipts });
             }
             const keptSpans = [];
             const keptProblems = [];       // this reply's blocks that stay off (the checkpoints after it carry them)
@@ -144,7 +145,7 @@ export function createReplace(s, deps) {
                 }
                 nextOps.push(...blockOps);
                 keptSpans.push(span);
-                nextParts.push({ ops: blockOps, span });
+                nextParts.push({ ops: blockOps, span, receipts: [ran.receipt] });
                 nextReceipts.push(structuredClone(ran.receipt));
             }
             for (const [n, { ops: block, span: was }] of blocks.entries()) {
@@ -158,7 +159,9 @@ export function createReplace(s, deps) {
                 let blockOps;
                 let kept = receipt;
                 let again = null;      // the block as planned again, when it was
-                const asks = typeof rerun === 'function' && !(isMetaSpan(was) && intactReason(record, block, was, receipt)) && ((isMetaSpan(was) && was.guard && was.replan && receipt) || (receipt?.replan && !isGuardedBlock(was, paired ? receipt : receiptsFor({ receipts: keptReceipts }, block))));
+                // (a decision whose guard still holds on the state before it is kept as it was, never asked again)
+                const decided = isMetaSpan(was) && was.guard?.predicate?.kind === 'events.decision' && (() => { try { guardHolds(state, was, message); return true; } catch { return false; } })();
+                const asks = typeof rerun === 'function' && !decided && !(isMetaSpan(was) && intactReason(record, block, was, receipt)) && ((isMetaSpan(was) && was.guard && was.replan && receipt) || (receipt?.replan && !isGuardedBlock(was, paired ? receipt : receiptsFor({ receipts: keptReceipts }, block))));
                 if (asks) {
                     let out = null;
                     try { out = rerunBlock(rerun, state, receipt, index, was, nextParts, keptAlloc); } catch { out = null; }
@@ -225,7 +228,7 @@ export function createReplace(s, deps) {
                 if (applied) publish(span, index);
                 nextOps.push(...blockOps);
                 keptSpans.push(span);
-                nextParts.push({ ops: blockOps, span });
+                nextParts.push({ ops: blockOps, span, receipts: applied ? (kept ? [kept] : receiptsFor({ receipts: keptReceipts }, block)) : [] });
                 if (kept) nextReceipts.push(kept);
             }
             // Every kept receipt follows its ops through every rev they moved to (once: by the rev it had), the guarded one too.

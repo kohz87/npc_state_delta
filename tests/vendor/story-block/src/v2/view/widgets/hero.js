@@ -1,4 +1,4 @@
-// ss.hero (view/glass.css): the hero card, a character's one-glance sheet. A portrait (the persona avatar for
+// ss.hero (view/glass-*.css): the hero card, a character's one-glance sheet. A portrait (the persona avatar for
 // the PC, the character card's image, or an NPC's from a query such as Delta's `npc.portrait`; the initial
 // when there is none), the name, a level badge on the portrait (a star and the number), the class · title line, bars for HP, MP and SP and one for experience under the
 // Terms' own word ("Soul growth"), a time / place / weather corner, and a row of status badges. `compact`
@@ -289,7 +289,7 @@ function renderHero(el, input, api) {
         }
         cleanup(() => editor?.handle.destroy());
         // the text block: the name, the class line, the place and weather, the statuses: one stacked group, which the portrait is
-        // centred against (grid areas "portrait text", glass.css)
+        // centred against (grid areas "portrait text", glass-*.css)
         const text = h(doc, 'div', 'ss-hero-text');
         text.append(who, corner, statuses);
         main.append(text);

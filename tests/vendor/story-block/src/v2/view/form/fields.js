@@ -1,4 +1,4 @@
-// The form engine's field renderers (UI stage 1b, PR B): one control per kind, in Story Suite's look (glass.css,
+// The form engine's field renderers (UI stage 1b, PR B): one control per kind, in Story Suite's look (glass-*.css,
 // the `ss-switch`, `ss-input`, `ss-select`, `ss-slider`, `ss-chips`, `ss-lines`, `ss-search` classes).
 //
 //   switch (bool), text, number (int), slider (int with form: 'slider'), select (choice), chips (choice with

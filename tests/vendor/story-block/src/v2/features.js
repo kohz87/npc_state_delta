@@ -94,6 +94,7 @@ export function featureRefs(def) {
     }
     (Array.isArray(def.screens) ? def.screens : []).forEach((screen, index) => add(screen, `the screen "${screen?.id ?? index + 1}"`));
     (Array.isArray(def.tabs) ? def.tabs : []).forEach((tab, index) => add(tab, `the tab "${tab?.id ?? index + 1}"`));
+    (Array.isArray(def.headerControls) ? def.headerControls : []).forEach((control, index) => add(control, `the header control "${control?.id ?? index + 1}"`));
     for (const [name, widget] of Object.entries(isObject(def.widgets) ? def.widgets : {})) add(widget, `the widget "${name}"`);
     // Settings: a schema field ({ type, …, feature }), and the custom panel (a function with `feature`).
     if (isObject(def.settings)) {

@@ -11,10 +11,21 @@ import { resolveModule } from '../data-modules/part/views.js';
 
 const DEATH = /(?<![\p{L}\p{N}])(?:died|dies|dead|death|killed|slain|murdered|perished)(?![\p{L}\p{N}])/iu;
 
+/** Any `+ party` line counts, however it parsed. */
+const partyJoin = line => (line?.kind === 'party' && line.op === '+') || /^\s*\+\s*party(?![\p{L}\p{N}])/iu.test(String(line?.raw ?? ''));
+
 /** Rule name -> does this parsed change line fall under it? */
 export const RULE_LINES = Object.freeze({
+    // `? roll Name | skill | difficulty | die`: story checks (lean-rpg/checks). A reply with no mark keeps what it did before: the line is not used.
+    checks: line => line?.kind === 'roll',
     // `- key Name | died`: a death counts for anyone, not only a pinned key person (Story Director keypeople). Same words as its death test.
+    // `+ party Name`: the room for a companion's blocks (data-modules dmRoom: 20 own, 28 in all) and the party limit counting only active members. Any `+ party` line counts, however it parsed.
+    partyRoom: partyJoin,
+    // The party holds 4 active members, the reader's character included (lean-rpg/names.js PARTY_ACTIVE; a reply with only `partyRoom` keeps 8). Same lines as `partyRoom`.
+    partyFour: partyJoin,
     diedAny: line => line?.kind === 'key' && line.op === '-' && [line.text, ...Object.keys(line.labels ?? {}), ...Object.values(line.labels ?? {})].some(part => DEATH.test(String(part ?? ''))),
+    // `+/~/- world Event | factions: A, B`: Story Director names unknown factions from an event's tags (feat/faction-from-events). Any world line counts, so an old reply with one never gains the new creation on Re-read.
+    factionTags: line => line?.kind === 'world',
 });
 
 /** A narrator's set-slot line, using normalized labels and the same omitted-kind inference as the handler. */

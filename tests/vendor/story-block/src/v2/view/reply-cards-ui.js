@@ -1,6 +1,6 @@
 // Story Suite v2: one card under a reply (fix 8e, reply-cards.js and Cards.dc.html): a glass card with a 1px ring in its tone, a 34px
 // tone icon tile, the title and the muted text, the rows, and a button row (44px buttons, the primary one in the accent, at most
-// three). Folded by Later it is one line: "<title> · <first row> · Open". Built with createElement and textContent only: a module's
+// four). Folded by Later it is one line: "<title> · <first row> · Open". Built with createElement and textContent only: a module's
 // words are never parsed. A card is drawn under the head reply only, so its buttons are enabled; `head: false` (a caller that draws one
 // elsewhere) shows them disabled, with the reason. Controls carry `data-focus` (line, later, action:<id>) so the mount can give the
 // focus back to the same control when the card is drawn again.

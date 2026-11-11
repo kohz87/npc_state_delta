@@ -1,9 +1,9 @@
-// Installs the page host's event listeners in their original order.
+// Installs the page host's event listeners in their original order, and holds the redraw a multi-step form asks for (createHold, below).
 // The panel, overlay and blocked notice remain live until the returned listeners are removed.
 
 import { captureConsole } from '../diagnostics.js';
 
-export function installUiEvents({ replyOffs, offs0, registry, store, events, ctx, runtime, mounts, screens, blockWidgets, cardOffer, blockPresentation, syncScreens, syncLeanRpg, refresh, clearBlocked, getPanel, getTabHost, getOverlay, getBlockedBy }) {
+export function installUiEvents({ replyOffs, offs0, registry, store, events, ctx, runtime, mounts, screens, blockWidgets, cardOffer, blockPresentation, syncScreens, syncLeanRpg, refresh, clearBlocked, getPanel, getTabHost, getOverlay, getBlockedBy, redrawHold }) {
     const offs = [...replyOffs, ...offs0];
     // Story Suite's console errors, kept for Diagnostics (once per page; the console still prints them).
     offs.push(captureConsole());
@@ -29,18 +29,17 @@ export function installUiEvents({ replyOffs, offs0, registry, store, events, ctx
             try { pinned = blockPresentation() ?? []; if (pinned.length) next = JSON.stringify(pinned); } catch { dataStamp = null; /* older host */ }
             if (next !== dataPresentation) { dataPresentation = next; syncScreens(pinned); }
         }
-        mounts.tab.register(); if (!getPanel().hidden) getTabHost()?.refresh();
+        // (the panel's redraw waits while a form's plan holds it, and runs once after)
+        const redraw = () => { mounts.tab.register(); if (!getPanel().hidden) getTabHost()?.refresh(); };
+        if (name === 'committed') redrawHold.run('panel', redraw); else redraw();
     }));
     // A feature turned on or off: its screens, tabs, widgets and cards come and go; nothing else changes.
     for (const name of ['head', 'committed', 'turn']) offs.push(events.on(name, () => getOverlay()?.refreshSize?.()));
-    // A chat change closes the dialogs (their drafts were for the chat they were opened in), the game view's More sheet and the
-    // Story panel's More sheet.
+    // A chat change closes the dialogs (their drafts were for the chat they were opened in).
     const chatTypes = ctx.eventTypes ?? ctx.event_types ?? {};
     const onChatChanged = () => {
         blockWidgets.reset();
         mounts.dialog?.closeAll();
-        mounts.screen?.closeMore?.();
-        getTabHost()?.bar?.closeMore?.({ focus: false });
         // The new chat's card is read for its offer (a read of the chat before is dropped).
         cardOffer?.refresh().catch(error => console.warn('[Story Suite] the card offer could not be read', error));
     };
@@ -83,4 +82,25 @@ export function installUiEvents({ replyOffs, offs0, registry, store, events, ctx
     }));
 
     return offs;
+}
+
+// The redraw hold: a form with several steps (the Inventory item form) holds the screens' redraw from `committed` events until its plan
+// ends, so the form stays alive for every step and shows a refusal; the held redraws then run once each. Held work is keyed, so
+// the same listener held twice runs once.
+export function createHold() {
+    let holds = 0;
+    const queued = new Map();
+    const flush = () => { const run = [...queued.values()]; queued.clear(); for (const fn of run) fn(); };
+    return {
+        /** → a release function (safe to call twice); the last release runs what was held. */
+        hold() {
+            holds += 1;
+            let done = false;
+            return () => { if (done) return; done = true; holds -= 1; if (!holds) flush(); };
+        },
+        /** Runs `fn` now, or after the last release when held. */
+        run(key, fn) { if (holds) queued.set(key, fn); else fn(); },
+        /** Forgets what was held for `key` (its listener went away). */
+        drop(key) { queued.delete(key); },
+    };
 }

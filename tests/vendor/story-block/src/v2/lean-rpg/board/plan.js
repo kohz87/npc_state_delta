@@ -29,8 +29,8 @@ export function actionSkills(actor, flags = {}, { bars = false } = {}) {
 }
 
 /** Build a Standard plan from one choice for each standing member, or one flee choice. */
-// `aoe`: the newer area rule (setup.aoe === 1): an area skill hits every standing group, the picked group is its main target. `bars`: the doubled bars (setup.bars === 2): an area skill needs 2 of its resource.
-export function exchangePlan(sheet, actions, flags = {}, number = 1, { members = false, aoe = false, bars = false } = {}) {
+// `aoe`: the area rule (setup.aoe === 1): an area skill hits every standing group, the picked group is its main target. `areaAll` (setup.areaAll === 1, newer): no main group; an area skill needs no group and strikes every standing group alike. `bars`: the doubled bars (setup.bars === 2): an area skill needs 2 of its resource.
+export function exchangePlan(sheet, actions, flags = {}, number = 1, { members = false, aoe = false, areaAll = false, bars = false } = {}) {
     const actors = (sheet?.characters ?? []).filter(standing), foes = (sheet?.foes ?? []).filter(up);
     if (!actors.length || !foes.length) return { error: 'The fight has already ended.' };
     const grouped = members;
@@ -65,7 +65,9 @@ export function exchangePlan(sheet, actions, flags = {}, number = 1, { members =
         }
         let target = null, group;
         if (area) {
-            if (grouped) {
+            if (grouped && areaAll) {
+                target = foes[0];   // (the contest's foe side is the first standing group's; roll.js hits every standing group alike)
+            } else if (grouped) {
                 const groups = [...new Set(foes.map(groupOf))];
                 const chosen = Number.isInteger(action.group) ? action.group
                     : Number.isInteger(action.target) ? groupOf(foes.find(foe => foe.slot === action.target))
@@ -77,11 +79,11 @@ export function exchangePlan(sheet, actions, flags = {}, number = 1, { members =
         } else target = foes.find(foe => foe.slot === action.target);
         if (!target) return { error: 'That foe is no longer standing.' };
         acts.push({ who: actor.who, ...(skill ? { skill: skill.name } : {}), target: `foe${target.slot}`, type: skill?.uses === 'mana' ? 'magic' : 'physical',
-            ...(area ? { area: true } : {}), ...(group !== undefined ? { group } : {}), ...(area && group !== undefined && aoe ? { aoe: true } : {}) });
+            ...(area ? { area: true } : {}), ...(group !== undefined ? { group } : {}), ...(area && group !== undefined && aoe ? { aoe: true } : {}), ...(area && grouped && areaAll ? { aoe: true, areaAll: true } : {}) });
     }
     // Every member attacks once and a pack attacks as its thinning bar allows. The flattened attacker index rotates targets.
     // A new-board defence is charged on its first executed attack, so Standard decides `paid` at the table, not here.
-    const attackers = foes.flatMap(foe => Array.from({ length: foe.pack === true ? packAttacks(foe.count, foe.hurt, foe.size) : 1 }, () => foe));
+    const attackers = foes.flatMap(foe => Array.from({ length: foe.pack === true ? packAttacks(foe.count, foe.hurt, foe.size, foe.full) : 1 }, () => foe));
     const guards = actors.map(target => {
         const skill = bestDefence(target, item => flagsFor(flags, target, item));
         return { target: target.who, ...(skill ? { skill: skill.name } : {}) };

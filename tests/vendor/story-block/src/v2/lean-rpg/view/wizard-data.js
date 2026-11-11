@@ -15,7 +15,7 @@ import { DM_LIMITS } from '../../data-modules/schema.js';
 import { activeDefinition } from '../../data-modules/adapters.js';
 import { uniqueBlockSlug } from '../../data-modules/block-builder.js';
 import { fold } from '../read.js';
-import { LEVEL, CREATION, RANK_NAMES, STATS, USES } from '../names.js';
+import { LEVEL, CREATION, PARTY_ACTIVE, RANK_NAMES, STATS, USES } from '../names.js';
 import { SKILL_FIELDS_MAX, SKILL_SLOTS_MAX, UTILITY_SLOTS, skillSlots } from '../../skill-slots.js';
 import { STANDARD_FORMULA, isStandard } from '../rules.js';
 import { classOfLevel, levelOfClass } from '../formula.js';
@@ -237,7 +237,7 @@ export function actionsFree(state, key) {
 }
 
 /** What Create is held up by, as plain sentences ([] when it may go). `world`: { persona, names (the characters' names now), room (whether two more blocks fit), hasYou, free (block actions the reply has left) }. */
-export function problemsOf(draft, { persona = '', names = [], room = true, hasYou = false, free = DM_LIMITS.replyRoots } = {}) {
+export function problemsOf(draft, { persona = '', names = [], room = true, hasYou = false, free = DM_LIMITS.replyRoots, full = false } = {}) {
     const out = [];
     const name = draft.name;
     if (!name) out.push(W.needName);
@@ -256,6 +256,7 @@ export function problemsOf(draft, { persona = '', names = [], room = true, hasYo
         if (!skill.about) out.push(fill(W.needAbout, { name: skill.name }));
         if (!skill.stat) out.push(fill(W.needStat, { name: skill.name }));
     }
+    if (full) out.push(fill(RPG_STRINGS.join.fullActive, { max: PARTY_ACTIVE }));   // (the same sentence a `+ party` line is refused with)
     if (!room) out.push(fill(W.noRoom, { max: DM_LIMITS.definitions }));
     else if (free < CREATE_ACTIONS) out.push(fill(W.noActions, { used: DM_LIMITS.replyRoots - free, max: DM_LIMITS.replyRoots, need: CREATE_ACTIONS }));
     return [...new Set(out)];
@@ -269,9 +270,9 @@ function blockCounts(state) {
 }
 
 /** Whether two more blocks fit in the story (the chat holds at most `DM_LIMITS.definitions` of its own blocks). */
-export function hasRoom(state) {
+export function hasRoom(state, room = DM_LIMITS) {
     const { own, all } = blockCounts(state);
-    return own + 2 <= DM_LIMITS.definitions && all + 2 <= DM_LIMITS.pins;
+    return own + 2 <= room.definitions && all + 2 <= room.pins;
 }
 
 /** The chat blocks the RPG's fights need besides the characters, in the order Create adds them. */

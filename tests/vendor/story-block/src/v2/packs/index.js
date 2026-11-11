@@ -20,6 +20,7 @@
 //   `[{ craft, title, stats, stations, note?, pack }]`) for modules that use recipes.
 // * query `packs.weather` → the first enabled pack's weather table `{ pack, seasons, tables }`, or null
 //   (MODULES §F122: Story Director's weather by rule).
+// * query `packs.ripples` → the first enabled pack's ripples table `{ pack, powers, tiers?, caps?, worldDirections? }`, or null.
 // * query `packs.youRank` → `{ pack, label }` of the first enabled pack with `content.you.rank`, or null (MODULES §F126).
 // * query `packs.economy` → the first enabled pack's money scale `{ pack, scale, note }`, or null. Modules
 //   read the settled scale through Story Block's `inventory.economy` instead (MODULES §F104).
@@ -38,7 +39,7 @@
 import { createInstalled } from './installed.js';
 import { createPortraits } from './portraits.js';
 import { browserImageIo } from './portrait-fit.js';
-import { calendarOf, contentOf, craftsOf, economyOf, itemDefsIn, mergeStart, resolveItemIn, applyStart, weatherOf, youRankOf } from './content.js';
+import { calendarOf, contentOf, craftsOf, economyOf, itemDefsIn, mergeStart, resolveItemIn, applyStart, weatherOf, ripplesOf, rippleChoice, youRankOf } from './content.js';
 import { renderPacksPanel } from './panel.js';
 import { HOST_VERSION, slugify } from './validate/core.js';
 import { readCharacterLorebook, stCapabilities, stHostVersion, stPortraitFiles, stSettings } from './st-adapter.js';
@@ -46,7 +47,7 @@ import { marketEntries } from './lorebook.js';
 import { castGearOf, gearLine } from './cast-gear.js';
 import { readSheet, sameWho } from '../lean-rpg/read.js';
 
-export { slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, youRankOf, createInstalled, renderPacksPanel };
+export { slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, ripplesOf, youRankOf, createInstalled, renderPacksPanel };
 export { LIMITS, CONTENT_KINDS, DEFAULT_CRAFTS, STATIONS } from './limits.js';
 export { findPackEntries, marketEntries, readMarketLine, PACK_TAG } from './lorebook.js';
 export { satisfies } from './version.js';
@@ -118,6 +119,9 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
             'packs.start': () => startState(),
             'packs.calendar': () => calendarOf(packs.packs()),
             'packs.weather': () => weatherOf(packs.packs()),
+            // The first enabled pack's ripples table `{ pack, powers, … }`, or null (Story Director's hidden sway per power).
+            'packs.ripples': (_state, args) => ripplesOf(packs.packs(), args),
+            'packs.rippleChoice': (_state, args, tools) => rippleChoice(packs.packs(), args, tools),
             // The Rank the first enabled pack that declares one gives {{user}}'s look, `{ pack, label }`, or null (no Rank in this story).
             'packs.youRank': () => youRankOf(packs.packs()),
             'packs.crafts': () => craftsOf(packs.packs()),

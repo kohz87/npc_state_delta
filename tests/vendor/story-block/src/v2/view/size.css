@@ -8,6 +8,11 @@
    must stay a screen's length (a full-screen layer in vw/dvh, a 44px tap area). Outside a root `--ss-zoomed` is unset (1).
    Measured distances (getBoundingClientRect, a pointer's clientX) are drawn pixels and a node's own lengths (style.left,
    scrollTop) are not: scripts divide by the node's zoom (view/scroll.js zoomOf; Story Director's map does the same). */
+/* The inventory sheet's and the navigation strip's styles load here, after glass-*.css (host.css imports glass-*.css, then settings-*.css, fonts.css,
+   this file): host.css is over its size limit, so it takes no new import line. */
+@import url('./inv-sheet.css');
+@import url('./screenbar-strip.css');
+@import url('../screens/block-maps.css');   /* the number lists, guild tiles and Enable all box (REPUI) */
 :root {
     --ss-zoom: 0.8;
 }
@@ -48,7 +53,7 @@
         height: max(100%, calc(44px / var(--ss-zoomed, 1)));
         transform: translate(-50%, -50%);
     }
-    /* the switch (48 x 28, glass.css) keeps room round it for that tap area, so it never reaches a neighbour (switches in a list;
+    /* the switch (48 x 28, glass-*.css) keeps room round it for that tap area, so it never reaches a neighbour (switches in a list;
        `!important` over a tile's own 2px top margin) */
     :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-switch {
         margin: max(0px, calc((44px / var(--ss-zoomed, 1) - 28px) / 2)) max(0px, calc((44px / var(--ss-zoomed, 1) - 48px) / 2)) !important;

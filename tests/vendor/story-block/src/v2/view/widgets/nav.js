@@ -1,4 +1,4 @@
-// ss.tabs and ss.navbar (view/glass.css): the two ways Story Suite's screens move between sections.
+// ss.tabs and ss.navbar (view/glass-*.css): the two ways Story Suite's screens move between sections.
 //
 // * ss.tabs: a row of text tabs (an icon when the item has one), for a panel or a screen's own sections.
 // * ss.navbar: the bottom bar of the game view: an icon over a label, in a dense glass pill.
