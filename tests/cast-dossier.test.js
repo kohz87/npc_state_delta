@@ -454,7 +454,7 @@ test('the twelve Ersveil entries all make a dossier: profile whole, fields, thre
 test('a person\'s pack stages are reached by the numbers alone, in order, with the preset\'s meters from the first meeting', async () => {
     const tansy = ERSVEIL.find(entry => entry.id === 'tansy-millrace');
     const records = { npc_tansy: { id: 'npc_tansy', name: 'Tansy Millrace', aliases: [], present: true, archived: false, castFrom: { key: 'ersveil:tansy-millrace', stages: normalizeEntry(tansy).stages } } };
-    const host = await createHost({ settings: { modules: { [MODULE_ID]: { presets: ['companion'] } }, features: { [FEATURE_STAGES]: true } }, modules: [director()] });
+    const host = await createHost({ settings: { modules: { [MODULE_ID]: { presets: ['companion'] } }, features: { [FEATURE_STAGES]: true, ...OLD_DEFAULTS } }, modules: [director()] });
     const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
     const api = {
         isEnabled: () => true, getNpc: id => (records[id] ? structuredClone(records[id]) : null),
@@ -527,6 +527,9 @@ const director = () => ({
 });
 const castRow = (extra = {}) => ({ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: null, alive: true, entry: structuredClone(FENNA_ENTRY), ...extra });
 
+// The three features that are on by default now (gate, mood and pull, notes) switched off: tests of the step as it was before them.
+const OLD_DEFAULTS = { 'npc-state-delta.anti-lever': false, 'npc-state-delta.mood-pull': false, 'npc-state-delta.notes': false };
+
 async function suite({ settings = {}, features = null, modules = [director()], castSync, castPortraitDue } = {}) {
     const records = {};
     const host = await createHost({ settings: { modules: { [MODULE_ID]: structuredClone(settings) }, ...(features ? { features: { ...features } } : {}) }, modules });
@@ -574,7 +577,7 @@ test('Story Director\'s cast is read through the adapter: cleaned, entry for the
 
 test('the meeting is recorded in the slice at the reply it is first seen: the first numbers, the problem line, the stage; unmet people leave no trace', async () => {
     const settings = { customMeters: [{ name: 'Loyalty', min: 0, max: 100, start: 20 }], ladder: [] };
-    const s = await suite({ settings, features: { [FEATURE_STAGES]: true } });
+    const s = await suite({ settings, features: { [FEATURE_STAGES]: true, ...OLD_DEFAULTS } });
     await s.world([castRow(), castRow({ key: 'ersveil:sera', id: 'sera', name: 'Sera' })]);
     await s.say();
     assert.deepEqual(s.made(), {}, 'nobody met: nothing recorded, nobody synced');
@@ -659,7 +662,7 @@ test('the person\'s own stages work like a ladder: reached by the numbers, only 
 });
 
 test('with no Story Director the per-reply step and the slice are exactly as before', async () => {
-    const s = await suite({ modules: [] });
+    const s = await suite({ modules: [], features: OLD_DEFAULTS });
     await s.say(['~ npc Ren | trust: +5']);
     assert.equal(s.host.head().domains.npc.cast, undefined);
     assert.deepEqual(s.synced, []);
@@ -1071,7 +1074,7 @@ test('a restore from a checkpoint keeps the mark that the reader removed a cast 
 
 test('the adapter asks for the picture sync when the step has nothing to do, only when there is a picture to give', async () => {
     let due = false;
-    const s = await suite({ castPortraitDue: () => due });
+    const s = await suite({ castPortraitDue: () => due, features: OLD_DEFAULTS });
     await s.world([castRow({ entry: { ...structuredClone(FENNA_ENTRY), stages: [] } })]);
     await s.say(['~ meet Fenna']);
     assert.equal(s.synced.length, 1, 'the meeting: the sync runs for the new dossier, once');
@@ -1086,7 +1089,7 @@ test('the adapter asks for the picture sync when the step has nothing to do, onl
     await s.say();
     assert.equal(s.synced.length, before, 'and it stops when there is none');
     // Without the option (older callers) nothing is asked.
-    const plain = await suite();
+    const plain = await suite({ features: OLD_DEFAULTS });
     await plain.world([castRow({ entry: { ...structuredClone(FENNA_ENTRY), stages: [] } })]);
     await plain.say(['~ meet Fenna']);
     await plain.say();

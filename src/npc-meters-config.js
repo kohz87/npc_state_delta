@@ -51,7 +51,8 @@ export const FEATURE_STAGES = 'npc-state-delta.stages';
 export const FEATURE_DRIFT = 'npc-state-delta.drift';
 export const FEATURE_PRESETS = 'npc-state-delta.presets';
 export const FEATURE_SCAN_EVERY_REPLY = 'npc-state-delta.scan-every-reply';
-// The anti-lever gate (npc-meters-gate.js): off by default, so the static prompt and every old chat stay as they were.
+// The anti-lever gate (npc-meters-gate.js): on by default (the owner restarts the chat, as for World pulse). A reply already written keeps its
+// stored ops on every replay, rebuild, swipe and delete; only a Re-read of an old reply runs its lines again, and an old line has no `via`.
 export const FEATURE_GATE = 'npc-state-delta.anti-lever';
 export const FEATURE_MOOD_PULL = 'npc-state-delta.mood-pull';
 // Dossier notes (src/npc-notes-kinds.js): lies told, what a person knows of others, tastes, ties; story kinds `~ lie|know|taste|tie`.
@@ -69,13 +70,13 @@ export const FEATURES = Object.freeze([
     // "Scan every" when larger), reading every reply since the last scan; a manual scan is never held back.
     Object.freeze({ id: FEATURE_SCAN_EVERY_REPLY, label: 'Scan after every reply', describe: 'Off: the automatic scan runs every 3 replies (or the "Scan every" setting if larger) and that scan reads every reply since the last one, so a reply in between is read, not lost. A manual scan always runs.', default: true, presets: LEAN_OFF }),
     // A story line may say `| via: praise`; the same approach to the same person again soon gives less and then backfires (npc-meters-gate.js).
-    Object.freeze({ id: FEATURE_GATE, label: 'Anti-lever: repeated approaches give less', describe: 'A story line may name its approach (praise, gift, help, flirt, threat, shared danger); repeating it to one person within a few days gives less, then backfires. Story lines only.', default: false, prompt: true, presets: LEAN_OFF }),
-    // Mood and pull (npc-mood.js, npc-instincts.js): code-set state on each record plus tail lines for present NPCs. Off by default, so an
-    // old chat's prompt and state stay byte-identical; a new chat turns it on in the feature list (the same gate as the anti-lever feature).
-    Object.freeze({ id: FEATURE_MOOD_PULL, label: 'Mood and pull', describe: 'Each person has a mood (how a betrayal or a trust drop left them) and a pull (an instinct such as wanting closure or belonging); the narrator is told both for people present.', default: false, prompt: true, presets: LEAN_OFF }),
+    Object.freeze({ id: FEATURE_GATE, label: 'Anti-lever: repeated approaches give less', describe: 'A story line may name its approach (praise, gift, help, flirt, threat, shared danger); repeating it to one person within a few days gives less, then backfires. Story lines only.', default: true, prompt: true, presets: LEAN_OFF }),
+    // Mood and pull (npc-mood.js, npc-instincts.js): code-set state on each record plus tail lines for present NPCs. On by default; a reply
+    // already written keeps its stored ops (replay is unchanged), a reader may turn it off in the feature list.
+    Object.freeze({ id: FEATURE_MOOD_PULL, label: 'Mood and pull', describe: 'Each person has a mood (how a betrayal or a trust drop left them) and a pull (an instinct such as wanting closure or belonging); the narrator is told both for people present.', default: true, prompt: true, presets: LEAN_OFF }),
     // Dossier notes: four story kinds (lie, know, taste, tie), code-kept leaves on each record and optional tail lines. Their grammar is
     // only in the static prompt while this is on; a reply written before it existed never holds one of those lines.
-    Object.freeze({ id: FEATURE_NOTES, label: 'Dossier notes', describe: 'The story may note a lie a person told, what they know of others, their tastes and ties (ally, rival, owes); a lie the story catches costs trust. Hidden until revealed.', default: false, prompt: true, presets: LEAN_OFF }),
+    Object.freeze({ id: FEATURE_NOTES, label: 'Dossier notes', describe: 'The story may note a lie a person told, what they know of others, their tastes and ties (ally, rival, owes); a lie the story catches costs trust. Hidden until revealed.', default: true, prompt: true, presets: LEAN_OFF }),
 ]);
 export const FEATURE_DEFAULTS = Object.freeze(Object.fromEntries(FEATURES.map(feature => [feature.id, feature.default])));
 

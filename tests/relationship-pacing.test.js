@@ -480,15 +480,15 @@ test('gate: only the story\'s own lines are gated: a scan\'s change passes throu
     assert.equal(s.npc('Oren').meters.tension, 0);
 });
 
-test('gate: feature off (the default) and old lines: byte-identical state, no ring, and the static line is unchanged', async () => {
+test('gate: feature off and old lines: byte-identical state, no ring, and the static line is unchanged', async () => {
     const lines = [['~ npc Oren | affection: +2 | impact: meaningful'], ['~ npc Oren | trust: +1']];
-    const off = await suite({ allowance: null });
+    const off = await suite({ allowance: null, features: { [FEATURE_GATE]: false } });
     const on = await suite({ allowance: null, features: gateOn });
     for (const s of [off, on]) { await s.setDay(1); for (const set of lines) await s.say(set); }
     const bare = x => JSON.stringify(x.host.head().domains.npc).replace(/sw_[a-z0-9]+/g, 'sw');
     assert.equal(bare(on), bare(off), 'lines without via: the feature on changes nothing');
     assert.equal(record(on).via, undefined);
-    const withVia = await suite({ allowance: null });
+    const withVia = await suite({ allowance: null, features: { [FEATURE_GATE]: false } });
     await withVia.setDay(1);
     await withVia.say([praise(), praise(), praise()]);
     assert.equal(record(withVia).via, undefined, 'off: no ring');
@@ -743,7 +743,9 @@ test('the tail tells mood and pull for present people only; feature off: the tai
     const off = make(false);
     const base = off.context.tail(view);
     assert.deepEqual(base.optional, [], 'off: no mood or pull line at all');
-    assert.equal(JSON.stringify(base), JSON.stringify(createNpcPart({ settings: () => ({}), present: () => ['Mira', 'Oren'] }).context.tail(view)), 'off equals a part that never heard of the feature');
+    const bare = JSON.parse(JSON.stringify(view));
+    for (const person of Object.values(bare.state.domains.npc.npcs)) { delete person.mood; delete person.pull; delete person.inst; }
+    assert.equal(JSON.stringify(base), JSON.stringify(off.context.tail(bare)), 'off: the tail does not read mood or pull at all');
     const on = make(true);
     assert.equal(on.context.static(), off.context.static(), 'the static prompt never changes');
     const told = on.context.tail(view);
@@ -777,7 +779,7 @@ test('mood and pull: replay equals rebuild through swipes, a Re-read, a middle d
     const head = JSON.stringify(s.host.head());
     s.host.store.rebuild();
     assert.equal(JSON.stringify(s.host.head()), head, 'after the middle delete: replay equals rebuild');
-    const off = await suite({ allowance: null, modules: [worldModule] });
+    const off = await suite({ allowance: null, modules: [worldModule], features: { [FEATURE_MOOD_PULL]: false } });
     await off.setDay(2);
     await world(off, { threads: [{ id: 'th_dddddddd', key: 'Old debt', status: 'active', fields: { people: 'Oren' } }] });
     await off.say(['~ npc Oren | trust: -3 | impact: major']);
@@ -809,4 +811,35 @@ test('mood and pull cores: the 3x3 word table, the bars, decay that never passes
     assert.deepEqual(stepPull(undefined, { day: 3, party: null, here: '', present: true, threads: [] }), { track: {}, inst: { belo: 0, clos: 0, awe: 0 }, pull: null });
     const joined = stepPull({ party: 0 }, { day: 4, party: true, threads: [] });
     assert.deepEqual(joined.pull, { kind: 'belonging', cause: 'new to the party', since: 4 });
+});
+
+// ---- the new defaults (anti-lever gate, mood and pull, notes are on) against replies already written ----
+
+test('defaults on: a chat written with the three features off replays unchanged after they are switched on; a Re-read of a reply with no new-feature line is identical, one with a trust drop adds only the mood', async () => {
+    const off = { [FEATURE_GATE]: false, [FEATURE_MOOD_PULL]: false, 'npc-state-delta.notes': false };
+    const s = await suite({ allowance: null, features: off });
+    const bare = x => JSON.stringify(x.host.head().domains.npc).replace(/sw_[a-z0-9]+/g, 'sw');
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +2 | impact: meaningful']);
+    const dropAt = await s.say(['~ npc Oren | trust: -3 | impact: major | reason: a broken oath']);
+    const calmAt = await s.say(['~ npc Sister Temiwa | affection: +1']);
+    const last = await s.say(['~ npc Oren | affection: +1']);
+    const written = bare(s);
+    for (const id of Object.keys(off)) s.host.features.set(id, true);
+    s.host.store.rebuild();
+    assert.equal(bare(s), written, 'rebuild under the new defaults: the stored ops give the same state');
+    await s.host.st.loadChat(s.host.ctx.chat);
+    await s.adapter.ticked();
+    assert.equal(bare(s), written, 'a cold reload under the new defaults: the same state');
+    assert.equal((await s.host.sdk.reread(calmAt)).ok, true);
+    assert.equal(bare(s), written, 'a Re-read of an old reply with no via, no note line and no trust drop: byte-identical');
+    assert.equal((await s.host.sdk.reread(last)).ok, true);
+    assert.equal(bare(s), written, 'a Re-read of the newest old reply (a rise): byte-identical');
+    const before = JSON.parse(written).npcs.oren;
+    assert.equal((await s.host.sdk.reread(dropAt)).ok, true);
+    const after = JSON.parse(bare(s)).npcs.oren;
+    assert.deepEqual(Object.keys(after).filter(key => !Object.keys(before).includes(key)), ['mood'], 'the one new field a Re-read of an old trust drop can add');
+    const { mood, ...rest } = after;
+    assert.deepEqual(rest, before, 'meters, stages, notes, the day\'s count and the last event are as they were');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });
