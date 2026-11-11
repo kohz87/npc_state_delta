@@ -187,7 +187,7 @@ export function createHostedPart(rt, deps) {
     function dossierSheetLevels(state) {
         const levels = partyLevelList();
         const marked = {};
-        for (const npc of levels.length ? state?.npcs || [] : []) if (npc?.id && sheetLevelOf(npc, levels) !== null) marked[npc.id] = true;
+        for (const npc of levels.length ? state?.npcs || [] : []) if (npc?.id && sheetLevelOf(npc, levels) !== null && String(npc.customFields?.Level ?? '') === String(sheetLevelOf(npc, levels))) marked[npc.id] = true;
         return Object.keys(marked).length ? marked : null;
     }
     // What the dossier view reads from the host beside the dossiers: v2 meters, key-person and living-cast views.

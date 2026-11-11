@@ -15,7 +15,7 @@ import { createTargetedRefreshPart } from './runtime-targeted-refresh.js';
 import { createTargetedBackfillPart } from './runtime-targeted-backfill.js';
 
 export function createTargetedPart(rt, deps) {
-    const { attachGeneratedSecrets, BACKFILL_MAX_ATTEMPTS, beginScanOperation, chatHydrationStatus, commitBranchCheckpoint, editorIsMounted, endScanOperation, ensureChatStateLoaded, ensureHydratedStateFresh, findMeguminDossierSources, flushStateFile, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeterView, hostedTargetNotes, isHostSwipeActive, isScanBusy, noteScanFailure, persist, recordInlineCardsInState, recordScanDiagnostics, removeNpcInlineCardAtMessage, renderDossier, requireReadyChatMutation, runTargetedDossierPass, saveNpcEditor, scanCanonicalBaseCurrent, scanOperationCurrent, scenePresentAt, setChatState, settleStateFileWrite, staleHostActive, targetNoteOptions, updateInjection } = deps;
+    const { attachGeneratedSecrets, BACKFILL_MAX_ATTEMPTS, beginScanOperation, chatHydrationStatus, commitBranchCheckpoint, editorIsMounted, endScanOperation, ensureChatStateLoaded, ensureHydratedStateFresh, findMeguminDossierSources, flushStateFile, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeterView, hostedTargetNotes, isHostSwipeActive, isScanBusy, noteScanFailure, partyLevelList, persist, recordInlineCardsInState, recordScanDiagnostics, removeNpcInlineCardAtMessage, renderDossier, requireReadyChatMutation, runTargetedDossierPass, saveNpcEditor, scanCanonicalBaseCurrent, scanOperationCurrent, scenePresentAt, setChatState, settleStateFileWrite, staleHostActive, targetNoteOptions, updateInjection } = deps;
     const { stateVersions, runningTargetedPasses } = rt;
     const { backfillScanMatchesTarget, rowContradictsTarget, soleRowMayBeTarget, scopeProfileUpdatesToTarget, edgeTouchesResolvedTarget } = createTargetedScopePart();
 
@@ -137,6 +137,7 @@ export function createTargetedPart(rt, deps) {
                 autoArchiveDeaths: settings.autoArchiveDeaths !== false,
                 autoReactivateArchived: settings.autoReactivateArchived !== false,
                 admissionMode: settings.admissionMode,
+                partyLevels: partyLevelList(),
                 preservePresence: true,
                 skipRelationshipUpdate: true,
                 ...job.mergeOptions,

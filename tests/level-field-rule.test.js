@@ -94,7 +94,6 @@ for (const { path: file } of JSON.parse(fs.readFileSync(path.join(sourceRoot, 'r
 }
 fs.writeFileSync(path.join(tempRoot, 'public', 'scripts', 'extensions.js'), 'export const extension_settings = {};\nexport function getContext() { return {}; }\n');
 fs.writeFileSync(path.join(tempRoot, 'public', 'script.js'), 'export function getRequestHeaders() { return {}; }\nexport async function saveSettings() {}\n');
-test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
 const { effectiveCustomFieldNames, setRpgProbe } = await import(pathToFileURL(path.join(extRoot, 'runtime-settings.js')).href);
 const { buildInjection } = await import('../core.js');
 const { suite } = await import('./helpers/pacing-suite.js');
@@ -198,3 +197,35 @@ test('the adapter reads party.levels (null without the query), the dossier marks
     assert.match(currentCard('Level', '5', '', '', 'from the party sheet'), /5<em class="delta-from">from the party sheet<\/em>/);
     assert.doesNotMatch(currentCard('Level', '5', ''), /delta-from/);
 });
+
+// ---- the sheet level holds on every scan path; the mark only when it matches ----
+const hostedPart = async answer => {
+    globalThis.document = { documentElement: { dataset: { npcStateDeltaStoryBlockV2: '1' } } };
+    const { createHostedPart } = await import(pathToFileURL(path.join(extRoot, 'runtime-hosted.js')).href);
+    const rt = { storySuiteV2: { hosted: () => true, partyLevelsAnswer: () => answer } };
+    return createHostedPart(rt, { chatHydrationStatus: () => 'ready', getChatKey: () => 'c1', getChatState: () => ({ npcs: [] }), latestMessageId: () => 1, latestReplyIndex: () => 1 });
+};
+
+test('partyLevelList drops a member who left (rule 2), keeps whole-number levels only, and the mark needs the stored Level to equal the sheet', async () => {
+    const prior = globalThis.document;
+    try {
+        const part = await hostedPart([{ name: 'Mira', level: 5, left: false }, { name: 'Bo', level: 3, left: true }, { name: 'Cy', level: 2.5 }, { name: 'Di', level: 4 }]);
+        assert.deepEqual(part.partyLevelList(), [{ name: 'Mira', level: 5 }, { name: 'Di', level: 4 }], 'Bo left; Cy has no whole level');
+        const person = (id, name, level) => normalizeNpcRecord({ id, name, customFields: level === null ? {} : { Level: level } });
+        const state = { npcs: [person('m', 'Mira', '5'), person('b', 'Bo', '3'), person('d', 'Di', 'C'), person('x', 'Xu', '5')] };
+        assert.deepEqual(part.dossierHostViews({ ...state }).sheetLevels, { m: true }, 'Mira matches; Bo left; Di holds another value (hand-locked or not yet scanned); Xu is not a member');
+        assert.equal(part.dossierHostViews({ npcs: [person('d', 'Di', null)] }).sheetLevels, undefined, 'no stored Level: no mark');
+    } finally { globalThis.document = prior; }
+});
+
+test('every merge call site passes the party levels: the reply scan and the targeted passes (backfill, Refresh, catch-up and import go through them)', () => {
+    const read = file => fs.readFileSync(path.join(sourceRoot, file), 'utf8');
+    for (const file of ['runtime-scan.js', 'runtime-targeted.js']) {
+        const source = read(file);
+        const calls = source.split('mergeScanResult(').length - 1;
+        assert.equal(source.split('partyLevels: partyLevelList()').length - 1, calls, `${file}: each mergeScanResult call passes partyLevels`);
+        assert.ok(calls >= 1, file);
+    }
+    assert.match(read('index.js'), /createTargetedPart\(rt, \{[^}]*partyLevelList/, 'the targeted part is given the one shared helper');
+});
+test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));   // last: the hosted-part test above imports from it
