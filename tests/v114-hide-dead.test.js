@@ -37,8 +37,8 @@ test('1.1.4: a dead dossier stays listed only while it is selected', () => {
 
 test('1.1.4: the library offers All, Active and Archived only, and its counts leave out the dead', () => {
     const source = dossierUiSource();
-    assert.match(source, /\['all', 'active', 'archived'\]\.map\(key =>/);
+    // The library screen has the search only; every row is "all", and the counts still leave out the dead.
+    assert.match(source, /libraryRows\(this\.projection\.index, \{ query: this\.query, filter: 'all', keepId: this\.selectedNpcId \}\)/);
     assert.match(source, /if \(row\?\.bucket === 'dead'\) continue;/);
-    assert.match(source, /keepId: this\.selectedNpcId/);
     assert.match(source, /search by name to find them/);
 });

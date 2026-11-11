@@ -28,7 +28,7 @@ test('present NPC pane uses portrait-first cards that open the launcher dossier'
     assert.match(index, /eventTargetClosest\(event, '\.npc-state-delta-present-card, \.npc-state-delta-present-chip, \.npc-state-delta-present-cell'\)/);
     assert.match(index, /openDossier: value =>/);
     assert.match(dossierUi, /addEventListener\('npc-state-delta:open-dossier'[\s\S]*event\.detail\.handled = true;[\s\S]*ui\.openNpc\(npcId\)/);
-    assert.match(dossierUi, /if \(this\.pendingNpcId\) \{\s*this\.selectedNpcId = this\.pendingNpcId;[\s\S]*this\.filter = 'all';/, 'the requested NPC survives the chat-change reset and is not hidden by a filter');
+    assert.match(dossierUi, /if \(this\.pendingNpcId\) \{[^}]*this\.screen = openNpc\(createScreenState\(\), this\.pendingNpcId\);[\s\S]*this\.filter = 'all';/, 'the requested NPC survives the chat-change reset, opens its board and is not hidden by a filter');
     // UI 4c: one compact row per person, full width at every size: a 44px portrait on the left, the name on one
     // line (an unbroken name is cut with an ellipsis, never pushes the row wider), the stage line under it.
     assert.match(css, /\.npc-state-delta-present-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
@@ -327,7 +327,7 @@ test('per-NPC Scan dossier workflow and Key Relationships controls are exposed',
     assert.match(index, /Key relationships/);
     assert.match(index, /editorList\('keyRelationships', KEY_RELATIONSHIP_LIMIT\)/);
     assert.deepEqual(snapshotNpc({ id: 'npc_x', keyRelationships: ['Ilse — sister'] }).keyRelationships, ['Ilse — sister'], 'the inline snapshot copies the bonds');
-    assert.match(dossierUi, /Important bonds/);
+    assert.match(dossierUi, /No important ties recorded yet/);
 });
 
 

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DeltaDossierUi } from '../dossier-ui.js';
+import { openNpc, showScreen } from '../dossier-ui-screens.js';
 import { runHostScenario } from './helpers/host-scenario.js';
 
 // The dossier page at a long chat's scale: portraits reach the panel by reference (never escaped into its markup or copied by the
@@ -28,15 +29,10 @@ function stubNode(extra = {}) {
 test('the dossier panel draws portraits by reference: no data URL in its markup or signatures, src set on the inserted image, one key per picture, forgotten once no dossier shows it', async () => {
     const saved = { document: globalThis.document, CSS: globalThis.CSS };
     const list = stubNode();
-    const hero = stubNode();
     const documentPane = stubNode();
-    let documentMarkup = '';
-    // The document pane reconciles from a template; the stub keeps the markup and inserts nothing, and the pane's images are its images.
-    documentPane.querySelectorAll = selector => (selector === 'img[data-delta-portrait]' ? documentPane.images : []);
-    globalThis.document = {
-        activeElement: null,
-        createElement: () => ({ set innerHTML(value) { documentMarkup = String(value); documentPane.images = imagesIn(value).filter(img => img.dataset.deltaPortrait); }, content: { children: [] } }),
-    };
+    // The library skeleton and its face list are two nodes in the stub; the board, profile and sections replace the pane's own markup.
+    documentPane.querySelector = selector => (selector === '[data-delta-library-list]' ? list : null);
+    globalThis.document = { activeElement: null, createElement: () => ({}) };
     globalThis.CSS = { escape: value => value };
     try {
         const npcs = [
@@ -49,37 +45,38 @@ test('the dossier panel draws portraits by reference: no data URL in its markup 
         const state = { npcs, formPortraits: { a: { Fox: { dataUrl: picture('aster-fox') }, Human: { dataUrl: picture('aster-human') } } } };
         const api = { dossierViewStatus: () => ({ chatKey: 'chat-1', hydrationStatus: 'ready' }), getDossierState: () => state, dossierViewToken: () => JSON.stringify(state.npcs.map(npc => npc.portrait)) };
         const ui = new DeltaDossierUi(api);
-        const nodes = { '.delta-cast-list': list, '.delta-hero': hero, '.delta-document': documentPane };
+        const nodes = { '.delta-document': documentPane, '.delta-stage': stubNode(), '.delta-empty': stubNode(), '.delta-notice': stubNode(), '.delta-chat-state': stubNode() };
         ui.root = { querySelector: selector => nodes[selector] ?? null, querySelectorAll: () => [], dispatchEvent: () => {} };
         ui.panelOpen = true;
-        ui.renderFilters = () => {};
-        ui.renderFromProjection = function () {
-            const rows = this.projection.index;
-            this.selectedNpcId ||= 'a';
-            this.renderRail(rows, { force: true });
-            this.renderDetail(rows, { force: true });
-        };
         await ui.refresh({ force: true });
 
-        const markup = `${list.html}${hero.html}${documentMarkup}`;
-        assert.doesNotMatch(markup, /data:image/, 'no picture is escaped into the markup');
-        assert.doesNotMatch(`${ui.lastRailSignature}${ui.lastHeroSignature}${ui.lastDetailSignature}`, /data:image/, 'nor into a render signature');
-        assert.ok(ui.lastRailSignature.length < 600, `the rail signature stays small (${ui.lastRailSignature.length})`);
+        // Library: each face gets its picture (the current form's, as before); a plain URL stays a plain src.
+        const libraryMarkup = `${documentPane.html}${list.html}`;
+        assert.doesNotMatch(libraryMarkup, /data:image/, 'no picture is escaped into the markup');
+        assert.doesNotMatch(ui.lastScreenSignature, /data:image/, 'nor into a render signature');
+        assert.ok(ui.lastScreenSignature.length < 900, `the library signature stays small (${ui.lastScreenSignature.length})`);
         assert.deepEqual(list.images.map(img => img.src).sort(), [picture('aster-fox'), picture('bryn'), '/portraits/cass.png'].sort(),
-            'each inserted rail image gets its picture (the current form\'s, as before); a plain URL stays a plain src');
+            'each inserted library image gets its picture (the current form\'s); a plain URL stays a plain src');
         assert.equal(list.images.length, 3, 'a dossier with no portrait keeps its placeholder');
-        assert.equal(hero.images[0].src, picture('aster-fox'), 'the hero shows the current form picture');
-        assert.deepEqual(documentPane.images.map(img => img.src).sort(), [picture('aster-fox'), picture('aster-human')], 'the form thumbnails too');
+        assert.equal(ui.portraitRefs.size, 2, 'one key per distinct data-URL picture in the library (Aster\'s fox and Bryn)');
+
+        // Board: the dial's portrait goes by reference too. Profile: the portrait and the form thumbnails.
+        ui.setScreen(openNpc(ui.screen, 'a'));
+        assert.doesNotMatch(documentPane.html, /data:image/);
+        assert.equal(documentPane.images[0].src, picture('aster-fox'), 'the dial shows the current form picture');
+        ui.setScreen(showScreen(ui.screen, 'profile'));
+        assert.doesNotMatch(`${documentPane.html}${ui.lastScreenSignature}`, /data:image/);
+        assert.equal(documentPane.images[0].src, picture('aster-fox'), 'the profile portrait');
+        assert.deepEqual(documentPane.images.slice(1).map(img => img.src).sort(), [picture('aster-fox'), picture('aster-human')], 'the form thumbnails too');
         assert.equal(ui.portraitRefs.size, 3, 'one key per distinct picture shown (the two forms and Bryn)');
 
         // The same pictures drawn again keep their keys; a picture no dossier shows any more is forgotten.
-        const firstKeys = list.images.map(img => img.dataset.deltaPortrait);
+        const firstKeys = documentPane.images.map(img => img.dataset.deltaPortrait);
         await ui.refresh({ force: true });
-        assert.deepEqual(list.images.map(img => img.dataset.deltaPortrait), firstKeys);
+        assert.deepEqual(documentPane.images.map(img => img.dataset.deltaPortrait), firstKeys);
         state.npcs = npcs.map(npc => (npc.id === 'b' ? { ...npc, portrait: null } : npc));
         await ui.refresh({ force: true });
         assert.equal(ui.portraitRefs.size, 2, 'the removed picture was forgotten');
-        assert.equal(ui.portraitRefs.src(firstKeys[1]), '');
     } finally {
         globalThis.document = saved.document;
         globalThis.CSS = saved.CSS;

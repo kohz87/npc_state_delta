@@ -3,6 +3,7 @@ import { escapeHtml } from './src/util/html.js';
 import { awayRange } from './src/key-people.js';
 import { changeStamp, dossierDetailProjection, plain, RELATIONSHIP_AXES, wholeNumber } from './dossier-ui-model.js';
 import { v2MetersProjection } from './dossier-ui-meters.js';
+import { libraryTone } from './dossier-ui-view-model.js';
 
 export function sortDossierIndex(rows = []) {
     const bucketRank = { active: 0, archived: 1, dead: 2 };
@@ -175,8 +176,10 @@ export function projectDossierState(state = {}, status = {}) {
             lifeState: npc.lifeState,
             bucket: npc.bucket,
             statusLabel: npc.statusLabel,
+            mood: npc.mood,
             portrait: npc.portrait,
             updatedAt: npc.updatedAt,
+            ...(libraryTone(npc.relationship) ? { tone: libraryTone(npc.relationship) } : {}),
             ...(npc.key ? { key: true } : {}),
         }))),
     };

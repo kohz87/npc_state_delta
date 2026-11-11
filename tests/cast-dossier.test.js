@@ -987,11 +987,12 @@ test('runtime: the dossier view offers the Pin button while Story Director offer
     assert.equal(out.noDirector, false, 'no Story Director: no button');
 });
 
-test('the section bar after the cast box starts where the box ends, and the "Next:" line has its own space under the meters', () => {
+test('the cast box sits in Right now, and the "Next:" line has its own space under the meters', () => {
     const ui = dossierUiSource();
-    // The bar's -26px margin collapsed with the box's 10px: it pulled its opaque padding over the box's bottom edge.
-    assert.match(ui, /\.delta-cast-from \+ \.delta-section-nav \{ margin-top:-10px; \}/, 'on the desktop the box margin and this one cancel: the bar starts at the box end');
-    assert.match(ui, /@media \(max-width: 650px\)[\s\S]*\.delta-cast-from \+ \.delta-section-nav \{ margin-top:-4px; \}/, 'on a phone the same, with that layout\'s -4px');
+    // The section bar is gone with the one long page: the cast and away blocks head the Right now section.
+    assert.doesNotMatch(ui, /delta-section-nav/);
+    assert.match(ui, /castFromHtml\(npc\.cast, npc\.id\)/, 'the cast block (with its Pin button) is drawn in Right now');
+    assert.match(ui, /keyAwayHtml\(npc\.key\)/, 'so is the away block');
     // `.delta-section p { margin:0 }` outranks a bare class: the 6px of the rank, next and milestones lines never applied.
     assert.match(ui, /\.delta-section p\.delta-v2-next, [^\n]*\.delta-section p\.delta-v2-note \{ margin:6px 0 0;/);
     assert.doesNotMatch(ui, /#\$\{ROOT_ID\} \.delta-v2-next/, 'no bare-class rule for the lines (it loses to .delta-section p)');
@@ -1000,13 +1001,9 @@ test('the section bar after the cast box starts where the box ends, and the "Nex
 
 // ---- the opaque panel and section bar (a follow-up from the mockup) ----
 
-test('the dossier panel and its sticky section bar are opaque: a floor under the tint, the tint over it', () => {
+test('the dossier panel is opaque: a floor under the tint, the tint over it', () => {
     const ui = dossierUiSource();
     assert.match(ui, /\.delta-panel \{[^}]*background-color:var\(--delta-floor\); background-image:linear-gradient\(var\(--delta-bg\),var\(--delta-bg\)\);/s);
-    assert.match(ui, /\.delta-section-nav \{[^}]*background-color:var\(--delta-floor\); background-image:linear-gradient\(var\(--delta-bg\),var\(--delta-bg\)\);/s);
-    // The bar reaches up over the panel's 22px top padding, so nothing scrolls into view above it (the chips stay where they were).
-    assert.match(ui, /\.delta-section-nav \{ position:sticky; top:-22px;[^}]*margin:-26px 0 12px; padding:30px 0 8px;/);
-    assert.match(ui, /@media \(max-width: 650px\)[\s\S]*\.delta-section-nav \{ top:0; margin-top:-4px; padding-top:8px; \}/, 'on a phone the scrolling parent has no padding: as before');
     assert.doesNotMatch(ui, /\.delta-panel \{[^}]*background:var\(--delta-bg\)/s, 'the translucent tint alone is gone');
     assert.match(ui, /--delta-floor: var\(--ss-sheet-floor, #18191d\)/, 'a fixed floor where the host gives none');
     assert.match(ui, /@supports \(color: rgb\(from red r g b\)\)[\s\S]*--delta-floor: var\(--ss-sheet-floor, rgb\(from var\(--delta-bg\) r g b \/ 1\)\)/, 'the tint with its alpha dropped where relative colours exist');

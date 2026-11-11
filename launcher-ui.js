@@ -113,7 +113,6 @@ body:has(.ss-gameview) #${LAUNCHER_ID} { display: none !important; }
 html[data-npc-state-delta-story-block="1"]:not([data-npc-state-delta-launcher="keep"]) #${LAUNCHER_ID} { display: none !important; }
 /* A Story Block v2 host carries Delta (its Cast tab and overlay): the same, with its own keep setting. */
 html[data-npc-state-delta-story-block-v2="1"]:not([data-npc-state-delta-launcher-v2="keep"]) #${LAUNCHER_ID} { display: none !important; }
-#${ROOT_ID} .delta-document-head > .delta-edit { display: none !important; }
 #${ROOT_ID} .delta-backdrop {
   position: fixed;
   inset: 0;
@@ -234,40 +233,13 @@ html[data-npc-state-delta-story-block-v2="1"]:not([data-npc-state-delta-launcher
     min-width: 44px;
     min-height: 44px;
   }
-  #${ROOT_ID} .delta-cast {
+  #${ROOT_ID} .delta-document {
     padding-bottom: max(8px, env(safe-area-inset-bottom));
   }
 }
-@media (min-width: 651px) and (max-width: 900px) {
-  #${ROOT_ID} .delta-library {
-    grid-template-rows: minmax(0, 1fr) 178px;
-  }
-  #${ROOT_ID} .delta-cast-tools {
-    align-items: center;
-    flex-direction: row;
-  }
-  #${ROOT_ID} .delta-search-label {
-    flex: 1 1 0;
-    min-width: 0;
-    max-width: none;
-  }
-  #${ROOT_ID} .delta-filters {
-    flex: 0 0 auto;
-    flex-wrap: nowrap;
-  }
-  #${ROOT_ID} .delta-cast-list {
-    min-height: 92px;
-  }
-}
 @media (max-width: 650px) {
-  #${ROOT_ID} .delta-library {
-    grid-template-rows: minmax(0, 1fr) clamp(224px, 30dvh, 260px);
-  }
-  #${ROOT_ID} .delta-cast {
+  #${ROOT_ID} .delta-document {
     padding-bottom: max(10px, env(safe-area-inset-bottom));
-  }
-  #${ROOT_ID} .delta-cast-list {
-    min-height: 94px;
   }
 }
 `;
@@ -300,7 +272,6 @@ html[data-npc-state-delta-story-block-v2="1"]:not([data-npc-state-delta-launcher
     normalizeDossierChrome() {
         if (!this.root) return;
         for (const button of this.root.querySelectorAll('.delta-open-settings')) button.remove();
-        for (const button of this.root.querySelectorAll('.delta-document-head > .delta-edit')) button.remove();
         this.ensureBackdrop();
         this.syncPanelState();
     }

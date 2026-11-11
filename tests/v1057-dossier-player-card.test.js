@@ -46,12 +46,13 @@ test('the player card states when no change or only progress was recorded', () =
 test('the dossier layout keeps portrait emphasis, section jumps and compact dead cards', () => {
     const ui = dossierUiSource();
     const experience = fs.readFileSync(new URL('../dossier-experience-styles.js', import.meta.url), 'utf8');
-    assert.match(ui, /delta-portrait-expand/);
+    // The portrait is the dial's centre (a tap opens the profile) and fills the profile's left column; a tap there opens it full size.
+    assert.match(ui, /data-delta-screen="profile"/);
+    assert.match(ui, /img\.delta-profile-image/);
     assert.match(ui, /openLightbox\(\)/);
-    assert.match(ui, /data-delta-section="player"/);
-    assert.match(ui, /data-delta-jump/);
-    assert.match(ui, /data-bucket="\$\{escapeHtml\(npc\.bucket\)\}"/);
-    assert.match(experience, /\.delta-cast-card\[data-bucket="dead"\]/);
-    // The portrait column keeps its existing share of the spread.
-    assert.match(ui, /grid-template-columns:minmax\(310px,36%\) minmax\(0,1fr\)/);
+    assert.match(ui, /data-delta-section="\$\{esc\(tile\.section\)\}"/, 'a tile opens its section');
+    assert.match(ui, /data-bucket="\$\{escapeHtml\(npc\.bucket \|\| ''\)\}"/);
+    assert.doesNotMatch(experience, /delta-cast-card|delta-hero/, 'the old rail and hero rules are gone');
+    // Desktop: the board beside a section; the profile is two columns with the portrait on the left.
+    assert.match(ui, /\.delta-profile \{ grid-template-columns:minmax\(0,\.8fr\) minmax\(0,1\.2fr\); \}/);
 });
