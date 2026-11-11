@@ -83,6 +83,7 @@ Generated 2026-11-07.
 - `dossier-ui-relationship.js`: Relationship meter steps, latest change and history markup split from `dossier-ui.js`.
 - `dossier-ui-render.js`: Cast rail, filters and selected-dossier rendering split from `dossier-ui.js`.
 - `dossier-ui-styles.js`: The dossier panel's scoped stylesheet split from `dossier-ui.js`.
+- `relationship-map-focus.js`: Map Focus helpers: lit nodes and bonds for one person, relation word and tone per tied node (optional injected `bondTone`, local fallback), and the "Focus: Name ✕" chip markup. Pure.
 - `social-primitives.js`: Shared social-graph limits plus text normalization and similarity helpers split from `social.js`.
 - `social-relations.js`: Relation families, inverse/sanitization rules and shared relation parsing split from `social.js`.
 - `social-bonds.js`: Important-bond parsing, compaction and display formatting split from `social.js`.

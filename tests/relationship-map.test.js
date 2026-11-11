@@ -149,3 +149,56 @@ test('the map is a read-only adapter wired through the existing owners', () => {
     assert.match(read('bootstrap.js'), /await import\('\.\/dossier-experience\.js'\);[\s\S]*await import\('\.\/relationship-map\.js'\);/);
     assert.match(adapter, /readMapSettings\(\)\.enabled/, 'turning the map off removes its switch, pane and link');
 });
+
+test('focus: the web of one person lights her ties, dims the rest and words each tie', async () => {
+    const { buildFocusModel, relationWord, localBondTone, mapNodeHtml, mapSvgHtml, mapCardHtml, mapKeyLine } = await import('../relationship-map-focus.js');
+    const npcs = [
+        npc('rika', { keyRelationships: ['Temiwa: friend', 'Bregje: rival'] }),
+        npc('temiwa'), npc('bregje', { keyRelationships: ['Vane: owes a debt'] }), npc('vane'), npc('joren'),
+    ];
+    const projection = { npcs, turn: 1 };
+    const map = buildMapModel(projection, { selectedId: 'rika' });
+    const focus = buildFocusModel(projection, map, 'rika');
+    assert.equal(focus.active, true);
+    assert.deepEqual(focus.litIds.sort(), ['bregje', 'rika', 'temiwa']);
+    assert.equal(focus.states.joren, 'dim');
+    assert.equal(focus.states.vane, 'dim');
+    assert.equal(focus.states.rika, 'focus');
+    assert.deepEqual(focus.ties.map(t => [t.id, t.word, t.tone]), [['bregje', 'rival', 'bad'], ['temiwa', 'friend', 'good']]);
+    assert.equal(buildFocusModel(projection, map, 'nobody').active, false);
+    assert.equal(relationWord('owes her a favour'), 'owes');
+    assert.equal(localBondTone('owes'), 'gold');
+    // Markup: dimmed face, word under tied name, solid thick bonds only for her, ✕ chip, Open dossier › and Focus on the card.
+    const ties = new Map(focus.ties.map(t => [t.id, t]));
+    const nodes = map.nodes.map(n => mapNodeHtml(n, focus, { ties })).join('');
+    assert.match(nodes, /data-npc-id="joren"[^>]*data-focus="dim"/);
+    assert.match(nodes, /delta-map-word" data-tone="bad">rival</);
+    const svg = mapSvgHtml(map, focus);
+    assert.equal((svg.match(/<line /g) || []).length, 2, 'only her bonds are drawn in focus');
+    assert.match(svg, /delta-map-bond-solid/);
+    assert.equal((mapSvgHtml(map, buildFocusModel(projection, map, '')).match(/<line /g) || []).length, 3, 'all bonds without focus');
+    assert.match(focus.chip.html, /Focus: Rika[\s\S]*data-map-focus-clear="rika"[\s\S]*✕/);
+    assert.match(mapCardHtml(map, buildFocusModel(projection, map, ''), 'Astra'), /data-map-focus="rika"[\s\S]*Open dossier ›/);
+    assert.match(mapCardHtml(map, focus, 'Astra'), /Rika&#039;s ties<\/b>[\s\S]*rival<\/span> Bregje/);
+    assert.equal(mapKeyLine('warmth', 'Astra'), 'Closer to Astra = warmer · the dashed outer ring = cold · hostile');
+});
+
+test('map faces go through the portrait refs, never a raw data URL in the markup', async () => {
+    const { mapNodeHtml, buildFocusModel } = await import('../relationship-map-focus.js');
+    const { createPortraitRefs } = await import('../dossier-ui-html.js');
+    const refs = createPortraitRefs();
+    const data = 'data:image/png;base64,AAAA';
+    const map = buildMapModel({ npcs: [npc('rika', { portrait: data })] }, {});
+    const html = mapNodeHtml(map.nodes[0], buildFocusModel({}, map, ''), { refs });
+    assert.doesNotMatch(html, /data:image/);
+    assert.match(html, /data-delta-portrait="1"/);
+    assert.match(mapNodeHtml(map.nodes[0], buildFocusModel({}, map, '')), /src="data:image/, 'without refs the URL stays escaped in src');
+});
+
+test('the map wires Focus: button, double-tap, chip clear and portrait fill', () => {
+    const adapter = fs.readFileSync(new URL('../relationship-map.js', import.meta.url), 'utf8');
+    assert.match(adapter, /data-map-focus-clear/);
+    assert.match(adapter, /addEventListener\('dblclick'/);
+    assert.match(adapter, /refs\?\.fill\(pane\)/);
+    assert.ok(adapter.split('\n').length < 450);
+});
