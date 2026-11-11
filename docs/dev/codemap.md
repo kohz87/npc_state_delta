@@ -76,6 +76,7 @@ Generated 2026-11-07.
 - `dossier-ui-constants.js`: Dossier root, settings, style and observer constants shared by the split UI modules.
 - `dossier-ui-controller.js`: Dossier controller actions, refresh orchestration, editor and settings bridges split from `dossier-ui.js`.
 - `dossier-ui-html.js`: Escaped dossier markup, cards, appearance forms, portrait references and section helpers split from `dossier-ui.js`.
+- `dossier-ui-bond-tone.js`: Bond tone (close, hostile, duty, neutral) and short relation word for the dossier bond line, from `social-relations.js` families plus enemy/duty words.
 - `dossier-ui-meters.js`: Hosted meter bars, rank, milestones and Secrets-section projections and markup split from `dossier-ui.js`.
 - `dossier-ui-model.js`: Dossier record lookups, change stamps and index/detail projections split from `dossier-ui.js`.
 - `dossier-ui-mount.js`: Singleton dossier UI mounting and open-dossier request forwarding split from `dossier-ui.js`.
