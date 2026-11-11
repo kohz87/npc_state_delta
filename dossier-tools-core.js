@@ -122,9 +122,7 @@ export function npcById(id, options) {
 }
 export function selectedNpcId() {
     const root = uiRoot();
-    const selected = root?.querySelector?.('.delta-cast-card.selected')?.dataset?.npcId
-        || root?.querySelector?.('.delta-hero .delta-edit[data-npc-id]')?.dataset?.npcId
-        || '';
+    const selected = root?.__npcStateDeltaStage1Ui?.selectedNpcId || '';
     return plain(selected);
 }
 export function draftKey(chatKey, npcId) { return `${chatKey}::${npcId}`; }

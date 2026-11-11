@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { boardHtml } from '../dossier-ui-board.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -228,7 +229,7 @@ test('dossier UI places gender between species and role and makes it searchable'
     assert.equal(projected.index[0].gender, 'female');
 
     assert.match(dossierUiText, /npc\?\.species,\s*\n\s*npc\?\.gender,\s*\n\s*npc\?\.role/);
-    assert.match(dossierUiText, /\[npc\.species, npc\.gender, npc\.role\]/);
+    assert.match(boardHtml(projected.npcs[0]), /Human · female · Barmaid/, 'the board names species, gender, role in that order');
     assert.match(runtimeText, /id="npc_state_delta_edit_gender"/);
     assert.match(runtimeText, /Gender<select/);
 });

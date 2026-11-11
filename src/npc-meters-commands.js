@@ -3,12 +3,16 @@
 import { storyMinuteText } from '../calendar.js';
 import { isAway, labelKey, labelsOf, normalizeKeyPeople } from './key-people.js';
 import { normalizeCast } from './cast-dossier.js';
-import { NPC_DOMAIN, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
+import { normalizeApproachKind } from '../npc-meters-gate.js';
+import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
+import { stepPull } from '../npc-instincts.js';
+import { runKind, noteLine, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
+import { applyEvents, restMood, restingMood } from '../npc-mood.js';
 import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence } from './npc-meters-slice.js';
 
 export function createNpcCommands({
     featureOn, normalized, defsFrom, tierCaps, ownOrModule, readerAction, headReply, commandReply,
-    identify, ensure, note, changesFrom, setupFor, limitsFor, resolve, settleRecord, run,
+    identify, ensure, note, changesFrom, setupFor, limitsFor, resolve, settleRecord, run, presentNames, clockDay,
 }) {
     // ---- the change lines ----
 
@@ -21,8 +25,35 @@ export function createNpcCommands({
         return run(ctx, { label: line.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, milestone: { add: [{ key, name }] } });
     }
 
+    // A note line (lie, know, taste, tie; feature notes): the kind's handler works out the new leaf and any trust drop of a caught lie,
+    // then ONE run() writes both in the line's own op (so the day's allowance, the mood and a swipe all follow). A refusal writes nothing.
+    function captureNote(ctx, line) {
+        if (!featureOn(FEATURE_NOTES, ctx)) ctx.fail('FEATURE_OFF', 'Dossier notes are turned off.');
+        const labels = Object.fromEntries(Object.entries(isObject(line.labels) ? line.labels : {}).map(([label, raw]) => [slug(label), clean(String(raw ?? ''), 200)]));
+        const at = isInt(ctx.carrier?.index) ? ctx.carrier.index : null;
+        const reply = replyKey(ctx.carrier?.sid, at);
+        const slice = ctx.draft(NPC_DOMAIN);
+        const who = identify(isObject(slice.npcs) ? slice.npcs : {}, line.name);
+        if (!who) ctx.fail('INVALID', 'The line does not name anyone.');
+        const day = clockDay(at);
+        const current = (isObject(slice.npcs) && isObject(slice.npcs[who.key]) ? slice.npcs[who.key][noteField(line.kind)] : '') ?? '';
+        const changes = [];
+        const problems = [];
+        const cues = [];
+        const notes = { run: change => changes.push(...change.changes), flag: (text, cue) => (cue ? (problems.push(text), cues.push(cue)) : cues.push(text)) };
+        const out = runKind(line.kind, current, noteLine(line.kind, labels, { current, r: reply, day }), { name: who.name, day, r: reply, userText: ctx.chat?.lastUser ?? '', tier: CAUGHT_TIER, drop: CAUGHT_DROP, notes });
+        if (out.problem) ctx.fail('REFUSED', out.problem);
+        const moves = changes.length > 0;
+        const done = run(ctx, {
+            label: line.name, changes, problems, limit: moves, reply: moves ? reply : null, at: moves ? at : null, allowEmpty: true, story: moves,
+            impact: moves && tierCaps() ? { tier: CAUGHT_TIER, caps: tierCaps() } : null, reason: moves ? `caught lying to ${clean(labels.to, 40)}` : '', leaf: { field: out.field, text: out.text },
+        });
+        return cues.length ? { ...done, summary: sentence(moves ? [...cues, done.summary] : cues), narrate: true } : done;
+    }
+
     function captureLine(ctx, line = {}) {
         if (line.kind === MILESTONE_KIND) return captureMilestone(ctx, line);
+        if (isNoteKind(line.kind)) return captureNote(ctx, line);
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         const byLabel = new Map(defs.flatMap(def => [[def.id, def], [slug(def.label), def]]));
@@ -30,10 +61,14 @@ export function createNpcCommands({
         const changes = [];
         let disposition;
         let tier = 'ordinary';
+        let via = null;
+        let reason = '';
         for (const [label, raw] of Object.entries(isObject(line.labels) ? line.labels : {})) {
             const key = slug(label);
-            if (REASON_LABELS.has(key)) continue;
+            if (REASON_LABELS.has(key)) { reason ||= clean(raw, 80); continue; }
             if (key === 'impact' && !byLabel.has(key)) { tier = tierOf(raw); continue; }
+            // The anti-lever approach label (a feature, off: "not a meter" as before); an unknown word is no approach, quietly.
+            if (key === 'via' && !byLabel.has(key) && featureOn(FEATURE_GATE, ctx)) { via = normalizeApproachKind(String(raw ?? '').trim().toLowerCase()); continue; }
             if (key === 'stage' || key === 'stages') { problems.push(`Stages are set by code from the meters; "stage: ${clean(raw, 60)}" was not used.`); continue; }
             if (key === 'disposition') { disposition = clean(raw, DISPOSITION_MAX); continue; }
             const def = byLabel.get(key);
@@ -46,7 +81,7 @@ export function createNpcCommands({
         // index an older one had is its own reply, with its own cap.
         const at = isInt(ctx.carrier?.index) ? ctx.carrier.index : null;
         const reply = replyKey(ctx.carrier?.sid, at);
-        return run(ctx, { label: line.name, changes, problems, limit: true, reply, at, disposition, allowEmpty: line.op === '+', impact: tierCaps() ? { tier, caps: tierCaps() } : null, story: true });
+        return run(ctx, { label: line.name, changes, problems, limit: true, reply, at, disposition, via, allowEmpty: line.op === '+', impact: tierCaps() ? { tier, caps: tierCaps() } : null, story: true, reason });
     }
 
     // ---- commands (cause ui from Delta itself; capture is the story's) ----
@@ -54,6 +89,45 @@ export function createNpcCommands({
     const milestoneList = value => (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value])
         .map(item => clean(isObject(item) ? item.name ?? item.key : item, MILESTONE_MAX)).filter(Boolean)
         .map(name => ({ key: wordKey(name), name })).filter(item => item.key);
+
+    // What the tick reads once for mood and pull (feature mood-pull): who is in the party (party.actors), the place (scene.place),
+    // the open threads and who they name (director.threads), who is present. A query that fails or is missing is "no signal" (null, '', []).
+    function readWorld(ctx) {
+        const ask = (name, args) => { try { return ctx.query(name, args); } catch { return null; } };
+        const actors = ask('party.actors', {});
+        const place = ask('scene.place', {});
+        const rows = ask('director.threads', { open: true });
+        const scene = ask('scene.present', {});
+        const names = value => String(value ?? '').split(',').map(labelKey).filter(Boolean);
+        return {
+            party: Array.isArray(actors) ? new Set(actors.map(actor => labelKey(actor?.name)).filter(Boolean)) : null,
+            here: typeof place?.name === 'string' ? clean(place.name, 60) : '',
+            // Present by the reply's own scene (reply-pinned like every other read here), else the host's present list (the dossiers' own flags).
+            present: new Set((Array.isArray(scene) && scene.length ? scene : presentNames()).map(name => labelKey(typeof name === 'string' ? name : name?.name)).filter(Boolean)),
+            threads: (Array.isArray(rows) ? rows : []).filter(row => typeof row?.id === 'string' && row.status === 'active').map(row => ({
+                id: row.id, title: clean(row.key, 60), names: [labelKey(row.key), ...names(row.fields?.giver), ...names(row.fields?.people)].filter(Boolean),
+            })),
+        };
+    }
+
+    // One record's mood decay and pull for this tick (feature mood-pull). `rawPeople`: Story Director's key people as answered.
+    function moodPullStep(record, day, world, rawPeople, minutes) {
+        const labels = new Set([record.name, ...(resolve(record.name)?.aliases ?? [])].map(labelKey).filter(Boolean));
+        const has = list => list.some(label => labels.has(label));
+        const gone = (Array.isArray(rawPeople) ? rawPeople : []).find(person => isObject(person?.away) && !person.removed && has([person.name, ...(Array.isArray(person.aliases) ? person.aliases : [])].map(labelKey)));
+        const out = stepPull(record.track, {
+            day, party: world.party ? has([...world.party]) : null, here: world.here, present: has([...world.present]),
+            awayDay: isInt(gone?.away?.since) ? Math.floor(gone.away.since / DAY_MINUTES) : null,
+            threads: world.threads.filter(thread => has(thread.names)),
+            // Drives (notes feature): the person's instinct strengths scale what pulls at them; none stored: the scores as they are.
+            scale: featureOn(FEATURE_NOTES) && record.drives ? driveScale(record.drives) : undefined,
+        });
+        if (isObject(record.mood) && isInt(minutes)) record.mood = applyEvents(record.mood, minutes, []);
+        const set = (field, value, empty) => { if (empty) delete record[field]; else record[field] = value; };
+        set('track', out.track, !Object.keys(out.track).length);
+        set('inst', out.inst, !Object.values(out.inst).some(Boolean));
+        set('pull', out.pull, !out.pull);
+    }
 
     const commands = {
         /**
@@ -115,6 +189,26 @@ export function createNpcCommands({
             return run(ctx, { label: payload?.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, notes: { open, close, story } });
         },
         /**
+         * npc.flag { name, text?, cue?, lock?: true, reply? }: Delta's own scan tells the slice about a person's look (feature notes): `lock` stamps the
+         * day and reply the first durable look was set (kept once), `text` is a Problem line (the same text is not written twice in a row) and `cue`
+         * the one-reply words the story is told (narrate). Only Delta's own scan or another module's command may send it.
+         */
+        'npc.flag'(ctx, payload = {}) {
+            if (!ownOrModule(ctx, 'npc.flag', payload)) ctx.fail('REFUSED', 'A look flag comes only from NPC State Delta\'s own scan.');
+            if (!featureOn(FEATURE_NOTES, ctx)) ctx.fail('FEATURE_OFF', 'Dossier notes are turned off.');
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            const slice = ctx.read(NPC_DOMAIN);
+            const who = identify(slice?.npcs ?? {}, payload?.name);
+            const have = who ? slice?.npcs?.[who.key] : null;
+            const text = clean(payload?.text, 200);
+            const cue = clean(payload?.cue, 240);
+            const stamp = payload?.lock === true && !readLookStamp(have?.lookLockedAt) ? lookStamp(clockDay(at), commandReply(ctx, at)) : null;
+            const fresh = text && !(Array.isArray(slice?.problems) && slice.problems.some(item => item?.text === text));
+            if (!fresh && !stamp) ctx.fail('REFUSED', 'Nothing to flag.');
+            const done = run(ctx, { label: payload?.name, changes: [], problems: fresh ? [text] : [], limit: false, reply: null, allowEmpty: true, leaf: stamp ? { field: 'lookLockedAt', text: stamp } : null });
+            return cue ? { ...done, summary: sentence([cue]), narrate: true } : done;
+        },
+        /**
          * npc.milestone { name, add?: [words], remove?: [words or keys] }: the reader's own milestones
          * for one NPC (the dossier editor). Each is kept under its words' key, so the same milestone
          * written twice is one; a new one may promote on the ladder at once.
@@ -137,18 +231,21 @@ export function createNpcCommands({
             const settings = normalized(ctx.settings(), ctx);
             const defs = defsFrom(settings);
             const drifting = featureOn(FEATURE_DRIFT, ctx) ? defs.filter(def => def.drift) : [];
+            const moodPull = featureOn(FEATURE_MOOD_PULL, ctx);
             let minutes = null;
-            if (drifting.length && typeof ctx.time === 'function') {
+            if ((drifting.length || moodPull) && typeof ctx.time === 'function') {
                 try { minutes = ctx.time(); } catch { minutes = null; }
             }
             const day = isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
             // Key people (Story Director's `director.keyPeople`, read only): while one is away their meters stay as
             // the reader set them, so no drift and no count toward losing a stage. Without that query: nobody.
             let people = null;
+            let rawPeople = null;
             try {
                 let calendar = null;
                 try { calendar = ctx.query('director.calendar', {}); } catch { calendar = null; }
-                people = normalizeKeyPeople(ctx.query(KEY_PEOPLE_QUERY, {}), minutes => storyMinuteText(minutes, calendar));
+                rawPeople = ctx.query(KEY_PEOPLE_QUERY, {});
+                people = normalizeKeyPeople(rawPeople, minutes => storyMinuteText(minutes, calendar));
             } catch { people = null; }
             const awayKeys = new Set();
             for (const entry of people ?? []) if (isAway(entry)) for (const label of labelsOf(entry)) awayKeys.add(label);
@@ -176,9 +273,17 @@ export function createNpcCommands({
                     else unknown.push(`${person.name}: "${clean(name, 40)}" is not a meter here (meters: ${defs.map(item => item.id).join(', ')}).`);
                 }
                 try { ensure(ctx, slice.npcs, who, defs, seed); } catch { continue; }
+                // Temperament (feature mood-pull): a person whose pack words give a resting mood starts at it, so it is stored with the record.
+                const rest = moodPull && isInt(minutes) && slice.npcs[who.key] ? restingMood(person.entry.personality, person.entry.about) : null;
+                if (rest && (rest.v || rest.a || rest.d)) slice.npcs[who.key].mood = restMood(rest, minutes);
+                // Notes (feature notes): the pack's tastes and drives are the person's first, kept in the record's leaves.
+                if (slice.npcs[who.key] && featureOn(FEATURE_NOTES, ctx)) Object.assign(slice.npcs[who.key], seedNotes(person.entry));
                 note(slice, ctx.rev, unknown);
             }
             if (castSeen.fresh.length) slice.cast = castSeen.cast;
+            // The world (four reads) is read once for this tick, and only when a person's record is there to use it.
+            let world = null;
+            const worldNow = () => { if (!world) world = readWorld(ctx); return world; };
             const texts = [];
             const data = [];
             let narrate = false;
@@ -210,6 +315,7 @@ export function createNpcCommands({
                         drift.push({ meter: def.id, before: value, after: next });
                     }
                 }
+                if (moodPull && day !== null) moodPullStep(record, day, worldNow(), rawPeople, minutes);
                 const settled = settleRecord(record, [record.name], settings, defs, featureOn(FEATURE_STAGES, ctx) && !away);
                 if (JSON.stringify(record) === was) continue;
                 changed = true;

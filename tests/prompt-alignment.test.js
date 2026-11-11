@@ -66,7 +66,7 @@ test('step 12 I-7: backfill, import and Refresh show bonds, mannerisms and memor
         assert.ok(prompt.includes(`caps: ${PROMPT_CAPS}`), `${label} states the stored caps`);
     }
     assert.ok(prompts.backfill.includes(JSON.stringify(npc.memories[0])), 'backfill shows the whole memory');
-    assert.match(PROMPT_CAPS, new RegExp(`personality ${DURABLE_PROFILE_LIMITS.personality}, speech ${DURABLE_PROFILE_LIMITS.speech},.*mannerisms 4x${DURABLE_PROFILE_LIMITS.mannerism}, keyRelationships 5x${DURABLE_PROFILE_LIMITS.keyRelationship}, memory ${DURABLE_PROFILE_LIMITS.memory}`));
+    assert.match(PROMPT_CAPS, new RegExp(`personality ${DURABLE_PROFILE_LIMITS.personality}, speech ${DURABLE_PROFILE_LIMITS.speech},.*mannerisms 4x${DURABLE_PROFILE_LIMITS.mannerism}, keyRelationships 8x${DURABLE_PROFILE_LIMITS.keyRelationship}, memory ${DURABLE_PROFILE_LIMITS.memory}`));
 });
 
 test('step 12 I-7: the relationship evaluator gets the whole stored summary it is told to copy', () => {

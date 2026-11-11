@@ -313,7 +313,8 @@ test('custom meters: their own range and start, a bar each, kept in the static l
     assert.deepEqual(cast[0].bars.map(bar => bar.id), ['trust', 'affection', 'desire', 'tension', 'lust'], 'a hidden meter has no bar');
     assert.deepEqual(cast[0].bars.find(bar => bar.id === 'lust'), { id: 'lust', label: 'Lust', value: 3, min: 0, max: 100, stage: '', tone: 'neutral', text: '3', delta: 3 });
     assert.deepEqual(cast[0].still.find(bar => bar.id === 'lust'), { id: 'lust', label: 'Lust', value: 3, min: 0, max: 100, stage: '', tone: 'neutral', text: '3' }, 'still: the same bar without the change');
-    assert.equal(h.def.context.static(), 'NPC meters: trust, affection, desire, tension (-100..100), lust (0..100), respect-level (-50..50). When the scene changes how someone feels: ~ npc Name | meter: +N, -N or =N. Code clamps each meter, moves it at most 15 a reply and sets the stages; never write a stage.');
+    // (The anti-lever sentence is on by default and tested in relationship-pacing.test.js; the line without it is what is pinned here.)
+    assert.equal(h.def.context.static().replace(/ Add \| via:[^.]*\./, ''), 'NPC meters: trust, affection, desire, tension (-100..100), lust (0..100), respect-level (-50..50). When the scene changes how someone feels: ~ npc Name | meter: +N, -N or =N. Code clamps each meter, moves it at most 15 a reply and sets the stages; never write a stage.');
     // A row just added in the overlay (empty name, zero range) is left out; an upside-down range reads 0..100.
     const odd = normalizeMeterSettings({ customMeters: [{ name: '', min: 0, max: 0 }, { name: 'Odd', min: 50, max: -50, start: 999 }] }).custom;
     assert.deepEqual(odd.map(({ id, min, max, start }) => ({ id, min, max, start })), [{ id: 'odd', min: 0, max: 100, start: 100 }]);
@@ -966,9 +967,9 @@ test('secrets: the scanner prompt asks for layered notes and watches story event
 
 test('secrets: the dossier\'s Secrets section follows Background / History, with a Secrets chip, and only for a dossier with notes', () => {
     const ui = dossierUiSource();
-    assert.match(ui, /<h3>Background \/ History\$\{changedMark\(selected, 'background'\)\}<\/h3>[^`]*?<\/section>\s*\$\{v2SecretsHtml\(selected\.v2Meters\)\}/, 'right after History');
-    assert.match(ui, /\$\{sectionNavHtml\(Boolean\(selected\.v2Meters\?\.secrets\?\.length\)\)\}/);
-    assert.match(ui, /secrets \? \[\.\.\.DOSSIER_SECTIONS, \['secrets', 'Secrets'\]\] : DOSSIER_SECTIONS/, 'the chip comes after History');
+    assert.match(ui, /SECTION_KEYS = Object\.freeze\(\['now', 'with', 'ties', 'past', 'secrets'\]\)/, 'Secrets is the fifth and last section');
+    assert.match(ui, /\['secrets', secretsSectionHtml\]/);
+    assert.match(ui, /ring: \{ value: secrets\.total/, 'the board\'s Secrets tile shows opened / total');
     const notes = [{ state: 'open', title: 'Her past', text: SECRET, pill: 'Opened · Trust 20' }, { state: 'hidden', opens: 'Opens with the story', width: 61 }, { state: 'bogus' }, null];
     const state = { npcs: [{ id: 'npc_a', name: 'Ada' }, { id: 'npc_b', name: 'Bo' }], meterViews: { npc_a: { bars: [], secrets: notes }, npc_b: { bars: [] } } };
     const [ada, bo] = projectDossierState(state).npcs;

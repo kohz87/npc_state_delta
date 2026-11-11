@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { scannerDiagnosticLines } from '../scanner-routing.js';
 import { createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { styleSource } from './helpers/shipped-modules.js';
 
 function ctxWith(profiles, { disabled = [], service = true } = {}) {
     return {
@@ -87,7 +88,7 @@ test('the scanner profile list says plainly when there is no profile to pick; th
     assert.match(index, /id="npc_state_delta_scanner_profile_none"[^>]*hidden> There is no connection profile yet/);
     assert.match(index, /\$\('#npc_state_delta_scanner_profile_none'\)\.prop\('hidden', usable\)/);
     assert.match(index, /scannerReport: \(\) => scannerDiagnosticLines\(/);
-    const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    const css = styleSource();
     assert.match(css, /\.story-suite-section \.story-suite-drawer > \.inline-drawer-content \{ display: block !important; \}/);
     assert.match(css, /\.story-suite-section \.story-suite-drawer > \.inline-drawer-header \{ display: none !important; \}/);
 });

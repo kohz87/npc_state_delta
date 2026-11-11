@@ -1,11 +1,12 @@
 /* NPC State Delta cohesive dossier experience refinement.
- * Keeps canonical state/runtime owners while refining dossier actions, cast carousel,
+ * Keeps canonical state/runtime owners while refining dossier actions (the header ⋯ menu),
  * adaptive editing, extension-wide settings actions, and explicit manual life-state correction.
  */
 import { activeChatKey, api, escapeHtml, flushDurably, plain, stage1Refresh, uiRoot } from './dossier-tools-core.js';
 import { exportNativeTools, openDiagnostics, openImportTools } from './dossier-tools.js';
 import { openPortraitTools } from './portrait-tools.js';
-import { currentNpc, lifeStateChoice, selectedNpcId, setNodeTextIfChanged, setNodeValueIfChanged } from './dossier-experience-state.js';
+import { currentNpc, lifeStateChoice, screenNpcId, setNodeTextIfChanged, setNodeValueIfChanged } from './dossier-experience-state.js';
+import { dossierMenuHtml } from './dossier-ui-header.js';
 export { lifeStateChoice, setNodeTextIfChanged };
 import { installStyles } from './dossier-experience-styles.js';
 
@@ -14,9 +15,6 @@ const EDITOR_OBSERVER_GUARD = '__npcStateDeltaDossierExperienceEditorObserver';
 const DOSSIER_GUARD = '__npcStateDeltaDossierExperienceEvents';
 const DOCUMENT_GUARD = '__npcStateDeltaDossierExperienceDocumentEvents';
 const diagnosticVisibleNpcIds = new Set();
-// The library starts collapsed each time the dossier panel opens, leaving the open dossier the
-// room; expanding it lasts until the panel closes. This is presentation only, never dossier state.
-let libraryCollapsed = true;
 let normalizeQueued = false;
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
@@ -47,57 +45,15 @@ async function applyManualLifeState(npcId, requested, editor) {
     return currentNpc(npcId);
 }
 
-function ensureLibraryChrome(root) {
-    const cast = root?.querySelector?.('.delta-cast');
-    const tools = cast?.querySelector?.('.delta-cast-tools');
-    const list = cast?.querySelector?.('.delta-cast-list');
-    if (!cast || !tools || !list) return;
-
-    let heading = tools.querySelector('.delta-library-heading');
-    if (!heading) {
-        heading = document.createElement('button');
-        heading.type = 'button';
-        heading.className = 'delta-library-heading';
-        heading.dataset.deltaLibraryToggle = '1';
-        tools.prepend(heading);
-    }
-    const total = root.__npcStateDeltaStage1Ui?.projection?.npcs?.length || 0;
-    setNodeTextIfChanged(heading, `${libraryCollapsed ? '▸' : '▾'} DOSSIER LIBRARY · ${total} NPC${total === 1 ? '' : 's'}`);
-    const expanded = libraryCollapsed ? 'false' : 'true';
-    if (heading.getAttribute?.('aria-expanded') !== expanded) heading.setAttribute('aria-expanded', expanded);
-    const title = libraryCollapsed ? 'Show the dossier library' : 'Hide the dossier library for more reading space';
-    if (heading.title !== title) heading.title = title;
-    root.querySelector?.('.delta-library')?.classList?.toggle?.('delta-library-collapsed', libraryCollapsed);
-
-    if (!list.parentElement?.classList?.contains('delta-cast-rail-wrap')) {
-        const wrap = document.createElement('div');
-        wrap.className = 'delta-cast-rail-wrap';
-        const left = document.createElement('button');
-        left.type = 'button';
-        left.className = 'delta-rail-arrow delta-rail-left';
-        left.dataset.railDirection = '-1';
-        left.setAttribute('aria-label', 'Scroll dossier library left');
-        left.textContent = '‹';
-        const right = document.createElement('button');
-        right.type = 'button';
-        right.className = 'delta-rail-arrow delta-rail-right';
-        right.dataset.railDirection = '1';
-        right.setAttribute('aria-label', 'Scroll dossier library right');
-        right.textContent = '›';
-        cast.insertBefore(wrap, list);
-        wrap.append(left, list, right);
-    }
-}
-
 function actionSignature(npc) {
     return npc ? `${npc.id}:${Boolean(npc.archived)}:${lifeStateChoice(npc)}:${diagnosticVisibleNpcIds.has(String(npc.id))}` : '';
 }
 
 function renderNpcDiagnostics(root) {
-    const hero = root?.querySelector?.('.delta-hero');
-    if (!hero) return;
-    hero.querySelectorAll(':scope > .delta-npc-diagnostics').forEach(node => node.remove());
-    const npcId = selectedNpcId(root);
+    const body = root?.querySelector?.('.delta-panel-body');
+    if (!body) return;
+    root.querySelectorAll('.delta-npc-diagnostics').forEach(node => node.remove());
+    const npcId = screenNpcId(root);
     if (!npcId || !diagnosticVisibleNpcIds.has(npcId)) return;
     const records = api()?.diagnosticsForNpc?.(npcId) || [];
     const recent = records.slice(-8).reverse();
@@ -105,41 +61,20 @@ function renderNpcDiagnostics(root) {
     section.className = 'delta-npc-diagnostics';
     section.innerHTML = `<header><b>Diagnostics</b><small>${recent.length} recent operation${recent.length === 1 ? '' : 's'}</small></header>
       ${recent.length ? recent.map(row => `<details><summary>${escapeHtml(row.type || 'scan')} · ${escapeHtml(String(row.sourceMessageId ?? 'no source'))}</summary><pre>${escapeHtml(JSON.stringify({ profile: row.profile || [], birthdays: row.birthdays || [], accounting: row.accounting || {} }, null, 2))}</pre></details>`).join('') : '<p>No retained diagnostic operations for this NPC yet.</p>'}`;
-    const actions = hero.querySelector('.delta-hero-actions');
-    if (actions) actions.insertAdjacentElement('afterend', section);
-    else hero.appendChild(section);
+    body.insertAdjacentElement('beforebegin', section);
 }
 
+// The header's ⋯ menu (Edit, Refresh, More) for the dossier on screen; the library has none. The markup comes from
+// dossier-ui-header.js with the same classes and data-npc-id the global Edit / Refresh / Scan / Archive handlers find.
 function ensureDossierActions(root) {
-    const hero = root?.querySelector?.('.delta-hero');
-    const actions = hero?.querySelector?.('.delta-hero-actions');
-    const npcId = selectedNpcId(root);
-    const npc = currentNpc(npcId);
-    if (!actions || !npcId || !npc) return;
-    const signature = actionSignature(npc);
-    if (actions.dataset.deltaExperienceActions === signature) return;
-    actions.dataset.deltaExperienceActions = signature;
-
-    const dead = lifeStateChoice(npc) === 'deceased';
-    const lifecycleAction = dead
-        ? `<button type="button" class="delta-btn npc-state-delta-restore-npc" data-npc-id="${escapeHtml(npcId)}">Correct death record</button>`
-        : npc.archived
-            ? `<button type="button" class="delta-btn npc-state-delta-restore-npc" data-npc-id="${escapeHtml(npcId)}">Restore active</button>`
-            : `<button type="button" class="delta-btn npc-state-delta-archive-npc" data-npc-id="${escapeHtml(npcId)}">Archive dossier</button>`;
-
-    actions.innerHTML = `<div class="delta-dossier-actions-primary">
-        <button type="button" class="delta-btn delta-primary delta-edit" data-npc-id="${escapeHtml(npcId)}">Edit</button>
-        <button type="button" class="delta-btn npc-state-delta-refresh-chat" data-npc-id="${escapeHtml(npcId)}">Refresh</button>
-        <details class="delta-dossier-more">
-          <summary class="delta-btn">••• More</summary>
-          <div class="delta-dossier-more-menu">
-            <button type="button" class="delta-btn npc-state-delta-scan-dossier" data-npc-id="${escapeHtml(npcId)}">Scan dossier</button>
-            <button type="button" class="delta-btn delta-experience-portrait" data-npc-id="${escapeHtml(npcId)}">Portrait</button>
-            <button type="button" class="delta-btn delta-experience-diagnostics" data-npc-id="${escapeHtml(npcId)}">${diagnosticVisibleNpcIds.has(npcId) ? 'Hide diagnostics' : 'Show diagnostics'}</button>
-            ${lifecycleAction}
-          </div>
-        </details>
-      </div>`;
+    const slot = root?.querySelector?.('.delta-header-slot');
+    if (!slot) return;
+    const npcId = screenNpcId(root);
+    const npc = npcId ? currentNpc(npcId) : null;
+    const signature = npc ? actionSignature(npc) : '';
+    if (slot.dataset.deltaExperienceActions === signature) return;
+    slot.dataset.deltaExperienceActions = signature;
+    slot.innerHTML = npc ? dossierMenuHtml(npcId, { archived: Boolean(npc.archived), deceased: lifeStateChoice(npc) === 'deceased', diagnosticsVisible: diagnosticVisibleNpcIds.has(npcId) }) : '';
 }
 
 function editorNpcId(editor) {
@@ -261,7 +196,6 @@ function ensureEditorLifeState(editor) {
 
 function normalizeRoot(root = uiRoot()) {
     if (!root?.isConnected) return;
-    ensureLibraryChrome(root);
     ensureDossierActions(root);
     renderNpcDiagnostics(root);
 }
@@ -293,24 +227,9 @@ function bindDossierEvents(root) {
             const npcId = plain(diagnostics.dataset.npcId);
             if (diagnosticVisibleNpcIds.has(npcId)) diagnosticVisibleNpcIds.delete(npcId);
             else diagnosticVisibleNpcIds.add(npcId);
-            const actions = root.querySelector('.delta-hero-actions');
-            if (actions) actions.dataset.deltaExperienceActions = '';
+            const slot = root.querySelector('.delta-header-slot');
+            if (slot) slot.dataset.deltaExperienceActions = '';
             normalizeRoot(root);
-            return;
-        }
-        const libraryToggle = event.target.closest?.('[data-delta-library-toggle]');
-        if (libraryToggle) {
-            event.preventDefault();
-            libraryCollapsed = !libraryCollapsed;
-            ensureLibraryChrome(root);
-            return;
-        }
-        const arrow = event.target.closest?.('[data-rail-direction]');
-        if (arrow) {
-            event.preventDefault();
-            const list = root.querySelector('.delta-cast-list');
-            const direction = Number(arrow.dataset.railDirection) || 1;
-            list?.scrollBy?.({ left: direction * Math.max(240, Math.round((list.clientWidth || 360) * .72)), behavior: 'smooth' });
         }
     });
 }
@@ -364,14 +283,6 @@ function bindDocumentEvents() {
 function installRootObserver(root) {
     if (!root || root[ROOT_OBSERVER_GUARD]) return;
     root.addEventListener('npc-state-delta:dossier-rendered', () => scheduleNormalize(root));
-    const panel = root.querySelector?.('.delta-panel');
-    if (panel && typeof MutationObserver !== 'undefined') {
-        new MutationObserver(() => {
-            if (!panel.hidden || libraryCollapsed) return;
-            libraryCollapsed = true;
-            ensureLibraryChrome(root);
-        }).observe(panel, { attributes: true, attributeFilter: ['hidden'] });
-    }
     root[ROOT_OBSERVER_GUARD] = true;
 }
 

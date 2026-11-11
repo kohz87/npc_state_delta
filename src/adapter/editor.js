@@ -9,6 +9,7 @@ import {
 } from '../npc-meters.js';
 import { eventSummary } from '../npc-meters-pacing.js';
 import { escapeHtml } from '../util/html.js';
+import { tieRows, owedBy, foldTies, aliasCanon } from '../npc-notes-kinds.js';
 
 // The scan's short list of story events to watch for: this many people, this many events each.
 const EVENT_WATCH_NPCS = 6;
@@ -226,6 +227,14 @@ export function createEditorPart(session, deps) {
         const entries = sliceEntries() ?? [];
         const builtIn = new Set(part.defs().filter(def => def.builtIn).map(def => def.id));
         const out = {};
+        // Ties are kept by the other person's entry key; the map and the Ties rows read them by dossier id and by bond.
+        const idByKey = {};
+        for (const npc of npcs) {
+            const found = npc?.id ? part.identify(byKey, npc.name) : null;
+            if (found && Object.hasOwn(byKey, found.key)) idByKey[found.key] = npc.id;
+        }
+        const canon = aliasCanon(npcs);
+        const allTies = Object.fromEntries(cast.map(item => [item.key, item.notes?.ties ? foldTies(item.notes.ties, canon) : null]));
         for (const npc of npcs) {
             if (!npc?.id) continue;
             const who = part.identify(byKey, npc.name);
@@ -240,6 +249,11 @@ export function createEditorPart(session, deps) {
                 bars: (entry?.bars ?? []).map(bar => ({ ...bar, builtIn: builtIn.has(bar.id) })),
                 rank: entry?.rank ?? '',
                 next: entry?.next ?? '',
+                // Mood and pull (feature mood-pull): only a person who has them (npc.cast's `mood` and `pull`).
+                ...(entry?.mood ? { mood: entry.mood } : {}),
+                ...(entry?.pull ? { pull: entry.pull } : {}),
+                // Dossier notes (feature notes): the rows, the Ties rows for this person's bonds and the tags by dossier id (the map's lines).
+                ...(entry?.notes ? { notes: { ...entry.notes, ties: tieRows(foldTies(entry.notes.ties, canon), npc.keyRelationships, owedBy(entry.key, allTies)) }, ties: Object.fromEntries(Object.entries(foldTies(entry.notes.ties, canon)).map(([key, tags]) => [idByKey[key] ?? key, tags])) } : {}),
                 milestones: Object.values(slice?.milestones ?? {}),
                 secrets,
             };

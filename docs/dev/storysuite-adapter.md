@@ -217,3 +217,7 @@ Without Story Director, or one without the query, `adapter.castPeople()` is null
 - Keep the unhosted path untouched: a test with no host must show NSD exactly as before.
 - Run the adapter tests with Story Director absent (the default here) and, once, Story Block's matrix with Story
   Block, Story Director and Delta side by side.
+
+## Gate, mood and pull, notes (dossier phase 2)
+
+Three Features, all on by default (`npc-state-delta.anti-lever`, `.mood-pull`, `.notes`), each checked through `ctx.feature(id)`. Old replies are untouched: the host replays each reply's stored ops, and a Re-read runs a reply's lines again with `moodStands` (mood only where the state after the reply's earlier read already had one); old lines carry no `via` or note lines. `npc.cast` carries `mood`, `pull` and `notes` per person; `dossierMeters` (`src/adapter/editor.js`) hands them, with the Ties rows and the tags by dossier id, to the dossier, which projects them in `dossier-ui-meters.js` (an uncaught lie has no words; a secret not told is dropped) and draws them in the Board tiles, With, Ties, Right now and Profile. No feature or no data: the block is not drawn.

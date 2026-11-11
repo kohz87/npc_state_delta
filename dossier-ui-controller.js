@@ -1,9 +1,10 @@
 /* NPC State Delta dossier surface: controller actions, refresh orchestration, editor and settings bridges. */
 import { plain } from './dossier-ui-model.js';
-import { filterDossierIndex, projectDossierState } from './dossier-ui-catalog.js';
+import { projectDossierState } from './dossier-ui-catalog.js';
 import { visibleElement } from './dossier-ui-html.js';
 import { SETTINGS_ID } from './dossier-ui-constants.js';
 import { DossierUiRender } from './dossier-ui-render.js';
+import { createScreenState, openNpc, showScreen } from './dossier-ui-screens.js';
 
 export class DeltaDossierUi extends DossierUiRender {
     async open() {
@@ -19,26 +20,22 @@ export class DeltaDossierUi extends DossierUiRender {
         this.root.querySelector('.delta-panel')?.focus?.({ preventScroll: true });
     }
 
-    // Open the library on one NPC (present-cast cards in chat use this). The request is applied
-    // after any chat-change reset in refresh(), and clears search/filter so the NPC is visible.
+    // Open the panel on one NPC's board (present-cast cards in chat use this). The request is applied
+    // after any chat-change reset in refresh(), and clears the search so the NPC is visible.
     async openNpc(npcId) {
         this.pendingNpcId = plain(npcId);
         await this.open();
     }
 
-    // Select one dossier the same way a library card does (the relationship map uses this). If the
-    // current search or filter hides it, they are cleared so the library, hero and map agree.
+    // Select one dossier the way a library face does: its board opens (the relationship map uses this). The search is
+    // cleared so the library, the board and the map agree.
     select(npcId) {
         const id = plain(npcId);
         if (!this.root || !id || !this.projection?.index?.some(row => row.id === id)) return false;
-        if (!filterDossierIndex(this.projection.index, { query: this.query, filter: this.filter, keepId: id }).some(row => row.id === id)) {
-            this.query = '';
-            this.filter = 'all';
-            const search = this.root.querySelector('.delta-search');
-            if (search) search.value = '';
-        }
-        this.selectedNpcId = id;
-        this.renderFromProjection({ forceRail: true, forceDetail: true });
+        this.query = '';
+        this.filter = 'all';
+        this.lastScreenSignature = '';
+        this.setScreen(showScreen(this.screen, this.screen.name === 'library' ? 'board' : this.screen, id));
         return true;
     }
 
@@ -75,34 +72,32 @@ export class DeltaDossierUi extends DossierUiRender {
         if (chatChanged) {
             this.lastChatKey = chatKey;
             this.selectedNpcId = '';
+            this.screen = createScreenState();
             this.query = '';
             this.filter = 'all';
-            const search = this.root.querySelector('.delta-search');
-            if (search) search.value = '';
-            this.lastRailSignature = '';
-            this.lastDetailSignature = '';
-            this.lastHeroSignature = '';
+            this.lastScreenSignature = '';
         }
         if (this.pendingNpcId) {
-            this.selectedNpcId = this.pendingNpcId;
+            // An NPC asked for from outside (a present-cast card): its board opens, whatever screen was showing.
+            this.screen = openNpc(createScreenState(), this.pendingNpcId);
+            this.selectedNpcId = this.screen.npcId || '';
             this.pendingNpcId = '';
             this.query = '';
             this.filter = 'all';
-            const search = this.root.querySelector('.delta-search');
-            if (search) search.value = '';
+            this.lastScreenSignature = '';
         }
 
         if (chatKey === 'no-chat') {
             this.projection = projectDossierState({}, status);
             this.dirtyWhileClosed = false;
-            this.renderFromProjection({ forceRail: true, forceDetail: true });
+            this.renderFromProjection({ force: true });
             this.drewFrom(token);
             return;
         }
         if (status?.hydrationStatus && status.hydrationStatus !== 'ready') {
             this.projection = projectDossierState({}, status);
             this.dirtyWhileClosed = false;
-            this.renderFromProjection({ forceRail: true, forceDetail: true });
+            this.renderFromProjection({ force: true });
             this.drewFrom(token);
             return;
         }
@@ -110,11 +105,11 @@ export class DeltaDossierUi extends DossierUiRender {
             const state = typeof this.api?.getDossierState === 'function' ? this.api.getDossierState() : this.api?.getState?.() || { npcs: [] };
             this.projection = projectDossierState(state, status);
             this.dirtyWhileClosed = false;
-            this.renderFromProjection({ forceRail: force || chatChanged, forceDetail: force || chatChanged });
+            this.renderFromProjection({ force: force || chatChanged });
             this.drewFrom(token);
         } catch (error) {
             this.projection = projectDossierState({}, { ...status, hydrationStatus: 'error', hydrationError: error?.message || String(error) });
-            this.renderFromProjection({ forceRail: true, forceDetail: true });
+            this.renderFromProjection({ force: true });
             this.drewFrom('');
         }
     }

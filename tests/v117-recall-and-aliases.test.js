@@ -69,6 +69,6 @@ test('hand-edited aliases are kept from scanner additions and shown on the dossi
     assert.match(index, /id="npc_state_delta_edit_aliases"/);
     assert.match(index, /aliases: editorList\('aliases', 8\)/);
     assert.ok(EDITOR_LOCKABLE_FIELDS.includes('aliases'), 'hand-edited aliases can be locked');
-    assert.match(dossierUiSource(), /currentCard\('Also known as'/);
+    assert.match(dossierUiSource(), /currentCard\('Known as'/);
     assert.deepEqual(LOCKED_FIELD_KEYS.aliases, ['aliases'], 'the lock map bundle import and branch restore share');
 });

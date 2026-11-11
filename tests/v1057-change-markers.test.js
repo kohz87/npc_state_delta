@@ -55,9 +55,9 @@ test('portrait attachment records the appearance it was made for and the dossier
     assert.match(index, /portrait\.appearanceFingerprint = fingerprint/);
     assert.match(index, /portrait\.appearanceForm = /);
     const ui = dossierUiSource();
-    assert.match(ui, /changedMark\(selected, 'mood'\)/);
-    assert.match(ui, /changeSummaryHtml\(selected, this\.projection\)/);
-    assert.match(ui, /Appearance changed since portrait/);
+    assert.match(ui, /changedMark\(npc, 'personality'\)/);
+    assert.match(ui, /changedMark\(npc, 'homeBase'\)/);
+    assert.match(ui, /Appearance changed since portrait/, 'the profile portrait carries the stale-portrait note');
 });
 
 test('change markers and portrait fingerprints never reach model-facing prompts or injection', async () => {

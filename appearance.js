@@ -13,7 +13,7 @@ export {
     resolveNpcAppearance,
     currentPresentationText,
 } from './appearance-model.js';
-export { carryOmittedPhysicalTraits, applyAppearanceUpdate } from './appearance-update.js';
+export { carryOmittedPhysicalTraits, applyAppearanceUpdate, rejectedOverallLook } from './appearance-update.js';
 export {
     formPortraitKey,
     normalizeFormPortraitAssets,

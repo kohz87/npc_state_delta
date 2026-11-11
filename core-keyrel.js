@@ -5,7 +5,7 @@
 import { compactSocialKeyRelationship, SOCIAL_DYNAMIC_MAX_CHARS } from './social.js';
 import { cleanText, cleanTextBoundary, normalizeName } from './core-text.js';
 
-export const KEY_RELATIONSHIP_LIMIT = 5;
+export const KEY_RELATIONSHIP_LIMIT = 8;
 
 export function compactKeyRelationshipEntry(value) {
     const text = String(value ?? '').replace(/\s+/g, ' ').trim();

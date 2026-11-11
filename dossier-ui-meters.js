@@ -22,7 +22,56 @@ export function v2MetersProjection(view) {
         next: plain(view.next),
         milestones: stringList(view.milestones, 16),
         secrets: secretsProjection(view.secrets),
+        ...(tiesProjection(view.ties) ? { ties: tiesProjection(view.ties) } : {}),
+        ...(moodProjection(view.mood) ? { mood: moodProjection(view.mood) } : {}),
+        ...(pullProjection(view.pull) ? { pull: pullProjection(view.pull) } : {}),
+        ...(notesProjection(view.notes) ? { notes: notesProjection(view.notes) } : {}),
     };
+}
+
+const int = (value, min, max, fallback = 0) => Math.max(min, Math.min(max, Number.isFinite(Number(value)) ? Math.round(Number(value)) : fallback));
+const list = (value, cap) => (Array.isArray(value) ? value.filter(item => item && typeof item === 'object').slice(0, cap) : []);
+
+// Mood (feature mood-pull): the word, the Energy and Control bars (steps of max) and what moved it. Null without a mood.
+function moodProjection(mood) {
+    if (!mood || typeof mood !== 'object' || !plain(mood.word)) return null;
+    const max = int(mood.bars?.max, 1, 12, 6);
+    return { word: plain(mood.word), energy: int(mood.bars?.energy, 0, max), control: int(mood.bars?.control, 0, max), max, cause: plain(mood.cause).slice(0, 120) };
+}
+
+// Pull (feature mood-pull): the instinct, its strength 1..3, what causes it and for how many days. Null without one.
+const PULL_KINDS = new Set(['belonging', 'closure', 'awe']);
+function pullProjection(pull) {
+    if (!pull || typeof pull !== 'object' || !PULL_KINDS.has(pull.kind)) return null;
+    return { kind: pull.kind, level: int(pull.level, 0, 3), days: int(pull.days, 0, 9999), cause: plain(pull.cause).slice(0, 120) };
+}
+
+// The dossier notes (feature notes). An uncaught lie carries no words (said is null) and a secret not opened is dropped: the
+// projection never holds what the story has not shown. Plain rows; the sections escape them.
+function notesProjection(notes) {
+    if (!notes || typeof notes !== 'object') return null;
+    const day = value => (Number.isInteger(value) && value >= 0 ? value : null);
+    const lies = list(notes.lies, 6).map(row => (row.hidden || row.said == null
+        ? { hidden: true, day: day(row.day) }
+        : { hidden: false, to: plain(row.to), said: plain(row.said), day: day(row.day), caught: row.caught ? { day: day(row.caught.day) } : null }));
+    const knows = list(notes.knows, 6).filter(row => !row.hidden && plain(row.text)).map(row => ({ about: plain(row.about), how: plain(row.how), day: day(row.day), text: plain(row.text), secret: row.secret === true }));
+    const tastes = list(notes.tastes, 12).filter(row => plain(row.item)).map(row => ({ sign: row.sign === '-' ? '-' : '+', item: plain(row.item), from: plain(row.from), mirrored: row.mirrored === true }));
+    const ties = list(notes.ties, 12).filter(row => plain(row.name)).map(row => ({ name: plain(row.name), tags: (Array.isArray(row.tags) ? row.tags : []).filter(tag => TIE_WORDS.has(tag)), owedBy: row.owedBy === true }));
+    const drives = list(notes.drives, 8).filter(row => plain(row.label)).map(row => ({ label: plain(row.label), strength: int(row.strength, 0, 3), word: plain(row.word) }));
+    const look = notes.look && Number.isInteger(notes.look.day) ? { day: notes.look.day } : null;
+    return lies.length || knows.length || tastes.length || ties.length || drives.length || look ? { lies, knows, tastes, ties, drives, look } : null;
+}
+
+// Tie tags toward other people by dossier id ({ id: ['ally', 'rival', 'owes'] }): the relationship map colours its lines with them.
+const TIE_WORDS = new Set(['ally', 'rival', 'owes']);
+function tiesProjection(map) {
+    if (!map || typeof map !== 'object' || Array.isArray(map)) return null;
+    const out = {};
+    for (const [id, tags] of Object.entries(map).slice(0, 24)) {
+        const kept = (Array.isArray(tags) ? tags : []).filter(tag => TIE_WORDS.has(tag));
+        if (id && kept.length) out[id] = kept;
+    }
+    return Object.keys(out).length ? out : null;
 }
 
 // The notes of a dossier for its Secrets section, in the order written: an opened one { state: 'open', title, text,

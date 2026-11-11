@@ -11,6 +11,12 @@ Generated 2026-11-07.
 - `src/npc-meters-secrets.js`: Hidden-note normalization and IDs, generated notes, and secret/limit line conversion for the editor.
 - `src/npc-meters-slice.js`: Per-reply NPC slice, key-person absence and cast memory, validation, meter moves and stage settling.
 
+## Stylesheet (style.css is only @import lines, in cascade order)
+- `style-editor.css`: Settings roster, relationship tuning, native dossier editor, archive, mobile hardening, popup editor and Megumin rules.
+- `style-cast.css`: Story Block tabs, dossier browser, present-NPC cards and speaker cards.
+- `style-portrait.css`: Native SillyTavern portrait generation rules.
+- `style-settings-panel.css`: Extensions-tab settings panel, What's sent, v2 hosting, World present and People-here rules.
+
 ## src/adapter/
 - `src/adapter/cast-ui.js`: Dossiers drawer, settings, list, cast cards/meters, page API, preset block, key pin and reply-time cast sync.
 - `src/adapter/connect.js`: Finds a Story Block v2 host, registers Delta, watches it, and restores unhosted behavior when it leaves.
@@ -42,6 +48,13 @@ Generated 2026-11-07.
 - `src/relationship-pacing.js`: Events-per-story-day allowance by impact tier: the used-tier rule, the per-NPC `impactDay` count, pacing defaults and migration. Pure.
 - `src/npc-meters-pacing.js`: The reader's words for a held event and the cut of a forwarded scanner change to a lower tier, split from `src/npc-meters.js`.
 - `src/npc-meters-prompt.js`: The NPC meter prompt line, reminder tail and locked-note redaction split from `src/npc-meters.js`.
+- `src/npc-notes-kinds.js`: NPC note kinds (lie, know, taste, tie): the handlers that call run() through a notes option, NOTE_FIELDS, validateNotes for the record, and notesTail with the cap (2 per present NPC, 4 in all). The only file that imports the six npc-notes-* files (pure).
+- `src/npc-notes-tastes.js`: NPC tastes: the JSON leaf reader and caps, the first-mention rule (why: to change), the deterministic mirror check (flags, never blocks), and its wording and tail line. Pure.
+- `src/npc-notes-lies.js`: NPC lies told: the `lies` slice leaf (readLies, addLie with re-read and no-op rules, catchLie with the trust change at a tier), the hidden tail line, dossier rows with a redact option and the caught receipt (pure).
+- `src/npc-notes-knows.js`: NPC "knows about others" (`~ know` lines): the per-reply stored list, input check, secret redaction until opened, one tail line per present person, dossier rows (pure).
+- `src/npc-notes-look.js`: Locked NPC look: the drift text for a refused durable look, the npc.flag cue wording, the flag dedupe key and the lookLockedAt stamp helpers (pure).
+- `src/npc-notes-ties.js`: NPC ties: ally, rival and owes tags between any two people (the `ties` slice leaf: readTies, applyTags for `~ tie` +/- tags, tiesText, the read-time tagsFromRelation fallback, owedBy and the bond-list rows in tiesView) (pure).
+- `src/npc-notes-drives.js`: NPC drives (instinct strengths 0..3, default 2): the JSON leaf reader and writer, the first-time seed from a cast pack entry or the first description, the strength multiplier the pull applies and the dossier rows (pure).
 - `src/adapter/queries-dossier.js`: Dossier field copies and portrait URL safety helpers split from `src/adapter/queries.js`.
 - `src/adapter/queries-director.js`: Story Director and pack lookups split from `src/adapter/queries.js`.
 - `src/adapter/cast-ui/cast-render.js`: Action binding, key-person pin, present-cast and dossier-list rendering.
@@ -72,17 +85,31 @@ Generated 2026-11-07.
 - `branch-delete-recovery.js`: Deleted-block NPC reversion, social-graph undo and cleanup split from `branch.js`.
 - `branch-reconcile.js`: `reconcileBranchState` and its exact journal/checkpoint recovery split from `branch.js`.
 - `branch-ancestry.js`: Cross-chat `bestAncestorState` and explicit-parent matching split from `branch.js`.
+- `dossier-skin.js`: Dossier style setting (Neutral, Fantasy, Modern): normalization, the data-skin attribute on the dossier root and its settings row.
+- `dossier-ui-board.js`: The Board screen: dial, name and status, and the tiles, as markup from the view model. Mood bars, pull ring, tie faces with initials and Past dots from the phase-2 data.
 - `dossier-ui-catalog.js`: Index filtering, selection, key/cast projections and dossier-state shaping split from `dossier-ui.js`.
 - `dossier-ui-constants.js`: Dossier root, settings, style and observer constants shared by the split UI modules.
 - `dossier-ui-controller.js`: Dossier controller actions, refresh orchestration, editor and settings bridges split from `dossier-ui.js`.
+- `dossier-ui-dial.js`: The Board dial: portrait under an SVG ring with the four meter arcs and their numbers.
+- `dossier-ui-header.js`: Dossier header ⋯ menu markup (Edit, Refresh, More) with the existing action classes and `data-npc-id` hooks.
 - `dossier-ui-html.js`: Escaped dossier markup, cards, appearance forms, portrait references and section helpers split from `dossier-ui.js`.
-- `dossier-ui-meters.js`: Hosted meter bars, rank, milestones and Secrets-section projections and markup split from `dossier-ui.js`.
+- `dossier-ui-bond-tone.js`: Bond tone (close, hostile, duty, neutral) of a relation word and of tie tags, from `social-relations.js` families plus enemy/duty words.
+- `npc-instincts.js`: Pure pull core: Belonging, Closure and Awe signal readers, per-NPC inst values (belo/clos/awe) and the top pressure {kind, cause, since}; no host access.
+- `npc-mood.js`: Pure mood (VAD) core: the mood {v,a,d,day,cause} clamp and shape, trust-drop/betrayal/rest/safe deltas, decay per story day, the 3x3 word table, Energy/Control bars and cause text; no host access.
+- `dossier-ui-library.js`: Library screen: tone-ringed faces, search box, key-first ordering and face markup (replaces the cast rail's `renderRail`).
+- `dossier-ui-meters.js`: Hosted meter bars, rank, milestones and Secrets-section projections and markup split from `dossier-ui.js`. Also projects the mood, pull and notes rows for the screens (an uncaught lie carries no words; a secret not opened is dropped).
 - `dossier-ui-model.js`: Dossier record lookups, change stamps and index/detail projections split from `dossier-ui.js`.
 - `dossier-ui-mount.js`: Singleton dossier UI mounting and open-dossier request forwarding split from `dossier-ui.js`.
-- `dossier-ui-panel.js`: Dossier panel lifecycle, shell, events, observers and portrait lightbox split from `dossier-ui.js`.
+- `dossier-ui-panel.js`: Dossier panel lifecycle, shell, screen clicks and Esc order, observers and portrait lightbox split from `dossier-ui.js`.
+- `dossier-ui-profile.js`: The Profile screen: portrait, identity, appearance forms, character and background (phone full screen, desktop two columns). Tastes, Drives and the locked-look note (only with data).
 - `dossier-ui-relationship.js`: Relationship meter steps, latest change and history markup split from `dossier-ui.js`.
-- `dossier-ui-render.js`: Cast rail, filters and selected-dossier rendering split from `dossier-ui.js`.
+- `dossier-ui-render.js`: Draws the current screen (library, board, profile or section) from the projection, with signature caching; split from `dossier-ui.js`.
+- `dossier-ui-screens.js`: Screen state machine (library | board | profile | section), back and Esc order, swipe steps and the shared 650px phone query.
+- `dossier-ui-sections.js`: The five section screens (Right now, With the player, Ties, Past, Secrets) with their arrows-and-dots header. Ties tags (ally, rival, owes, owed by), lies told and knows about others (redacted), the Past timeline.
+- `dossier-ui-styles-board.js`: CSS-in-JS for the library faces, the dial, the board and tiles, with the Neutral, Fantasy and Modern skin tokens on the panel root.
+- `dossier-ui-styles-sections.js`: CSS-in-JS for the header menu, section screens, profile and the desktop pane layout.
 - `dossier-ui-styles.js`: The dossier panel's scoped stylesheet split from `dossier-ui.js`.
+- `relationship-map-focus.js`: Map Focus helpers: lit nodes and bonds for one person, relation word and tone per tied node (optional injected `bondTone`, local fallback), and the "Focus: Name ✕" chip markup. Pure.
 - `social-primitives.js`: Shared social-graph limits plus text normalization and similarity helpers split from `social.js`.
 - `social-relations.js`: Relation families, inverse/sanitization rules and shared relation parsing split from `social.js`.
 - `social-bonds.js`: Important-bond parsing, compaction and display formatting split from `social.js`.
@@ -127,6 +154,7 @@ Generated 2026-11-07.
 - `portrait-tools-actions.js`: Upload completion, generated portrait previews/seeds and removal split from `portrait-tools.js`.
 - `dossier-experience-state.js`: Life-state projection, current selection and DOM write guards split from `dossier-experience.js`.
 - `dossier-experience-styles.js`: Extension-wide dossier, editor and settings CSS split from `dossier-experience.js`.
+- `dossier-ui-view-model.js`: Pure view model for the board (data only) plus the local bond-tone and library-ring fallbacks.
 - `runtime-hydration-state.js`: Fresh/normalized chat state, cached-copy accessors, hydration metadata, freshness events, dirty marks and native-change notices split from `runtime-hydration.js`.
 - `runtime-hydration-freshness.js`: Revision conflicts, server-copy freshness checks, preserved local work and canonical-state installation split from `runtime-hydration.js`.
 - `runtime-hydration-load.js`: Sidecar discovery and retry, loaded-state installation, freshness-gated mutations and hydration write gates split from `runtime-hydration.js`.
@@ -149,3 +177,4 @@ Generated 2026-11-07.
 - `runtime-targeted-scope.js`: Target-row admission and single-target profile/social channel scoping split from `runtime-targeted.js`.
 - `runtime-targeted-refresh.js`: Editor-field sync and the targeted Refresh pass split from `runtime-targeted.js`.
 - `runtime-targeted-backfill.js`: History backfill and the pending-backfill queue split from `runtime-targeted.js`.
+- `npc-meters-gate.js`: Pure anti-lever gate for story-line meter moves: approach kinds, the per-NPC recent-approach ring, diminishing/backfire/low-trust rules, cue text and receipt words.

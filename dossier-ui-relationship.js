@@ -51,6 +51,7 @@ export function lastRelationshipChangeHtml(change) {
         <div class="delta-rel-last-head"><h4>Last relationship change</h4>${tier ? `<span class="delta-rel-impact delta-rel-impact-${escapeHtml(tier)}">${escapeHtml(impactLabel(tier))}</span>` : ''}${stampHtml(event?.date && stamp.label ? { ...stamp, label: `${stamp.label} · ${event.date}` } : stamp)}</div>
         ${event?.held ? `<p class="delta-rel-held">Held: ${escapeHtml(event.note || 'the day\'s allowance is used')}. Nothing moved.</p>${asked ? `<p class="delta-muted delta-rel-asked">Asked: ${escapeHtml(asked)}</p>` : ''}`
         : `<div class="delta-rel-deltas">${deltas || '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>'}</div>`}
+        ${event?.gate ? `<p class="delta-rel-gate">${escapeHtml(event.gate)}</p>` : ''}
         ${change.reason ? `<p>${escapeHtml(change.reason)}</p>` : ''}
     </div>`;
 }

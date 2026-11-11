@@ -1,9 +1,11 @@
 // NPC meters, the settings defaults and the settings schema the Story Suite overlay renders. A pure part of npc-meters.js (same
 // owner, moved without change); npc-meters.js re-exports both names. Never imports npc-meters.js.
 import { BUILT_IN_RANGE, DEFAULT_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DESCRIBE_MAX, LABEL_MAX, MAX_CHANGE_CAP, MAX_CUSTOM_METERS, MILESTONE_MAX, STAGE_NAME_MAX, TONES, TRACK_MAX } from './npc-meters-config.js';
+import { DEFAULT_GATE_SETTINGS, GATE_STRENGTHS, GATE_WINDOW_MAX } from '../npc-meters-gate.js';
+import { FEATURE_GATE } from './npc-meters-config.js';
 import { DEFAULT_SOCIAL_CAP, DEFAULT_SOCIAL_SCALE, FEATURE_SOCIAL, MAX_SOCIAL_CAP, MAX_SOCIAL_SCALE } from './social-check.js';
 
-export const SETTINGS_DEFAULTS = Object.freeze({ changeCap: DEFAULT_CHANGE_CAP, customMeters: [], stages: [], ladder: [], conflictAt: DEFAULT_CONFLICT_AT, demoteAfter: DEFAULT_DEMOTE_AFTER, presets: [], socialScale: DEFAULT_SOCIAL_SCALE, socialCap: DEFAULT_SOCIAL_CAP });
+export const SETTINGS_DEFAULTS = Object.freeze({ changeCap: DEFAULT_CHANGE_CAP, customMeters: [], stages: [], ladder: [], conflictAt: DEFAULT_CONFLICT_AT, demoteAfter: DEFAULT_DEMOTE_AFTER, presets: [], socialScale: DEFAULT_SOCIAL_SCALE, socialCap: DEFAULT_SOCIAL_CAP, gateDays: DEFAULT_GATE_SETTINGS.windowDays, gateStrength: DEFAULT_GATE_SETTINGS.strength });
 
 const TONE_OPTIONS = Object.freeze(TONES.map(tone => Object.freeze({ value: tone, label: tone[0].toUpperCase() + tone.slice(1) })));
 
@@ -56,6 +58,16 @@ export const SETTINGS_SCHEMA = Object.freeze({
     demoteAfter: Object.freeze({
         type: 'int', min: 0, max: 50, label: 'Replies before a stage is lost',
         help: 'A stage on the ladder falls back one rung only after its needs have failed this many replies in a row (0: never).',
+    }),
+    // The anti-lever gate (feature npc-state-delta.anti-lever, npc-meters-gate.js): a story line's `| via:` approach repeated to one person.
+    gateDays: Object.freeze({
+        type: 'int', min: 1, max: GATE_WINDOW_MAX, label: 'Anti-lever: window (story days)', feature: FEATURE_GATE,
+        help: 'The same approach (praise, a gift, help, flirting, a threat, shared danger) to the same person within this many story days counts as a repeat. Needs the story clock.',
+    }),
+    gateStrength: Object.freeze({
+        type: 'choice', label: 'Anti-lever: strength', feature: FEATURE_GATE,
+        options: Object.freeze(Object.keys(GATE_STRENGTHS).map(value => Object.freeze({ value, label: value[0].toUpperCase() + value.slice(1) }))),
+        help: 'Light: a repeat gives three quarters and the fourth backfires. Normal: half, the third backfires. Strong: a quarter, the second backfires.',
     }),
     // Social checks (feature npc-state-delta.social, src/social-check.js): read by a dice module only.
     socialScale: Object.freeze({

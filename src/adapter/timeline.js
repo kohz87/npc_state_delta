@@ -213,6 +213,8 @@ export function createTimelinePart(session, deps) {
             kinds: {
                 [NPC_KIND]: { grammar: part.kinds[NPC_KIND].grammar },
                 [MILESTONE_KIND]: { grammar: part.kinds[MILESTONE_KIND].grammar, feature: FEATURE_STAGES },
+                // The notes kinds (lie, know, taste, tie): each behind the notes feature, all handled by the one apply below.
+                ...Object.fromEntries(Object.entries(part.kinds).filter(([kind]) => kind !== NPC_KIND && kind !== MILESTONE_KIND).map(([kind, entry]) => [kind, { grammar: entry.grammar, feature: entry.feature }])),
             },
             apply: (ctx, line) => part.kinds[NPC_KIND].apply(ctx, line),
         },

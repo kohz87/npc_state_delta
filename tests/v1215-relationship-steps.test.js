@@ -31,7 +31,7 @@ test('v1.2.15 nothing beside a meter when the axis did not move, or the change i
 
 test('v1.2.15 the meters pass the last change and the latest reply; settings fold the rarely touched ones under Advanced', () => {
     const ui = dossierUiSource();
-    assert.match(ui, /relationshipAxis\(label, selected\.relationship\[axis\], axis, selected\.lastRelationshipChange, this\.projection\?\.reply\)/);
+    assert.match(ui, /lastRelationshipChangeHtml\(npc\.lastRelationshipChange\)/, 'the With section shows the last change card');
     const index = runtimeSource();
     const advanced = index.match(/const advanced = \[([\s\S]*?)\]\.join\(''\);/)?.[1] ?? '';
     for (const id of ['npc_state_delta_scan_depth', 'npc_state_delta_inject_budget', 'npc_state_delta_mid_delete_rewind', 'npc_state_delta_branch_rescan']) {

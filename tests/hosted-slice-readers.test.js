@@ -58,7 +58,7 @@ test('diagnostics renders the selected relationship view without changing the st
     globalThis.document = {
         documentElement: { classList: classes },
         body: { classList: classes, appendChild(node) { overlay = node; } },
-        getElementById: () => ({ querySelector: () => ({ dataset: { npcId: 'npc_mira' } }) }),
+        getElementById: () => ({ __npcStateDeltaStage1Ui: { selectedNpcId: 'npc_mira', screen: { name: 'board' } } }),
         createElement: () => ({ dataset: {}, addEventListener() {}, setAttribute() {}, querySelector: () => null, remove() {} }),
     };
     globalThis.requestAnimationFrame = fn => fn();
