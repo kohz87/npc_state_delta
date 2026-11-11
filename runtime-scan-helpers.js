@@ -9,7 +9,8 @@ import { stampNpcChanges } from './src/relationship-pass.js';
 import { normalizeName } from './core.js';
 import { chatLineage, firstLineageDivergence, lineageCheckpointKey, clearUserDismissedGroupsFor } from './branch.js';
 import { getSettings } from './runtime-settings.js';
-import { setScannerWaitAround } from './scanner-routing.js';
+import { setScannerSendYield, setScannerWaitAround } from './scanner-routing.js';
+import { createSendYield } from './runtime-send-yield.js';
 
 // ---- history replay scope ----
 // While a history replay reads one missed reply, `replay` is the scope of that reply (one at a time: the scan operation of the replay holds the chat
@@ -36,6 +37,8 @@ export async function awayFromReplay(promise) {
     try { return await promise; } finally { replay = mine; }
 }
 setScannerWaitAround(awayFromReplay);
+// (send yield) Watches the input box and Send from page load, so a scan never starts under a typing user and always steps aside for a Send.
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') setScannerSendYield(createSendYield(document));
 // Story Block as a replay sees it: reads answer from the state after reply `index` (sdk.query { asOf }, adapter.at), writes are not sent.
 const HOSTED_WRITES = new Set(['adjust', 'setMeters', 'refresh', 'applyEditor', 'openByEvent', 'tick', 'pinKeyPerson']);
 export function scopedAdapter(adapter, index, sink) {

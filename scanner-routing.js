@@ -7,6 +7,10 @@ const inflight = new Map();
 // The one place the scanner waits for the model: a caller (a history replay) may step aside for that wait, so live readers see the live state.
 let aroundWait = promise => promise;
 export function setScannerWaitAround(wrap) { aroundWait = typeof wrap === 'function' ? wrap : (promise => promise); }
+// The user's Send always wins (runtime-send-yield.js): a request starts only when the user is quiet, and one already sent yields to a Send.
+let sendYield = null;
+export function setScannerSendYield(gate) { sendYield = gate && typeof gate.quiet === 'function' ? gate : null; }
+const YIELDED = Symbol('yielded');
 let sequence = 0;
 const metrics = {
     attempts: 0, total: 0, defaultRoute: 0, profileRoute: 0,
@@ -232,12 +236,26 @@ export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
             });
         }
         assertCurrent();
-        // Count provider invocations, not rejected settings or cancelled preflights.
-        record.sent = true;
-        metrics.total += 1;
-        metrics[profileId ? 'profileRoute' : 'defaultRoute'] += 1;
-        const response = await aroundWait(Promise.race([invoke(), stopped]));
-        assertCurrent();
+        let response;
+        for (;;) {
+            // Not while the user types or a Send runs; a bounded wait inside the request's own deadline.
+            if (sendYield) { await Promise.race([sendYield.quiet(), stopped]); assertCurrent(); }
+            // Count provider invocations, not rejected settings or cancelled preflights (a re-send after a yield is not counted again).
+            if (!record.sent) {
+                record.sent = true;
+                metrics.total += 1;
+                metrics[profileId ? 'profileRoute' : 'defaultRoute'] += 1;
+            }
+            const since = sendYield ? sendYield.epoch() : 0;
+            const call = invoke();
+            void call.catch(() => {});   // a yielded call's late answer or error is discarded
+            const yielded = sendYield ? sendYield.pressed(since).then(() => YIELDED) : new Promise(() => {});
+            response = await aroundWait(Promise.race([call, stopped, yielded]));
+            assertCurrent();
+            // A Send pressed before the answer arrived discards it too, whichever settled first.
+            if (response !== YIELDED && !(sendYield && sendYield.epoch() !== since)) break;
+            record.yields = (record.yields || 0) + 1;   // Send was pressed under this request: same prompt again once the user is quiet
+        }
         verifyProfile();
         let value = response;
         if (profileId) {

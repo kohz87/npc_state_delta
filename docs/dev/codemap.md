@@ -202,6 +202,7 @@ Generated 2026-11-07.
 - `runtime-portrait.js`: The portrait generator dialog, its native image request and file, and the portrait settings draft, via `createPortraitPart` split from `index.js`.
 - `runtime-reconcile.js`: Swipe, regenerate, edit and delete reconciliation: settlement, merged requests, rollback to checkpoint or journal, and rescan, via `createReconcilePart` split from `index.js`.
 - `runtime-scan-helpers.js`: Stateless readers of the open chat (latest message and reply positions, lineage, scan indicators, capture setting) and replay-scope helpers split from `index.js`.
+- `runtime-send-yield.js`: The send yield: watches the input box and Send; a scan request starts only when the user is quiet and one already sent yields to a Send, then runs again (the user's Send always wins).
 - `runtime-scan-ops.js`: Scan operation lifecycle, canonical-base check, generation gate, automatic-scan queue and drain, post-reply backfills and diagnostics, via `createScanOpsPart` split from `index.js`.
 - `runtime-settings-bind.js`: Settings panel bindings and mount retries, via `createSettingsBindPart` split from `index.js`.
 - `runtime-settings-html.js`: Settings panel markup, hints, open-group memory and control sync, via `createSettingsHtmlPart` split from `index.js`.

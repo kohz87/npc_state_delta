@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    cancelScannerRequests, dispatchScannerRequest, scannerRoutingMetrics,
+    cancelScannerRequests, dispatchScannerRequest, scannerRoutingMetrics, setScannerSendYield,
     selectedScannerProfileId, scannerProfileOptions,
 } from '../scanner-routing.js';
 
@@ -238,4 +238,77 @@ test('metrics distinguish actual calls from rejected preflights and keep termina
     assert.equal(m.inflight, 0);
     m.last.code = 'mutation';
     assert.notEqual(scannerRoutingMetrics().last.code, 'mutation');
+});
+
+// ---- send yield: the user's Send always wins over a background scan ----
+import { createSendYield, SEND_QUIET_MS } from '../runtime-send-yield.js';
+function sendDoc() {
+    const handlers = {};
+    const doc = { body: { dataset: {} }, addEventListener(type, fn) { (handlers[type] ||= []).push(fn); } };
+    const fire = (type, event) => (handlers[type] || []).forEach(fn => fn(event));
+    return { doc, fire };
+}
+function clock() {
+    const c = { t: 1_000_000 };
+    c.now = () => c.t;
+    c.sleep = async ms => { c.t += ms; await Promise.resolve(); };
+    return c;
+}
+
+test('send yield: a scan request does not start while the user is typing, and starts once quiet', async () => {
+    const { doc, fire } = sendDoc(); const c = clock();
+    const gate = createSendYield(doc, c);
+    const { ctx, calls } = fixture();
+    setScannerSendYield(gate);
+    try {
+        fire('input', { target: { id: 'send_textarea' } });
+        const started = c.t;
+        assert.equal(await dispatchScannerRequest(ctx, payload), '{"npcs":[]}');
+        assert.equal(calls.host.length, 1);
+        assert.ok(c.t - started >= SEND_QUIET_MS, 'waited for the typing to stop');
+    } finally { setScannerSendYield(null); }
+});
+
+test('send yield: a Send pressed under a request in flight discards it and sends the same prompt again once quiet; the scan result is not lost', async () => {
+    const { doc, fire } = sendDoc(); const c = clock();
+    const gate = createSendYield(doc, c);
+    const { ctx, calls } = fixture();
+    const first = deferred();
+    let n = 0;
+    ctx.generateRaw = options => { calls.host.push(options); n += 1; return n === 1 ? first.promise : Promise.resolve('{"npcs":["again"]}'); };
+    setScannerSendYield(gate);
+    try {
+        const before = scannerRoutingMetrics().total;
+        const run = dispatchScannerRequest(ctx, payload);
+        await new Promise(r => setImmediate(r));
+        assert.equal(calls.host.length, 1, 'first request is in flight');
+        fire('pointerdown', { target: { id: 'send_but', closest: () => ({}) } });   // the user presses Send
+        first.resolve('{"npcs":["late"]}');                                           // the late answer must be discarded
+        assert.equal(await run, '{"npcs":["again"]}');
+        assert.equal(calls.host.length, 2);
+        assert.equal(calls.host[1], payload, 'the same request again');
+        assert.equal(scannerRoutingMetrics().total, before + 1, 'counted once');
+    } finally { setScannerSendYield(null); }
+});
+
+test('send yield: no scan starts while the host generates the Send reply, and the wait is bounded', async () => {
+    const { doc } = sendDoc(); const c = clock();
+    doc.body.dataset.generating = 'true';
+    const gate = createSendYield(doc, c);
+    const started = c.t;
+    await gate.quiet();                                // never hangs
+    assert.ok(c.t - started >= 45000 && c.t - started < 46000);
+    doc.body.dataset.generating = 'false';
+    const again = c.t;
+    await gate.quiet();
+    assert.ok(c.t - again < 1000, 'quiet at once when nothing is going on');
+});
+
+test('send yield: Enter in the box counts as a Send, Shift+Enter as typing', async () => {
+    const { doc, fire } = sendDoc(); const c = clock();
+    const gate = createSendYield(doc, c);
+    fire('keydown', { target: { id: 'send_textarea' }, key: 'Enter', shiftKey: true });
+    assert.equal(gate.epoch(), 0);
+    fire('keydown', { target: { id: 'send_textarea' }, key: 'Enter', shiftKey: false });
+    assert.equal(gate.epoch(), 1);
 });
