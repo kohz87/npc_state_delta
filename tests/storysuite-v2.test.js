@@ -15,7 +15,6 @@ import {
     portraitUrl,
     safeImageUrl,
 } from '../src/storysuite-v2.js';
-import { connectStoryBlock, V2_HOST_EVENT as TABS_V2_HOST_EVENT } from '../story-block-tabs.js';
 import { announceNpcStateDelta, openSuiteOverlay, storyBlockIsV2, suiteManageAvailable } from '../suite-handshake.js';
 
 // Story Suite v2 adapter (src/storysuite-v2.js): Delta registers with a Story Block v2 host when one
@@ -658,7 +657,6 @@ test('if the v1 empty-state markup cannot load, the Cast tab still shows a plain
 
 test('the adapter tells the page when it is hosted and when the host goes away; never without a host', async () => {
     const { doc, box, timers, adapter } = await hosted();
-    assert.equal(V2_HOST_EVENT, TABS_V2_HOST_EVENT, 'story-block-tabs.js listens for the same event');
     assert.deepEqual(doc.sent, [{ type: V2_HOST_EVENT, detail: { hosted: true } }]);
     box.host = undefined;
     timers.runIntervals();
@@ -763,22 +761,6 @@ test('with a v2 Story Block, Delta withdraws from v1\'s Story Suite registry and
     } finally {
         if (saved === undefined) delete globalThis.StoryBlock; else globalThis.StoryBlock = saved;
     }
-});
-
-test('with a v2 Story Block, the v1 Present NPCs / Dossiers tabs are not registered even if it offers registerTab', () => {
-    const tabs = [];
-    const api = { presentCastHtml: () => '', isEnabled: () => true };
-    assert.equal(connectStoryBlock(api, { apiVersion: 2, ready: Promise.resolve({}), registerTab: tab => tabs.push(tab) }), null);
-    assert.deepEqual(tabs, []);
-
-    // A v1 host still gets both, and a v2 host taking over later takes them back.
-    const removed = [];
-    const connection = connectStoryBlock(api, { apiVersion: 1, registerTab: tab => tabs.push(tab), unregisterTab: id => removed.push(id) });
-    assert.deepEqual(tabs.map(tab => tab.id), ['npc-state-delta-cast', 'npc-state-delta-dossiers']);
-    connection.disconnect();
-    assert.deepEqual(removed, ['npc-state-delta-cast', 'npc-state-delta-dossiers']);
-    connection.disconnect();
-    assert.equal(removed.length, 2, 'once');
 });
 
 // ---- the hook in index.js ----

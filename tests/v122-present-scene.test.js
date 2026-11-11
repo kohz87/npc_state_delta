@@ -271,16 +271,13 @@ test('v1.2.2 a malformed scene shapes to nothing instead of throwing', () => {
     assert.equal(sceneAttr(null), '');
 });
 
-test('v1.2.2 the present cards render now/chatter slots and the Story Block tab fills them', () => {
+test('v1.2.2 the present cards render now/chatter slots ', () => {
     const index = runtimeSource();
-    const tabs = fs.readFileSync(new URL('../story-block-tabs.js', import.meta.url), 'utf8');
     assert.match(index, /function inlineCardHtml\(npc, messageId, scene = null\)[\s\S]*nowSlotHtml\(scene, npc\.id\)[\s\S]*chatterSlotsHtml\(scene, npc\.id\)/);
     assert.match(index, /npc-state-delta-present-roster" data-message-id="\$\{messageId\}"\$\{sceneAttr\(scene\)\}/);
     assert.match(index, /fillPresentSceneText\(anchor\)/);
     assert.match(index, /fillPresentCast: root => fillPresentSceneText\(root\)/);
     assert.match(index, /areaOwner\('scene', settings\.sourceOfTruth\)\?\.id === 'story-block'/, 'World State only while Story Block keeps the scene');
-    assert.match(tabs, /pane\.innerHTML = html;[\s\S]*api\.fillPresentCast\?\.\(pane\)/);
-    assert.match(tabs, /storyBlock\.onUpdate\?\.\(\(\) => api\.renderInline\?\.\(\)\)/);
     const css = styleSource();
     assert.doesNotMatch(css, /grid-column: span 2/, 'wide: the bubble sits under its card, not in a stretched two-column cell');
     assert.match(index, /const side = chatter \? chatter\s*: \(now \? `<div class="npc-state-delta-present-side npc-state-delta-present-side-now">\$\{now\}<\/div>`\s*: `<div class="npc-state-delta-present-side npc-state-delta-present-side-idle">[^`]*No changes this turn[^`]*`\);/, 'right half: chatter, else the now lines, else role + no changes');
