@@ -44,7 +44,7 @@ test('present NPCs in chat support Full, Compact, Only in Story Block and Off di
     assert.match(index, /PRESENT_CAST_DISPLAY_MODES = Object\.freeze\(\['full', 'compact', 'storyblock', 'off'\]\)/);
     assert.match(index, /assign\('presentCastDisplay', normalizePresentCastDisplay\(settings\.presentCastDisplay\)\)/);
     assert.match(index, /id="npc_state_delta_present_cast_display"[^>]*><option value="full">Full cards<\/option><option value="compact">Compact strip<\/option><option value="storyblock">Only in Story Block<\/option><option value="off">Off<\/option>/);
-    assert.match(index, /function inlineEntriesForRender\(state\) \{\s*\/\/[^\n]*\n\s*if \(inChatCastMode\(\) === 'off'\) return \[\];/);
+    assert.match(index, /function inlineEntriesForRender\(state\) \{\s*\/\/[^\n]*\n\s*if \(getSettings\(\)\.enabled === false \|\| inChatCastMode\(\) === 'off'\) return \[\];/);
     assert.match(index, /function startInlineWatchdog\(\) \{[\s\S]*?if \(inChatCastMode\(\) === 'off'\) return stopInlineWatchdog\(\);/);
     assert.match(index, /class="npc-state-delta-present-chip"/);
     assert.match(css, /\.npc-state-delta-present-chips \{ display: flex;[^}]*overflow-x: auto;/);
@@ -427,4 +427,9 @@ test('opening the dossier never focuses the search box (no phone/tablet keyboard
     assert.doesNotMatch(open, /delta-search/);
     assert.match(open, /querySelector\('\.delta-panel'\)\?\.focus\?\.\(\{ preventScroll: true \}\)/);
     assert.doesNotMatch(dossierUi, /focusSearch/);
+});
+
+test('switched off, Delta renders no in-chat cards, and the Enable switch redraws them (BH2, 12 Nov)', () => {
+    assert.match(index, /if \(getSettings\(\)\.enabled === false \|\| inChatCastMode\(\) === 'off'\) return \[\];/);
+    assert.match(index, /function afterEnabledChange\(\) \{[\s\S]*renderDossier\(\);[\s\S]*globalThis\.NPCStateDelta\?\.renderInline\?\.\(\);/);
 });

@@ -58,8 +58,8 @@ export function createInlineCardsModePart(deps, inlineRosterHtml) {
     }
 
     function inlineEntriesForRender(state) {
-        // Presentation only: Off renders nothing, while inlineCards history is still recorded below.
-        if (inChatCastMode() === 'off') return [];
+        // Presentation only: Off renders nothing, while inlineCards history is still recorded below. Switched off, Delta shows no cards.
+        if (getSettings().enabled === false || inChatCastMode() === 'off') return [];
         // Visible NPC State Delta is a live present-cast view, not a historical dossier timeline.
         // Keep inlineCards internally for branch/rollback safety, but render only the latest
         // assistant message and only NPCs physically present in the current merged state.
