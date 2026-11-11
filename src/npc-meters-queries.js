@@ -1,6 +1,6 @@
 // Read-only NPC meter queries and screen views. A pure part of npc-meters.js (same owner, moved without change);
 // npc-meters.js re-exports every public name it exported before. Never imports npc-meters.js.
-import { NPC_DOMAIN, MAX_STAGES_PER_METER, SECRET_TITLE_MAX, NAME_MAX, FEATURE_NOTES, isObject, isInt, isReplyId, sameReply, clean, own, bandWord, needMet, thresholdReached, stageAt, clamp, intOr } from './npc-meters-config.js';
+import { NPC_DOMAIN, MAX_STAGES_PER_METER, SECRET_TITLE_MAX, NAME_MAX, FEATURE_NOTES, isObject, isInt, isReplyId, sameReply, clean, own, bandWord, needMet, thresholdReached, stageAt, clamp, intOr, readLeaf } from './npc-meters-config.js';
 import { initialNpcSlice, findNpcKey, meterValue, rungMet, conflictOn } from './npc-meters-slice.js';
 import { readEvent } from './npc-meters-pacing.js';
 import { INSTINCT_KEYS } from '../npc-instincts.js';
@@ -136,11 +136,12 @@ export function createNpcQueries({
     // The dossier's mood and pull (feature mood-pull; only a record that has them): `mood` { word, valence, energy, control, bars,
     // cause } and `pull` { kind, cause, since, days, level (1..3, the top item's score), inst }. Plain data: the UI escapes the text.
     function moodPullView(record) {
-        const mood = normalizeMood(record.mood);
-        const pull = isObject(record.pull) ? record.pull : null;
+        const mood = normalizeMood(readLeaf(record.mood));
+        const pull = isObject(readLeaf(record.pull)) ? readLeaf(record.pull) : null;
+        const inst = isObject(readLeaf(record.inst)) ? readLeaf(record.inst) : null;
         return {
             ...(mood ? { mood: { word: moodWord(mood), valence: mood.v, energy: mood.a, control: mood.d, bars: moodBars(mood), cause: mood.cause, day: mood.day } } : {}),
-            ...(pull ? { pull: { kind: pull.kind, cause: pull.cause, since: pull.since, days: isInt(record.day) ? Math.max(0, record.day - pull.since) : 0, level: isObject(record.inst) && isInt(record.inst[INSTINCT_KEYS[pull.kind]]) ? record.inst[INSTINCT_KEYS[pull.kind]] : 0, inst: { ...(isObject(record.inst) ? record.inst : {}) } } } : {}),
+            ...(pull ? { pull: { kind: pull.kind, cause: pull.cause, since: pull.since, days: isInt(record.day) ? Math.max(0, record.day - pull.since) : 0, level: inst && isInt(inst[INSTINCT_KEYS[pull.kind]]) ? inst[INSTINCT_KEYS[pull.kind]] : 0, inst: { ...(inst ?? {}) } } } : {}),
         };
     }
 

@@ -8,7 +8,7 @@ import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
 import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent, spendFlatEvent } from '../src/relationship-pacing.js';
 import { cutToTier, eventSummary, pacingNote, readEvent } from '../src/npc-meters-pacing.js';
-import { FEATURE_GATE, FEATURE_MOOD_PULL, CONTEXT_BUDGET } from '../src/npc-meters-config.js';
+import { FEATURE_GATE, FEATURE_MOOD_PULL, CONTEXT_BUDGET, readLeaf } from '../src/npc-meters-config.js';
 import { gateApproach, readApproachRing } from '../npc-meters-gate.js';
 import { createNpcPart } from '../src/npc-meters.js';
 import { applyEvents, easeAxis, eventsFromMoves, moodBars, moodWord, restMood, restingMood } from '../npc-mood.js';
@@ -588,7 +588,8 @@ const worldModule = {
 };
 const moodSuite = (extra = {}) => suite({ allowance: null, features: MOOD_ON, modules: [worldModule], ...extra });
 const world = async (s, patch) => { const out = await s.host.sdk.command('zz.world', patch); assert.equal(out.ok, true, JSON.stringify(out)); };
-const recordOf = (s, key = 'oren') => s.host.head().domains.npc.npcs[key];
+// The record as stored, with its text leaves (mood, inst, pull, track) read back as objects.
+const recordOf = (s, key = 'oren') => { const raw = s.host.head().domains.npc.npcs[key]; return raw && Object.fromEntries(Object.entries(raw).map(([field, value]) => [field, ['mood', 'inst', 'pull', 'track'].includes(field) ? readLeaf(value) : value])); };
 const plain = ({ v, a, d, day, cause }) => ({ v, a, d, day, cause });
 const clockTo = (s, minutes) => s.host.sdk.command('zz.clock', { minutes });
 const axes = s => { const m = recordOf(s).mood; return [m.v, m.a, m.d]; };
@@ -866,4 +867,26 @@ test('defaults on: a chat written with the three features off (a ladder ticking 
     const moody = bare(s);
     assert.equal((await s.host.sdk.reread(fresh)).ok, true);
     assert.equal(bare(s), moody, 'and a Re-read of that reply keeps it, as it was');
+});
+
+test('mood, pull, inst, track are stored whole as one text leaf: a middle delete of the reply that made them leaves no skipped change', async () => {
+    const s = await moodSuite();
+    await s.setDay(2);
+    await s.say(['~ npc Oren | trust: +3']);
+    const made = await s.say(['~ npc Oren | trust: -2 | impact: meaningful | reason: Astra lied']);
+    await s.say(['~ npc Oren | trust: -2 | impact: meaningful | reason: Astra lied again']);
+    await s.setDay(3);
+    await s.say(['~ npc Oren | trust: +1']);
+    const raw = s.host.head().domains.npc.npcs.oren;
+    assert.equal(typeof raw.mood, 'string', 'the mood is one text leaf');
+    assert.ok(readLeaf(raw.mood).v < 0);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    await s.host.st.deleteMessage(made);
+    const live = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), live, 'rebuild equals live after the delete');
+    assert.deepEqual(s.host.store.problems(), [], 'nothing was skipped');
+    assert.equal(readLeaf('{"a":1}').a, 1);
+    assert.deepEqual(readLeaf({ a: 1 }), { a: 1 }, 'an old stored object reads as it is');
+    assert.equal(readLeaf('not json'), undefined);
 });

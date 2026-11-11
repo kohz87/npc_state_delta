@@ -12,6 +12,7 @@ import { mergeScanResult, normalizeNpcRecord as normalizeProduction } from '../c
 import { currentPresentationText, normalizeAppearanceModel, resolveNpcAppearance } from '../appearance.js';
 import { castFromHtml, castProjection, projectDossierState } from '../dossier-ui.js';
 import { FEATURE_STAGES, normalizeSecrets, observeCast, validateNpcSlice } from '../src/npc-meters.js';
+import { readLeaf } from '../src/npc-meters-config.js';
 import {
     applyCastEntry, applyCastPortrait, castBadge, castPortraitWanted, castSecrets, castView, dossierFor, findCastPerson, markCastPortraitRemoved, metWithEntry, normalizeCast, normalizeEntry, parsePeople, shortPackName,
 } from '../src/cast-dossier.js';
@@ -1501,7 +1502,9 @@ test('mood: a person met from the cast starts at the resting mood their pack per
     const calm = await suite({ features: { 'npc-state-delta.mood-pull': true } });
     await calm.world([castRow({ entry: { ...structuredClone(FENNA_ENTRY), personality: 'Calm, confident and unhurried.' } })]);
     await calm.say(['~ meet Fenna']);
-    const mood = Object.values(calm.host.head().domains.npc.npcs).find(record => record.name === 'Fenna')?.mood;
+    const raw = Object.values(calm.host.head().domains.npc.npcs).find(record => record.name === 'Fenna')?.mood;
+    const mood = readLeaf(raw);
+    assert.equal(typeof raw, 'string', 'stored whole as one text leaf');
     assert.deepEqual([mood?.v, mood?.a, mood?.d, mood?.rest], [0, -2, 1, { v: 0, a: -2, d: 1 }]);
     assert.deepEqual(validateNpcSlice(calm.host.head().domains.npc), []);
     const plain = await suite({ features: { 'npc-state-delta.mood-pull': true } });

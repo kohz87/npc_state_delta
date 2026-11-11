@@ -4,7 +4,7 @@ import { storyMinuteText } from '../calendar.js';
 import { isAway, labelKey, labelsOf, normalizeKeyPeople } from './key-people.js';
 import { normalizeCast } from './cast-dossier.js';
 import { normalizeApproachKind } from '../npc-meters-gate.js';
-import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
+import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, leafText, readLeaf, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
 import { runKind, noteLine, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
 import { applyEvents, restMood, restingMood } from '../npc-mood.js';
@@ -115,15 +115,16 @@ export function createNpcCommands({
         const labels = new Set([record.name, ...(resolve(record.name)?.aliases ?? [])].map(labelKey).filter(Boolean));
         const has = list => list.some(label => labels.has(label));
         const gone = (Array.isArray(rawPeople) ? rawPeople : []).find(person => isObject(person?.away) && !person.removed && has([person.name, ...(Array.isArray(person.aliases) ? person.aliases : [])].map(labelKey)));
-        const out = stepPull(record.track, {
+        const out = stepPull(readLeaf(record.track), {
             day, party: world.party ? has([...world.party]) : null, here: world.here, present: has([...world.present]),
             awayDay: isInt(gone?.away?.since) ? Math.floor(gone.away.since / DAY_MINUTES) : null,
             threads: world.threads.filter(thread => has(thread.names)),
             // Drives (notes feature): the person's instinct strengths scale what pulls at them; none stored: the scores as they are.
             scale: featureOn(FEATURE_NOTES) && record.drives ? driveScale(record.drives) : undefined,
         });
-        if (isObject(record.mood) && isInt(minutes)) record.mood = applyEvents(record.mood, minutes, []);
-        const set = (field, value, empty) => { if (empty) delete record[field]; else record[field] = value; };
+        const mood = readLeaf(record.mood);
+        if (isObject(mood) && isInt(minutes)) record.mood = leafText(applyEvents(mood, minutes, []));
+        const set = (field, value, empty) => { if (empty) delete record[field]; else record[field] = leafText(value); };
         set('track', out.track, !Object.keys(out.track).length);
         set('inst', out.inst, !Object.values(out.inst).some(Boolean));
         set('pull', out.pull, !out.pull);
@@ -275,7 +276,7 @@ export function createNpcCommands({
                 try { ensure(ctx, slice.npcs, who, defs, seed); } catch { continue; }
                 // Temperament (feature mood-pull): a person whose pack words give a resting mood starts at it, so it is stored with the record.
                 const rest = moodPull && isInt(minutes) && slice.npcs[who.key] ? restingMood(person.entry.personality, person.entry.about) : null;
-                if (rest && (rest.v || rest.a || rest.d)) slice.npcs[who.key].mood = restMood(rest, minutes);
+                if (rest && (rest.v || rest.a || rest.d)) slice.npcs[who.key].mood = leafText(restMood(rest, minutes));
                 // Notes (feature notes): the pack's tastes and drives are the person's first, kept in the record's leaves.
                 if (slice.npcs[who.key] && featureOn(FEATURE_NOTES, ctx)) Object.assign(slice.npcs[who.key], seedNotes(person.entry));
                 note(slice, ctx.rev, unknown);
