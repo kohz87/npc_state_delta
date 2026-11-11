@@ -233,7 +233,8 @@ export function createNpcCommands({
             try { minutes = ctx.time(); } catch { minutes = null; }
             if (needsMood && isInt(minutes)) {
                 const rest = restingMood(payload?.personality, payload?.about);
-                if (rest.v || rest.a || rest.d) record.mood = restMood(rest, minutes);
+                // Always stored, even at 0/0/0: a person with no temperament words still has a mood (and so a decay and pull) like a cast meeting's.
+                record.mood = restMood(rest, minutes);
             }
             if (needsDrives) Object.assign(record, seedNotes({ personality: payload?.personality, about: payload?.about }));
             return out;
