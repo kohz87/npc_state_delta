@@ -478,8 +478,10 @@ function prng(seed) {
     return { int: (lo, hi) => lo + Math.floor(next() * (hi - lo + 1)), chance: p => next() < p, pick: list => list[Math.floor(next() * list.length)] };
 }
 
-for (const seed of [5, 17, 41]) {
-    test(`delete fuzz seed ${seed}: meters, milestones and the per-reply step over middle deletes; replay equals rebuild`, async t => {
+// FUZZ_SEEDS="1-200" (or "5,17") runs those seeds (default 5, 17, 41); FUZZ_STEPS the steps (default 18).
+const fuzzSeeds = (spec, fallback) => (spec ? spec.split(',').flatMap(part => { const [a, b] = part.split('-').map(Number); return b ? Array.from({ length: b - a + 1 }, (_, i) => a + i) : [a]; }) : fallback);
+for (const seed of fuzzSeeds(process.env.FUZZ_SEEDS, [5, 17, 41])) {
+    test(`delete fuzz seed ${seed}: meters, milestones, via gate, notes kinds and the per-reply step over middle deletes; replay equals rebuild`, async t => {
         t.mock.method(console, 'warn', () => {});
         const records = dossiers();
         records.npc_mira.meterSetup = { limits: { affection: { ceiling: 50 } } };
@@ -489,12 +491,18 @@ for (const seed of [5, 17, 41]) {
         await s.say(['~ npc Mira | trust: +1', '~ npc Oren | trust: +1']);
         const setup = s.host.store.headIndex();
         const own = new Map();   // record sid → the milestones that reply added
-        for (let step = 0; step < 18; step += 1) {
+        for (let step = 0; step < (Number(process.env.FUZZ_STEPS) || 18); step += 1) {
             const lines = [];
             const marks = [];
             for (let n = r.int(1, 3); n > 0; n -= 1) {
                 const who = r.pick(['Mira', 'Oren']);
-                switch (r.int(0, 4)) {
+                switch (r.int(0, 9)) {
+                    // The gate's `via:` (a repeat gives less, then backfires) and the notes kinds (lie, know, taste, tie), also under middle deletes.
+                    case 5: lines.push(`~ npc ${who} | affection: +${r.int(1, 9)} | via: ${r.pick(['praise', 'gift', 'help', 'flirt', 'threat', 'shared-danger'])} | impact: ${r.pick(['ordinary', 'major'])}`); break;
+                    case 6: lines.push(r.chance(0.5) ? `~ lie ${who} | to: ${r.pick(['Mira', 'Oren', 'Astra'])} | said: not me ${r.int(0, 3)}` : `~ lie ${who} | to: ${r.pick(['Mira', 'Oren', 'Astra'])} | caught: yes`); break;
+                    case 7: lines.push(`~ know ${who} | about: ${r.pick(['Mira', 'Oren', 'Astra', 'Brann'])} | fact: keeps a ledger ${r.int(0, 3)} | ${r.pick(['how: saw | secret: yes', 'how: heard', 'told: yes'])}`); break;
+                    case 8: lines.push(`~ taste ${who} | ${r.pick(['likes', 'dislikes'])}: ${r.pick(['tea', 'toffee', 'rain'])}`); break;
+                    case 9: lines.push(`~ tie ${who} | with: ${r.pick(['Astra', 'Brann', 'Cole', 'Dova', 'Esk', 'Finn', 'Gale', 'Hobb', 'Ines'])} | tag: ${r.pick(['+', '-'])}${r.pick(['ally', 'rival', 'owes'])}`); break;
                     case 0: lines.push(`~ npc ${who} | trust: ${r.pick(['+', '-'])}${r.int(1, 15)} | affection: +${r.int(0, 9)}`); break;
                     // Past the change cap (B-a1-15): held to 15 a reply, also after a middle delete.
                     case 4: lines.push(`~ npc ${who} | trust: ${r.pick(['+', '-'])}${r.int(16, 40)}`); break;

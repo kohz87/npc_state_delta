@@ -361,18 +361,40 @@ function prng(seed) {
     return { int: (lo, hi) => lo + Math.floor(next() * (hi - lo + 1)), chance: p => next() < p, pick: list => list[Math.floor(next() * list.length)] };
 }
 
-for (const seed of [3, 11, 29]) {
-    test(`pacing fuzz seed ${seed}: tiers over several story days, middle deletes and swipes; the slice validates and replay equals rebuild`, async t => {
+// FUZZ_SEEDS="1-200" (or "3,11,29") runs those seeds; the default is the three below. FUZZ_STEPS sets the steps (default 16).
+const fuzzSeeds = (spec, fallback) => (spec ? spec.split(',').flatMap(part => { const [a, b] = part.split('-').map(Number); return b ? Array.from({ length: b - a + 1 }, (_, i) => a + i) : [a]; }) : fallback);
+const PEOPLE = ['Astra', 'Sister Temiwa', 'Brann', 'Cole', 'Dova', 'Esk', 'Finn', 'Gale', 'Hobb', 'Ines', 'Jory', 'Kess', 'Lund', 'Mave'];   // 14: past the bond limit (8) and the ties limit (12)
+// One random line of the notes kinds (lie, know, taste, tie), a gate `via:` meter line, or a plain meter line: every change-line kind NSD owns.
+function fuzzLine(r, who) {
+    const other = r.pick(PEOPLE);
+    switch (r.int(0, 9)) {
+        case 0: return `~ lie ${who} | to: ${other} | said: it was not me ${r.int(0, 3)}`;
+        case 1: return `~ lie ${who} | to: ${other} | caught: yes`;
+        case 2: return `~ know ${who} | about: ${other} | fact: keeps a ledger ${r.int(0, 3)} | how: ${r.pick(['saw', 'heard'])}${r.chance(0.4) ? ' | secret: yes' : ''}`;
+        case 3: return `~ know ${who} | about: ${other} | fact: keeps a ledger ${r.int(0, 3)} | told: yes`;
+        case 4: return `~ taste ${who} | ${r.pick(['likes', 'dislikes'])}: ${r.pick(['tea', 'toffee', 'rain', 'paperwork'])}${r.chance(0.3) ? ' | why: a change of heart' : ''}`;
+        case 5: return `~ tie ${who} | with: ${other} | tag: ${r.pick(['+', '-'])}${r.pick(['ally', 'rival', 'owes'])}${r.chance(0.3) ? `, ${r.pick(['+', '-'])}${r.pick(['ally', 'rival', 'owes'])}` : ''}`;
+        case 6: case 7: return `~ npc ${who} | affection: +${r.int(1, 9)} | trust: ${r.pick(['+', '-'])}${r.int(0, 6)} | via: ${r.pick(['praise', 'gift', 'help', 'flirt', 'threat', 'shared-danger'])} | impact: ${r.pick(['ordinary', 'meaningful', 'major', 'extreme'])}`;
+        default: return `~ npc ${who} | trust: +${r.int(1, 9)} | affection: ${r.pick(['+', '-'])}${r.int(0, 6)} | impact: ${r.pick(['ordinary', 'meaningful', 'major', 'extreme'])}`;
+    }
+}
+
+for (const seed of fuzzSeeds(process.env.FUZZ_SEEDS, [3, 11, 29])) {
+    test(`pacing fuzz seed ${seed}: tiers, notes kinds, via gate, look stamp and mood/pull tick over several story days, middle deletes and swipes; the slice validates and replay equals rebuild`, async t => {
         t.mock.method(console, 'warn', () => {});
-        const s = await suite();
+        // FUZZ_OFF=mood-pull,anti-lever,notes switches those features off for a run (to look past a failure of one).
+        const s = await suite({ features: process.env.FUZZ_OFF ? Object.fromEntries(process.env.FUZZ_OFF.split(',').map(id => [`npc-state-delta.${id}`, false])) : null });
         const r = prng(seed);
         await s.say(['~ npc Oren | trust: +1', '~ npc Sister Temiwa | trust: +1']);   // the set-up reply makes both entries and is never deleted
         const setup = s.host.store.headIndex();
         let day = 1;
-        for (let step = 0; step < 16; step += 1) {
+        for (let step = 0; step < (Number(process.env.FUZZ_STEPS) || 16); step += 1) {
             if (r.chance(0.4)) { day += r.int(1, 2); await s.setDay(day); }
-            const lines = Array.from({ length: r.int(1, 2) }, () => `~ npc ${r.pick(['Oren', 'Sister Temiwa'])} | trust: +${r.int(1, 9)} | affection: ${r.pick(['+', '-'])}${r.int(0, 6)} | impact: ${r.pick(['ordinary', 'meaningful', 'major', 'extreme'])}`);
+            const lines = Array.from({ length: r.int(1, 3) }, () => fuzzLine(r, r.pick(['Oren', 'Sister Temiwa'])));
             const index = await s.say(lines);
+            // The look stamp / flag (feature notes): first look set, or a refused contradiction; replayed with the reply.
+            if (r.chance(0.2)) await s.adapter.flag(r.chance(0.5) ? { name: 'Oren', lock: true, reply: s.host.store.headIndex(), cue: 'Oren\'s look is fixed: grey hair.' } : { name: 'Oren', drift: { before: 'grey hair', incoming: 'red hair' }, reply: s.host.store.headIndex() });
+            if (r.chance(0.15)) await s.host.sdk.command('npc.tick', {});   // from outside: refused (the step is Delta's own); must change nothing
             if (r.chance(0.2)) await s.swipe(lines);
             if (step > 3 && r.chance(0.35)) {
                 assert.equal((await s.host.sdk.reread(s.host.store.headIndex())).ok, true);
