@@ -137,8 +137,9 @@ export function createNpcQueries({
     // cause } and `pull` { kind, cause, since, days, level (1..3, the top item's score), inst }. Plain data: the UI escapes the text.
     function moodPullView(record) {
         const mood = normalizeMood(readLeaf(record.mood));
-        const pull = isObject(readLeaf(record.pull)) ? readLeaf(record.pull) : null;
-        const inst = isObject(readLeaf(record.inst)) ? readLeaf(record.inst) : null;
+        const [pullRaw, instRaw] = [readLeaf(record.pull), readLeaf(record.inst)];
+        const pull = isObject(pullRaw) ? pullRaw : null;
+        const inst = isObject(instRaw) ? instRaw : null;
         return {
             ...(mood ? { mood: { word: moodWord(mood), valence: mood.v, energy: mood.a, control: mood.d, bars: moodBars(mood), cause: mood.cause, day: mood.day } } : {}),
             ...(pull ? { pull: { kind: pull.kind, cause: pull.cause, since: pull.since, days: isInt(record.day) ? Math.max(0, record.day - pull.since) : 0, level: inst && isInt(inst[INSTINCT_KEYS[pull.kind]]) ? inst[INSTINCT_KEYS[pull.kind]] : 0, inst: { ...(inst ?? {}) } } } : {}),

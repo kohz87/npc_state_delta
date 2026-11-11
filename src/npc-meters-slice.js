@@ -1,7 +1,7 @@
 // NPC meters, the per-reply slice: the initial slice, key-person absence and cast memory, slice validation, meter moves, the stage
 // and ladder settling, and the change text. A pure part of npc-meters.js (same owner, moved without change); npc-meters.js
 // re-exports every name it exported before. Never imports npc-meters.js.
-import { readLeaf, clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KEYS, isInt, isObject, isReplyId, KEY_MAX, MAX_METERS_PER_NPC, MAX_MILESTONES, MAX_NPCS, MAX_PROBLEMS, MAX_RUNGS, MAX_UNLOCKED, METER_ID_MAX, MILESTONE_MAX, NAME_MAX, needMet, npcKey, own, RECORD_FIELDS, replyKey, sameReply, signed, STAGE_NAME_MAX, stageAt, thresholdReached, WORDS } from './npc-meters-config.js';
+import { readLeaf, leafText, clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KEYS, isInt, isObject, isReplyId, KEY_MAX, MAX_METERS_PER_NPC, MAX_MILESTONES, MAX_NPCS, MAX_PROBLEMS, MAX_RUNGS, MAX_UNLOCKED, METER_ID_MAX, MILESTONE_MAX, NAME_MAX, needMet, npcKey, own, RECORD_FIELDS, replyKey, sameReply, signed, STAGE_NAME_MAX, stageAt, thresholdReached, WORDS } from './npc-meters-config.js';
 import { isKey, memoryKey, RECENT_REPLIES } from './key-people.js';
 import { CAST_KEY, metWithEntry } from './cast-dossier.js';
 import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
@@ -368,6 +368,9 @@ export function settle(record, { defs, stages, rules, name, rungs = [], conflict
 // A Re-read of a reply (the host gives ctx.standing: the story as it stood after that reply's earlier read) gives the reply's mood only where that
 // state already had one on this person: a reply written before the feature was on is read again as it was; a reply written with it on keeps
 // its mood. A first read (no standing) always may.
+// A leaf is written in the form the reply's earlier read stored it: an object where the standing holds one (a chat written under 1.16.0, whose later
+// per-field ops need the object), text otherwise (a first read, a new reply). So a Re-read of an old reply stores the same ops.
+export const asStored = (ctx, key, field, value) => (isObject(ctx?.standing?.domains?.npc?.npcs?.[key]?.[field]) ? value : leafText(value));
 export const moodStands = (ctx, key) => !ctx.standing || isObject(readLeaf(ctx.standing.domains?.npc?.npcs?.[key]?.mood));
 
 export const sentence = parts => parts.filter(Boolean).map(part => (/[.!?]$/.test(part) ? part : `${part}.`)).join(' ');
