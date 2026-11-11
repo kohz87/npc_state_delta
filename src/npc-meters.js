@@ -66,15 +66,16 @@ import {
     socialSettings,
     socialSkill,
 } from './social-check.js';
-import { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, CUSTOM_RANGE, MAX_NPCS, MAX_STAGES_PER_METER, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, MILESTONE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURES, FEATURE_DEFAULTS, NAME_MAX, DISPOSITION_MAX, TRACK_MAX, REASON_LABELS, IMPACT_TIERS, tierOf, isObject, isInt, isReplyId, replyKey, sameReply, clamp, clean, own, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, intOr, bandWord, needMet, rung, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
+import { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, CUSTOM_RANGE, MAX_NPCS, MAX_STAGES_PER_METER, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, MILESTONE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_MOOD_PULL, FEATURES, FEATURE_DEFAULTS, NAME_MAX, DISPOSITION_MAX, TRACK_MAX, REASON_LABELS, IMPACT_TIERS, tierOf, isObject, isInt, isReplyId, replyKey, sameReply, clamp, clean, own, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, intOr, bandWord, needMet, rung, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
 import { initialNpcSlice, observeKeyAway, CAST_QUERY, observeCast, validateNpcSlice, findNpcKey, meterValue, moveMeters, rungMet, conflictOn, settle, sentence, result } from './npc-meters-slice.js';
+import { applyEvents, eventsFromMoves } from '../npc-mood.js';
 import { SETTINGS_DEFAULTS, SETTINGS_SCHEMA } from './npc-meters-schema.js';
 import { createNpcCommands } from './npc-meters-commands.js';
 import { createNpcQueries } from './npc-meters-queries.js';
 import { createNpcPrompt } from './npc-meters-prompt.js';
 import { normalizeAllowance, pacedTier, spendFlatEvent } from './relationship-pacing.js';
 import { askedOf, cutToTier, nextEvent, pacingNote } from './npc-meters-pacing.js';
-export { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, BUILT_IN_RANGE, CUSTOM_RANGE, MAX_CUSTOM_METERS, MAX_NPCS, MAX_METERS_PER_NPC, MAX_STAGES_PER_METER, MAX_SECRETS, MAX_GENERATED_SECRETS, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, MAX_TRACKS, MAX_BANDS, MAX_NEEDS, DEFAULT_CHANGE_CAP, MAX_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, SECRET_WHEN_MAX, NOTE_SOURCES, MILESTONE_MAX, DESCRIBE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURES, replyKey, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, parseBands, bandWord, parseNeeds, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
+export { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, BUILT_IN_RANGE, CUSTOM_RANGE, MAX_CUSTOM_METERS, MAX_NPCS, MAX_METERS_PER_NPC, MAX_STAGES_PER_METER, MAX_SECRETS, MAX_GENERATED_SECRETS, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, MAX_TRACKS, MAX_BANDS, MAX_NEEDS, DEFAULT_CHANGE_CAP, MAX_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, SECRET_WHEN_MAX, NOTE_SOURCES, MILESTONE_MAX, DESCRIBE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_MOOD_PULL, FEATURES, replyKey, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, parseBands, bandWord, parseNeeds, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
 export { normalizeSecrets, secretId, normalizeGeneratedSecrets, secretsToLines, secretsFromLines, limitsToLines, limitsFromLines } from './npc-meters-secrets.js';
 export { initialNpcSlice, observeKeyAway, CAST_QUERY, CAST_MADE_MAX, observeCast, validateNpcSlice, findNpcKey, meterValue, rungMet } from './npc-meters-slice.js';
 export { SETTINGS_DEFAULTS, SETTINGS_SCHEMA } from './npc-meters-schema.js';
@@ -130,6 +131,10 @@ export function createNpcPart(hooks = {}) {
         if (call(hooks.calendarOwn, false) === true) return null;
         const minutes = call(hooks.startTime, null, at);
         return isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
+    };
+    // The story day by the host's clock now (a scan's change names no reply); null without a clock.
+    const timeDay = ctx => {
+        try { const minutes = ctx.time(); return isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null; } catch { return null; }
     };
     const rulesFor = (name, aliases = []) => {
         const value = call(hooks.secretRules, [], name, aliases);
@@ -315,7 +320,7 @@ export function createNpcPart(hooks = {}) {
     }
 
     // `milestone`: { add: [{ key, name }], remove: [key] } (the reader's or a story line's).
-    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false, scanTier = null }) {
+    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false, scanTier = null, reason = '' }) {
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         if (!changes.length && disposition === undefined && !allowEmpty) {
@@ -346,6 +351,12 @@ export function createNpcPart(hooks = {}) {
         else if (impact) stepped = tiered(record, mine, defs, { ...impact, tier: spent?.used ?? impact.tier });
         else if (spent?.used && spent.used !== asked) stepped = cutToTier(mine, spent.used, normalizeRelationshipCaps(tierCaps() ?? {}), id => meterValue(record, defs.find(def => def.id === id)));
         const moved = moveMeters(record, stepped, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup), story });
+        // Mood (npc-mood.js; feature mood-pull): the trust this line moved, as code reads it, is a trust drop or a betrayal.
+        if (limit && moved.length && featureOn(FEATURE_MOOD_PULL, ctx)) {
+            const day = clockDay(at) ?? timeDay(ctx);
+            const events = day === null ? [] : eventsFromMoves(moved.map(item => ({ meter: item.meter, change: item.after - item.before })), { reason, impact: spent?.used ?? asked });
+            if (events.length) record.mood = applyEvents(record.mood, day, events);
+        }
         // This event's outcome, written whole on the record (display only; the card's tier, held and asked).
         if (spent && replyKey(reply, reply) !== null) {
             const text = nextEvent(record.lastEvent, { reply: replyKey(reply, reply), date: clockDay(at) === null ? '' : call(hooks.startDate, '', at), src: impact ? 'story' : 'scan', ask: askedNow, tier: spent.used ?? asked, held: !spent.used, note: pace });
@@ -419,7 +430,8 @@ export function createNpcPart(hooks = {}) {
         tickWanted: () => {
             const settings = storedSettings();
             return (featureOn(FEATURE_STAGES) && Object.keys(settings.ladder).length > 0)
-                || (featureOn(FEATURE_DRIFT) && settings.custom.some(def => def.drift));
+                || (featureOn(FEATURE_DRIFT) && settings.custom.some(def => def.drift))
+                || featureOn(FEATURE_MOOD_PULL);
         },
         ladder: record => (isObject(record) ? ladderView(record, storedSettings(), defsFrom(storedSettings())) : null),
         notes: record => (isObject(record) ? notesView(record, defsFrom(storedSettings())) : { locked: [], opened: [] }),

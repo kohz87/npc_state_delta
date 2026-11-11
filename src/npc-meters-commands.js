@@ -3,12 +3,14 @@
 import { storyMinuteText } from '../calendar.js';
 import { isAway, labelKey, labelsOf, normalizeKeyPeople } from './key-people.js';
 import { normalizeCast } from './cast-dossier.js';
-import { NPC_DOMAIN, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
+import { NPC_DOMAIN, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_MOOD_PULL, KEY_PEOPLE_QUERY, isObject, isInt, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
+import { stepPull } from '../npc-instincts.js';
+import { applyEvents } from '../npc-mood.js';
 import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence } from './npc-meters-slice.js';
 
 export function createNpcCommands({
     featureOn, normalized, defsFrom, tierCaps, ownOrModule, readerAction, headReply, commandReply,
-    identify, ensure, note, changesFrom, setupFor, limitsFor, resolve, settleRecord, run,
+    identify, ensure, note, changesFrom, setupFor, limitsFor, resolve, settleRecord, run, presentNames,
 }) {
     // ---- the change lines ----
 
@@ -30,9 +32,10 @@ export function createNpcCommands({
         const changes = [];
         let disposition;
         let tier = 'ordinary';
+        let reason = '';
         for (const [label, raw] of Object.entries(isObject(line.labels) ? line.labels : {})) {
             const key = slug(label);
-            if (REASON_LABELS.has(key)) continue;
+            if (REASON_LABELS.has(key)) { reason ||= clean(raw, 80); continue; }
             if (key === 'impact' && !byLabel.has(key)) { tier = tierOf(raw); continue; }
             if (key === 'stage' || key === 'stages') { problems.push(`Stages are set by code from the meters; "stage: ${clean(raw, 60)}" was not used.`); continue; }
             if (key === 'disposition') { disposition = clean(raw, DISPOSITION_MAX); continue; }
@@ -46,7 +49,7 @@ export function createNpcCommands({
         // index an older one had is its own reply, with its own cap.
         const at = isInt(ctx.carrier?.index) ? ctx.carrier.index : null;
         const reply = replyKey(ctx.carrier?.sid, at);
-        return run(ctx, { label: line.name, changes, problems, limit: true, reply, at, disposition, allowEmpty: line.op === '+', impact: tierCaps() ? { tier, caps: tierCaps() } : null, story: true });
+        return run(ctx, { label: line.name, changes, problems, limit: true, reply, at, disposition, allowEmpty: line.op === '+', impact: tierCaps() ? { tier, caps: tierCaps() } : null, story: true, reason });
     }
 
     // ---- commands (cause ui from Delta itself; capture is the story's) ----
@@ -54,6 +57,43 @@ export function createNpcCommands({
     const milestoneList = value => (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value])
         .map(item => clean(isObject(item) ? item.name ?? item.key : item, MILESTONE_MAX)).filter(Boolean)
         .map(name => ({ key: wordKey(name), name })).filter(item => item.key);
+
+    // What the tick reads once for mood and pull (feature mood-pull): who is in the party (party.actors), the place (scene.place),
+    // the open threads and who they name (director.threads), who is present. A query that fails or is missing is "no signal" (null, '', []).
+    function readWorld(ctx) {
+        const ask = (name, args) => { try { return ctx.query(name, args); } catch { return null; } };
+        const actors = ask('party.actors', {});
+        const place = ask('scene.place', {});
+        const rows = ask('director.threads', { open: true });
+        const scene = ask('scene.present', {});
+        const names = value => String(value ?? '').split(',').map(labelKey).filter(Boolean);
+        return {
+            party: Array.isArray(actors) ? new Set(actors.map(actor => labelKey(actor?.name)).filter(Boolean)) : null,
+            here: typeof place?.name === 'string' ? clean(place.name, 60) : '',
+            // Present by the reply's own scene (reply-pinned like every other read here), else the host's present list (the dossiers' own flags).
+            present: new Set((Array.isArray(scene) && scene.length ? scene : presentNames()).map(name => labelKey(typeof name === 'string' ? name : name?.name)).filter(Boolean)),
+            threads: (Array.isArray(rows) ? rows : []).filter(row => typeof row?.id === 'string' && row.status === 'active').map(row => ({
+                id: row.id, title: clean(row.key, 60), names: [labelKey(row.key), ...names(row.fields?.giver), ...names(row.fields?.people)].filter(Boolean),
+            })),
+        };
+    }
+
+    // One record's mood decay and pull for this tick (feature mood-pull). `rawPeople`: Story Director's key people as answered.
+    function moodPullStep(record, day, world, rawPeople) {
+        const labels = new Set([record.name, ...(resolve(record.name)?.aliases ?? [])].map(labelKey).filter(Boolean));
+        const has = list => list.some(label => labels.has(label));
+        const gone = (Array.isArray(rawPeople) ? rawPeople : []).find(person => isObject(person?.away) && !person.removed && has([person.name, ...(Array.isArray(person.aliases) ? person.aliases : [])].map(labelKey)));
+        const out = stepPull(record.track, {
+            day, party: world.party ? has([...world.party]) : null, here: world.here, present: has([...world.present]),
+            awayDay: isInt(gone?.away?.since) ? Math.floor(gone.away.since / DAY_MINUTES) : null,
+            threads: world.threads.filter(thread => has(thread.names)),
+        });
+        if (isObject(record.mood)) record.mood = applyEvents(record.mood, day, []);
+        const set = (field, value, empty) => { if (empty) delete record[field]; else record[field] = value; };
+        set('track', out.track, !Object.keys(out.track).length);
+        set('inst', out.inst, !Object.values(out.inst).some(Boolean));
+        set('pull', out.pull, !out.pull);
+    }
 
     const commands = {
         /**
@@ -137,18 +177,21 @@ export function createNpcCommands({
             const settings = normalized(ctx.settings(), ctx);
             const defs = defsFrom(settings);
             const drifting = featureOn(FEATURE_DRIFT, ctx) ? defs.filter(def => def.drift) : [];
+            const moodPull = featureOn(FEATURE_MOOD_PULL, ctx);
             let minutes = null;
-            if (drifting.length && typeof ctx.time === 'function') {
+            if ((drifting.length || moodPull) && typeof ctx.time === 'function') {
                 try { minutes = ctx.time(); } catch { minutes = null; }
             }
             const day = isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
             // Key people (Story Director's `director.keyPeople`, read only): while one is away their meters stay as
             // the reader set them, so no drift and no count toward losing a stage. Without that query: nobody.
             let people = null;
+            let rawPeople = null;
             try {
                 let calendar = null;
                 try { calendar = ctx.query('director.calendar', {}); } catch { calendar = null; }
-                people = normalizeKeyPeople(ctx.query(KEY_PEOPLE_QUERY, {}), minutes => storyMinuteText(minutes, calendar));
+                rawPeople = ctx.query(KEY_PEOPLE_QUERY, {});
+                people = normalizeKeyPeople(rawPeople, minutes => storyMinuteText(minutes, calendar));
             } catch { people = null; }
             const awayKeys = new Set();
             for (const entry of people ?? []) if (isAway(entry)) for (const label of labelsOf(entry)) awayKeys.add(label);
@@ -179,6 +222,7 @@ export function createNpcCommands({
                 note(slice, ctx.rev, unknown);
             }
             if (castSeen.fresh.length) slice.cast = castSeen.cast;
+            const world = moodPull && day !== null ? readWorld(ctx) : null;
             const texts = [];
             const data = [];
             let narrate = false;
@@ -210,6 +254,7 @@ export function createNpcCommands({
                         drift.push({ meter: def.id, before: value, after: next });
                     }
                 }
+                if (world) moodPullStep(record, day, world, rawPeople);
                 const settled = settleRecord(record, [record.name], settings, defs, featureOn(FEATURE_STAGES, ctx) && !away);
                 if (JSON.stringify(record) === was) continue;
                 changed = true;

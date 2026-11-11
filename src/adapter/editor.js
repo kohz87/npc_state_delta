@@ -240,6 +240,9 @@ export function createEditorPart(session, deps) {
                 bars: (entry?.bars ?? []).map(bar => ({ ...bar, builtIn: builtIn.has(bar.id) })),
                 rank: entry?.rank ?? '',
                 next: entry?.next ?? '',
+                // Mood and pull (feature mood-pull): only a person who has them (npc.cast's `mood` and `pull`).
+                ...(entry?.mood ? { mood: entry.mood } : {}),
+                ...(entry?.pull ? { pull: entry.pull } : {}),
                 milestones: Object.values(slice?.milestones ?? {}),
                 secrets,
             };

@@ -1,7 +1,8 @@
 // The NPC meter prompt line, tail and redaction. A pure part of npc-meters.js (same owner, moved without change);
 // npc-meters.js re-exports every public name it exported before. Never imports npc-meters.js.
-import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_PRESETS, RECENT_MESSAGES, SECRET_TEXT_MAX, TAIL_SECRETS_PER_NPC, isInt, clean, bandWord } from './npc-meters-config.js';
+import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_PRESETS, FEATURE_MOOD_PULL, RECENT_MESSAGES, SECRET_TEXT_MAX, TAIL_SECRETS_PER_NPC, isInt, clean, bandWord } from './npc-meters-config.js';
 import { meterValue } from './npc-meters-slice.js';
+import { moodWord, normalizeMood } from '../npc-mood.js';
 
 export function createNpcPrompt({
     call, hooks, storedSettings, tierCaps, tierAllowance, featureOn, defsFrom, setupFor, rungsFor, rulesFor,
@@ -44,6 +45,31 @@ export function createNpcPrompt({
     // (lean) The wording is said once, on the nearest locked note, and each note then reads "Name (hidden): text".
     const HIDDEN_ONCE = 'Lines marked (hidden) are secrets: never state or reveal them; let them shape how that person acts.';
     const HIDDEN_LINE = new RegExp(`^(.+?)(?:, ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}| \\(hidden\\)): .*$`, 'gm');
+
+    // Mood and pull for present people (feature mood-pull): "Mood: Mira alarmed, cornered; Tomas wary." and
+    // "Pull: Mira wants closure (the stolen letter, 3 days)". At most PULL_PEOPLE people each; sent as optional lines so the
+    // host's budget drops them first. A mood of all zeros says nothing.
+    const PULL_PEOPLE = 3;
+    const PULL_WORDS = { belonging: 'belonging', closure: 'closure', awe: 'awe' };
+    function moodPullLines(npcs, here) {
+        const moods = [];
+        const pulls = [];
+        for (const key of Object.keys(npcs).sort()) {
+            if (!here.has(key)) continue;
+            const record = npcs[key];
+            const mood = normalizeMood(record.mood);
+            if (mood && (mood.v || mood.a || mood.d) && moods.length < PULL_PEOPLE) {
+                const control = mood.d <= -2 ? ', cornered' : mood.d >= 2 ? ', in control' : '';
+                moods.push(`${record.name} ${moodWord(mood).toLowerCase()}${control}`);
+            }
+            const pull = record.pull;
+            if (pull && PULL_WORDS[pull.kind] && pulls.length < PULL_PEOPLE) {
+                const days = isInt(record.day) && isInt(pull.since) ? Math.max(0, record.day - pull.since) : 0;
+                pulls.push(`${record.name}: ${PULL_WORDS[pull.kind]} (${clean(pull.cause, 60)}${days > 0 ? `, ${days} ${days === 1 ? 'day' : 'days'}` : ''})`);
+            }
+        }
+        return [...(moods.length ? [`Mood: ${moods.join('; ')}.`] : []), ...(pulls.length ? [`Pull: ${pulls.join('; ')}.`] : [])];
+    }
 
     /**
      * Present NPCs' meters when they moved lately (band words where a meter has them), and their notes: an
@@ -97,6 +123,7 @@ export function createNpcPrompt({
         hidden.sort((a, b) => a.distance - b.distance || a.order - b.order);
         // The wording rides on the nearest note (the host drops the farthest first, so it stays while any note does).
         const optional = hidden.map((item, i) => (i ? item.short : `${HIDDEN_ONCE}\n${item.short}`));
+        if (featureOn(FEATURE_MOOD_PULL)) optional.push(...moodPullLines(npcs, here));
         return { lines: [...lines, ...notes], optional };
     }
 

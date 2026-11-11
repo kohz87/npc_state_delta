@@ -8,6 +8,9 @@ import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
 import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent, spendFlatEvent } from '../src/relationship-pacing.js';
 import { cutToTier, pacingNote } from '../src/npc-meters-pacing.js';
+import { createNpcPart, FEATURE_MOOD_PULL, CONTEXT_BUDGET } from '../src/npc-meters.js';
+import { applyEvents, eventsFromMoves, moodBars, moodWord } from '../npc-mood.js';
+import { stepPull } from '../npc-instincts.js';
 import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-suite.js';
 
 // Relationship pacing: points per event 1 / 2 / 3 / 6 and events per story day for each person
@@ -370,7 +373,14 @@ for (const seed of [3, 11, 29]) {
             const index = await s.say(lines);
             if (r.chance(0.2)) await s.swipe(lines);
             if (step > 3 && r.chance(0.35)) {
-                const replies = s.host.ctx.chat.map((message, at) => (!message.is_user && at > setup && at < s.host.store.headIndex() ? at : -1)).filter(at => at >= 0);
+                assert.equal((await s.host.sdk.reread(s.host.store.headIndex())).ok, true);
+    let again = JSON.stringify(s.host.head());
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head()), again, 'after a Re-read: replay equals live');
+    await s.host.st.loadChat(s.host.ctx.chat);
+    await s.adapter.ticked();
+    assert.equal(JSON.stringify(s.host.head()), again, 'a cold reload equals live');
+    const replies = s.host.ctx.chat.map((message, at) => (!message.is_user && at > setup && at < s.host.store.headIndex() ? at : -1)).filter(at => at >= 0);
                 if (replies.length) {
                     const gone = r.pick(replies);
                     await s.host.st.deleteMessage(gone);
@@ -391,3 +401,193 @@ for (const seed of [3, 11, 29]) {
         }
     });
 }
+
+// ---- mood and pull (feature npc-state-delta.mood-pull; npc-mood.js, npc-instincts.js) ----
+
+const MOOD_ON = { 'npc-state-delta.mood-pull': true };
+// A stand-in for Story Director's threads and key people and Story Block's party: one domain, queries read it as of the reply.
+const worldModule = {
+    id: 'zz-world', name: 'World',
+    // One text leaf (the host checks every field called `id`): { party, threads, away } as JSON.
+    domains: { world: { initial: () => ({ data: '{}' }) } },
+    commands: { 'zz.world': (ctx, patch) => { const slice = ctx.draft('world'); slice.data = JSON.stringify({ ...JSON.parse(slice.data), ...patch }); return { summary: 'the world moves' }; } },
+    queries: {
+        'party.actors': state => JSON.parse(state?.domains?.world?.data ?? '{}').party ?? null,
+        'director.threads': state => JSON.parse(state?.domains?.world?.data ?? '{}').threads ?? [],
+        'director.keyPeople': state => JSON.parse(state?.domains?.world?.data ?? '{}').away ?? [],
+    },
+};
+const moodSuite = (extra = {}) => suite({ allowance: null, features: MOOD_ON, modules: [worldModule], ...extra });
+const world = async (s, patch) => { const out = await s.host.sdk.command('zz.world', patch); assert.equal(out.ok, true, JSON.stringify(out)); };
+const recordOf = (s, key = 'oren') => s.host.head().domains.npc.npcs[key];
+const tailOf = s => JSON.stringify(s.host.sdk.context ? s.host.sdk.context() : null);
+
+test('mood: a trust drop and a betrayal move the axes by the rules and keep the reason as the cause; a rise does nothing', async () => {
+    const s = await moodSuite();
+    await s.setDay(2);
+    await s.say(['~ npc Oren | trust: +3']);
+    assert.equal(recordOf(s).mood, undefined, 'a rise moves no mood');
+    await s.say(['~ npc Oren | trust: -2 | impact: meaningful | reason: Astra lied']);
+    assert.deepEqual(recordOf(s).mood, { v: -1, a: 1, d: -1, day: 2, cause: 'trust dropped: Astra lied' });
+    await s.say(['~ npc Oren | trust: -3 | impact: major | why: the vault']);
+    assert.deepEqual(recordOf(s).mood, { v: -3, a: 3, d: -2, day: 2, cause: 'betrayed: the vault' });
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    const row = (await s.host.sdk.query('npc.cast', {})).find(item => item.key === 'oren');
+    assert.equal(row.mood.word, 'Alarmed');
+    assert.deepEqual(row.mood.bars, { energy: 6, control: 1, max: 6 });
+    assert.equal(row.mood.cause, 'betrayed: the vault');
+    const shown = s.adapter.dossierMeters([{ id: 'npc_oren', name: 'Oren' }]);
+    assert.equal(shown.npc_oren.mood.word, 'Alarmed', 'the dossier view model carries the mood');
+});
+
+test('mood decays one step per story day toward 0 in the tick, and the dossier row carries it', async () => {
+    const s = await moodSuite();
+    await s.setDay(2);
+    await s.say(['~ npc Oren | trust: -3 | impact: major']);
+    assert.deepEqual([recordOf(s).mood.v, recordOf(s).mood.a, recordOf(s).mood.d], [-2, 2, -1]);
+    await s.setDay(3);
+    await s.say([]);
+    assert.deepEqual([recordOf(s).mood.v, recordOf(s).mood.a, recordOf(s).mood.d, recordOf(s).mood.day], [-1, 1, 0, 3]);
+    await s.setDay(6);
+    await s.say([]);
+    assert.deepEqual([recordOf(s).mood.v, recordOf(s).mood.a, recordOf(s).mood.d], [0, 0, 0]);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('pull: closure from an open thread that names them, after the days it waited; belonging when benched', async () => {
+    const s = await moodSuite();
+    await s.setDay(1);
+    await world(s, { party: [{ id: 'a', name: 'Oren' }], threads: [{ id: 'th_aaaaaaaa', key: 'The stolen letter', status: 'active', fields: { people: 'Oren, Astra' } }] });
+    await s.say(['~ npc Oren | trust: +1']);
+    assert.equal(recordOf(s).pull, undefined, 'a thread seen today has waited no days');
+    await s.setDay(4);
+    await s.say([]);
+    assert.deepEqual(recordOf(s).pull, { kind: 'closure', cause: 'The stolen letter', since: 1 });
+    assert.deepEqual(recordOf(s).inst, { belo: 0, clos: 1, awe: 0 });
+    const pulled = s.adapter.dossierMeters([{ id: 'npc_oren', name: 'Oren' }]).npc_oren.pull;
+    assert.deepEqual([pulled.kind, pulled.level, pulled.days], ['closure', 1, 3], 'the dossier view model carries the pull, its level and days');
+    await s.setDay(5);
+    await world(s, { party: [{ id: 'it_aaaaaaaa', name: 'Astra' }] });
+    await s.say([]);
+    assert.deepEqual(recordOf(s).pull, { kind: 'belonging', cause: 'benched from the party', since: 5 });
+    assert.equal(recordOf(s).inst.belo, 3);
+    await world(s, { party: [{ id: 'a', name: 'Oren' }], threads: [] });
+    await s.say([]);
+    assert.equal(recordOf(s).pull?.cause === 'benched from the party', false, 'back in the party: no longer benched');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('pull: awe at the first arrival at a place they were not at before (the first place seen is only remembered)', async () => {
+    const s = await moodSuite();
+    await s.setDay(1);
+    await s.say(['~ place Market | street | Dunmere', '~ npc Oren | trust: +1']);
+    assert.equal(recordOf(s).pull, undefined, 'the first place is the baseline, not an arrival');
+    await s.say(['~ place Harbor | docks | Dunmere']);
+    assert.deepEqual(recordOf(s).pull, { kind: 'awe', cause: 'first time at Harbor', since: 1 });
+    assert.deepEqual(recordOf(s).track.places, ['Market', 'Harbor']);
+    await s.say(['~ place Market | street | Dunmere']);
+    assert.equal(recordOf(s).pull, undefined, 'a place they have seen is no awe');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('pull: a person away (key people) feels left behind; a failing or missing query is no signal', async () => {
+    const s = await moodSuite();
+    await s.setDay(3);
+    await world(s, { away: [{ name: 'Oren', aliases: [], here: false, away: { doing: 'abroad', since: 2 * DAY, back: null, steps: [] } }] });
+    await s.say(['~ npc Oren | trust: +1']);
+    assert.deepEqual(recordOf(s).pull, { kind: 'belonging', cause: 'left behind while the group moved on', since: 2 });
+    // A query that throws is no signal too: the tick still runs and the record is clean.
+    const broken = await suite({ allowance: null, features: MOOD_ON, modules: [{ id: 'zz-broken', name: 'Broken', queries: { 'party.actors': () => { throw new Error('down'); }, 'director.threads': () => { throw new Error('down'); }, 'director.keyPeople': () => { throw new Error('down'); } } }] });
+    await broken.setDay(3);
+    await broken.say(['~ npc Oren | trust: -3 | impact: major']);
+    await broken.setDay(6);
+    await broken.say([]);
+    assert.equal(recordOf(broken).pull, undefined);
+    assert.equal(recordOf(broken).mood.day, 6, 'the tick ran (the mood eased to day 6)');
+    assert.deepEqual(validateNpcSlice(broken.host.head().domains.npc), []);
+    const bare = await suite({ allowance: null, features: MOOD_ON });
+    await bare.setDay(3);
+    await bare.say(['~ npc Oren | trust: -3 | impact: major']);
+    assert.equal(recordOf(bare).pull, undefined, 'no party, threads or key people: no pull');
+    assert.deepEqual(validateNpcSlice(bare.host.head().domains.npc), []);
+});
+
+test('the tail tells mood and pull for present people only; feature off: the tail and the static line are byte-identical to before', () => {
+    const record = (name, extra) => ({ name, meters: { trust: 5, affection: 0, desire: 0, tension: 0 }, stages: {}, unlocked: [], turn: { reply: 2, from: {} }, day: 5, ...extra });
+    const state = { domains: { npc: { problems: [], npcs: {
+        mira: record('Mira', { mood: { v: -2, a: 2, d: -2, day: 5, cause: 'betrayed: Astra lied' }, pull: { kind: 'closure', cause: 'the stolen letter', since: 2 }, inst: { belo: 0, clos: 2, awe: 0 } }),
+        oren: record('Oren', { mood: { v: 2, a: 0, d: 0, day: 5, cause: '' } }),
+        tomas: record('Tomas', { mood: { v: -3, a: 3, d: 0, day: 5, cause: 'x' }, pull: { kind: 'awe', cause: 'first time at the harbor', since: 5 } }),
+    } } } };
+    const make = on => createNpcPart({ settings: () => ({}), present: () => ['Mira', 'Oren'], feature: id => (id === FEATURE_MOOD_PULL ? on : undefined) });
+    const view = { state, chat: { length: 3 } };
+    const off = make(false);
+    const base = off.context.tail(view);
+    assert.deepEqual(base.optional, [], 'off: no mood or pull line at all');
+    assert.equal(JSON.stringify(base), JSON.stringify(createNpcPart({ settings: () => ({}), present: () => ['Mira', 'Oren'] }).context.tail(view)), 'off equals a part that never heard of the feature');
+    const on = make(true);
+    assert.equal(on.context.static(), off.context.static(), 'the static prompt never changes');
+    const told = on.context.tail(view);
+    assert.deepEqual(told.lines, base.lines, 'the meter lines are untouched');
+    assert.deepEqual(told.optional, ['Mood: Mira alarmed, cornered; Oren content.', 'Pull: Mira: closure (the stolen letter, 3 days).'], 'present people only: Tomas is not here');
+    const tokens = text => Math.ceil(text.length / 4);
+    assert.ok(tokens(told.optional.join('\n')) <= 30, `the two lines stay small (${tokens(told.optional.join('\n'))} tokens, budget ${CONTEXT_BUDGET})`);
+    assert.ok(told.optional.every(line => !/[<>]/.test(line)));
+});
+
+test('mood and pull: replay equals rebuild through swipes, a Re-read, a middle delete and a cold reload; the slice validates; a feature-off chat gets no new field', async t => {
+    t.mock.method(console, 'warn', () => {});
+    const s = await moodSuite();
+    await s.setDay(1);
+    await world(s, { party: [{ id: 'a', name: 'Oren' }], threads: [{ id: 'th_cccccccc', key: 'Old debt', status: 'active', fields: { people: 'Oren' } }] });
+    await s.say(['~ npc Oren | trust: +1', '~ npc Sister Temiwa | trust: +1']);
+    const setup = s.host.store.headIndex();
+    for (const [day, line] of [[2, '~ npc Oren | trust: -2 | impact: meaningful | reason: a broken oath'], [4, '~ npc Sister Temiwa | trust: -6 | impact: extreme'], [6, '~ npc Oren | trust: +4']]) {
+        await s.setDay(day);
+        await s.say([line]);
+        await s.swipe([line]);
+        assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+        const head = JSON.stringify(s.host.head());
+        s.host.store.rebuild();
+        assert.equal(JSON.stringify(s.host.head()), head, `day ${day}: replay equals rebuild`);
+    }
+    const replies = s.host.ctx.chat.map((message, at) => (!message.is_user && at > setup && at < s.host.store.headIndex() ? at : -1)).filter(at => at >= 0);
+    await s.host.st.deleteMessage(replies[0]);
+    await s.host.st.deleteMessage(replies[0] - 1);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    const head = JSON.stringify(s.host.head());
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head()), head, 'after the middle delete: replay equals rebuild');
+    const off = await suite({ allowance: null, modules: [worldModule] });
+    await off.setDay(2);
+    await world(off, { threads: [{ id: 'th_dddddddd', key: 'Old debt', status: 'active', fields: { people: 'Oren' } }] });
+    await off.say(['~ npc Oren | trust: -3 | impact: major']);
+    await off.setDay(6);
+    await off.say([]);
+    assert.deepEqual(Object.keys(recordOf(off)).filter(key => ['mood', 'inst', 'pull', 'track'].includes(key)), [], 'feature off: no mood, pull or memory on a record');
+});
+
+test('validator: a malformed mood, instinct, pull or memory is refused; every old record shape stays valid', () => {
+    const base = { name: 'Mira', meters: { trust: 0, affection: 0, desire: 0, tension: 0 }, stages: {}, unlocked: [] };
+    const check = extra => validateNpcSlice({ npcs: { mira: { ...base, ...extra } }, problems: [] });
+    assert.deepEqual(check({}), []);
+    assert.deepEqual(check({ mood: { v: 1, a: -3, d: 0, day: 4, cause: 'rested' }, inst: { belo: 1, clos: 0, awe: 3 }, pull: { kind: 'closure', cause: 'a letter', since: 2 }, track: { party: 1, join: 3, threads: { th_aaaaaaaa: 2 }, places: ['Harbor'] } }), []);
+    for (const bad of [{ mood: { v: 9, a: 0, d: 0, day: 0, cause: '' } }, { mood: { v: 1, a: 0, d: 0 } }, { mood: 'sad' }, { inst: { belo: 4 } }, { inst: { fear: 1 } }, { pull: { kind: 'fear', cause: 'x', since: 1 } },
+        { pull: { kind: 'awe', cause: 'x', since: -1 } }, { pull: { kind: 'awe', cause: 'x', since: 1, extra: 1 } }, { track: { party: 2 } }, { track: { places: new Array(7).fill('p') } }, { track: { other: 1 } }]) {
+        assert.notDeepEqual(check(bad), [], JSON.stringify(bad));
+    }
+});
+
+test('mood and pull cores: the 3x3 word table, the bars, decay that never passes 0, bad input is no signal', () => {
+    assert.deepEqual([moodWord({ v: -3, a: 3, d: 0, day: 0, cause: '' }), moodWord({ v: 0, a: 0, d: 0, day: 0, cause: '' }), moodWord({ v: 3, a: -3, d: 0, day: 0, cause: '' })], ['Alarmed', 'Steady', 'Calm']);
+    assert.deepEqual(moodBars({ v: 0, a: 3, d: -3, day: 0, cause: '' }), { energy: 6, control: 0, max: 6 });
+    assert.deepEqual(applyEvents({ v: -1, a: 1, d: 0, day: 2, cause: 'x' }, 9, []), { v: 0, a: 0, d: 0, day: 9, cause: 'x' });
+    assert.deepEqual(applyEvents(null, 1, [{ kind: 'nonsense' }]), { v: 0, a: 0, d: 0, day: 1, cause: '' });
+    assert.deepEqual(eventsFromMoves([{ meter: 'trust', change: -1 }]), [], 'one point is no drop');
+    assert.equal(eventsFromMoves([{ meter: 'trust', change: -3 }], { impact: 'major' })[0].kind, 'betrayal');
+    assert.equal(eventsFromMoves([{ meter: 'trust', change: -3 }], { impact: 'meaningful' })[0].kind, 'trust-drop');
+    assert.deepEqual(stepPull({}, { day: null, threads: [{ id: 'x', title: 't' }] }).pull, null, 'no story day: no signal');
+    assert.deepEqual(stepPull(undefined, { day: 3, party: null, here: '', present: true, threads: [] }), { track: {}, inst: { belo: 0, clos: 0, awe: 0 }, pull: null });
+    const joined = stepPull({ party: 0 }, { day: 4, party: true, threads: [] });
+    assert.deepEqual(joined.pull, { kind: 'belonging', cause: 'new to the party', since: 4 });
+});
