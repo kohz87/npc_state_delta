@@ -17,6 +17,20 @@ ${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"], ${PANEL}:not([data-ski
   --dsk-tile-bg: var(--dsk-tile);
   --dsk-tile-shadow: none; --dsk-tile-radius: 12px; --dsk-face-radius: 50%; --dsk-glow: none;
 }
+/* Neutral on a LIGHT theme: the pastel tones above are made for a dark panel (about 1.5:1 on white). Where relative colours exist, each tone
+   keeps its own hue and chroma and takes its lightness from the panel floor (1.2 - floor lightness, never lighter than the pastel, never darker
+   than .46): a dark floor gives the pastel back, a light one a readable (>= 4.5:1) tone. Fantasy and Modern are dark looks and keep theirs. */
+@supports (color: oklch(from white l c h)) {
+${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"], ${PANEL}:not([data-skin]) .delta-panel.ss-cards, ${PANEL}[data-skin="neutral"] .delta-panel.ss-cards {
+  --good: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .78) .073 143);
+  --bad: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .713) .098 25);
+  --held: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .785) .097 86);
+  --dsk-ten: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .753) .09 61);
+  --aff: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .751) .078 2);
+  --des: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .748) .066 305);
+  --trust: oklch(from var(--delta-floor) clamp(.46, calc(1.2 - l), .756) .067 248);
+}
+}
 ${PANEL}, ${PANEL} .delta-panel.ss-cards { --face-flat: color-mix(in srgb, var(--delta-text) 16%, var(--delta-floor)); }
 ${PANEL}[data-skin="fantasy"], ${PANEL}[data-skin="fantasy"] .delta-panel.ss-cards {
   --delta-bg: #18130d; --delta-floor: #18130d; --delta-text: #efe5cf; --delta-muted: #b3a37f; --delta-warn: #e0bf63;

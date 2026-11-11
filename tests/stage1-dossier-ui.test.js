@@ -587,3 +587,16 @@ test('round 3 fix 2-6: no tier line under a change row, a muted secrets intro, L
   assert.match(css, /--delta-muted: color-mix\(in srgb, var\(--delta-text\) 62%, transparent\);/);
   assert.match(fs.readFileSync(new URL("../dossier-ui-styles-board.js", import.meta.url), "utf8"), /\.delta-tile-dots::before \{ content:""; position:absolute/);
 });
+
+test("light themes: the neutral tones take their lightness from the panel floor and nothing keeps a fixed pale tone (12 Nov)", async () => {
+  const board = await import("../dossier-ui-styles-board.js");
+  const css = board.BOARD_STYLES;
+  assert.match(css, /@supports \(color: oklch\(from white l c h\)\) \{[\s\S]*--good: oklch\(from var\(--delta-floor\) clamp\(\.46, calc\(1\.2 - l\), \.78\) \.073 143\);/);
+  for (const tone of ["bad", "held", "dsk-ten", "aff", "des", "trust"]) assert.match(css, new RegExp(`--${tone}: oklch\\(from var\\(--delta-floor\\)`), tone);
+  const dial = dialSvg({ trust: 11, affection: 11, desire: 6, tension: 13 });
+  assert.doesNotMatch(dial, /(?:fill|stroke)="#(?:8fb4d9|d99aaa|b7a3cf|d9a273)"/, "the dial's arcs and labels follow the tone variables");
+  assert.match(dial, /fill="var\(--trust, #8fb4d9\)"/);
+  const styles = await import("../dossier-ui-styles.js");
+  assert.match(styles.STYLES, /--delta-good: var\(--ss-good, #9ed5b6\);[\s\S]*--delta-danger: var\(--ss-bad-text, #efaaaa\);/);
+  assert.doesNotMatch(styles.STYLES, /\.delta-rel-(step|delta)-\w+ \{ color:#/);
+});

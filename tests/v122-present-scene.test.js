@@ -271,7 +271,7 @@ test('v1.2.2 a malformed scene shapes to nothing instead of throwing', () => {
     assert.equal(sceneAttr(null), '');
 });
 
-test('v1.2.2 the present cards render now/chatter slots ', () => {
+test('v1.2.2 the present cards render now/chatter slots', () => {
     const index = runtimeSource();
     assert.match(index, /function inlineCardHtml\(npc, messageId, scene = null\)[\s\S]*nowSlotHtml\(scene, npc\.id\)[\s\S]*chatterSlotsHtml\(scene, npc\.id\)/);
     assert.match(index, /npc-state-delta-present-roster" data-message-id="\$\{messageId\}"\$\{sceneAttr\(scene\)\}/);

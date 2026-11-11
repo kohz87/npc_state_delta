@@ -5,7 +5,7 @@ import { dialHtml } from './dossier-ui-dial.js';
 import { boardModel, gateWords, possessiveWord } from './dossier-ui-view-model.js';
 
 // Tone keys → the --delta-* tokens the skins define. Anything else gets no tone, so a model value can never inject CSS.
-const TONES = { good: 'var(--delta-good)', bad: 'var(--delta-danger)', ten: 'var(--dsk-ten)', aff: 'var(--aff)', des: 'var(--des)', held: 'var(--held)' };
+const TONES = { good: 'var(--good, var(--delta-good))', bad: 'var(--bad, var(--delta-danger))', ten: 'var(--dsk-ten)', aff: 'var(--aff)', des: 'var(--des)', held: 'var(--held)' };
 const esc = value => escapeHtml(String(value ?? ''));
 const toneVar = key => TONES[key] || 'var(--delta-muted)';
 const percent = value => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
