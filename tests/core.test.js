@@ -3726,6 +3726,24 @@ test('name collisions: "Varn" the carter and "Master Varn" (a different role) st
     const same = mergeScanResult(state, { npcs: [{ name: 'Master Varn', aliases: ['Varn'], sameIndividual: true, gender: 'male', role: 'guild treasurer', present: true, dossierSignal: 'persistent' }] }, { maxNpcs: 12, turn: 9, admissionMode: 'immediate' }).state;
     assert.equal(same.npcs.length, 1, 'an explicit sameIndividual joins them');
 });
+test('name collisions: a reworded role alone does not split one person; a role conflict plus a second difference does', () => {
+    const opts = { maxNpcs: 12, turn: 9, admissionMode: 'immediate' };
+    const row = extra => ({ present: true, dossierSignal: 'persistent', gender: 'female', ...extra });
+    const state = seedRoster([{ name: 'Vrena Pell', gender: 'female', role: 'spice seller', location: 'Salt Market' }]);
+    // The first name only, the role worded another way, no place conflict: the same person.
+    const same = mergeScanResult(state, { npcs: [row({ name: 'Vrena', aliases: ['Vrena Pell'], role: 'market trader', location: 'Salt Market stalls' })] }, opts).state;
+    assert.equal(same.npcs.length, 1, 'a reworded role with a shared place stays one dossier');
+    const noPlace = mergeScanResult(state, { npcs: [row({ name: 'Vrena', aliases: ['Vrena Pell'], role: 'market trader' })] }, opts).state;
+    assert.equal(noPlace.npcs.length, 1, 'no place on one side is not a second difference');
+    // The same first name, a different role AND a different place: two people.
+    const apart = mergeScanResult(state, { npcs: [row({ name: 'Vrena', aliases: ['Vrena Pell'], role: 'ferry pilot', location: 'Eastern Ferry' })] }, opts).state;
+    assert.equal(apart.npcs.length, 2, 'role and place both differ');
+    // A bare surname of the other (role differs, no place): two people, as before; gender conflicts still block on their own.
+    const surname = mergeScanResult(state, { npcs: [row({ name: 'Pell', aliases: ['Vrena Pell'], role: 'street courier' })] }, opts).state;
+    assert.equal(surname.npcs.length, 2, 'a surname with a different role');
+    const gender = mergeScanResult(state, { npcs: [row({ name: 'Vrena', aliases: ['Vrena Pell'], gender: 'male', role: 'spice seller' })] }, opts).state;
+    assert.equal(gender.npcs.length, 2, 'gender conflict blocks alone');
+});
 test('name collisions: the alias consolidation pass keeps a surname-alias pair of different gender apart', () => {
     const state = seedRoster([{ name: 'Pell', gender: 'male', role: 'courier' }, { name: 'Vrena Pell', gender: 'female', role: 'spice seller' }]);
     const woman = state.npcs.find(npc => npc.name === 'Vrena Pell');

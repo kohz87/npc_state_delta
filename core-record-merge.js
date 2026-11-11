@@ -4,25 +4,13 @@
 import { ageSpecificity, isInterimNpcLabel, isRoleDescriptionLabel, normalizeGender } from './core-identity.js';
 import { DURABLE_PROFILE_LIMITS, durableSeedGrounded, durableSemanticSimilarity, semanticDedupeItems } from './core-relationship.js';
 import { cleanList, normalizeName } from './core-text.js';
-import { identityConflict, partialNamePair } from './core-merge-names.js';
+import { identityConflict, partialNamePair, placesOverlap } from './core-merge-names.js';
 
 import { keyRelationshipSubject, mergeKeyRelationshipUpdates } from './core-keyrel.js';
 import { isSafeUnmarkedDurableReplacement } from './core-durable.js';
 
 import { IMPORTANT_MEMORY_LIMIT } from './core-record-shared.js';
 import { mergeCustomFieldValues } from './core-record-custom-fields.js';
-const GENERIC_PLACE_WORDS = new Set(['near', 'from', 'with', 'into', 'outside', 'inside', 'room', 'hall', 'house',
-    'street', 'road', 'square', 'market', 'tavern', 'city', 'town', 'village', 'district', 'quarter']);
-
-function placesOverlap(a, b) {
-    const left = normalizeName(a);
-    const right = normalizeName(b);
-    if (!left || !right) return false;
-    if (` ${left} `.includes(` ${right} `) || ` ${right} `.includes(` ${left} `)) return true;
-    const words = new Set(left.split(' ').filter(word => word.length >= 4 && !GENERIC_PLACE_WORDS.has(word)));
-    return right.split(' ').some(word => words.has(word));
-}
-
 // A shared role-description label ("Innkeeper", "the captain") fits many people, so on its own it
 // links a scan row to a properly named record only with continuity evidence: sameIndividual, the
 // record being present (before this scan reset presence), or an overlapping location/home base. A
