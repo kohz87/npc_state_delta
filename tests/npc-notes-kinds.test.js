@@ -393,3 +393,55 @@ test('notes host (review fix 5/9): a swipe of the reply whose scan sent npc.flag
     assert.ok(!(s.host.head().domains.npc.problems ?? []).some(item => /Look drift refused/.test(item?.text ?? '')), 'and its Problem');
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });
+
+test('notes host: npc.meet gives a scan-admitted person an entry with the dossier\'s mood and drives; a button, a repeat and a swipe-free rebuild all hold', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    assert.equal((await s.host.sdk.command('npc.meet', { name: 'Mara' })).ok, false, 'not from a button');
+    const slice = () => s.host.head().domains.npc;
+    assert.equal(slice().npcs.mara, undefined, 'a person the scan admitted has no entry yet');
+    await s.adapter.meet({ name: 'Mara', personality: 'cheerful, warm and kind; confident and bold', about: 'a caravan guard' });
+    const mara = slice().npcs.mara;
+    assert.ok(mara && mara.meters, 'the entry exists with meters');
+    assert.ok(mara.mood && mara.mood.v > 0 && mara.mood.d > 0, 'a resting mood from the temperament words');
+    assert.deepEqual(validateNpcSlice(slice()), []);
+    const live = JSON.stringify(slice());
+    await s.adapter.meet({ name: 'Mara', personality: 'cheerful, warm and kind' });   // refused: nothing to add
+    assert.equal(JSON.stringify(slice()), live, 'a second meeting changes nothing');
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(slice()), live, 'rebuild equals live');
+    assert.deepEqual(s.host.store.problems(), []);
+});
+
+test('scan-admitted people: the scan sends npc.meet for a dossier it just made, not for a known or archived one, and an older host without meet gets nothing', async () => {
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-meet-'));
+    const ext = path.join(temp, 'a', 'b', 'ext');
+    fs.mkdirSync(ext, { recursive: true });
+    for (const file of fs.readdirSync(root).filter(name => name.endsWith('.js'))) fs.copyFileSync(path.join(root, file), path.join(ext, file));
+    fs.cpSync(path.join(root, 'src'), path.join(ext, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(temp, 'extensions.js'), 'export const getContext = () => ({ chat: [] });\nexport const extension_settings = {};\n');
+    globalThis.document = { documentElement: { dataset: { npcStateDeltaStoryBlockV2: '1' } } };
+    const sent = [];
+    try {
+        const { createHostedPart } = await import(pathToFileURL(path.join(ext, 'runtime-hosted.js')).href);
+        const deps = { chatHydrationStatus: () => ({}), getChatKey: () => 'k', getChatState: () => ({}), latestMessageId: () => 0, latestReplyIndex: () => 0 };
+        const adapter = { hosted: () => true, flag: async () => {}, adjust: async () => {}, meet: async item => { sent.push(item); } };
+        const part = createHostedPart({ storySuiteV2: adapter }, deps);
+        const old = { id: 'o1', name: 'Oren' };
+        const fresh = { id: 'n2', name: 'Coram', personality: 'calm and stoic', background: 'a ferryman' };
+        const tick = () => new Promise(resolve => setTimeout(resolve, 5));
+        part.forwardRelationshipChangesToHost([old], [old, fresh, { id: 'n3', name: 'Gone', archived: true }], 4, null, []);
+        await tick();
+        assert.deepEqual(sent, [{ name: 'Coram', personality: 'calm and stoic', about: 'a ferryman' }]);
+        sent.length = 0;
+        part.forwardRelationshipChangesToHost([old, fresh], [old, fresh], 5, null, []);
+        await tick();
+        assert.deepEqual(sent, [], 'a known person is not met again');
+        const older = createHostedPart({ storySuiteV2: { hosted: () => true, flag: async () => {}, adjust: async () => {} } }, deps);
+        older.forwardRelationshipChangesToHost([old], [old, fresh], 6, null, []);
+        await tick();
+        assert.deepEqual(sent, [], 'an adapter without meet: as before');
+    } finally { delete globalThis.document; fs.rmSync(temp, { recursive: true, force: true }); }
+});

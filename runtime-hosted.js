@@ -287,7 +287,10 @@ export function createHostedPart(rt, deps) {
             const rejected = rejectedOverallLook(was.overallAppearance, now.overallAppearance, row);
             if (rejected && !refused.some(item => item.id === now.id)) refused.push({ id: now.id, name: now.name, before: was.overallAppearance, incoming: rejected.incoming });
         }
-        if (!changes.length && !looks.length && !refused.length) return;
+        // (scan-admitted people) A dossier the scan made (an id the sidecar did not have) gets a slice entry the way a cast meeting gives one;
+        // an adjust above has made it first when the scan moved its meters, and the meeting then only adds the mood and drives.
+        const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && !prior.has(npc.id)) : [];
+        if (!changes.length && !looks.length && !refused.length && !met.length) return;
         void (async () => {
             for (const npc of looks) {
                 if (!chatHeadUnchanged(head)) return dropped();
@@ -301,6 +304,11 @@ export function createHostedPart(rt, deps) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.adjust(change);
                 stage1Refresh();   // an open dossier panel draws again once the host's meters took this change
+            }
+            for (const npc of met) {
+                if (!chatHeadUnchanged(head)) return dropped();
+                await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background });
+                stage1Refresh();
             }
         })();
     }
