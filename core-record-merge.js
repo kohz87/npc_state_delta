@@ -4,6 +4,7 @@
 import { ageSpecificity, isInterimNpcLabel, isRoleDescriptionLabel, normalizeGender } from './core-identity.js';
 import { DURABLE_PROFILE_LIMITS, durableSeedGrounded, durableSemanticSimilarity, semanticDedupeItems } from './core-relationship.js';
 import { cleanList, normalizeName } from './core-text.js';
+import { identityConflict, partialNamePair } from './core-merge-names.js';
 
 import { keyRelationshipSubject, mergeKeyRelationshipUpdates } from './core-keyrel.js';
 import { isSafeUnmarkedDurableReplacement } from './core-durable.js';
@@ -32,6 +33,8 @@ export function scanLabelsMatch(record, incoming, presentIds = new Set()) {
     const recordLabels = [record.name, ...(record.aliases || [])].filter(label => normalizeName(label));
     const sharedKeys = new Set(recordLabels.map(normalizeName).filter(key => incomingLabels.some(label => normalizeName(label) === key)));
     if (!sharedKeys.size) return false;
+    // A surname or a title-less name alone never joins people with different genders or roles (see partialNamePair).
+    if (partialNamePair(record.name, incoming.name) && identityConflict(record, incoming, incoming.sameIndividual === true)) return false;
     if (isInterimNpcLabel(record.name, record.identityKind) || isRoleDescriptionLabel(record.name)) return true;
     // A label counts as a name when either side spells it as one ("Red" beside "red").
     if ([...recordLabels, ...incomingLabels].some(label => sharedKeys.has(normalizeName(label)) && !isRoleDescriptionLabel(label))) return true;

@@ -2,7 +2,7 @@
    normalized phrase counts used by scan presence and scene matching. Split from core-merge.js
    without change; core-merge.js keeps the public exports. Never imports core-merge.js. */
 import { normalizeName } from './core-text.js';
-import { isRoleDescriptionLabel } from './core-identity.js';
+import { isRoleDescriptionLabel, normalizeGender } from './core-identity.js';
 
 // Name/alias match used to bring an off-screen dossier into the next generation when the recent
 // story names that NPC. It never changes presence.
@@ -99,4 +99,28 @@ export function countNormalizedPhrase(haystack, phrase) {
         offset += Math.max(1, needle.length - 1);
     }
     return count;
+}
+
+// (name collisions) Two dossiers that share a label only through a PART of a longer name are not one person on that alone: a surname
+// ("Pell" and "Vrena Pell"), a first word, or a name with a title dropped ("Varn" and "Master Varn"). `partialNamePair` finds such a pair;
+// `identityConflict` says they are different people when their genders differ, or their roles share no word and the scanner did not say
+// they are the same individual (`explicit`). A pair that is not partial, or has no conflict, matches exactly as before.
+const bareTokens = label => normalizeName(label).split(/\s+/).filter(token => token && !NAME_TITLE_TOKENS.has(token));
+export function partialNamePair(a, b) {
+    const left = normalizeName(a);
+    const right = normalizeName(b);
+    if (!left || !right || left === right || isRoleDescriptionLabel(a) || isRoleDescriptionLabel(b)) return false;
+    const [short, long] = bareTokens(a).length <= bareTokens(b).length ? [bareTokens(a), bareTokens(b)] : [bareTokens(b), bareTokens(a)];
+    return short.length > 0 && short.every(token => long.includes(token));
+}
+const roleWords = role => new Set(normalizeName(role).split(/\s+/).filter(word => word.length >= 4));
+export function identityConflict(a, b, explicit = false) {
+    const genderA = normalizeGender(a?.gender);
+    const genderB = normalizeGender(b?.gender);
+    if (genderA && genderB && genderA !== genderB) return true;
+    if (explicit) return false;
+    const wordsA = roleWords(a?.role);
+    const wordsB = roleWords(b?.role);
+    if (!wordsA.size || !wordsB.size) return false;
+    return ![...wordsA].some(word => wordsB.has(word) || [...wordsB].some(other => word.includes(other) || other.includes(word)));
 }
