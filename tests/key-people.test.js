@@ -656,3 +656,38 @@ test('runtime: a swipe or regenerate of the first reply after a return is told t
     assert.equal(out.afterB + out.afterSwipe + out.afterRegenerate, 0, 'once a reply is written the note is not carried on');
     assert.equal(out.promptC, 0, 'the next new reply is not told');
 });
+
+// Story Director absent is "no key list", not a failure (so the stale pass still deletes incidental dossiers); only a real failure blocks deletion.
+import { createDirectorQueriesPart } from '../src/adapter/queries-director.js';
+test('keyPeopleReadable: no Story Director module or switched off (null) is readable; an error or a non-list answer from a registered one is not', () => {
+    const readable = (query, modules = [{ id: 'story-director' }]) => createDirectorQueriesPart({ hosted: true, sdkRef: { query, modules: () => modules } }, {}, { hostFeature: () => undefined }).keyPeopleReadable();
+    assert.equal(readable(() => { throw new Error('no module answers'); }, []), true, 'no Story Director registered: no key list, whatever the error');
+    assert.equal(readable(() => null), true, 'the feature is off');
+    assert.equal(readable(() => []), true);
+    assert.equal(readable(() => { throw Object.assign(new Error('x'), { code: 'NOT_FOUND' }); }), false, 'a registered Director that fails');
+    assert.equal(readable(() => { throw new Error('boom'); }), false);
+    assert.equal(readable(() => ({ not: 'a list' })), false, 'malformed answer');
+    assert.equal(createDirectorQueriesPart({ hosted: true, sdkRef: { query: () => [], modules: () => { throw new Error('x'); } } }, {}, { hostFeature: () => undefined }).keyPeopleReadable(), false, 'the host cannot say');
+    assert.equal(createDirectorQueriesPart({ hosted: false }, {}, { hostFeature: () => undefined }).keyPeopleReadable(), true, 'not hosted: nothing to read');
+});
+
+// Director absence is read from the host's modules (the sdk's no-module error has no code): through the vendored Story Block runtime.
+import { applyStaleLifecycleAfterScan as staleAfterScan } from '../runtime-scan-stale.js';
+test('hosted: Story Director not registered reads fine and an incidental stale dossier is deleted; a registered one that throws deletes nothing', async () => {
+    const stale = () => [{ ...createNpcRecord('Inc', []), id: 'npc_inc', lastSeenTurn: 1 }];
+    const settings = { autoPruneStale: true, maxNpcs: 40, staleArchiveAfter: 30, staleDeleteAfter: 50 };
+    // The same test the runtime applies (runtime-hosted.js hostedReadsFailed), on the real adapter and sdk.
+    const failed = adapter => adapter.keyPeopleReadable() === false || !Array.isArray(adapter.meterEntries());
+    const run = adapter => staleAfterScan({ turn: 100, npcs: stale() }, {}, '', settings, { keepIds: [], noDelete: failed(adapter) });
+
+    const none = await suite({ modules: [] });
+    assert.throws(() => none.host.sdk.query(KEY_PEOPLE_QUERY, {}), error => error.code === undefined, 'the real sdk error carries no code');
+    assert.equal(none.adapter.keyPeopleReadable(), true);
+    assert.equal(failed(none.adapter), false);
+    assert.deepEqual(run(none.adapter).removed.map(item => item.id), ['npc_inc'], 'deleted, as without Director');
+
+    const throwing = await suite({ modules: [{ id: 'story-director', name: 'Story Director', version: '0.0.0-test', queries: { 'director.keyPeople': () => { throw new Error('boom'); } } }] });
+    assert.equal(throwing.adapter.keyPeopleReadable(), false);
+    assert.equal(failed(throwing.adapter), true);
+    assert.equal(run(throwing.adapter).removed.length, 0, 'a registered Director that fails: nothing deleted');
+});

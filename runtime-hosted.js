@@ -210,6 +210,18 @@ export function createHostedPart(rt, deps) {
             return copy;
         });
     }
+    // The ids of dossiers Story Director names as key people or away (exact name/alias, src/key-people.js): the stale pass archives, never deletes, them.
+    function keyKeepIds(state) {
+        const list = keyPeopleList();
+        return list?.length ? (state?.npcs || []).filter(npc => isKey(findKeyEntry(list, npc))).map(npc => npc.id) : [];
+    }
+    // True while hosted and a read really failed: the key list (a present query that errors or answers a non-list; Story Director absent or
+    // off is no key list, not a failure) or the meter read. The stale pass then only archives.
+    function hostedReadsFailed() {
+        const adapter = storySuiteV2Meters();
+        if (!adapter) return false;
+        try { return adapter.keyPeopleReadable?.() === false || !Array.isArray(adapter.meterEntries?.()); } catch { return true; }
+    }
     function keyAwayScanOptions(state) {
         const list = keyPeopleList();
         if (!list?.length) return {};
@@ -378,5 +390,5 @@ export function createHostedPart(rt, deps) {
         return { text: 'The latest scan found no NPC in the scene.', scan: true };
     }
 
-    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
+    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
 }

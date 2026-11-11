@@ -36,7 +36,7 @@ export function collectStaleCleanupProtectedIds(state, scanResult, transcript = 
     return ids;
 }
 
-export function applyStaleLifecycleAfterScan(state, scanResult, transcript, settings, { onlyWhenAtCap = false } = {}) {
+export function applyStaleLifecycleAfterScan(state, scanResult, transcript, settings, { onlyWhenAtCap = false, keepIds = [], noDelete = false, now = null } = {}) {
     if (settings.autoPruneStale === false) return { state, archived: [], removed: [] };
     const activeCount = (state.npcs || []).filter(npc => !npc?.archived).length;
     if (onlyWhenAtCap && activeCount < Number(settings.maxNpcs || 40)) return { state, archived: [], removed: [] };
@@ -44,6 +44,7 @@ export function applyStaleLifecycleAfterScan(state, scanResult, transcript, sett
         turn: state.turn,
         archiveAfter: settings.staleArchiveAfter,
         deleteAfter: settings.staleDeleteAfter,
+        keepIds, noDelete, now, baseline: settings.relationshipBaseline,
         protectedIds: [...collectStaleCleanupProtectedIds(state, scanResult, transcript)],
     });
 }

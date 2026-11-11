@@ -143,7 +143,7 @@ Generated 2026-11-07.
 - `runtime-editor-save.js`: Dossier editor save, hosted-meter changes, social reconciliation and durable persistence split from `runtime-editor.js`.
 - `runtime-lifecycle-delete.js`: Transactional chat-deletion retirement, recovery-copy handling and tombstone publication split from `runtime-lifecycle.js`.
 - `runtime-scan-backfill.js`: Pending-backfill queue entry and one-pass admission cap split from `runtime-scan.js`.
-- `runtime-scan-stale.js`: Stale-cleanup protected references and archive/delete pass split from `runtime-scan.js`.
+- `runtime-scan-stale.js`: Stale-cleanup protected references and archive/delete pass split from `runtime-scan.js` (dossiers that matter are archived, never deleted: `keepIds`).
 - `runtime-scan-reply.js`: Reply parent/rewrite checks, earlier-only scene stripping and first-scan window split from `runtime-scan.js`.
 - `runtime-scan-handler.js`: Assistant-message receipt, swipe guard, scan cadence and reply-name check split from `runtime-scan.js`.
 - `runtime-targeted-scope.js`: Target-row admission and single-target profile/social channel scoping split from `runtime-targeted.js`.
