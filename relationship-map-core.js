@@ -13,6 +13,10 @@ export const MAP_ROOM = 2 * 18 + 14; // side padding of the map pane and the gap
 export const MAP_CARD_BESIDE_MIN = MAP_CIRCLE_MIN + MAP_CARD_MIN + MAP_ROOM;
 // Below this width of the circle itself a face shows its short name and no number (the labels would meet): about 5 labels around the ring (64px each).
 export const MAP_LABELS_SHORT_MAX = 520;
+// Below this width of the circle the labels of ten faces with their names and numbers meet: the short name alone.
+export const MAP_NAMES_MIN = 340;
+// With more faces than this a narrow circle shows the short names alone (full names and numbers for up to this many).
+export const MAP_DENSE_NODES = 12;
 export const DESKTOP_NODE_CAP = 24;
 export const PHONE_NODE_CAP = 16;
 
@@ -115,9 +119,10 @@ export function resolveMapBonds(npcs = [], shownIds = new Set()) {
             const key = [npc.id, other.id].sort().join('|');
             const bond = bonds.get(key) || { a: [npc.id, other.id].sort()[0], b: [npc.id, other.id].sort()[1], relation: {} };
             bond.relation[npc.id] = parsed.relation;
+            if (parsed.dynamic) (bond.dynamic ||= {})[npc.id] = parsed.dynamic;
             // Tie tags (ally, rival, owes) either person has toward the other, from the notes feature (npc.v2Meters.ties, by dossier id).
             const tags = Array.isArray(npc.v2Meters?.ties?.[other.id]) ? npc.v2Meters.ties[other.id] : [];
-            if (tags.length) bond.tags = [...new Set([...(bond.tags || []), ...tags])];
+            if (tags.length) { bond.tags = [...new Set([...(bond.tags || []), ...tags])]; (bond.tagsBy ||= {})[npc.id] = tags; }
             bonds.set(key, bond);
         }
     }
@@ -170,7 +175,7 @@ export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth
     const lines = resolveMapBonds(npcs, new Set(positions.keys()))
         .map(bond => ({ ...bond, touches: bond.a === selectedId || bond.b === selectedId }))
         .filter(bond => bond.touches || allBonds)
-        .map(bond => ({ touches: bond.touches, a: bond.a, b: bond.b, relation: bond.relation, tags: bond.tags, from: positions.get(bond.a), to: positions.get(bond.b) }));
+        .map(bond => ({ touches: bond.touches, a: bond.a, b: bond.b, relation: bond.relation, dynamic: bond.dynamic, tags: bond.tags, tagsBy: bond.tagsBy, from: positions.get(bond.a), to: positions.get(bond.b) }));
     const change = selected?.lastRelationshipChange || {};
     return {
         turn,
@@ -198,17 +203,20 @@ export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth
     };
 }
 
-// Where the outer ring's word ("cold · hostile") is written: in the widest free stretch of the ring, so no face's label
-// is ever written over it. Candidate spots every 3 degrees on the ring just inside the dashed circle; each is tested against
-// the box of every face and its label (in the map's own 780-unit space, sized for the largest label) and the free spot nearest
-// the bottom wins (the old, fixed place); with none free, the spot with the most room. Pure: a function of the nodes' places.
+// Where the outer ring's word ("cold · hostile") is written: in a free stretch of the ring, so no face's label is ever written over it.
+// Candidate spots every 3 degrees on the ring just inside the dashed circle; each is tested against the boxes of the faces and their labels
+// (`boxes`, {l,r,t,b} in the map's own 780-unit space) and the free spot nearest the bottom (the old, fixed place) wins; with none free,
+// the one with the most room. `word` is the text's size ({w,h} in units, drawn on the baseline). Pure: a function of the boxes.
 const WORD_RADIUS = -80;
-const WORD_BOX = Object.freeze({ half: 62, up: 15, down: 6 });
-const NODE_BOX = Object.freeze({ half: 58, up: 34, down: 66 });
-export function ringWordSpot(nodes = [], size = MAP_SPAN) {
+export const WORD_SIZE = Object.freeze({ w: 124, h: 21 });
+const NODE_FOOT = Object.freeze({ half: 60, up: 34, down: 70 });
+// The boxes the markup alone can know (no measuring): each face with a label under it, at the biggest sizes the labels take.
+export const nodeBoxes = (nodes = [], size = MAP_SPAN) => nodes.map(node => {
+    const x = (node.x / 100) * size, y = (node.y / 100) * size;
+    return { l: x - NODE_FOOT.half, r: x + NODE_FOOT.half, t: y - NODE_FOOT.up, b: y + NODE_FOOT.down };
+});
+export function ringWordSpot(boxes = [], word = WORD_SIZE, size = MAP_SPAN) {
     const r = mapRadius(WORD_RADIUS, size);
-    const k = size / MAP_SPAN;
-    const places = nodes.map(node => ({ x: (node.x / 100) * size, y: (node.y / 100) * size }));
     let best = null;
     for (let deg = 0; deg < 360; deg += 3) {
         const rad = deg * Math.PI / 180;
@@ -216,15 +224,13 @@ export function ringWordSpot(nodes = [], size = MAP_SPAN) {
         const anchor = cos > 0.5 ? 'end' : (cos < -0.5 ? 'start' : 'middle');
         const x = size / 2 + r * cos;
         const y = size / 2 + r * Math.sin(rad);
-        const left = anchor === 'end' ? x - 2 * WORD_BOX.half * k : (anchor === 'start' ? x : x - WORD_BOX.half * k);
-        const box = { l: left, r: left + 2 * WORD_BOX.half * k, t: y - WORD_BOX.up * k, b: y + WORD_BOX.down * k };
+        const left = anchor === 'end' ? x - word.w : (anchor === 'start' ? x : x - word.w / 2);
+        const box = { l: left, r: left + word.w, t: y - word.h * 0.8, b: y + word.h * 0.3 };
         if (box.l < 0 || box.r > size || box.t < 0 || box.b > size) continue;
-        // The room left to the nearest face box (negative when they overlap), the smallest gap on either axis.
-        const room = Math.min(Infinity, ...places.map(at => Math.max(
-            at.x - NODE_BOX.half * k - box.r, box.l - (at.x + NODE_BOX.half * k),
-            at.y - NODE_BOX.up * k - box.b, box.t - (at.y + NODE_BOX.down * k))));
+        // The room left to the nearest box (negative when they overlap): the smaller of the gaps on the two axes, the larger one counts.
+        const room = Math.min(Infinity, ...boxes.map(at => Math.max(at.l - box.r, box.l - at.r, at.t - box.b, box.t - at.b)));
         const away = Math.abs(((deg - 90 + 540) % 360) - 180);
-        const free = room > 0;
+        const free = room > 4;
         if (!best || (free && !best.free) || (free === best.free && (free ? away < best.away : room > best.room))) best = { x, y, anchor, room, away, free };
     }
     const spot = best || { x: size / 2, y: size / 2 + r, anchor: 'middle' };

@@ -6,15 +6,18 @@ import {
     DESKTOP_NODE_CAP,
     MAP_CARD_BESIDE_MIN,
     MAP_CARD_MIN,
+    MAP_DENSE_NODES,
     MAP_LABELS_SHORT_MAX,
+    MAP_NAMES_MIN,
     MAP_LENSES,
     normalizeRelationshipMapSettings,
     PHONE_NODE_CAP,
     plain,
+    ringWordSpot,
 } from './relationship-map-core.js';
 import { buildFocusModel, focusStyles, mapCardHtml, mapKeyLine, mapNodeHtml, mapSvgHtml } from './relationship-map-focus.js';
 import { escapeHtml } from './src/util/html.js';
-import { isNarrow, isNarrowWidth, observedWidth, TWO_PANE_MIN } from './dossier-ui-screens.js';
+import { isNarrow, isNarrowWidth, observedWidth, showScreen, TWO_PANE_MIN } from './dossier-ui-screens.js';
 import { libraryFootHtml } from './dossier-ui-library.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
@@ -71,7 +74,7 @@ function dossierUi() {
 
 function sessionLens(settings) { return view.lens || settings.defaultLens; }
 
-function paneHtml(model, focus, { phone, persona, refs, count }) {
+function paneHtml(model, focus, { phone, persona, refs, count, npc }) {
     const lenses = MAP_LENSES.map(item => `<button type="button" class="delta-map-lens ss-tap-pill" data-map-lens="${item.key}" aria-pressed="${item.key === model.lens}">${item.label}</button>`).join('');
     const toggles = `<button type="button" class="delta-map-toggle ss-tap-pill" data-map-toggle="bonds" aria-pressed="${view.allBonds}">${phone ? 'Bonds' : 'All bonds'}</button>`;
     const chip = focus.active ? focus.chip.html : '';
@@ -80,7 +83,7 @@ function paneHtml(model, focus, { phone, persona, refs, count }) {
     const more = model.total > model.shownCount ? ` · Showing ${model.shownCount} of ${model.total}; the rest are in the library` : '';
     const ties = new Map(focus.ties.map(tie => [tie.id, tie]));
     const map = model.nodes.length
-        ? `<div class="delta-map">${mapSvgHtml(model, focus)}<div class="delta-map-you" title="${escapeHtml(persona)}">${escapeHtml(persona)}</div>${model.nodes.map(node => mapNodeHtml(node, focus, { refs, ties })).join('')}${hint}</div>`
+        ? `<div class="delta-map"${model.nodes.length > MAP_DENSE_NODES ? ' data-dense' : ''}>${mapSvgHtml(model, focus)}<div class="delta-map-you" title="${escapeHtml(persona)}">${escapeHtml(persona)}</div>${model.nodes.map(node => mapNodeHtml(node, focus, { refs, ties })).join('')}${hint}</div>`
         : '<div class="delta-map delta-map-empty"><p>No NPCs to map yet.</p></div>';
     return `<div class="delta-map-head"><p class="delta-map-key-line">${mapKeyLine(model.lens, persona)}${escapeHtml(more)}</p>
         <div class="delta-map-toolbar">
@@ -89,9 +92,43 @@ function paneHtml(model, focus, { phone, persona, refs, count }) {
         </div></div>
         <div class="delta-map-body">
             <div class="delta-map-stage"><div class="delta-map-frame">${map}</div></div>
-            ${mapCardHtml(model, focus, persona, { refs })}
+            ${mapCardHtml(model, focus, persona, { refs, npc })}
         </div>
         ${libraryFootHtml(count)}`;
+}
+
+// The ring's word, placed against what is really drawn: the measured boxes of every face with its label and the You marker, in the
+// map's own units. Runs after each draw and whenever the circle's size changes (the faces and labels scale differently from the ring).
+let mapObserver = null;
+function fitRingWord(map) {
+    const text = map?.querySelector('.delta-map-outer-word');
+    const svg = map?.querySelector('.delta-map-svg');
+    if (!text || !svg) return;
+    const frame = svg.getBoundingClientRect();
+    if (!frame.width) return;
+    const k = 780 / frame.width;
+    const unit = r => ({ l: (r.left - frame.left) * k, r: (r.right - frame.left) * k, t: (r.top - frame.top) * k, b: (r.bottom - frame.top) * k });
+    const boxes = [];
+    for (const node of map.querySelectorAll('.delta-map-node')) {
+        const parts = [node.querySelector('.delta-map-avatar'), ...[...(node.querySelector('.delta-map-label')?.children || [])].filter(kid => getComputedStyle(kid).display !== 'none')];
+        const rects = parts.map(part => { const range = document.createRange(); range.selectNodeContents(part); return part.matches('.delta-map-avatar') ? part.getBoundingClientRect() : range.getBoundingClientRect(); }).filter(r => r.width);
+        if (rects.length) boxes.push(unit({ left: Math.min(...rects.map(r => r.left)), right: Math.max(...rects.map(r => r.right)), top: Math.min(...rects.map(r => r.top)), bottom: Math.max(...rects.map(r => r.bottom)) }));
+    }
+    const you = map.querySelector('.delta-map-you');
+    if (you) boxes.push(unit(you.getBoundingClientRect()));
+    const own = text.getBoundingClientRect();
+    const spot = ringWordSpot(boxes, { w: own.width * k + 4, h: own.height * k }, 780);
+    text.setAttribute('x', spot.x.toFixed(1));
+    text.setAttribute('y', spot.y.toFixed(1));
+    text.setAttribute('text-anchor', spot.anchor);
+}
+function watchMap(pane) {
+    mapObserver?.disconnect();
+    const map = pane.querySelector('.delta-map');
+    if (!map || typeof ResizeObserver !== 'function') return;
+    fitRingWord(map);
+    mapObserver = new ResizeObserver(() => fitRingWord(map));
+    mapObserver.observe(map);
 }
 
 function focusKey() {
@@ -119,13 +156,16 @@ function renderMap(ui, { force = false } = {}) {
     });
     const focus = buildFocusModel(ui.projection || {}, model, view.focus);
     if (!focus.active) view.focus = '';
-    const signature = JSON.stringify([model, phone, persona, view.allBonds, focus.focusId]);
+    const npc = (ui.projection?.npcs || []).find(item => item.id === model.selected?.id) || null;
+    // the card draws more of the selected person than the model holds (key, mood, gender, the dial's numbers, portrait mark)
+    const signature = JSON.stringify([model, phone, persona, view.allBonds, focus.focusId, npc && [npc.key, npc.mood, npc.v2Meters?.mood?.word, npc.relationship, npc.gender, !!npc.portrait]]);
     if (!force && signature === view.signature) return;
     view.signature = signature;
     const refocus = focusKey();
     const refs = ui.portraitRefs || null;
-    pane.innerHTML = paneHtml(model, focus, { phone, persona, refs, count: (ui.projection?.index || []).length });
+    pane.innerHTML = paneHtml(model, focus, { phone, persona, refs, count: (ui.projection?.index || []).length, npc });
     refs?.fill(pane);
+    watchMap(pane);
     if (refocus) pane.querySelector(refocus)?.focus?.({ preventScroll: true });
 }
 
@@ -155,6 +195,9 @@ function onPaneClick(event) {
     const focusId = event.target.closest('[data-map-focus]')?.dataset?.mapFocus;
     if (focusId) { view.focus = focusId; return void renderMap(ui, { force: true }); }
     if (event.target.closest('.delta-map-open')) return void setMode(ui, 'dossier');
+    // The dial in the card ("Profile ›"): leave the map and open that person's profile.
+    const profile = event.target.closest('[data-map-profile]')?.dataset?.mapProfile;
+    if (profile) { setMode(ui, 'dossier'); return void ui.setScreen?.(showScreen(ui.screen, 'profile', profile)); }
     const node = event.target.closest('.delta-map-node')?.dataset?.npcId;
     // While focused, tapping another face moves the focus to them.
     if (node && view.focus) view.focus = node;
@@ -263,7 +306,7 @@ const STYLES = `
 #${DOSSIER_ROOT_ID} .delta-map-switch { display:flex; padding:3px; border:1px solid var(--delta-line); border-radius:9px; background:rgba(0,0,0,.18); }
 #${DOSSIER_ROOT_ID} .delta-map-switch button { min-height:34px; padding:0 14px; border:0; border-radius:6px; color:var(--delta-muted); background:transparent; cursor:pointer; }
 #${DOSSIER_ROOT_ID} .delta-map-switch button[aria-selected="true"] { color:var(--delta-accent-soft); background:rgba(216,188,120,.16); font-weight:600; }
-#${DOSSIER_ROOT_ID} .delta-map-see { float:right; margin:-5px 0 0 8px; min-height:30px; padding:3px 10px; font-size:.78rem; }
+#${DOSSIER_ROOT_ID} .delta-map-see { float:right; margin:-5px 0 0 8px; min-height:30px; padding:3px 10px; font-size:var(--dt-meta); }
 #${DOSSIER_ROOT_ID} .delta-map-pane { min-width:0; min-height:0; display:flex; flex-direction:column; gap:10px; padding:0; overflow:hidden; }
 #${DOSSIER_ROOT_ID} .delta-map-head { flex:none; display:grid; gap:10px; padding:14px 18px 0; }
 #${DOSSIER_ROOT_ID} .delta-map-pane > .delta-library-foot { flex:none; margin-top:auto; }
@@ -272,12 +315,12 @@ const STYLES = `
 #${DOSSIER_ROOT_ID} .delta-map-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 #${DOSSIER_ROOT_ID} .delta-map-lenses { display:flex; gap:2px; padding:3px; min-width:0; max-width:100%; overflow-x:auto; border:1px solid var(--delta-line); border-radius:9px; background:rgba(0,0,0,.18); }
 #${DOSSIER_ROOT_ID} .delta-map-toggles { display:flex; gap:6px; margin-left:auto; }
-#${DOSSIER_ROOT_ID} .delta-map-lens, #${DOSSIER_ROOT_ID} .delta-map-toggle { flex:0 1 auto; min-width:0; min-height:34px; padding:0 clamp(5px,1.7cqw,11px); border:1px solid transparent; border-radius:7px; color:var(--delta-muted); background:transparent; font-size:.8rem; cursor:pointer; }
+#${DOSSIER_ROOT_ID} .delta-map-lens, #${DOSSIER_ROOT_ID} .delta-map-toggle { flex:0 1 auto; min-width:0; min-height:34px; padding:0 clamp(3px,1.7cqw,11px); border:1px solid transparent; border-radius:7px; color:var(--delta-muted); background:transparent; font-size:var(--dt-meta); cursor:pointer; }
 #${DOSSIER_ROOT_ID} .delta-map-toggle { border-color:var(--delta-line); }
 #${DOSSIER_ROOT_ID} .delta-map-lens[aria-pressed="true"], #${DOSSIER_ROOT_ID} .delta-map-toggle[aria-pressed="true"] { color:var(--delta-accent-soft); background:rgba(216,188,120,.16); border-color:var(--delta-line-strong); font-weight:600; }
 /* below the line the map and its ties block stack and scroll; the library bar stays under them */
 #${DOSSIER_ROOT_ID} .delta-map-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:auto; overscroll-behavior:contain; }
-#${DOSSIER_ROOT_ID} .delta-map-stage { flex:none; min-width:0; padding:0 18px; }
+#${DOSSIER_ROOT_ID} .delta-map-stage { flex:1 0 auto; min-width:0; display:grid; align-content:center; padding:0 18px; }
 #${DOSSIER_ROOT_ID} .delta-map-frame { min-height:0; display:grid; place-items:center; }
 #${DOSSIER_ROOT_ID} .delta-map { position:relative; width:100%; max-width:640px; aspect-ratio:1/1; container:dmap / inline-size; }
 #${DOSSIER_ROOT_ID} .delta-map-empty { display:grid; place-items:center; color:var(--delta-muted); }
@@ -300,26 +343,22 @@ const STYLES = `
 #${DOSSIER_ROOT_ID} .delta-map-node[aria-pressed="true"] .delta-map-avatar { border:3px solid var(--delta-accent); box-shadow:0 0 0 5px rgba(216,188,120,.2); opacity:1; }
 #${DOSSIER_ROOT_ID} .delta-map-delta { position:absolute; top:calc(50% - var(--node) / 2 - 5px); left:calc(50% + var(--node) / 2 - 12px); padding:0 4px; border-radius:4px; color:#1a160e; background:var(--delta-accent); font:500 10px/1.5 ui-monospace,monospace; pointer-events:none; }
 #${DOSSIER_ROOT_ID} .delta-map-label { position:absolute; top:calc(50% + var(--node) / 2 + 2px); left:50%; width:max(64px,20cqw); transform:translateX(-50%); display:grid; text-align:center; line-height:1.15; pointer-events:none; text-shadow:0 1px 3px #000,0 0 2px #000; }
-#${DOSSIER_ROOT_ID} .delta-map-label b { overflow:hidden; color:var(--delta-text); font-size:clamp(10px,1.9cqw,12px); font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
+#${DOSSIER_ROOT_ID} .delta-map-label b { color:var(--delta-text); font-size:clamp(10px,1.9cqw,12px); font-weight:500; white-space:normal; overflow-wrap:anywhere; }
 #${DOSSIER_ROOT_ID} .delta-map-label .delta-map-short { display:none; }
 #${DOSSIER_ROOT_ID} .delta-map-label small { color:var(--delta-muted); font:clamp(9px,1.7cqw,11px) ui-monospace,monospace; }
 #${DOSSIER_ROOT_ID} .delta-map-node[aria-pressed="true"] .delta-map-label b { color:var(--delta-accent-soft); font-weight:700; }
-#${DOSSIER_ROOT_ID} .delta-map-hint { position:absolute; z-index:3; top:4%; left:50%; width:min(420px,90%); transform:translateX(-50%); padding:9px 13px; border:1px solid var(--delta-line); border-radius:8px; color:var(--delta-text); background:rgba(30,30,30,.94); font-size:.8rem; text-align:center; }
-#${DOSSIER_ROOT_ID} .delta-map-last { grid-column:1/-1; margin:0; color:var(--delta-muted); font-size:.8rem; }
-#${DOSSIER_ROOT_ID} .delta-map-last b { color:var(--delta-accent); font-family:ui-monospace,monospace; font-weight:500; }
-/* the card: stacked (phone) it is the full-width ties block under the map; beside the map it is the mockup's side card */
-#${DOSSIER_ROOT_ID} .delta-map-card { flex:none; display:grid; justify-items:start; align-content:start; gap:8px; min-width:0; padding:14px 18px; border-top:1px solid var(--delta-line); }
-#${DOSSIER_ROOT_ID} .delta-map-card-face, #${DOSSIER_ROOT_ID} .delta-map-card-name { display:none; }
-#${DOSSIER_ROOT_ID} .delta-map-card-line { margin:0; color:var(--delta-muted); font-size:var(--dt-meta); }
-#${DOSSIER_ROOT_ID} .delta-map-ties { line-height:1.5; }
-#${DOSSIER_ROOT_ID} .delta-map-card-img { display:block; width:100%; height:100%; object-fit:cover; object-position:center 12%; }
-#${DOSSIER_ROOT_ID} .delta-map-card-img.delta-portrait-placeholder { display:grid; place-items:center; background:var(--face-flat); color:var(--delta-muted); font:700 clamp(22px,4cqw,40px)/1 var(--ss-font, system-ui, sans-serif); letter-spacing:.04em; }
-#${DOSSIER_ROOT_ID} .delta-map-last { margin:0; color:var(--delta-muted); font-size:var(--dt-meta); }
-#${DOSSIER_ROOT_ID} .delta-map-last b { color:var(--delta-accent); font-family:ui-monospace,monospace; font-weight:500; }
-/* a circle narrower than this shows short names and no numbers under the faces (the labels would meet) */
+#${DOSSIER_ROOT_ID} .delta-map-hint { position:absolute; z-index:3; top:4%; left:50%; width:min(420px,90%); transform:translateX(-50%); padding:9px 13px; border:1px solid var(--delta-line); border-radius:8px; color:var(--delta-text); background:rgba(30,30,30,.94); font-size:var(--dt-meta); text-align:center; }
+/* a circle narrower than this draws smaller labels: the full name (cut with an ellipsis) and its number, in a narrower box; with many faces (data-dense)
+   the short name alone, so the labels never meet */
 @container dmap (max-width: ${MAP_LABELS_SHORT_MAX}px) {
-  #${DOSSIER_ROOT_ID} .delta-map-label .delta-map-name { display:none; }
-  #${DOSSIER_ROOT_ID} .delta-map-label small:not(.delta-map-word) { display:none; }
+  #${DOSSIER_ROOT_ID} .delta-map-label { width:clamp(52px,17cqw,76px); }
+  #${DOSSIER_ROOT_ID} .delta-map-label b { font-size:clamp(8.5px,2.5cqw,11px); }
+  #${DOSSIER_ROOT_ID} .delta-map-label small { font-size:clamp(8px,2.3cqw,10px); }
+  #${DOSSIER_ROOT_ID} .delta-map[data-dense] .delta-map-label .delta-map-name, #${DOSSIER_ROOT_ID} .delta-map[data-dense] .delta-map-label small:not(.delta-map-word) { display:none; }
+  #${DOSSIER_ROOT_ID} .delta-map[data-dense] .delta-map-label .delta-map-short { display:block; }
+}
+@container dmap (max-width: ${MAP_NAMES_MIN}px) {
+  #${DOSSIER_ROOT_ID} .delta-map-label .delta-map-name, #${DOSSIER_ROOT_ID} .delta-map-label small:not(.delta-map-word) { display:none; }
   #${DOSSIER_ROOT_ID} .delta-map-label .delta-map-short { display:block; }
 }
 /* beside: the circle at its smallest readable size (MAP_CIRCLE_MIN) plus the card at its narrowest (MAP_CARD_MIN) and the room around them fit */
@@ -328,14 +367,6 @@ const STYLES = `
   #${DOSSIER_ROOT_ID} .delta-map-stage { min-height:0; display:grid; grid-template-rows:minmax(0,1fr); padding-bottom:14px; }
   #${DOSSIER_ROOT_ID} .delta-map-frame { container-type:size; }
   #${DOSSIER_ROOT_ID} .delta-map { width:min(100cqw,100cqh); max-width:none; }
-  #${DOSSIER_ROOT_ID} .delta-map-card { justify-items:center; text-align:center; overflow:auto; padding:18px 16px; border-top:0; border-left:1px solid var(--delta-line); }
-  #${DOSSIER_ROOT_ID} .delta-map-card-face { display:block; width:clamp(96px,60%,170px); aspect-ratio:1; overflow:hidden; border:2px solid var(--delta-accent); border-radius:50%; }
-  #${DOSSIER_ROOT_ID} .delta-map-card-name { display:block; margin:4px 0 0 !important; padding:0 !important; border:0 !important; text-align:center !important; font-size:clamp(20px,1.2cqw + 12px,28px); line-height:1.1; font-weight:700; color:var(--delta-accent-soft); text-transform:none; letter-spacing:0; overflow-wrap:anywhere; }
-  #${DOSSIER_ROOT_ID} .delta-map-ties { justify-self:stretch; text-align:left; }
-  #${DOSSIER_ROOT_ID} .delta-map-ties > b { display:block; margin:0 0 4px; font-size:var(--dt-kick); letter-spacing:.12em; text-transform:uppercase; color:var(--delta-accent); }
-  #${DOSSIER_ROOT_ID} .delta-map-tie { display:block; padding:3px 0; }
-  #${DOSSIER_ROOT_ID} .delta-map-tie-sep { display:none; }
-  #${DOSSIER_ROOT_ID} .delta-map-last { justify-self:stretch; text-align:left; }
 }
 @container dsr (max-width: ${TWO_PANE_MIN - 0.02}px) {
   #${DOSSIER_ROOT_ID} .delta-map-switch button { padding:0 10px; }
