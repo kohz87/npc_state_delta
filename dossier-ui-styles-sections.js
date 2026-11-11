@@ -86,7 +86,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-profile { display:grid; gap:14px; min-height:0; padding:12px 14px 16px; align-items:start; }
 #${ROOT_ID} .delta-profile-portrait { position:relative; overflow:hidden; aspect-ratio:4 / 5; max-height:72dvh; border-radius:14px; background:var(--delta-surface); }
 #${ROOT_ID} .delta-profile-image { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 10%; }
-#${ROOT_ID} .delta-profile-back { position:absolute; top:10px; left:10px; min-height:34px; padding:4px 10px; border:1px solid var(--delta-line); border-radius:999px; background:color-mix(in srgb, var(--delta-floor) 80%, transparent); color:var(--delta-text); font-size:12px; font-weight:700; cursor:pointer; }
+#${ROOT_ID} .delta-profile-back { position:absolute; top:10px; left:10px; min-height:34px; padding:4px 10px; border:1px solid var(--delta-line); border-radius:999px; background:color-mix(in srgb, var(--delta-floor) 80%, transparent); color:var(--delta-text); font-size:var(--dt-pill); font-weight:700; cursor:pointer; }
 #${ROOT_ID} .delta-profile-caption { position:absolute; left:0; right:0; bottom:0; display:grid; gap:2px; padding:24px 12px 10px; background:linear-gradient(transparent, rgba(0,0,0,.6)); color:#fff; }
 #${ROOT_ID} .delta-profile-caption b { font-size:clamp(16px,.6cqw + 12px,20px); }
 #${ROOT_ID} .delta-profile-caption span { font-size:var(--dt-meta); opacity:.85; }
