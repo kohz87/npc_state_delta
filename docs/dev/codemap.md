@@ -11,6 +11,12 @@ Generated 2026-11-07.
 - `src/npc-meters-secrets.js`: Hidden-note normalization and IDs, generated notes, and secret/limit line conversion for the editor.
 - `src/npc-meters-slice.js`: Per-reply NPC slice, key-person absence and cast memory, validation, meter moves and stage settling.
 
+## Stylesheet (style.css is only @import lines, in cascade order)
+- `style-editor.css`: Settings roster, relationship tuning, native dossier editor, archive, mobile hardening, popup editor and Megumin rules.
+- `style-cast.css`: Story Block tabs, dossier browser, present-NPC cards and speaker cards.
+- `style-portrait.css`: Native SillyTavern portrait generation rules.
+- `style-settings-panel.css`: Extensions-tab settings panel, What's sent, v2 hosting, World present and People-here rules.
+
 ## src/adapter/
 - `src/adapter/cast-ui.js`: Dossiers drawer, settings, list, cast cards/meters, page API, preset block, key pin and reply-time cast sync.
 - `src/adapter/connect.js`: Finds a Story Block v2 host, registers Delta, watches it, and restores unhosted behavior when it leaves.

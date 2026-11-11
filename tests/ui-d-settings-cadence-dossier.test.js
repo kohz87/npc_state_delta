@@ -7,6 +7,7 @@ import { AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY, autoScanDue } from '../scan-contex
 import { FEATURES, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS } from '../src/npc-meters.js';
 import { runtimeSource } from './helpers/runtime-source.js';
 import { dossierUiSource } from './helpers/dossier-ui-source.js';
+import { styleSource } from './helpers/shipped-modules.js';
 
 // UI cleanup (1 Nov): "Scan after every reply" (npc-state-delta.scan-every-reply) and its presets, the settings folds
 // (Meter presets, Expert) and the phone-width dossier window.
@@ -80,7 +81,7 @@ test('settings panel: Meter presets fold; Expert holds the five rarely needed gr
     // The groups the reader had open before keep working: one memory key, the What's sent refresh still follows its group.
     assert.match(index, /data-delta-settings-group="sent"/);
     assert.match(index, /const SETTINGS_OPEN_GROUPS_KEY = 'npc_state_delta_settings_open_groups'/);
-    const css = read('style.css');
+    const css = styleSource();
     assert.match(css, /\.delta-settings-group\[hidden\] \{ display: none; \}/);
     assert.match(css, /\.delta-settings-slot \.npc-state-delta-v2-presets-head \{ display: none; \}/);
 });

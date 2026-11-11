@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as branch from '../branch.js';
 import * as branchCore from '../branch-core.js';
-import { shippedModulePaths } from './helpers/shipped-modules.js';
+import { shippedModulePaths, styleSource } from './helpers/shipped-modules.js';
 
 const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const modules = shippedModulePaths();
@@ -47,7 +47,7 @@ test('2: no top-level constant in a shipped module goes unused', () => {
 });
 
 test('3: every extension class in style.css is used by a shipped module', () => {
-    const classes = [...new Set([...read('style.css').matchAll(/\.(npc-state-delta-[A-Za-z0-9_-]+)/g)].map(match => match[1]))];
+    const classes = [...new Set([...styleSource().matchAll(/\.(npc-state-delta-[A-Za-z0-9_-]+)/g)].map(match => match[1]))];
     // Every src/ module ships too, including the nested parts of the adapter.
     const shipped = [all, ...fs.readdirSync(new URL('../src/', import.meta.url), { recursive: true }).filter(name => name.endsWith('.js')).map(name => read(`src/${name}`))].join('\n');
     assert.deepEqual(classes.filter(name => !shipped.includes(name)), []);

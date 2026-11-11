@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { shippedStylePaths, styleSource } from './helpers/shipped-modules.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -138,4 +139,19 @@ test('a declared src/ module gets the same runtime checks as a top-level one', (
     } finally {
         fs.rmSync(copy, { recursive: true, force: true });
     }
+});
+
+test('style.css only imports its parts, each part is small and packaged', () => {
+    const entry = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
+    const rest = entry.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(line => line.trim()).filter(Boolean);
+    assert.ok(rest.length > 0 && rest.every(line => /^@import url\('\.\/style-[a-z-]+\.css'\);$/.test(line)), 'style.css holds only comments and @import lines');
+    const parts = shippedStylePaths();
+    assert.equal(parts.length, rest.length);
+    const script = fs.readFileSync(path.join(root, 'scripts', 'package.py'), 'utf8');
+    const listed = [...script.match(/^support_files = \[(.*)\]$/m)[1].matchAll(/'([^']+)'/g)].map(match => match[1]);
+    for (const name of parts) {
+        assert.ok(fs.readFileSync(path.join(root, name), 'utf8').split('\n').length <= 451, `${name} stays within 450 lines`);
+        assert.ok(listed.includes(name), `${name} is packaged`);
+    }
+    assert.ok(styleSource().includes('.npc-state-delta-extension {'), 'the parts carry the rules');
 });
