@@ -23,7 +23,7 @@ Story Block (kohz87/Story_block, the host), RPG Battle (kohz87/rpg_battle), Stor
 - `src/npc-meters.js`, `npc-meters-presets.js`, `npc-meters-screen.js`: the hosted `npc` domain, presets, card.
 - `src/fields/registry.js`: the one table of stored dossier fields. `src/scanner-request.js`, `relationship-pass.js`,
   `transcript.js`, `dossier-edit.js`, `util/html.js`.
-- `suite.js`, `suite-handshake.js`: the v1 Story Block handshake (offers nothing to a v2 host). `story-block-tabs.js` keeps only the dossier list rows and the empty-cast line the v2 adapter uses (the v1 tab registration was removed).
+- `suite.js`, `suite-handshake.js`, `story-block-tabs.js`: the v1 Story Block handshake (offers nothing to a v2 host).
 - `tests/*.test.js` (synthetic host, regression and adapter tests `storysuite-v2-*.test.js`), `tests/v2/break/`,
   `tests/compatibility-check.js`, `tests/runtime-smoke.mjs`, `tests/fixtures/` (golden files, Stage 9 budgets).
 - `tests/vendor/story-block/`: Story Block's testkit + runtime, vendored for the adapter tests (VERSION names the commit).
