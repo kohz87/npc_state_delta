@@ -253,7 +253,8 @@ const STYLES = `
 #${DOSSIER_ROOT_ID} .delta-map-switch button[aria-selected="true"] { color:var(--delta-accent-soft); background:rgba(216,188,120,.16); font-weight:600; }
 #${DOSSIER_ROOT_ID} .delta-map-see { float:right; margin:-5px 0 0 8px; min-height:30px; padding:3px 10px; font-size:.78rem; }
 #${DOSSIER_ROOT_ID} .delta-map-pane { min-width:0; min-height:0; display:flex; flex-direction:column; gap:10px; padding:14px 18px; overflow:hidden; }
-#${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode > .delta-document { display:none; }
+#${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode > .delta-document, #${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode > .delta-hero { display:none; }
+#${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode { grid-template-columns:minmax(0,1fr); }
 #${DOSSIER_ROOT_ID} .delta-map-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 #${DOSSIER_ROOT_ID} .delta-map-lenses { display:flex; gap:2px; padding:3px; max-width:100%; overflow-x:auto; border:1px solid var(--delta-line); border-radius:9px; background:rgba(0,0,0,.18); }
 #${DOSSIER_ROOT_ID} .delta-map-toggles { display:flex; gap:6px; margin-left:auto; }
@@ -293,8 +294,8 @@ const STYLES = `
 #${DOSSIER_ROOT_ID} .delta-map-strip-head { display:grid; min-width:0; }
 #${DOSSIER_ROOT_ID} .delta-map-strip-head b { overflow:hidden; color:var(--delta-accent-soft); font:700 1.1rem/1.15 Georgia,serif; text-overflow:ellipsis; white-space:nowrap; }
 #${DOSSIER_ROOT_ID} .delta-map-strip-head small { color:var(--delta-muted); }
-#${DOSSIER_ROOT_ID} .delta-map-bars { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px 14px; }
-#${DOSSIER_ROOT_ID} .delta-map-bar-label { display:flex; justify-content:space-between; gap:6px; font-size:.75rem; color:var(--delta-muted); }
+#${DOSSIER_ROOT_ID} .delta-map-bars { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px 28px; }
+#${DOSSIER_ROOT_ID} .delta-map-bar-label { display:flex; justify-content:space-between; gap:10px; min-width:0; white-space:nowrap; font-size:.75rem; color:var(--delta-muted); }
 #${DOSSIER_ROOT_ID} .delta-map-bar[data-on] .delta-map-bar-label span:first-child { color:var(--delta-text); font-weight:600; }
 #${DOSSIER_ROOT_ID} .delta-map-bar-value { font-family:ui-monospace,monospace; color:var(--delta-text); }
 #${DOSSIER_ROOT_ID} .delta-map-bar-value em { font-style:normal; color:var(--delta-accent); }
@@ -312,8 +313,6 @@ const STYLES = `
 }
 @media (max-width: 900px) {
   #${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode { display:block; overflow:auto; }
-  #${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode > .delta-hero { border-right:0; border-bottom:1px solid var(--delta-line); }
-  #${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode .delta-hero-media { height:380px; min-height:380px; }
   #${DOSSIER_ROOT_ID} .delta-map-pane { overflow:visible; }
   #${DOSSIER_ROOT_ID} .delta-map-body { display:grid; grid-template-columns:minmax(0,520px) minmax(0,1fr); align-items:start; gap:14px; }
   #${DOSSIER_ROOT_ID} .delta-map-frame { container-type:normal; }

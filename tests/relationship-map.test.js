@@ -202,3 +202,15 @@ test('the map wires Focus: button, double-tap, chip clear and portrait fill', ()
     assert.match(adapter, /refs\?\.fill\(pane\)/);
     assert.ok(adapter.split('\n').length < 450);
 });
+
+test('map mode hides the dossier hero and gives the map the full width; meters get their own spaced columns', async () => {
+    const { mapNodeHtml, buildFocusModel } = await import('../relationship-map-focus.js');
+    const adapter = fs.readFileSync(new URL('../relationship-map.js', import.meta.url), 'utf8');
+    assert.match(adapter, /delta-map-mode > \.delta-hero \{ display:none; \}/);
+    assert.match(adapter, /\.delta-spread\.delta-map-mode \{ grid-template-columns:minmax\(0,1fr\); \}/);
+    assert.doesNotMatch(adapter, /delta-map-mode \.delta-hero-media/);
+    assert.match(adapter, /\.delta-map-bars \{ display:grid; grid-template-columns:repeat\(4,minmax\(0,1fr\)\); gap:8px 28px; \}/);
+    const map = buildMapModel({ npcs: [npc('rika', { portrait: 'data:image/png;base64,AAAA' }), npc('vane')] }, {});
+    const face = mapNodeHtml(map.nodes.find(n => n.id === 'vane'), buildFocusModel({}, map, ''), {});
+    assert.match(face, /delta-map-face delta-portrait-placeholder[\s\S]*<span>V<\/span>/, 'initials when there is no portrait');
+});
