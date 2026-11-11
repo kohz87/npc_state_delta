@@ -46,7 +46,8 @@ ${PANEL} .delta-library-face { --rc:var(--dial); display:grid; justify-items:cen
 ${PANEL} .delta-library-face.selected { outline:2px solid var(--delta-accent); outline-offset:-1px; }
 ${PANEL} .delta-library-av { display:block; width:clamp(56px,6.5cqw,92px); height:clamp(56px,6.5cqw,92px); margin-bottom:10px; overflow:hidden; border-radius:var(--dsk-face-radius); box-shadow:0 0 0 2px var(--dsk-tile), 0 0 0 3.5px var(--rc); }
 ${PANEL} .delta-library-portrait { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 4%; }
-${PANEL} .delta-library-portrait.delta-portrait-placeholder, ${PANEL} .delta-tile-face.delta-portrait-placeholder { background:var(--face-flat); font-size:0; }
+${PANEL} .delta-library-portrait.delta-portrait-placeholder { display:grid; place-items:center; background:var(--face-flat); color:var(--delta-muted); font:700 clamp(15px,2.2cqw,26px)/1 var(--ss-font, system-ui, -apple-system, "Segoe UI", sans-serif); letter-spacing:.04em; }
+${PANEL} .delta-tile-face.delta-portrait-placeholder { background:var(--face-flat); font-size:0; }
 ${PANEL} .delta-library-face > b { max-width:100%; color:var(--delta-accent-soft); overflow-wrap:anywhere; }
 ${PANEL} .delta-library-meta { max-width:100%; font-size:var(--dt-meta); color:var(--delta-muted); overflow-wrap:anywhere; }
 
@@ -75,8 +76,8 @@ ${PANEL} .delta-board-name .delta-board-title { display:block; margin:0 !importa
 ${PANEL} .delta-board-name p { margin:4px 0 0; font-size:var(--dt-meta); }
 ${PANEL} .delta-board-pills { display:flex; flex-wrap:wrap; justify-content:center; gap:6px; margin-top:6px; }
 ${PANEL} .delta-pill { padding:1px 9px; border:1px solid var(--delta-line); border-radius:999px; font-size:var(--dt-pill); font-weight:700; color:var(--delta-text); white-space:nowrap; }
-${PANEL} .delta-pill-key { color:var(--held); border-color:color-mix(in srgb, var(--held) 50%, transparent); }
-${PANEL} .delta-pill-mood { color:var(--dsk-ten); border-color:color-mix(in srgb, var(--dsk-ten) 50%, transparent); }
+${PANEL} .delta-pill-key { color:color-mix(in srgb, var(--held) 72%, var(--delta-text)); border-color:color-mix(in srgb, var(--held) 50%, transparent); }
+${PANEL} .delta-pill-mood { color:color-mix(in srgb, var(--dsk-ten) 72%, var(--delta-text)); border-color:color-mix(in srgb, var(--dsk-ten) 50%, transparent); }
 ${PANEL} .delta-board-status { margin:4px 0 0; font-size:var(--dt-meta); color:var(--delta-muted); }
 ${PANEL} .delta-board-tiles { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:clamp(6px,1cqw,10px); padding:10px clamp(10px,2cqw,14px) 14px; }
 
@@ -84,7 +85,7 @@ ${PANEL} .delta-board-tiles { display:grid; grid-template-columns:repeat(2,minma
 ${PANEL} .delta-tile { --c:var(--delta-muted); display:grid; align-content:start; gap:4px; min-width:0; padding:9px 10px; border:1px solid var(--delta-line); border-radius:var(--dsk-tile-radius); background:var(--dsk-tile-bg); box-shadow:var(--dsk-tile-shadow); color:var(--delta-text); font:inherit; font-size:var(--dt-body); text-align:left; overflow-wrap:anywhere; }
 ${PANEL} button.delta-tile { cursor:pointer; }
 ${PANEL} .delta-tile-wide { grid-column:span 2; }
-${PANEL} .delta-tile-k { display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:var(--dt-kick); font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--c); }
+${PANEL} .delta-tile-k { display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:var(--dt-kick); font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:color-mix(in srgb, var(--c) 72%, var(--delta-text)); }
 ${PANEL} .delta-tile-arrow { font-size:12px; letter-spacing:0; color:var(--delta-muted); }
 ${PANEL} .delta-tile-mood::first-letter { text-transform:uppercase; }
 ${PANEL} .delta-tile-lead { font-weight:700; }
@@ -118,7 +119,7 @@ ${PANEL} .delta-library-foot { display:block; width:100%; padding:8px 12px; bord
 
 /* Two panes (the dial and name beside the tiles) when both fit: from the width the dial pane (250) and the tiles (2 x 150 and gaps) need. */
 @container dsr (min-width: ${TWO_PANE_MIN}px) {
-  ${PANEL} .delta-board { grid-template-columns:clamp(${PANE_HERO_MIN}px,32%,460px) minmax(0,1fr); align-items:stretch; }
+  ${PANEL} .delta-board { grid-template-columns:clamp(${PANE_HERO_MIN}px,32%,460px) minmax(0,1fr); align-items:stretch; height:100%; }
   ${PANEL} .delta-panes[data-screen="section"] .delta-board { grid-template-columns:clamp(${PANE_HERO_SLIM_MIN}px,40%,300px) minmax(0,1fr); }
   ${PANEL} .delta-board-hero { border-right:1px solid var(--delta-line); padding-bottom:14px; overflow:hidden; align-content:center; }
   /* a taller panel (the host's full screen) spreads the tiles over its height; a content-sized one keeps them as they are */

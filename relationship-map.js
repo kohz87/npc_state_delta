@@ -270,9 +270,9 @@ const STYLES = `
 #${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode > .delta-document, #${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode > .delta-hero { display:none; }
 #${DOSSIER_ROOT_ID} .delta-spread.delta-map-mode { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
 #${DOSSIER_ROOT_ID} .delta-map-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-#${DOSSIER_ROOT_ID} .delta-map-lenses { display:flex; gap:2px; padding:3px; max-width:100%; overflow-x:auto; border:1px solid var(--delta-line); border-radius:9px; background:rgba(0,0,0,.18); }
+#${DOSSIER_ROOT_ID} .delta-map-lenses { display:flex; gap:2px; padding:3px; min-width:0; max-width:100%; overflow-x:auto; border:1px solid var(--delta-line); border-radius:9px; background:rgba(0,0,0,.18); }
 #${DOSSIER_ROOT_ID} .delta-map-toggles { display:flex; gap:6px; margin-left:auto; }
-#${DOSSIER_ROOT_ID} .delta-map-lens, #${DOSSIER_ROOT_ID} .delta-map-toggle { flex:0 0 auto; min-height:34px; padding:0 11px; border:1px solid transparent; border-radius:7px; color:var(--delta-muted); background:transparent; font-size:.8rem; cursor:pointer; }
+#${DOSSIER_ROOT_ID} .delta-map-lens, #${DOSSIER_ROOT_ID} .delta-map-toggle { flex:0 1 auto; min-width:0; min-height:34px; padding:0 clamp(5px,1.7cqw,11px); border:1px solid transparent; border-radius:7px; color:var(--delta-muted); background:transparent; font-size:.8rem; cursor:pointer; }
 #${DOSSIER_ROOT_ID} .delta-map-toggle { border-color:var(--delta-line); }
 #${DOSSIER_ROOT_ID} .delta-map-lens[aria-pressed="true"], #${DOSSIER_ROOT_ID} .delta-map-toggle[aria-pressed="true"] { color:var(--delta-accent-soft); background:rgba(216,188,120,.16); border-color:var(--delta-line-strong); font-weight:600; }
 /* below the line the map and its ties block stack and scroll; the library bar stays under them */
@@ -287,12 +287,12 @@ const STYLES = `
 #${DOSSIER_ROOT_ID} .delta-map-ring-zero { stroke:var(--delta-line-strong); }
 #${DOSSIER_ROOT_ID} .delta-map-outer-word { fill:var(--delta-muted); font:italic 17px system-ui,sans-serif; letter-spacing:.08em; text-anchor:middle; }
 #${DOSSIER_ROOT_ID} .delta-map-bond-selected { stroke-width:2; }
-#${DOSSIER_ROOT_ID} .delta-map-you { position:absolute; left:50%; top:50%; width:clamp(44px,10%,68px); aspect-ratio:1/1; transform:translate(-50%,-50%); display:grid; place-items:center; overflow:hidden; padding:4px; border:1.5px solid var(--delta-text); border-radius:50%; color:var(--delta-text); background:#2a2733; font:700 .82rem/1.1 system-ui,sans-serif; text-align:center; text-overflow:ellipsis; white-space:nowrap; }
+#${DOSSIER_ROOT_ID} .delta-map-you { position:absolute; left:50%; top:50%; width:clamp(54px,11%,72px); aspect-ratio:1/1; transform:translate(-50%,-50%); display:grid; place-items:center; overflow:hidden; padding:4px; border:1.5px solid var(--delta-text); border-radius:50%; color:var(--delta-text); background:color-mix(in srgb, var(--delta-text) 16%, var(--delta-floor)); font:700 .82rem/1.1 system-ui,sans-serif; text-align:center; text-overflow:ellipsis; white-space:nowrap; }
 #${DOSSIER_ROOT_ID} .delta-map-node { --node:8.6cqw; position:absolute; z-index:1; width:max(44px,var(--node)); height:max(44px,var(--node)); padding:0; transform:translate(-50%,-50%); display:grid; place-items:center; border:0; border-radius:50%; background:transparent; cursor:pointer; }
 #${DOSSIER_ROOT_ID} .delta-map-node[data-status="scene"] { --node:11.4cqw; }
 #${DOSSIER_ROOT_ID} .delta-map-node[data-status="active"] { --node:9.8cqw; }
 #${DOSSIER_ROOT_ID} .delta-map-node[data-status="archived"] { --node:7cqw; }
-#${DOSSIER_ROOT_ID} .delta-map-avatar { width:var(--node); height:var(--node); display:grid; place-items:center; overflow:hidden; border:2px solid var(--tone,var(--map-grey)); border-radius:50%; background:#3a3740; }
+#${DOSSIER_ROOT_ID} .delta-map-avatar { width:var(--node); height:var(--node); display:grid; place-items:center; overflow:hidden; border:2px solid var(--tone,var(--map-grey)); border-radius:50%; background:var(--face-flat, #3a3740); }
 #${DOSSIER_ROOT_ID} .delta-map-face { width:100%; height:100%; object-fit:cover; object-position:center 18%; }
 #${DOSSIER_ROOT_ID} .delta-map-face.delta-portrait-placeholder { display:grid; place-items:center; color:var(--delta-text); font:700 calc(var(--node) * .42)/1 system-ui,sans-serif; }
 #${DOSSIER_ROOT_ID} .delta-map-node[data-status="archived"] .delta-map-avatar { opacity:.55; }
@@ -324,7 +324,7 @@ const STYLES = `
 }
 /* beside: the circle at its smallest readable size (MAP_CIRCLE_MIN) plus the card at its narrowest (MAP_CARD_MIN) and the room around them fit */
 @container dsr (min-width: ${MAP_CARD_BESIDE_MIN}px) {
-  #${DOSSIER_ROOT_ID} .delta-map-body { display:grid; grid-template-columns:minmax(0,1fr) clamp(${MAP_CARD_MIN}px,28cqw,360px); overflow:hidden; }
+  #${DOSSIER_ROOT_ID} .delta-map-body { display:grid; grid-template-columns:minmax(0,1fr) clamp(${MAP_CARD_MIN}px,28cqw,360px); grid-template-rows:minmax(0,1fr); overflow:hidden; }
   #${DOSSIER_ROOT_ID} .delta-map-stage { min-height:0; display:grid; grid-template-rows:minmax(0,1fr); padding-bottom:14px; }
   #${DOSSIER_ROOT_ID} .delta-map-frame { container-type:size; }
   #${DOSSIER_ROOT_ID} .delta-map { width:min(100cqw,100cqh); max-width:none; }

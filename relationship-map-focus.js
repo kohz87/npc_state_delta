@@ -225,12 +225,12 @@ ${root} .delta-map-bond { stroke:var(--tone,var(--map-grey)); stroke-dasharray:5
 ${root} .delta-map-bond-solid { stroke-dasharray:none; stroke-width:3; }
 ${root} .delta-map-node[data-focus="dim"] { opacity:.22; }
 ${root} .delta-map-node[data-focus="focus"] .delta-map-avatar { box-shadow:0 0 0 4px rgba(216,188,120,.25); }
-${root} .delta-map-word { color:var(--tone); font-size:.68rem; font-weight:700; line-height:1.2; }
+${root} .delta-map-word { color:color-mix(in srgb, var(--tone) 75%, var(--delta-text)); font-size:.68rem; font-weight:700; line-height:1.2; }
 ${root} .delta-map-focus-chip { display:inline-flex; align-items:center; gap:6px; min-height:34px; padding:0 4px 0 12px; border:1px solid var(--delta-accent); border-radius:999px; color:var(--delta-text); font-size:.8rem; }
 ${root} .delta-map-focus-clear { min-width:30px; min-height:30px; border:0; border-radius:50%; color:var(--delta-text); background:transparent; cursor:pointer; }
 ${root} .delta-map-ties { margin:0; font-size:var(--dt-meta); color:var(--delta-muted); }
 ${root} .delta-map-ties b { color:var(--delta-text); margin-right:6px; }
-${root} .delta-map-tie > [data-tone] { color:var(--tone); font-weight:700; }
+${root} .delta-map-tie > [data-tone] { color:color-mix(in srgb, var(--tone) 75%, var(--delta-text)); font-weight:700; }
 ${root} .delta-map-tie em { font-style:normal; }
 ${root} .delta-map-actions { display:flex; flex-wrap:wrap; gap:8px; }
 ${root} .delta-map-key-line { margin:0; color:var(--delta-muted); font-size:.78rem; }

@@ -22,7 +22,7 @@ export function boardTileHtml(tile = {}) {
     const raw = (Array.isArray(tile.lines) ? tile.lines.filter(Boolean) : []).map(String);
     // A lead (the toned bold start of the first line) joins that line with " · ", as the mockup's last-change tile reads;
     // any further line is the small muted one.
-    const first = tile.lead ? [`<span><b class="delta-tile-lead" style="color:${toneVar(tile.tone)}">${esc(tile.lead)}</b>${raw.length ? ` · ${esc(raw.shift())}` : ''}</span>`] : [];
+    const first = tile.lead ? [`<span><b class="delta-tile-lead" style="color:color-mix(in srgb, ${toneVar(tile.tone)} 72%, var(--delta-text))">${esc(tile.lead)}</b>${raw.length ? ` · ${esc(raw.shift())}` : ''}</span>`] : [];
     const lines = [...first, ...raw.map(line => `<span${tile.lead || tile.small ? ' class="delta-tile-small"' : ''}>${esc(line)}</span>`)];
     const body = [
         tile.big ? `<span class="delta-tile-big${tile.bigClass ? ` ${tile.bigClass}` : ''}">${esc(tile.big)}</span>` : '',

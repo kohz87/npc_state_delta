@@ -113,6 +113,9 @@ export const SECTIONS_STYLES = `
   /* the portrait runs full-bleed to the pane edges (no inset, no rounding), the sheet takes the rest */
   #${ROOT_ID} .delta-profile { grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); gap:0; padding:0; align-items:stretch; }
   #${ROOT_ID} .delta-profile-portrait { border-radius:0; }
+  /* the portrait stays whole beside a long sheet: the sheet scrolls inside its own column */
+  #${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="profile"] .delta-profile { height:100%; overflow:hidden; }
+  #${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="profile"] .delta-profile-sheet { min-height:0; max-height:100%; overflow:auto; overscroll-behavior:contain; }
   #${ROOT_ID} .delta-profile-sheet { align-content:start; padding:clamp(14px,2.2cqw,26px); }
   #${ROOT_ID} .delta-profile-cols { grid-template-columns:repeat(2,minmax(0,1fr)); }
   #${ROOT_ID} .delta-profile-portrait { position:sticky; top:0; max-height:none; height:100%; aspect-ratio:auto; }

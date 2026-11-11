@@ -95,6 +95,9 @@ export class DossierUiRender extends DossierUiPanel {
         }
         // the layout mark follows the panel's width on every draw (the panes are kept when only the width crossed the line)
         doc.querySelector('.delta-panes')?.setAttribute('data-layout', isNarrow(this.root.querySelector('.delta-panel')) ? 'phone' : 'desktop');
+        const search = doc.querySelector('[data-delta-library-search]');
+        const total = this.projection.index.length;
+        if (search) search.placeholder = `Search ${total > 0 ? `${total} people` : 'people'}…`;
         const count = doc.querySelector('.delta-library-foot[data-static]');
         if (count) count.outerHTML = libraryCountHtml(this.projection.index.length);
         const list = doc.querySelector('[data-delta-library-list]');
