@@ -30,7 +30,7 @@ const TODAY = {
         keyRelationships: ['keyRelationships'], customFields: ['customFields'], aliases: ['aliases'],
         // Step 6:
         relationshipSummary: ['relationshipSummary'], mood: ['mood'], location: ['location'], goal: ['goal'], status: ['status'],
-        memories: ['memories', 'manualMemories'],
+        memories: ['memories', 'manualMemories', 'memoryFacts'],
     },
     NPC_REVERT_GROUPS: [
         ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange', 'impactDay'],

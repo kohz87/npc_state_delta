@@ -68,6 +68,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         developmentContext: String(options.developmentContext || ''),
         allowTargetedDurableSeed: options.allowTargetedDurableSeed === true,
         memoryInputLimit,
+        memoryFacts: options.memoryFacts && typeof options.memoryFacts === 'object' ? options.memoryFacts : null,   // { source, player }: set only for a marked live reply
         customFieldNames: normalizeCustomFieldNames(options.customFieldNames),
     };
     if (Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext')) {

@@ -107,7 +107,8 @@ async function helpers(mockState, eventSource, sleep, replayUrl) {
     const stable = state => {
         const copy = JSON.parse(JSON.stringify(state));
         // The dossiers, the counters and the cards; not the clock stamps, the journal of rollbacks or the branch bookkeeping (those differ by when they ran).
-        for (const key of Object.keys(copy)) if (/^(rollback|branch)|^(lastScanAt|timeline|catchUp|checkpoints|scanCount|lineage|portraitAssets|formPortraitAssets)$/.test(key)) delete copy[key];
+        // The live-eligibility marks (memory facts) are bookkeeping too: a rebuild keeps them, but their position among the state's keys differs.
+        for (const key of Object.keys(copy)) if (/^(rollback|branch)|^(lastScanAt|timeline|catchUp|checkpoints|scanCount|lineage|portraitAssets|formPortraitAssets|memoryFactMarks)$/.test(key)) delete copy[key];
         for (const item of [...(copy.pendingBackfills || []), ...(copy.inlineCards || [])]) for (const key of ['requestedAt', 'lastAttemptAt', 'createdAt']) delete item[key];
         for (const list of [copy.npcs, ...(copy.inlineCards || []).map(entry => entry.cards)]) for (const npc of list || []) for (const key of ['createdAt', 'updatedAt', 'archivedAt']) delete npc[key];
         return copy;
@@ -119,6 +120,7 @@ test('parity: replaying a chat from an empty state gives the dossiers of the liv
     runScenario('parity', async h => {
         for (let i = 1; i <= 5; i += 1) await h.turn('We walk on.', i % 2 ? `Yunyun speaks, mark-${i}.` : `The road goes on, mark-${i}.`);
         const live = h.stable(h.runtime.getState());
+        const marksBefore = [...(h.runtime.getState().memoryFactMarks?.keys || [])];
         h.check(live.npcs.length >= 1, 'the live run made a dossier');
         const calls = h.scannerCalls().length;
         const catchUp = h.controller();
@@ -132,6 +134,7 @@ test('parity: replaying a chat from an empty state gives the dossiers of the liv
         h.equal(catchUp.status().outcome, 'done', 'the rebuild finished');
         h.check(h.scannerCalls().length > calls, 'the replay made model calls');
         h.equal(h.stable(h.runtime.getState()), live, 'replay from empty == the live run');
+        h.check(JSON.stringify([...(h.runtime.getState().memoryFactMarks?.keys || [])].sort()) === JSON.stringify([...marksBefore].sort()) && marksBefore.length > 0, 'the live-eligibility marks survive the rebuild');
         h.equal(h.published(), 1, 'one publication');
     });
 });

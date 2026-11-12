@@ -5,6 +5,7 @@
 import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { autoScanDue as autoScanDueAfterReply, replyMayChangeDossiers, replyScanned } from './scan-context.js';
 import { currentExchangeBodies } from './src/transcript.js';
+import { markLiveReply, memoryFactsOn } from './src/memory-fact-marks.js';
 import { chatLineage, lineageCheckpointKey, ensureBranchParentAnchor, migrateLegacyLineage } from './branch.js';
 import { getSettings } from './runtime-settings.js';
 import { narrationCaptureEnabled, latestMessageId, notify, replayScope } from './runtime-scan-helpers.js';
@@ -64,6 +65,7 @@ export function createAssistantHandlerPart(rt, deps, helpers) {
         // Receipt deduplication is separate from successful scan completion and cadence.
         // Store bounded source keys, never copies of narrative text or dossier state.
         receipts.add(eventSourceKey);
+        if (!replay && !forceBranchRescan) markLiveReply(state, eventSourceKey, { enabled: memoryFactsOn(settings) });   // (memory facts) a genuinely new live reply
         while (receipts.size > 64) receipts.delete(receipts.values().next().value);
         (replay ? replay.receipts : assistantReceipts).set(eventChatKey, receipts);
         if (Number.isInteger(messageId) && !staleHostActive(eventChatKey)) ensureBranchParentAnchor(state, getContext().chat || [], messageId, 'assistant-parent');

@@ -21,6 +21,7 @@ import { rememberCastAdmissions, seedCastAdmission } from './runtime-cast-sync.j
 import { dossierFor, metWithEntry } from './src/cast-dossier.js';
 import { normalizeSourceOfTruth } from './suite-handshake.js';
 import { captureJournalEntry, recordAcceptedCapture, recordReadMark } from './runtime-narration.js';
+import { phraseMerged, scanMemoryFacts, scanMemoryParagraph } from './src/memory-fact-scan.js';
 export function createScanPart(rt, deps) {
     const { attachGeneratedSecrets, beginScanOperation, castList, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanOperationCurrent, scanScenePresent, scenePresentAt, setChatState, storySuiteV2Meters, takeNarrationCapture, updateInjection } = deps;
     // Events per story day while Delta works alone (the pass counts them on the dossier). The day is Story Director's clock, which
@@ -119,9 +120,11 @@ export function createScanPart(rt, deps) {
         const hostedNotes = hostedMeters();
         const noteOptions = hostedNotes && !capture ? hostedNotePromptOptions(state, settings, messageId) : {};
         const eventWatch = capture ? (Array.isArray(capture.watch) ? capture.watch : []) : (noteOptions.eventWatch || []);
+        // (memory facts) Pending facts of replies inside this call's own window may be phrased in it; a one-pass capture sends none.
+        const memoryAsk = capture ? { text: '', handles: [] } : scanMemoryParagraph(state, settings, skippedWindow ? skippedWindow.readIds : ((manual || fullWindowScan) ? recentReplyIds(settings.scanDepth) : [messageId]), ctx.chat);
         const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, {
             currentTranscript, earlierOnly, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId), ...noteOptions,
-        }));
+        })) + memoryAsk.text;
 
         let relationshipEdgeCount = 0;
         let relationshipEdgeFallbacks = 0;
@@ -148,15 +151,9 @@ export function createScanPart(rt, deps) {
                     promptChars: prompt.length,
                     responseChars: String(raw ?? '').length,
                     retried: Boolean(retried),
-                    relationshipPass: false,
-                    relationshipTargets: 0,
-                    relationshipResponseChars: 0,
-                    relationshipRetried: false,
-                    relationshipEdges: relationshipEdgeCount,
-                    relationshipEdgeFallbacks,
-                    profileUpdates: profileUpdateCount,
-                    profileApplied: 0,
-                    profileEvidenceAdded: 0,
+                    relationshipPass: false, relationshipTargets: 0, relationshipResponseChars: 0, relationshipRetried: false,
+                    relationshipEdges: relationshipEdgeCount, relationshipEdgeFallbacks,
+                    profileUpdates: profileUpdateCount, profileApplied: 0, profileEvidenceAdded: 0,
                     stale: true,
                     at: Date.now(),
                 };
@@ -244,6 +241,8 @@ export function createScanPart(rt, deps) {
                 npc.present = false;
                 if (!compactWorldStateTurn) npc.worldActive = false;
             }
+            // (memory facts) Standalone only: hosted, the slice applies the move (its allowance, tier cut and gates), which this scan cannot see.
+            const factOpt = hostedMeters() ? null : scanMemoryFacts(state, settings, currentLineage, targetMessageId, ctx.name1);
             const merged = mergeScanResult(mergeBaseState, parsedForMerge, {
                 maxNpcs: settings.maxNpcs,
                 excludeNames: [...currentExclusions(), ...(state.dismissed || [])],
@@ -268,7 +267,9 @@ export function createScanPart(rt, deps) {
                 ...(manual ? {} : keyAwayScanOptions(mergeBaseState)),
                 partyLevels: partyLevelList(),
                 historicalRead: Boolean(replayScope() && !journaled), // (ONEPASSCAPR2-1) only a reply read before the journal existed keeps the old reading
+                memoryFacts: factOpt,
             });
+            merged.state = phraseMerged(merged.state, memoryAsk.handles, parsed, getContext().chat || []);
             if (earlierOnly) {
                 // Presence is the latest scene's: an earlier-only window leaves each person as last confirmed.
                 const before = new Map((state.npcs || []).map(npc => [npc.id, npc]));
@@ -310,7 +311,7 @@ export function createScanPart(rt, deps) {
                         responseChars: combinedResponseChars,
                         retried: combinedRetried,
                     };
-                    applyFocusedRelationshipDecisions(merged.state, combinedDecisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings));
+                    applyFocusedRelationshipDecisions(merged.state, combinedDecisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings), factOpt);
                     if (rt.lastScanMetrics) {
                         rt.lastScanMetrics.newNpcRelationshipTargets = combinedTargetCount;
                         rt.lastScanMetrics.newNpcRelationshipResponseChars = combinedResponseChars;
@@ -333,7 +334,7 @@ export function createScanPart(rt, deps) {
                 rt.lastScanMetrics.profileDevelopment = Array.isArray(merged.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [];
                 console.info('[NPC State Delta] dossier scan metrics', rt.lastScanMetrics);
             }
-            applyFocusedRelationshipDecisions(merged.state, relationshipPass.decisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings));
+            applyFocusedRelationshipDecisions(merged.state, relationshipPass.decisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings), factOpt);
             const postCleanup = applyStaleLifecycleAfterScan(merged.state, parsedForMerge, currentTranscript || transcript, settings, { keepIds: keyKeepIds(merged.state), noDelete: hostedReadsFailed(), now: clockNow() });
             const staleArchived = [...preCleanup.archived, ...postCleanup.archived]
                 .filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index);
