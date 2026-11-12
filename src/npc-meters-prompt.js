@@ -49,7 +49,9 @@ export function createNpcPrompt({
     const HIDDEN = 'hidden: never state or reveal; let it shape how they act';
     // (lean) The wording is said once, on the nearest locked note, and each note then reads "Name (hidden): text".
     const HIDDEN_ONCE = 'Lines marked (hidden) are secrets: never state or reveal them; let them shape how that person acts.';
-    // One short cue, with the notes feature on and someone present: the block is written, just before <Blocks>, even when <Blocks> is empty.
+    // One short cue, with the notes feature on (whoever is in the scene): the block is written, just before <Blocks>, even when <Blocks> is empty.
+    // Sent as a kept line ({ text, keep: true }): the host's tail budget (the run used 550 tokens) drops this module's optional lines first,
+    // and its section is last, so as an optional line the cue never reached a prompt. A host without kept lines takes the text as a line.
     const CHANGES_CUE = 'Whenever anything changed, write the <Changes> block (just before <Blocks>, which still ends the reply), even if <Blocks> is empty; a lie, secret, taste, tie or turning point gets its own line.';
     const HIDDEN_LINE = new RegExp(`^(.+?)(?:, ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}| \\(hidden\\)): .*$`, 'gm');
 
@@ -144,10 +146,10 @@ export function createNpcPrompt({
             const first = hidden.length ? -1 : noted.findIndex(line => / \(hidden\): /.test(line));
             if (first >= 0) noted[first] = `${HIDDEN_ONCE}\n${noted[first]}`;
             optional.push(...noted);
-            // Last of the per-reply parts: the model drifts into ending on an empty <Blocks> and drops <Changes> (the data of the live runs).
-            if (here.size) optional.push(CHANGES_CUE);
         }
-        return { lines: [...lines, ...notes], optional };
+        // Last of the per-reply parts: the model drifts into ending on an empty <Blocks> and drops <Changes> (the data of the live runs).
+        const cue = featureOn(FEATURE_NOTES) ? [{ text: CHANGES_CUE, keep: true }] : [];
+        return { lines: [...lines, ...notes, ...cue], optional };
     }
 
     /**
