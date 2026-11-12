@@ -64,5 +64,5 @@ test('scanner, Refresh, backfill and import prompts separate enduring body from 
     assert.match(backfill, PHYS);
     // (cleanup step 13) The rule above defines both; the generated shape lists the keys.
     assert.match(backfill, /,overallAppearance,appearance,appearanceState:refine\|change,/);
-    assert.match(buildDossierImportPrompt({ dossierText: 'Elin is small.', targetName: 'Elin', existingNpc: npc }), /Appearance=>overallAppearance \(enduring body\)\+appearance \(outfit\)/);
+    assert.match(buildDossierImportPrompt({ dossierText: 'Elin is small.', targetName: 'Elin', existingNpc: npc }), /Appearance=>overallAppearance \(body only: kind, age look, build, height, hair, eyes, marks\)\+appearance \(clothes and their state/);
 });

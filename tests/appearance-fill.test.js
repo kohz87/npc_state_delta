@@ -4,7 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildBackfillPrompt, buildDossierImportPrompt, buildProfileRefreshPrompt, buildScannerPrompt, createNpcRecord, DURABLE_PROFILE_LIMITS, mergeScanResult } from '../core.js';
-import { appendedLooks, blankLookFields, describedFeatures, fillLooksLine, fillWanted, missingFeatures, partialLookGaps } from '../appearance-fill.js';
+import { dossierDetailProjection } from '../dossier-ui.js';
+import { appendedLooks, blankLookFields, describedFeatures, fillLooksLine, fillWanted, missingFeatures, partialLookGaps, splitLook, withSplitLook } from '../appearance-fill.js';
 
 const NONE = { relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } };
 const story = 'Tamsin, the ferry keeper from the salt marsh, tied the boat and asked the stranger for the toll. The tide was out.';
@@ -270,4 +271,60 @@ test('when the stored overallAppearance is the combined string, the line quotes 
     const whole = combined.replace(/\.$/, ', watery blue eyes.');
     assert.equal(appendedLooks(combined, whole), whole, 'the quoted text plus the eyes is accepted');
     assert.equal(run(npc, { overallAppearance: whole, overallAppearanceState: 'refine' }, story, FILL).overallAppearance, whole);
+});
+
+// Owner play bug (12 Nov): the body was written into the clothes field and overallAppearance stayed blank, so the dossier showed no Look.
+const OWNER_WEARING = 'Petite build, barely five feet tall, dark hair slipping loose from a wooden bodkin; coarse wool smock straining across extraordinarily heavy, round breasts resting against the wooden counter.';
+const OWNER_BODY = 'Petite build, barely five feet tall, dark hair slipping loose from a wooden bodkin';
+const OWNER_CLOTHES = 'coarse wool smock straining across extraordinarily heavy, round breasts resting against the wooden counter.';
+
+test('rule: body traits written into the clothes field move to overallAppearance, in the original words (owner text)', () => {
+    const split = splitLook(person({ appearance: OWNER_WEARING }));
+    assert.equal(split.moved, true);
+    assert.equal(split.overall, OWNER_BODY);
+    assert.equal(split.appearance, `${OWNER_BODY}; ${OWNER_CLOTHES}`, 'the stored combined shape, every word kept');
+});
+
+test('rule: the split never moves clothing, never invents words, and leaves a clothes-only text alone', () => {
+    assert.equal(splitLook(person({ appearance: 'A salt-stained oilskin coat, boots.' })).moved, false);
+    const mixed = splitLook(person({ appearance: 'Tall, lean, wearing a salt-stained coat and boots' }));
+    assert.equal(mixed.overall, 'Tall, lean');
+    assert.match(mixed.appearance, /wearing a salt-stained coat and boots/);
+    for (const word of mixed.overall.split(/\W+/).filter(Boolean)) assert.ok('Tall, lean, wearing a salt-stained coat and boots'.includes(word));
+});
+
+test('rule: a partial overallAppearance gets only the body traits it lacks; named forms, a fixed appearance and pack words are not split', () => {
+    const partial = person({ overallAppearance: 'Young human woman', appearance: `Young human woman; ${OWNER_WEARING}` });
+    const split = splitLook(partial);
+    assert.equal(split.overall, `Young human woman; ${OWNER_BODY}`);
+    assert.equal(splitLook(person({ overallAppearance: 'Tall woman', appearance: 'Tall woman; tall and lean, a coat' })).overall.includes('lean'), true);
+    assert.equal(splitLook(person({ appearance: OWNER_WEARING, manualProfileFields: ['appearance'] })).moved, false);
+    assert.equal(splitLook(person({ appearance: OWNER_WEARING, appearanceForms: [{ name: 'Fox', appearance: 'fox' }] })).moved, false);
+    assert.equal(splitLook(person({ appearance: OWNER_WEARING, castFrom: { first: { overallAppearance: 'x' } } })).moved, false);
+});
+
+test('display only: the dossier shows Look and Wearing for the old record; the stored record is untouched', () => {
+    const old = person({ appearance: OWNER_WEARING });
+    const before = JSON.stringify(old);
+    const shown = dossierDetailProjection(old);
+    assert.equal(shown.appearanceModel.overallAppearance, OWNER_BODY);
+    assert.equal(shown.currentPresentation, OWNER_CLOTHES.replace(/\.$/, '').concat('.'));
+    assert.equal(JSON.stringify(old), before);
+    assert.equal(withSplitLook(old).overallAppearance, OWNER_BODY);
+});
+
+test('rule: the next write stores the split, and the fill then only adds what is still missing (eyes)', () => {
+    const old = person({ appearance: OWNER_WEARING });
+    assert.deepEqual(partialLookGaps(old), ['eyes'], 'hair and build are now described; only eyes are missing');
+    assert.deepEqual(blankLookFields(old), []);
+    const saved = run(old, { overallAppearance: `${OWNER_BODY}, grey eyes.`, overallAppearanceState: 'refine' }, story, FILL);
+    assert.equal(saved.overallAppearance.startsWith(OWNER_BODY), true);
+    assert.match(saved.overallAppearance, /grey eyes/);
+    assert.match(saved.appearance, /coarse wool smock/);
+});
+
+test('the capture and Refresh prompts say plainly: overallAppearance = body, appearance = clothes and their state', () => {
+    const line = fillLooksLine(person({ appearance: OWNER_WEARING }));
+    assert.match(line, /overallAppearance is the body \(kind, age look, build, eyes, hair, marks\); appearance is clothes and their state/);
+    assert.match(buildDossierImportPrompt({ dossierText: 'Name: Tamsin', targetName: 'Tamsin', existingNpc: person() }), /overallAppearance \(body only: kind, age look, build, height, hair, eyes, marks\)\+appearance \(clothes and their state/);
 });

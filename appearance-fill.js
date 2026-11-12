@@ -10,9 +10,9 @@
    closing full stop may give way to the addition's comma). Pure. */
 
 import { DURABLE_PROFILE_LIMITS } from './core-mechanics.js';
-import { appearanceText } from './appearance-text.js';
+import { appearanceClauses, appearanceText, combineAppearance } from './appearance-text.js';
 import { currentPresentationText } from './appearance-model.js';
-import { PHYSICAL_TRAITS } from './appearance-physical.js';
+import { CHANGEABLE_PRESENTATION, PHYSICAL_TRAITS, physicalTraitKeys } from './appearance-physical.js';
 
 const blank = value => !String(value ?? '').trim();
 
@@ -46,14 +46,63 @@ const eligible = npc => {
     return !(Array.isArray(npc.manualProfileFields) && npc.manualProfileFields.includes('appearance'));
 };
 
+// The split of a look written into the clothes field (the scanner, the capture or a fill put build, height, hair ... in `appearance` and left
+// overallAppearance blank or short). Pure and deterministic; the owner's words move whole, nothing is added or reworded.
+// A comma piece is BODY when it names a physical trait (PHYSICAL_TRAITS keys) and no clothing/condition word; CLOTHES when it names clothing, gear or
+// condition; any other piece follows the piece before it (a leading one stays with the clothes). A piece whose traits the overall text already
+// describes stays where it is (no repeat). Named forms, a manually fixed appearance and pack-cast first words are never split.
+const splittable = npc => eligible(npc) && !npc.castFrom?.first;
+const limit = () => DURABLE_PROFILE_LIMITS?.appearance || 800;
+const pieceClass = piece => (CHANGEABLE_PRESENTATION.test(piece) ? 'clothes' : physicalTraitKeys(piece).length ? 'body' : null);
+
+/** { overall, appearance, moved } for a record: the body clauses of its clothes text moved into overallAppearance. `moved` is false (and the
+ *  texts the stored ones) when there is nothing to move. Stored data is not touched; callers use the result for display and on a write. */
+export function splitLook(npc = {}) {
+    const same = { overall: appearanceText(npc?.overallAppearance), appearance: appearanceText(npc?.appearance), moved: false };
+    if (!splittable(npc)) return same;
+    const overall = same.overall;
+    const source = overall ? appearanceText(currentPresentationText(npc)) : same.appearance;
+    const have = new Set(overall ? PHYSICAL_TRAITS.map(([key]) => key).filter(key => patternOf(key).test(overall)) : []);
+    const body = [];
+    const clothes = [];
+    for (const clause of appearanceClauses(source)) {
+        const stop = clause.match(/[.!?]+$/)?.[0] || '';
+        const pieces = clause.slice(0, clause.length - stop.length).split(/\s*,\s*/).filter(Boolean);
+        const kinds = pieces.map(piece => {
+            const found = pieceClass(piece);
+            return found === 'body' && physicalTraitKeys(piece).every(key => have.has(key)) ? 'clothes' : found;
+        });
+        // A piece naming nothing follows the piece before it; leading ones go with the first body piece when that is what comes next.
+        const firstFound = kinds.find(Boolean);
+        let last = firstFound === 'body' ? 'body' : 'clothes';
+        const mine = { body: [], clothes: [] };
+        pieces.forEach((piece, index) => { last = kinds[index] || last; mine[last].push(piece); });
+        const lastKind = last;
+        if (mine.body.length) body.push(mine.body.join(', ') + (lastKind === 'body' ? stop : ''));
+        if (mine.clothes.length) clothes.push(mine.clothes.join(', ') + (lastKind === 'clothes' ? stop : ''));
+    }
+    if (!body.length) return same;
+    const moved = overall ? `${overall.replace(/[\s.;,]+$/, '')}; ${body.join('; ')}` : body.join('; ');
+    if (moved.length > limit()) return same;
+    return { overall: moved, appearance: combineAppearance(moved, clothes.join('; ')), moved: true };
+}
+
+/** The record with its look split (a copy), or the record itself when nothing moves. */
+export function withSplitLook(npc) {
+    const split = npc && typeof npc === 'object' ? splitLook(npc) : null;
+    return split?.moved ? { ...npc, overallAppearance: split.overall, appearance: split.appearance } : npc;
+}
+
 /** The blank look fields a fill may write for this record, or [] when none/ineligible (dead, archived, named forms in use). */
-export function blankLookFields(npc = {}) {
+export function blankLookFields(raw = {}) {
+    const npc = withSplitLook(raw);
     if (!eligible(npc)) return [];
     return [blank(npc.overallAppearance) && 'overallAppearance', blank(npc.appearance) && blank(npc.unclassifiedAppearance) && 'appearance'].filter(Boolean);
 }
 
 /** The hair / eyes / build a fill may append to this record's PARTIAL overallAppearance, or [] (blank, complete or ineligible). */
-export function partialLookGaps(npc = {}) {
+export function partialLookGaps(raw = {}) {
+    const npc = withSplitLook(raw);
     return eligible(npc) ? missingFeatures(npc.overallAppearance) : [];
 }
 
@@ -70,7 +119,8 @@ export const isReadersOwn = (npc, playerName) => {
 export const fillAllowed = (npc, playerName) => fillWanted(npc) && !isReadersOwn(npc, playerName);
 
 /** The prompt's tail line for a fill call, or '' (static rules stay untouched; the line exists only on this call). */
-export function fillLooksLine(npc = {}) {
+export function fillLooksLine(raw = {}) {
+    const npc = withSplitLook(raw);
     const fields = blankLookFields(npc);
     const gaps = partialLookGaps(npc);
     if (!fields.length && !gaps.length) return '';
@@ -81,7 +131,7 @@ export function fillLooksLine(npc = {}) {
         const clothes = appearanceText(currentPresentationText(npc));
         parts.push(`overallAppearance is exactly ${JSON.stringify(appearanceText(npc.overallAppearance))} and does not yet describe this person's ${gaps.join(', ')}. Return overallAppearance as that quoted text, unchanged, followed by a short addition for ${gaps.join(', ')} only, fitted to what the story and dossier say (kind and its own features, age, role, region, setting).${clothes ? ` The current-presentation text ${JSON.stringify(clothes)} is appearance, never part of overallAppearance.` : ''} Add nothing already described, and never a second colour or style for anything already stated.`);
     }
-    return `\nFILL LOOKS: ${parts.join(' ')} Never contradict or repeat anything stated; invent nothing else.`;
+    return `\nFILL LOOKS: ${parts.join(' ')} Never contradict or repeat anything stated; invent nothing else. overallAppearance is the body (kind, age look, build, eyes, hair, marks); appearance is clothes and their state in the fewest words.`;
 }
 
 // What `next` adds to `prior`, or '': all of `prior` word for word, then more. A closing full stop (or ; ,) of `prior` may give way to the

@@ -12,7 +12,7 @@ import {
     isSafeUnmarkedDurableReplacement,
 } from './core-mechanics.js';
 import { APPEARANCE_FORM_LIMIT, APPEARANCE_MODEL_VERSION, appearanceText, clean, formKey, formState, hasOwn, sameAppearance, stripOverallPrefix } from './appearance-text.js';
-import { appendedLooks, attemptsExtension } from './appearance-fill.js';
+import { appendedLooks, attemptsExtension, withSplitLook } from './appearance-fill.js';
 import { filledGuess, guessedTraits, mergeRefinement, physicalTraitSwaps, settledGuess, preserveOmittedPhysicalTraits, withoutSharedPieces, withoutTraitSwaps } from './appearance-physical.js';
 import { groundedTraitEvent } from './core-durable-grounding.js';
 import { completeFormWithShared, normalizeAppearanceForms, normalizeAppearanceModel, resolveNpcAppearance } from './appearance-model.js';
@@ -209,6 +209,11 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
     // a selected form stops repeating pieces they already cover.
     if (next.overallAppearance && next.overallAppearance !== priorOverall && !next.currentForm && !next.currentFormUnknown) {
         next.appearance = withoutSharedPieces(stripOverallPrefix(next.appearance, priorOverall), next.overallAppearance);
+    }
+    // A body the scan left in the clothes field (overallAppearance blank or short) moves to overallAppearance, in its own words (appearance-fill.js splitLook).
+    if (!next.currentForm && !next.currentFormUnknown && !next.appearanceForms.length) {
+        const split = withSplitLook({ ...record, ...next });
+        if (split.overallAppearance !== next.overallAppearance) { next.overallAppearance = split.overallAppearance; next.appearance = split.appearance; }
     }
     next.appearanceModelVersion = APPEARANCE_MODEL_VERSION;
     // (card traits win) Provenance of a fill guess: what a fill call newly wrote is replaceable, a story-given value is not.
