@@ -3,7 +3,7 @@ import { escapeHtml } from './src/util/html.js';
 import { awayRange } from './src/key-people.js';
 import { changeStamp, dossierDetailProjection, plain, RELATIONSHIP_AXES, wholeNumber } from './dossier-ui-model.js';
 import { v2MetersProjection } from './dossier-ui-meters.js';
-import { noteTieTags, readTieRows } from './core-keyrel.js';
+import { noteTieTags, readTieRows, tieRoster } from './core-keyrel.js';
 import { libraryTone, moodTile } from './dossier-ui-view-model.js';
 
 export function sortDossierIndex(rows = []) {
@@ -143,13 +143,14 @@ export function projectDossierState(state = {}, status = {}) {
     const keyViews = state?.keyViews && typeof state.keyViews === 'object' ? state.keyViews : {};
     const castViews = state?.castViews && typeof state.castViews === 'object' ? state.castViews : {};
     const sheetLevels = state?.sheetLevels && typeof state.sheetLevels === 'object' ? state.sheetLevels : {};
+    const tieNames = tieRoster(records);   // once for the whole projection, not once per person
     const details = records.map(npc => {
         const detail = dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames });
         const meters = v2MetersProjection(Object.hasOwn(meterViews, String(npc?.id ?? '')) ? meterViews[npc.id] : null);
         const key = keyProjection(Object.hasOwn(keyViews, String(npc?.id ?? '')) ? keyViews[npc.id] : null);
         const cast = castProjection(Object.hasOwn(castViews, String(npc?.id ?? '')) ? castViews[npc.id] : null);
         // The ties as the board shows them: type, priority order and the Older fold (core-keyrel.js); a tie tag from the notes wins over the words.
-        const tieRows = readTieRows(npc, { npcs: records, day: Number.isInteger(state?.storyDay) ? state.storyDay : null, tags: noteTieTags(meters?.notes?.ties) })
+        const tieRows = readTieRows(npc, { npcs: records, roster: tieNames, day: Number.isInteger(state?.storyDay) ? state.storyDay : null, tags: noteTieTags(meters?.notes?.ties) })
             .map(({ index, ...row }) => row);
         return { ...detail, tieRows, ...(meters?.relChange ? { lastRelationshipChange: ownRelationshipChange(detail.lastRelationshipChange, meters.relChange) } : {}), ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}), ...(Object.hasOwn(sheetLevels, String(npc?.id ?? '')) ? { levelFromSheet: true } : {}) };
     }).filter(npc => npc.id);

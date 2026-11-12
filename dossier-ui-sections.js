@@ -131,7 +131,7 @@ function tieHtml(row) {
     const parsed = parseKeyRelationshipEntry(row.entry);
     if (!parsed) return `<div class="delta-bond" data-tone="grey"><p>${escapeHtml(plain(row.entry))}</p></div>`;
     // The relation as written goes into the description (not repeated when it is just the type word).
-    const description = [String(parsed.relation).toLowerCase() === row.type ? '' : parsed.relation, parsed.dynamic].map(plain).filter(Boolean).join(' — ');
+    const description = [String(parsed.relation).toLowerCase() === row.type ? '' : parsed.relation, parsed.dynamic].map(value => plain(value)).filter(Boolean).join(' — ');
     const why = row.state === 'died' ? ' · † died' : (row.state === 'left' ? ' · left' : '');
     const quiet = row.state === 'faded' && Number.isInteger(row.quiet) ? `${description ? ' · ' : ''}not mentioned for ${row.quiet} days` : '';
     return `<div class="delta-bond" data-tone="${TIE_TONES[row.type] ?? 'grey'}" data-tie-type="${escapeHtml(row.type)}"><span class="delta-bond-word">${escapeHtml(TIE_TYPE_LABELS[row.type] ?? 'Passing')}</span><b>${escapeHtml(parsed.subject)}${why ? `<span class="delta-bond-why">${why}</span>` : ''}</b>${description || quiet ? `<p>${escapeHtml(description)}${quiet}</p>` : ''}</div>`;

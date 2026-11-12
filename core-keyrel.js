@@ -103,17 +103,32 @@ const tieParts = entry => {
 /** Whether this person records ties' last mentions yet (an object `tieSeen`, written by a scan that had a story day). Without it nothing fades. */
 export const tiesTracked = npc => !!npc && typeof npc.tieSeen === 'object' && npc.tieSeen !== null && !Array.isArray(npc.tieSeen);
 
+/** The name/alias → person map of a roster, for readTieRows/narratorTies/recordTieMentions: build it once per projection, not per person. */
+export function tieRoster(npcs) {
+    const map = new Map();
+    const labels = new Map();   // person -> every name key they answer to (map.labels), so a mention check never scans the roster
+    for (const other of Array.isArray(npcs) ? npcs : []) {
+        for (const label of [other?.name, ...(other?.aliases || [])]) {
+            if (!label) continue;
+            const key = normalizeName(label);
+            map.set(key, other);
+            labels.set(other, [...(labels.get(other) || []), key]);
+        }
+    }
+    map.labels = labels;
+    return map;
+}
+
 /**
  * The ties of one person, read for the board and the narrator: [{ entry, name, key, type, rank, seen, state }] in priority order
  * (high types, then Interest, then Passing; most recently mentioned first inside a type). `state`: 'active', 'faded' (not mentioned for
  * its tier's days), 'left' (the other person is archived), 'died' (a death mark or the other person's life state). Only when
  * tiesTracked(npc) does anything leave 'active'; an older chat reads exactly as before. `day`: the story day now (null: no fading by time).
- * `tags(name)`: optional pack/player tie tags of the person.
+ * `tags(name)`: optional pack/player tie tags of the person. `roster`: tieRoster(npcs) built once by a caller that reads many people (else built here).
  */
-export function readTieRows(npc, { npcs = [], day = null, tags = () => [] } = {}) {
+export function readTieRows(npc, { npcs = [], day = null, tags = () => [], roster = null } = {}) {
     const tracked = tiesTracked(npc);
-    const others = new Map();
-    for (const other of Array.isArray(npcs) ? npcs : []) for (const label of [other?.name, ...(other?.aliases || [])]) if (label) others.set(normalizeName(label), other);
+    const others = roster || tieRoster(npcs);
     const rows = (Array.isArray(npc?.keyRelationships) ? npc.keyRelationships : []).map((entry, index) => {
         const { text, name, rest } = tieParts(entry);
         const key = normalizeName(name);
@@ -133,9 +148,9 @@ export function readTieRows(npc, { npcs = [], day = null, tags = () => [] } = {}
 }
 
 /** The ties the narrator may be told of: active ones in priority order, plus a died/left one only when `scene` (text) names the person. */
-export function narratorTies(npc, { npcs = [], day = null, scene = '', tags } = {}) {
+export function narratorTies(npc, { npcs = [], day = null, scene = '', tags, roster = null } = {}) {
     const sceneText = normalizeName(scene);
-    return readTieRows(npc, { npcs, day, tags }).filter(row => row.state === 'active'
+    return readTieRows(npc, { npcs, day, tags, roster }).filter(row => row.state === 'active'
         || (row.state === 'died' && row.key && sceneText.includes(row.key)));
 }
 
@@ -148,8 +163,12 @@ function tieEvictionIndex(current, tieState) {
     return weakest ? weakest.index : -1;
 }
 
-/** `tieSeen` after a reply on story `day`: each tie whose person `text` (the reply prose) or `named` (names in tie lines) mentions is marked `day`. */
-export function recordTieMentions(npc, { day, text = '', named = [] } = {}) {
+/**
+ * `tieSeen` after a reply on story `day`: each tie whose person `text` (the reply prose) or `named` (names in tie lines) mentions is marked `day`.
+ * A mention is the whole name or one of that person's known aliases (`roster`: tieRoster of the cast) as whole words; never a first word or a title
+ * ("the harbour captain" is not Captain Vane).
+ */
+export function recordTieMentions(npc, { day, text = '', named = [], roster = null } = {}) {
     if (!npc || !Number.isInteger(day)) return undefined;
     const hay = ` ${normalizeName(text)} `;
     const tied = new Set((Array.isArray(named) ? named : []).map(entry => normalizeName(tieParts(entry).name)));
@@ -157,8 +176,8 @@ export function recordTieMentions(npc, { day, text = '', named = [] } = {}) {
     for (const entry of Array.isArray(npc.keyRelationships) ? npc.keyRelationships : []) {
         const key = normalizeName(tieParts(entry).name);
         if (!key) continue;
-        const first = key.split(/\s+/)[0];
-        if (hay.includes(` ${key} `) || tied.has(key) || (first.length >= 4 && hay.includes(` ${first} `))) next[key] = Math.max(day, Number.isInteger(next[key]) ? next[key] : day);
+        const labels = [key, ...(roster?.labels?.get(roster.get(key)) || [])];
+        if (tied.has(key) || labels.some(label => label && hay.includes(` ${label} `))) next[key] = Math.max(day, Number.isInteger(next[key]) ? next[key] : day);
     }
     for (const key of Object.keys(next)) if (!(npc.keyRelationships || []).some(entry => normalizeName(tieParts(entry).name) === key)) delete next[key];
     return tiesTracked(npc) || Object.keys(next).length ? next : undefined;

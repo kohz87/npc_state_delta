@@ -253,3 +253,96 @@ test('dossier Ties section: type headings in priority order, every entry its div
     assert.ok(html.indexOf('delta-older-ties') > html.indexOf('Bregje'), 'Older ties last');
     assert.doesNotMatch(tiesSectionHtml({ ...shown, tieRows: undefined, tieSeen: undefined, keyRelationships: ['Joren — carter'] }), /Older ties/);
 });
+
+// ---- Fix round 2 (review probes): stray digit, hosted story day, cap 8 live, whole-name mentions, one roster map ----
+import { setStoryDayAtSource } from '../core.js';
+import { tieDayAt, useTranscriptSource } from '../src/transcript.js';
+import { tieRoster } from '../core-keyrel.js';
+
+test('Ties section: a tie with no dynamic shows no stray digit, and a relation equal to its type shows no description', () => {
+    const html = tiesSectionHtml({ keyRelationships: ['Hale — mentor', 'Bregje — rival', 'Ann — stranger | met once'] });
+    assert.match(html, /<p>mentor<\/p>/);
+    assert.doesNotMatch(html, /<p>[^<]*\b[01]\b[^<]*<\/p>/);
+    assert.doesNotMatch(html.slice(html.indexOf('Bregje')), /^[^]*?<p>1<\/p>/);
+    assert.match(html, /<p>stranger — met once<\/p>/);
+});
+
+test('story day of ties: the hosted clock at the reply when there is one (the reply\'s own day, not now), else the dated text', () => {
+    useTranscriptSource({ context: () => ({ chat: [{ mes: 'one' }, { mes: 'two' }, { mes: 'three' }] }) });
+    try {
+        assert.equal(tieDayAt(1), null, 'no clock and no dated block: no day');
+        setStoryDayAtSource(index => 100 + index);
+        assert.equal(tieDayAt(1), 101);
+        assert.equal(tieDayAt(0), 100, 'a Re-read of an older reply gets that reply\'s day');
+        assert.equal(tieDayAt(), 102, 'now: the last message');
+        setStoryDayAtSource(() => { throw new Error('host gone'); });
+        assert.equal(tieDayAt(1), null);
+    } finally { setStoryDayAtSource(null); }
+});
+
+test('mergeScanResult records the hosted day (tieDay) and reads it back the same on replay; a plain storyDay still works', () => {
+    const base = { turn: 1, npcs: [{ ...npcOf(['Joren — carter']), id: 'npc_rika', present: true }], candidates: [] };
+    const scan = { npcs: [{ name: 'Rika', present: true }] };
+    const run = opts => mergeScanResult(structuredClone(base), scan, { turn: 2, calendarSource: 'Joren grumbled at Rika.', ...opts }).state.npcs[0].tieSeen;
+    assert.deepEqual(run({ tieDay: 4000 }), { joren: 4000 });
+    assert.deepEqual(run({ tieDay: 4000, storyDay: 12 }), { joren: 4000 }, 'the hosted day wins');
+    assert.deepEqual(run({ storyDay: 12 }), { joren: 12 });
+});
+
+const EIGHT = ['Joren — carter', 'Odda — ferrywoman', 'Bregje — rival | clashes', 'Derk — friend', 'Hale — mentor', 'Mara — sister', 'Pim — neighbour', 'Lise — client'];
+const SEEN8 = { joren: 1, odda: 2, bregje: 3, derk: 4, hale: 5, mara: 6, pim: 7, lise: 8 };
+const rikaWith = (bonds, seen) => ({ id: 'npc_rika', name: 'Rika', present: true, keyRelationships: bonds, tieSeen: seen });
+const mergeTie = (bonds, seen, scanNpc, withRecords = false) => {
+    const others = withRecords ? ['Joren', 'Odda', 'Bregje', 'Derk', 'Hale', 'Mara', 'Pim', 'Lise', 'Tobin'].map(n => ({ id: `npc_${n.toLowerCase()}`, name: n, present: false })) : [];
+    const base = { turn: 1, npcs: [rikaWith(bonds, seen), ...others], candidates: [] };
+    return mergeScanResult(base, { npcs: [{ name: 'Rika', present: true, ...scanNpc }] }, { turn: 2, tieDay: 12, calendarSource: 'Rika read the letter from Tobin.' }).state.npcs.find(n => n.id === 'npc_rika');
+};
+const TOBIN = { keyRelationships: ['Tobin — courier | brings letters'], keyRelationshipsState: 'update' };
+
+test('cap 8 live (through mergeScanResult): eight ties stay eight; five plus a new one make six', () => {
+    for (const records of [false, true]) {
+        assert.equal(mergeTie(EIGHT, SEEN8, {}, records).keyRelationships.length, 8, `eight kept (records ${records})`);
+        const five = mergeTie(EIGHT.slice(0, 5), SEEN8, TOBIN, records);
+        assert.equal(five.keyRelationships.length, 6, 'the new tie is not dropped');
+        assert.ok(five.keyRelationships.some(e => /^Tobin/.test(e)));
+        assert.equal(five.tieSeen.tobin, 12);
+    }
+});
+
+test('cap 8 live: a full list takes the new tie in and drops the weakest, least recently mentioned; the Ally survives', () => {
+    for (const records of [false, true]) {
+        const out = mergeTie(EIGHT, SEEN8, TOBIN, records);
+        assert.equal(out.keyRelationships.length, 8, `still eight (records ${records})`);
+        assert.ok(out.keyRelationships.some(e => /^Tobin/.test(e)), 'new tie in');
+        assert.ok(!out.keyRelationships.some(e => /^Joren/.test(e)), 'the oldest Passing tie out');
+        assert.ok(out.keyRelationships.some(e => /^Mara/.test(e)), 'the Ally is kept');
+        assert.ok(out.keyRelationships.some(e => /^Odda/.test(e)), 'only one is replaced');
+    }
+});
+
+test('a chat that records no mentions keeps its list at five, as before', () => {
+    const out = mergeScanResult({ turn: 1, npcs: [{ id: 'npc_rika', name: 'Rika', present: true, keyRelationships: EIGHT }], candidates: [] }, { npcs: [{ name: 'Rika', present: true }] }, { turn: 2 }).state.npcs[0];
+    assert.equal(out.keyRelationships.length, 5);
+});
+
+test('mentions: the whole name or a known alias; no first word, no title ("the harbour captain" is not Captain Vane)', () => {
+    const npc = npcOf(['Grey Ledger Inspector — questioned her once', 'Captain Vane — owes a debt', 'Sister Temiwa — friend', 'Odda — ferrywoman'], { 'grey ledger inspector': 1, 'captain vane': 1, 'sister temiwa': 1, odda: 1 });
+    const text = 'Mist lay low in the grey half-light; the harbour captain waved; her sister wrote.';
+    assert.deepEqual(recordTieMentions(npc, { day: 30, text }), npc.tieSeen, 'nothing marked');
+    assert.equal(recordTieMentions(npc, { day: 30, text: 'Captain Vane nodded.' })['captain vane'], 30);
+    const roster = tieRoster([{ id: 'v', name: 'Captain Vane', aliases: ['the Skipper'] }, { id: 'o', name: 'Odda', aliases: [] }]);
+    assert.equal(recordTieMentions(npc, { day: 31, text: 'The Skipper waved.', roster })['captain vane'], 31, 'a known alias counts');
+    assert.equal(recordTieMentions(npc, { day: 31, text: 'The Skipper waved.' })['captain vane'], 1, 'an alias is not known without the roster');
+    assert.equal(recordTieMentions(npc, { day: 31, text: 'Oddarin spoke.', roster }).odda, 1, 'a longer word is not the name');
+});
+
+test('one roster map per projection: readTieRows reads the map it is given, and tieRoster keys names and aliases once', () => {
+    const roster = tieRoster([{ id: 'd', name: 'Derk', aliases: ['Old D'], lifeState: 'deceased' }]);
+    assert.equal(roster.get('derk'), roster.get('old d'));
+    assert.deepEqual(roster.labels.get(roster.get('derk')), ['derk', 'old d']);
+    const rows = readTieRows(npcOf(['Old D — friend'], { 'old d': 1 }), { roster, day: 2 });
+    assert.equal(rows[0].state, 'died', 'the other person is read from the given map');
+    const names = Array.from({ length: 50 }, (_, i) => ({ id: `n${i}`, name: `Person ${i}`, keyRelationships: ['Person 1 — friend'] }));
+    const shown = projectDossierState({ npcs: names, storyDay: 3 }, { chatKey: 'c1' }).npcs;
+    assert.equal(shown.length, 50);
+});

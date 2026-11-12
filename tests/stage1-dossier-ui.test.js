@@ -662,7 +662,7 @@ test('Ties: each tie is three stacked lines (type label, name, description); a l
   const ties = sectionScreenHtml('ties', { keyRelationships: ['Sister Temiwa — novice companion present at the counter | shares the cramped office and covered Sieke with an altar-cloth', 'Bregje — rival | clashes at the annex'] }, {});
   const rows = ties.match(/<div class="delta-bond"[\s\S]*?<\/div>/g) || [];
   assert.equal(rows.length, 2);
-  assert.match(rows[0], /<span class="delta-bond-word">novice companion present at the counter<\/span><b>Sister Temiwa<\/b><p>shares the cramped office/, 'type, then name, then description, in that order');
+  assert.match(rows[0], /<span class="delta-bond-word">Ally<\/span><b>Sister Temiwa<\/b><p>novice companion present at the counter — shares the cramped office/, 'tie type, then name, then description (relation as written, then dynamic), in that order');
   const css = SECTIONS_STYLES.replace(/\$\{ROOT_ID\}/g, '#r');
   const rule = selector => css.split('\n').filter(line => line.includes(selector)).join('\n');
   assert.doesNotMatch(rule('.delta-bond { grid-template-columns'), /auto minmax/, 'the type no longer sits beside the name');

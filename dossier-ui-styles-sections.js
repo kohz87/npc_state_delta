@@ -150,7 +150,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-meter > span { color:var(--delta-text); }
 #${ROOT_ID} .delta-secret-bar { height:12px; border-radius:3px; background:#0b0a0c; background-image:none; }
 /* Ties (mockup v22): type heading, name, description stacked; every entry has its own divider; Older ties fold last. Sizes follow the container (cqw). */
-#${ROOT_ID} .delta-bond { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:clamp(4px,.6cqw,8px); padding:clamp(12px,1.6cqw,18px) 0; border-top:1px solid var(--delta-line); }
+#${ROOT_ID} .delta-bond { grid-template-columns:minmax(0,1fr); display:grid; align-items:start; gap:clamp(4px,.6cqw,8px); padding:clamp(12px,1.6cqw,18px) 0; border-top:1px solid var(--delta-line); }
 #${ROOT_ID} .delta-bond:first-child { border-top:1px solid var(--delta-line); }
 #${ROOT_ID} .delta-bond[data-tone="rose"] { --c:var(--des, var(--delta-warn)); }
 #${ROOT_ID} .delta-bond-word { display:block; grid-column:1; grid-row:1; padding:0; border:0; border-radius:0; text-align:left; font-size:var(--dt-kick); letter-spacing:.06em; line-height:1.35; text-transform:uppercase; overflow-wrap:anywhere; }

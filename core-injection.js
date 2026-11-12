@@ -3,7 +3,7 @@
    core-injection-selection.js and core-injection-parts.js; core-mechanics.js re-exports every name
    it exported before. Never imports core-mechanics.js or core.js. */
 import { cleanText } from './core-text.js';
-import { narratorTies, tiesTracked } from './core-keyrel.js';
+import { narratorTies, tieRoster, tiesTracked } from './core-keyrel.js';
 import { DEFAULT_BEHAVIOR_CRITERIA } from './core-prompts.js';
 import { APPROX_CHARS_PER_TOKEN, INJECTION_CAP_BASE_TOKENS, DEFAULT_INJECTION_BUDGET_TOKENS, normalizeInjectionBudgetTokens, selectRelevantNpcs } from './core-injection-selection.js';
 import { clauseBoundedInjection, compactInjectionBehaviorRubric, injectionEssentialBlock, injectionOptionalFields, lowPlayerStanding, referenceBlock, truncateInjectionText } from './core-injection-parts.js';
@@ -14,9 +14,10 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
     const named = new Set(Array.isArray(namedNpcIds) ? namedNpcIds : []);
     const calledIn = npc => !npc?.present && named.has(npc?.id);
     const present = (npcs || []).filter(npc => (Boolean(npc?.present) || calledIn(npc)) && !npc?.archived);
+    const tieNames = tieRoster(npcs);
     let relevant = selectRelevantNpcs(present, text, turn, limit, socialGraph, npcs || [])
         // A person who records ties' last mentions tells the narrator only the active ties, strongest type first (core-keyrel.js); others as stored.
-        .map(npc => (tiesTracked(npc) ? { ...npc, keyRelationships: narratorTies(npc, { npcs, day: storyDay, scene: text }).map(row => row.entry) } : npc));
+        .map(npc => (tiesTracked(npc) ? { ...npc, keyRelationships: narratorTies(npc, { npcs, roster: tieNames, day: storyDay, scene: text }).map(row => row.entry) } : npc));
     const budget = normalizeInjectionBudgetTokens(budgetTokens);
     const budgetChars = budget * APPROX_CHARS_PER_TOKEN;
     if (!relevant.length) {
