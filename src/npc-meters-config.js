@@ -95,7 +95,7 @@ export const REASON_LABELS = new Set(['reason', 'why', 'because', 'note', 'cause
 const RESERVED_IDS = new Set(['stage', 'stages', 'disposition', 'name', 'meter', 'meters', 'milestone', 'milestones', ...REASON_LABELS]);
 export const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 export const WORDS = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u;
-export const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day', 'held', 'progress', 'impactDay', 'lastEvent', 'via', 'mood', 'inst', 'pull', 'track', 'lies', 'knows', 'tastes', 'ties', 'drives', 'lookLockedAt']);
+export const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day', 'held', 'progress', 'impactDay', 'lastEvent', 'via', 'mood', 'moodLog', 'inst', 'pull', 'track', 'lies', 'knows', 'tastes', 'ties', 'drives', 'lookLockedAt']);
 // The impact tiers of a story line (`| impact: major`), the scanner's own: the line's step is held to the tier's cap
 // (the reader's relationshipCaps). A missing or unknown tier is the smallest.
 export const IMPACT_TIERS = Object.freeze(['ordinary', 'meaningful', 'major', 'extreme']);

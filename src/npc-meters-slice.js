@@ -8,7 +8,7 @@ import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
 import { flatDayProblems } from './relationship-pacing.js';
 import { readEvent } from './npc-meters-pacing.js';
 import { readApproachRing } from '../npc-meters-gate.js';
-import { normalizeMood } from '../npc-mood.js';
+import { decayMood, normalizeMood, nextMoodLog, readMoodLog } from '../npc-mood.js';
 import { INSTINCT_KINDS } from '../npc-instincts.js';
 import { validateNotes } from './npc-notes-kinds.js';
 
@@ -119,9 +119,10 @@ const LEAF_TEXT_MAX = 1200;
 const shortText = (value, max) => typeof value === 'string' && value.length <= max && !/[\u0000-\u001f]/.test(value);
 export function moodPullProblems(record) {
     const out = [];
-    const [mood, inst, pull, track] = [record.mood, record.inst, record.pull, record.track].map(readLeaf);
-    if ([record.mood, record.inst, record.pull, record.track].some(raw => typeof raw === 'string' && (raw.length > LEAF_TEXT_MAX || readLeaf(raw) === undefined))) out.push('has an unreadable text leaf');
+    const [mood, inst, pull, track, moodLog] = [record.mood, record.inst, record.pull, record.track, record.moodLog].map(readLeaf);
+    if ([record.mood, record.inst, record.pull, record.track, record.moodLog].some(raw => typeof raw === 'string' && (raw.length > LEAF_TEXT_MAX || readLeaf(raw) === undefined))) out.push('has an unreadable text leaf');
     if (mood !== undefined && (!isObject(mood) || JSON.stringify(normalizeMood(mood)) !== JSON.stringify(Object.fromEntries(Object.keys(normalizeMood(mood)).map(key => [key, mood[key]]))))) out.push('has an unusable mood');
+    if (moodLog !== undefined && (!isObject(moodLog) || !Array.isArray(moodLog.e) || readMoodLog(moodLog).length !== moodLog.e.length)) out.push('has an unusable mood history');
     if (inst !== undefined && (!isObject(inst) || Object.keys(inst).some(key => !['belo', 'clos', 'awe'].includes(key)) || Object.values(inst).some(value => !isInt(value) || value < 0 || value > 3))) out.push('has unusable instincts');
     if (pull !== undefined && (!isObject(pull) || !INSTINCT_KINDS.includes(pull.kind) || !shortText(pull.cause, 120) || !isInt(pull.since) || pull.since < 0 || Object.keys(pull).length !== 3)) out.push('has an unusable pull');
     if (track !== undefined) {
@@ -371,6 +372,16 @@ export function settle(record, { defs, stages, rules, name, rungs = [], conflict
 // A leaf is written in the form the reply's earlier read stored it: an object where the standing holds one (a chat written under 1.16.0, whose later
 // per-field ops need the object), text otherwise (a first read, a new reply). So a Re-read of an old reply stores the same ops.
 export const asStored = (ctx, key, field, value) => (isObject(ctx?.standing?.domains?.npc?.npcs?.[key]?.[field]) ? value : leafText(value));
+/** Writes a mood move on the record in the line's own op: the new mood and, when an axis moved from `prev` settled to `day`, the reply's entry of the mood history (record.moodLog). */
+export function writeMood(ctx, key, record, { prev, mood, day, n = null, date = '', why = mood.cause }) {
+    const was = decayMood(prev, day);
+    record.mood = asStored(ctx, key, 'mood', mood);
+    // A Re-read of a reply the older code read (the standing holds no mood history for the person) keeps writing what that read wrote: no history entry.
+    const text = !ctx.standing || own(ctx.standing.domains?.npc?.npcs?.[key], 'moodLog') ? nextMoodLog(record.moodLog, { n, date, change: { v: mood.v - was.v, a: mood.a - was.a, d: mood.d - was.d }, why }) : null;
+    if (text) record.moodLog = asStored(ctx, key, 'moodLog', JSON.parse(text));
+}
+/** The reason a story line gave, as the reply's last event may keep it: a Re-read of a reply whose earlier read kept none (older code) keeps none. */
+export const reasonKept = (ctx, key, reason) => (!ctx.standing || /"why"/.test(String(ctx.standing.domains?.npc?.npcs?.[key]?.lastEvent ?? '')) ? reason : '');
 export const moodStands = (ctx, key) => !ctx.standing || isObject(readLeaf(ctx.standing.domains?.npc?.npcs?.[key]?.mood));
 
 export const sentence = parts => parts.filter(Boolean).map(part => (/[.!?]$/.test(part) ? part : `${part}.`)).join(' ');

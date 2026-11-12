@@ -67,7 +67,7 @@ import {
     socialSkill,
 } from './social-check.js';
 import { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, CUSTOM_RANGE, MAX_NPCS, MAX_STAGES_PER_METER, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, MILESTONE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURES, FEATURE_DEFAULTS, NAME_MAX, DISPOSITION_MAX, TRACK_MAX, REASON_LABELS, IMPACT_TIERS, tierOf, isObject, isInt, readLeaf, isReplyId, replyKey, sameReply, clamp, clean, own, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, intOr, bandWord, needMet, rung, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
-import { initialNpcSlice, observeKeyAway, CAST_QUERY, observeCast, validateNpcSlice, findNpcKey, meterValue, moveMeters, rungMet, conflictOn, settle, sentence, result, moodStands, asStored } from './npc-meters-slice.js';
+import { initialNpcSlice, observeKeyAway, CAST_QUERY, observeCast, validateNpcSlice, findNpcKey, meterValue, moveMeters, rungMet, conflictOn, settle, sentence, result, moodStands, reasonKept, writeMood } from './npc-meters-slice.js';
 import { applyEvents, eventsFromMoves } from '../npc-mood.js';
 import { SETTINGS_DEFAULTS, SETTINGS_SCHEMA } from './npc-meters-schema.js';
 import { createNpcCommands } from './npc-meters-commands.js';
@@ -360,11 +360,11 @@ export function createNpcPart(hooks = {}) {
         if (limit && moved.length && featureOn(FEATURE_MOOD_PULL, ctx) && moodStands(ctx, who.key)) {
             const day = clockMinutes(at) ?? timeMinutes(ctx);
             const events = day === null ? [] : eventsFromMoves(moved.map(item => ({ meter: item.meter, change: item.after - item.before })), { reason, impact: spent?.used ?? asked });
-            if (events.length) record.mood = asStored(ctx, who.key, 'mood', applyEvents(readLeaf(record.mood), day, events));
+            if (events.length) writeMood(ctx, who.key, record, { prev: readLeaf(record.mood), mood: applyEvents(readLeaf(record.mood), day, events), day, n: isInt(at) ? at : null, date: clockDay(at) === null ? '' : call(hooks.startDate, '', at) });
         }
         // This event's outcome, written whole on the record (display only; the card's tier, held and asked).
         if (spent && replyKey(reply, reply) !== null) {
-            const text = nextEvent(record.lastEvent, { reply: replyKey(reply, reply), date: clockDay(at) === null ? '' : call(hooks.startDate, '', at), src: impact ? 'story' : 'scan', ask: askedNow, tier: spent.used ?? asked, held: !spent.used, note: pace, via: gated?.via, gate: gated?.event });
+            const text = nextEvent(record.lastEvent, { reply: replyKey(reply, reply), date: clockDay(at) === null ? '' : call(hooks.startDate, '', at), src: impact ? 'story' : 'scan', ask: askedNow, tier: spent.used ?? asked, held: !spent.used, note: pace, via: gated?.via, gate: gated?.event, why: reasonKept(ctx, who.key, reason) });
             if (text) record.lastEvent = text;
         }
         if (!limit) {

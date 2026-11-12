@@ -554,3 +554,90 @@ test('notes tail: the Changes cue is the last optional line while someone is pre
     const empty = await suite({ allowance: null, features: ON });
     assert.ok(!optional(empty).some(line => /<Changes>/.test(line)));
 });
+
+// ---- the scanner's mood word becomes the three numbers (npc-mood.js lexicon; npc.mood) ----
+test('mood words: the fixed lexicon gives the axes of a word or phrase, an unknown text gives none, and the numbers always settle toward rest', async () => {
+    const { moodFromWord, applyWord, decayMood, restMood, nextMoodLog, readMoodLog } = await import('../npc-mood.js');
+    assert.deepEqual(moodFromWord('mortified and flustered'), { v: -2, a: 2, d: -3, words: ['mortified', 'flustered'] }, 'the mean of the words found, rounded away from zero');
+    assert.deepEqual(moodFromWord('Alarmed'), { v: -2, a: 3, d: -2, words: ['alarmed'] });
+    assert.equal(moodFromWord('xyzzy plugh'), null, 'no known word: no numbers, never a guess');
+    assert.equal(moodFromWord(''), null);
+    const rest = restMood({}, 0);
+    const moved = applyWord(rest, 600, moodFromWord('mortified and flustered'), 'mortified and flustered', 'the mishap');
+    assert.deepEqual([moved.mood.v, moved.mood.a, moved.mood.d], [-2, 2, -3]);
+    assert.deepEqual(moved.change, { v: -2, a: 2, d: -3 });
+    assert.equal(moved.mood.cause, 'now mortified and flustered — the mishap');
+    const later = decayMood(moved.mood, 600 + 1440 * 5);
+    assert.ok(Math.abs(later.v) < 2 && Math.abs(later.d) <= 3, 'fades toward the resting mood');
+    const text = nextMoodLog(null, { n: 4, date: 'Goldwane 21', change: moved.change, why: 'the mishap' });
+    assert.deepEqual(readMoodLog(text), [{ n: 4, date: 'Goldwane 21', v: -2, a: 2, d: -3, why: 'the mishap' }]);
+    assert.equal(nextMoodLog(text, { n: 5, change: { v: 0, a: 0, d: 0 } }), null, 'a reply that moved nothing writes no entry');
+    assert.deepEqual(readMoodLog('{"e":[{"n":1}]}'), [], 'an unreadable entry is dropped');
+});
+
+test('notes host: npc.mood sets the three numbers from the scanner\'s word, logs the move with its reason, refuses an unknown word, and rebuild equals live', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    const slice = () => s.host.head().domains.npc;
+    assert.equal((await s.host.sdk.command('npc.mood', { name: 'Oren', word: 'mortified' })).ok, false, 'not from a button');
+    const head = s.host.store.headIndex();
+    await s.adapter.mood({ name: 'Oren', word: 'mortified and flustered', reason: 'the wardrobe mishap', reply: head });
+    const oren = slice().npcs.oren;
+    const mood = readLeaf(oren.mood);
+    assert.deepEqual([mood.v, mood.a, mood.d], [-2, 2, -3]);
+    const log = readLeaf(oren.moodLog).e;
+    assert.equal(log.length, 1);
+    assert.deepEqual([log[0].n, log[0].v, log[0].a, log[0].d, log[0].why], [head, -2, 2, -3, 'now mortified and flustered — the wardrobe mishap']);
+    assert.deepEqual(validateNpcSlice(slice()), []);
+    const before = JSON.stringify(slice());
+    assert.equal((await s.adapter.mood({ name: 'Oren', word: 'xyzzy' })).ok, false, 'no known word: refused');
+    assert.equal(JSON.stringify(slice()), before, 'nothing written for an unknown word');
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(slice()), before, 'rebuild equals live');
+    assert.deepEqual(s.host.store.problems(), []);
+});
+
+test('notes host: a caught lie (a trust drop) writes its move on the mood history with the cause', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.say(['~ lie Oren | to: Astra | said: I never sold the spell']);
+    await s.say(['~ lie Oren | to: Astra | caught: yes']);
+    const log = readLeaf(oren(s).moodLog)?.e ?? [];
+    assert.equal(log.length, 1, 'the trust drop made one entry');
+    assert.match(log[0].why, /caught lying to Astra/);
+    assert.ok(log[0].v < 0 && log[0].a > 0, 'the axes moved the way the event says');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    const live = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), live, 'rebuild equals live');
+});
+
+test('notes host: the reason a story line gave is kept on the reply\'s last event and read back by the card summary; a line without one keeps none', async () => {
+    const { readEvent, eventSummary } = await import('../src/npc-meters-pacing.js');
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | affection: +2 | reason: Astra helped her cover up after the mishap']);
+    assert.equal(eventSummary(readEvent(oren(s).lastEvent)).why, 'Astra helped her cover up after the mishap');
+    await s.say(['~ npc Oren | affection: +1']);
+    assert.equal(eventSummary(readEvent(oren(s).lastEvent)).why, undefined, 'no reason given: none kept');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    const live = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), live, 'rebuild equals live');
+});
+
+test('replay: a Re-read of a reply the older code read writes no mood history and keeps no story reason; a first read and a read the new code made do', async () => {
+    const { writeMood, reasonKept } = await import('../src/npc-meters-slice.js');
+    const { restMood, applyEvents } = await import('../npc-mood.js');
+    const prev = restMood({}, 0);
+    const mood = applyEvents(prev, 100, [{ kind: 'trust-drop', reason: 'Astra lied' }]);
+    const write = ctx => { const record = {}; writeMood(ctx, 'oren', record, { prev, mood, day: 100, n: 4, date: 'Goldwane 1' }); return record; };
+    assert.ok(write({}).moodLog, 'a first read writes the history');
+    assert.equal(write({ standing: { domains: { npc: { npcs: { oren: { mood: '{}' } } } } } }).moodLog, undefined, 'the earlier read had none: this one has none');
+    assert.ok(write({ standing: { domains: { npc: { npcs: { oren: { moodLog: '{"e":[]}' } } } } } }).moodLog, 'the earlier read wrote it: so does this one');
+    assert.equal(reasonKept({}, 'oren', 'because'), 'because');
+    assert.equal(reasonKept({ standing: { domains: { npc: { npcs: { oren: { lastEvent: '{"at":1,"date":"","events":[]}' } } } } } }, 'oren', 'because'), '', 'the earlier read kept no reason');
+    assert.equal(reasonKept({ standing: { domains: { npc: { npcs: { oren: { lastEvent: '{"events":[{"why":"x"}]}' } } } } } }, 'oren', 'because'), 'because');
+});

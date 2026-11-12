@@ -238,10 +238,12 @@ test('hosted: a meeting the host did not keep is sent again with the next scan o
         mockState.quietResponder = async () => JSON.stringify({ npcs: [{ ...harek, mood: 'Bored and watchful' }] });
         await turn('Harek shrugs and spits into the dust beside the wagon.');
         await sleep(300);
-        console.log('RESULT ' + JSON.stringify({ total: mockState.sdk.sent.filter(item => item.type === 'npc.meet' && item.payload.name === 'Harek').length, names: api.getState().npcs.map(npc => npc.name) }));
+        console.log('RESULT ' + JSON.stringify({ total: mockState.sdk.sent.filter(item => item.type === 'npc.meet' && item.payload.name === 'Harek').length, moods: mockState.sdk.sent.filter(item => item.type === 'npc.mood').map(item => item.payload), names: api.getState().npcs.map(npc => npc.name) }));
     });
     const result = scenarioOutput(output);
     assert.equal(result.total, 2, 'the meeting the host did not keep was sent again with a later scan of Harek, and once kept never again');
+    // each mood word the scan wrote for Harek goes to the slice as npc.mood (its numbers are read there from the fixed word list), once per change
+    assert.deepEqual(result.moods.map(item => [item.name, item.word]), [['Harek', 'Cynical and indifferent'], ['Harek', 'Bored and watchful']]);
 });
 
 test('without a v2 host the same turns send nothing, and the sidecar and the injection are the same as hosted', () => {

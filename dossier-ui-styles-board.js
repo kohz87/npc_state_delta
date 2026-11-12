@@ -13,6 +13,7 @@ ${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"], ${PANEL}:not([data-ski
   --dial: color-mix(in srgb, var(--delta-text) 22%, var(--delta-floor));
   --tick: color-mix(in srgb, var(--delta-text) 32%, var(--delta-floor));
   --dsk-ten: #d9a273; --aff: #d99aaa; --des: #b7a3cf; --trust: #8fb4d9;
+  --feel: #e2c46f; --energy: #e08a5b; --control: #7fb6ad;   /* the mood axes: Feeling gold, Energy orange, Control teal */
   --dsk-tile: color-mix(in srgb, var(--delta-floor) 95%, var(--delta-text) 5%);
   --dsk-tile-bg: var(--dsk-tile);
   --dsk-tile-shadow: none; --dsk-tile-radius: 12px; --dsk-face-radius: 50%; --dsk-glow: none;
@@ -31,6 +32,9 @@ ${PANEL}:not([data-skin]), ${PANEL}[data-skin="neutral"], ${PANEL}:not([data-ski
   --aff: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .751) .078 2);
   --des: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .748) .066 305);
   --trust: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .756) .067 248);
+  --feel: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .828) .11 90);   /* light theme: L .46 = 5.8:1 or better on the tile (3:1 needed) */
+  --energy: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .714) .122 49);
+  --control: oklch(from var(--delta-text) clamp(.46, calc(l + .1), .735) .059 183);
   /* the panel's own fallbacks for the same tones, used when Story Block's tokens are not there (SillyTavern's own light theme) */
   --delta-accent-soft: var(--ss-text, oklch(from var(--delta-text) clamp(.4, calc(l + .1), .9) .07 90));
   --delta-warn: var(--ss-warn-text, oklch(from var(--delta-text) clamp(.4, calc(l + .1), .84) .08 85));
@@ -43,7 +47,7 @@ ${PANEL}[data-skin="fantasy"], ${PANEL}[data-skin="fantasy"] .delta-panel.ss-car
   --delta-bg: #18130d; --delta-floor: #18130d; --delta-text: #efe5cf; --delta-muted: #b3a37f; --delta-warn: #e0bf63;
   --delta-surface: #221b12; --delta-surface-strong: #2a2116; --delta-line: #5a4a2c; --delta-line-strong: #9a7c42;
   --delta-accent: #d9b56a; --delta-accent-soft: #e8d6a6; --delta-good: #8fbf7f; --delta-danger: #d07f6f;
-  --good: #8fbf7f; --bad: #d07f6f; --held: #e0bf63; --dial: #6a5530; --tick: #9a7c42; --dsk-ten: #d9945a; --aff: #d78a9b; --des: #a98fc9; --trust: #7fa9cf;
+  --good: #8fbf7f; --bad: #d07f6f; --held: #e0bf63; --dial: #6a5530; --tick: #9a7c42; --dsk-ten: #d9945a; --aff: #d78a9b; --des: #a98fc9; --trust: #7fa9cf; --feel: #e2c46f; --energy: #e08a5b; --control: #7fb6ad;
   --dsk-tile: #221b12; --dsk-tile-bg: linear-gradient(180deg, #2a2116, #221b12);
   --dsk-tile-shadow: inset 0 0 0 3px #221b12, inset 0 0 0 4px rgba(90,74,44,.7);
   --dsk-tile-radius: 4px; --dsk-face-radius: 50% / 46%;
@@ -53,7 +57,7 @@ ${PANEL}[data-skin="modern"], ${PANEL}[data-skin="modern"] .delta-panel.ss-cards
   --delta-bg: #101116; --delta-floor: #101116; --delta-text: #ecebef; --delta-muted: #9b9fae; --delta-warn: #e8c46a;
   --delta-surface: #15161c; --delta-surface-strong: #1b1c24; --delta-line: #2c2f3d; --delta-line-strong: #3d4152;
   --delta-accent: #8b7cf6; --delta-accent-soft: #c9c3ff; --delta-good: #5fcf8c; --delta-danger: #ef7a7a;
-  --good: #5fcf8c; --bad: #ef7a7a; --held: #e8c46a; --dial: #22252f; --tick: #2f3240; --dsk-ten: #ff9f5a; --aff: #f28cb1; --des: #c58cff; --trust: #6fb3ff;
+  --good: #5fcf8c; --bad: #ef7a7a; --held: #e8c46a; --dial: #22252f; --tick: #2f3240; --dsk-ten: #ff9f5a; --aff: #f28cb1; --des: #c58cff; --trust: #6fb3ff; --feel: #e2c46f; --energy: #e08a5b; --control: #7fb6ad;
   --dsk-tile: #15161c; --dsk-tile-bg: var(--dsk-tile);
   --dsk-tile-shadow: none; --dsk-tile-radius: 12px; --dsk-face-radius: 50%;
   --dsk-glow: 0 0 40px rgba(255,159,90,.35);
@@ -122,10 +126,6 @@ ${PANEL} .delta-tile-ring::after { content:""; position:absolute; inset:5px; bor
 ${PANEL} .delta-tile-ring > span { position:relative; z-index:1; font-size:var(--dt-kick); font-weight:700; }
 
 /* mood bars, pull ring, ties initials and past dots (phase 2 data) */
-${PANEL} .delta-tile-bars { display:grid; gap:5px; }
-${PANEL} .delta-tile-bar { display:grid; grid-template-columns:clamp(48px,5.6cqw,68px) minmax(0,1fr); align-items:center; gap:8px; font-size:var(--dt-meta); color:var(--delta-muted); }
-${PANEL} .delta-tile-bar i { height:5px; border-radius:3px; background:var(--dial); overflow:hidden; }
-${PANEL} .delta-tile-bar b { display:block; height:100%; border-radius:3px; background:var(--dsk-ten, var(--delta-accent)); }
 ${PANEL} .delta-tile-ring { --c:var(--held, var(--delta-warn)); }
 ${PANEL} .delta-tile-faces .delta-tile-face.delta-tile-initials { display:grid; place-items:center; font-size:clamp(7px,.2cqw + 6px,9px); line-height:1; letter-spacing:-.04em; overflow:hidden; font-weight:700; background:var(--face-flat); color:var(--delta-text); transform:none; }
 ${PANEL} .delta-tile-dots { display:flex; align-items:center; justify-content:space-between; gap:0; margin:2px 0; position:relative; }

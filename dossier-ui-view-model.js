@@ -1,5 +1,5 @@
 /* NPC State Delta dossier surface: the phase-1 board's view model (data only, no HTML) and the bond-tone / library-ring helpers. The section screens read the projection directly. */
-import { changeStamp, plain, RELATIONSHIP_AXES, relationshipValue, stringList } from './dossier-ui-model.js';
+import { changeStamp, plain, RELATIONSHIP_AXES, relationshipValue, stringList, wholeNumber } from './dossier-ui-model.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
 import { moodBars, moodWord } from './npc-mood.js';
 import { bondTone as bondToneOf, tieTone } from './dossier-ui-bond-tone.js';
@@ -42,6 +42,7 @@ function eventModel(event) {
         ask,
         date: plain(source.date),
         gate: plain(source.gate),
+        why: plain(source.why),
     };
 }
 
@@ -133,13 +134,22 @@ function secretsModel(npc) {
     };
 }
 
-// Mood: the word with the Energy and Control bars, always (all three mood fields are kept). The meters' mood gives the word and the
-// bar steps; a person with none yet shows the scanner's word (or the resting word) with both bars at the middle step.
-export function moodTile(npc) {
+// Mood: the word, and Feeling / Energy / Control each as a row (value on the stored -3..+3 scale, and what it moved by in the reply on show), always
+// (all three mood fields are kept). The meters' mood gives the word, the numbers and the history of moves; a person with none yet shows the scanner's
+// word (or the resting word) with the three rows at 0. `reply`: the reply on show (a move recorded at it is "this reply"). `bars` and `max` keep the
+// step form (0..6, the middle neutral) the plain-words line reads.
+export const MOOD_AXES = Object.freeze([['v', 'Feeling', 'feel'], ['a', 'Energy', 'energy'], ['d', 'Control', 'control']]);
+export function moodTile(npc, reply = null) {
     const mood = object(npc.v2Meters).mood;
-    if (mood) return { title: 'Mood', text: mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause };
+    const now = wholeNumber(reply);
+    if (mood) {
+        const log = Array.isArray(mood.log) ? mood.log : [];
+        const latest = now !== null && log[0] && wholeNumber(log[0].n) === now ? log[0] : null;
+        const rows = MOOD_AXES.map(([key, label, tone]) => ({ key, label, tone, value: Math.round(Number(object(mood.axes)[key]) || 0), change: latest ? Math.round(Number(latest[key]) || 0) : 0 }));
+        return { title: 'Mood', text: mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause, rows, log, known: true, quiet: now !== null && !latest };
+    }
     const rest = moodBars(null);
-    return { title: 'Mood', text: plain(npc.mood) || moodWord(null), feeling: rest.max / 2, energy: rest.energy, control: rest.control, max: rest.max };
+    return { title: 'Mood', text: plain(npc.mood) || moodWord(null), feeling: rest.max / 2, energy: rest.energy, control: rest.control, max: rest.max, rows: MOOD_AXES.map(([key, label, tone]) => ({ key, label, tone, value: 0, change: 0 })), log: [], known: false, quiet: false };
 }
 
 // The few plain words under the mood word, from the three bars (a step 0..max, the middle is neutral): only a bar well off the
@@ -183,7 +193,7 @@ export function pullTile(npc) {
 }
 
 // The board: the dial's four arcs, name and status, and one tile per section. Pull is null until its data exists (phase 2).
-export function boardModel(npc = {}) {
+export function boardModel(npc = {}, { reply = null } = {}) {
     const source = object(npc);
     const key = object(source.key);
     const last = changeModel(source.lastRelationshipChange);
@@ -202,7 +212,7 @@ export function boardModel(npc = {}) {
         dial: dialAxesModel(source.relationship),
         tiles: {
             lastChange: { title: SECTION_TITLES.with, heading: 'Last change', hasChange: last.hasChange, moved: last.moved, reason: last.reason, gate: last.gate, when: last.when },
-            mood: moodTile(source),
+            mood: moodTile(source, reply),
             pull: pullTile(source),
             rightNow: { title: SECTION_TITLES.now, ...(({ place, doing, summary }) => ({ place, doing, summary }))(rightNowModel(source)) },
             ties: { title: 'Ties', count: ties.count, names: ties.names, faces: ties.faces, lies: ties.lies },

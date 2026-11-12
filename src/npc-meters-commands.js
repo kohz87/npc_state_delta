@@ -7,12 +7,12 @@ import { normalizeApproachKind } from '../npc-meters-gate.js';
 import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, readLeaf, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
 import { runKind, noteLine, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
-import { applyEvents, restMood, restingMood } from '../npc-mood.js';
-import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence, asStored } from './npc-meters-slice.js';
+import { applyEvents, applyWord, moodFromWord, restMood, restingMood } from '../npc-mood.js';
+import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence, asStored, writeMood } from './npc-meters-slice.js';
 
 export function createNpcCommands({
     featureOn, normalized, defsFrom, tierCaps, ownOrModule, readerAction, headReply, commandReply,
-    identify, ensure, note, changesFrom, setupFor, limitsFor, resolve, settleRecord, run, presentNames, clockDay,
+    identify, ensure, note, changesFrom, setupFor, limitsFor, resolve, settleRecord, run, presentNames, clockDay, call, hooks,
 }) {
     // ---- the change lines ----
 
@@ -238,6 +238,31 @@ export function createNpcCommands({
             }
             if (needsDrives) Object.assign(record, seedNotes({ personality: payload?.personality, about: payload?.about }));
             return out;
+        },
+        /**
+         * npc.mood { name, word, reason?, reply? }: the scanner wrote a new mood word for a person; its numbers (feeling, energy, control) are read from the
+         * fixed word list (npc-mood.js moodFromWord; the scanner gives no numbers), set with the fade toward the resting mood anchored at once, and
+         * the move is written on the reply with its reason (record.moodLog). Refused when no word of the text is a known mood word (nothing to read).
+         * Only Delta's own scan sends it; recorded like any change, so a swipe takes it back; chats that never send it replay unchanged.
+         */
+        'npc.mood'(ctx, payload = {}) {
+            if (!ownOrModule(ctx, 'npc.mood', payload)) ctx.fail('REFUSED', 'A mood word is noted only by NPC State Delta\'s own scan.');
+            if (!featureOn(FEATURE_MOOD_PULL, ctx)) ctx.fail('FEATURE_OFF', 'Mood and pull are turned off.');
+            const target = moodFromWord(payload?.word);
+            if (!target) ctx.fail('REFUSED', 'The mood text holds no known mood word, so no numbers were set.');
+            let minutes = null;
+            try { minutes = ctx.time(); } catch { minutes = null; }
+            if (!isInt(minutes)) ctx.fail('REFUSED', 'The story clock is not known, so the mood was not set.');
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            const out = run(ctx, { label: payload?.name, changes: [], problems: [], limit: false, reply: commandReply(ctx, at), at, allowEmpty: true });
+            const key = out.data.key;
+            const record = ctx.draft(NPC_DOMAIN).npcs?.[key];
+            if (!record) return out;
+            const prev = readLeaf(record.mood) ?? restMood({}, minutes);
+            const { mood } = applyWord(prev, minutes, target, clean(payload.word, 60), clean(payload?.reason, 80));
+            writeMood(ctx, key, record, { prev, mood, day: minutes, n: at, date: clockDay(at) === null ? '' : call(hooks.startDate, '', at) });
+            const side = (label, value) => `${label} ${value > 0 ? '+' : ''}${value}`;
+            return { ...out, summary: sentence([`${record.name}: mood ${clean(payload.word, 60)} (${side('feeling', mood.v)}, ${side('energy', mood.a)}, ${side('control', mood.d)})`, out.data.created ? out.summary : '']) };
         },
         /**
          * npc.milestone { name, add?: [words], remove?: [words or keys] }: the reader's own milestones

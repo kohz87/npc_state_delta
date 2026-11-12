@@ -218,7 +218,7 @@ test('the board shows the tiles in order with the player\'s name, escapes text a
   // Mood tile: the word plus both bars, also for a person with no hosted mood (a mid-step rest) and no scanner word (the resting word).
   assert.match(html, /Energy[\s\S]*Control/);
   const rest = boardHtml({ ...rika, mood: '', v2Meters: undefined }, {});
-  assert.match(rest, /delta-tile-bar"><span>Energy<\/span><i><b style="width:50%">[\s\S]*Control<\/span><i><b style="width:50%">/);
+  assert.match(rest, /delta-mood-feel[^"]*"><span>Feeling<\/span>[\s\S]*delta-mood-energy[^"]*"><span>Energy<\/span>[\s\S]*delta-mood-control"><span>Control<\/span>/, 'the Mood tile shows all three rows, each with its number');
   assert.match(boardHtml({ id: 'x', name: 'Marrit', gender: 'male', role: 'bargemaster' }, {}), /Male · Bargemaster/);
 });
 
@@ -447,7 +447,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
     lastRelationshipChange: { impact: 'net', delta: { trust: 0, affection: 0, desire: 0, tension: 2 }, reason: '', hosted: true, message: 3, event: { tier: 'meaningful', held: false, note: '', ask: {}, date: '', gate: 'via praise · 3rd in 2 days · backfired' } },
   };
   const tiles = boardTiles(boardModel(npc), { userName: 'Astra' });
-  assert.equal(tiles.find(tile => tile.title === 'Mood').bars.length, 2);
+  assert.equal((tiles.find(tile => tile.title === 'Mood').rowsHtml.match(/delta-sheet-meter /g) || []).length, 3, 'the Mood tile has Feeling, Energy and Control');
   assert.equal(tiles.find(tile => tile.title === 'Mood').big, 'alarmed · tense');
   assert.equal(tiles.find(tile => tile.title === 'Pull').note, 'high · 2 days');
   assert.match(boardHtml(npc, { userName: 'Astra' }), /praise, the 3rd time in 2 days, backfired/, 'the gate receipt in the mockup\'s words');
@@ -465,7 +465,8 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   const none = boardTiles(boardModel(bare), { userName: 'Astra' });
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
   assert.doesNotMatch(sectionScreenHtml('ties', bare), /Lies told|Knows about/);
-  assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /Tastes|Drives|look was set/);
+  assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /look was set/);
+  assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /No tastes yet[\s\S]*All normal so far/, 'no data: the headings stay with a placeholder line');
 });
 
 // The dossier's stylesheets as the page gets them (the template numbers filled in), plus the source for the pins that read it.
@@ -512,8 +513,8 @@ test('fix 3: two-letter initials, mood bars in Right now, flat profile rows in t
   assert.equal(initialsOf('Marrit'), 'M');
   assert.match(portraitHtml({ name: 'Sister Temiwa' }, 'x'), /<span>ST<\/span>/);
   const now = sectionScreenHtml('now', { id: 'n', name: 'Marrit', mood: 'Cautious' });
-  assert.match(now, /<dt>Mood<\/dt><dd><b>Cautious<\/b><\/dd>[\s\S]*delta-now-bars[\s\S]*Feeling[\s\S]*Energy[\s\S]*Control/, 'Mood: the word and the three bars across the row, at rest as well');
-  assert.match(sectionScreenHtml('now', { id: 'n', name: 'Marrit' }), /<dt>Mood<\/dt><dd><b>[^<]+<\/b><\/dd>[\s\S]*delta-now-bars/, 'also with no mood word at all');
+  assert.match(now, /<dt>Mood<\/dt><dd><b>Cautious<\/b><\/dd>[\s\S]*delta-mood-rows[\s\S]*Feeling[\s\S]*Energy[\s\S]*Control/, 'Mood: the word and the three rows, at rest as well');
+  assert.match(sectionScreenHtml('now', { id: 'n', name: 'Marrit' }), /<dt>Mood<\/dt><dd><b>[^<]+<\/b><\/dd>[\s\S]*delta-mood-rows/, 'also with no mood word at all');
   const npc = { ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), appearanceModel: { overallAppearance: 'Freckled', appearanceForms: [{ name: 'Mage', appearance: 'Singed coat' }], currentForm: 'Mage' }, mannerisms: ['Ties off bandages'], personality: 'Proud', background: 'Frostbite', birthdaySource: 'generated' };
   const html = dossierProfileHtml(npc, { layout: 'desktop' });
   assert.match(html, /<dt>Look<\/dt><dd>Freckled<\/dd><dt>Wearing<\/dt><dd>Singed coat<\/dd><dt>Habits<\/dt><dd>Ties off bandages<\/dd>/);
@@ -536,13 +537,12 @@ test('round 2 fix 2-4: Right now in groups with three bars and Pull last, Recent
     fieldChanges: { mood: 3, location: 3 }, fieldChangeMessages: { mood: 3, location: 3 }, relationshipEventHistory: [{ impact: 'ordinary', reason: 'a gift', evidence: { desire: 'toffee' }, message: 1 }] }, {}, {}), v2Meters: v2MetersProjection(meters) };
   const now = sectionScreenHtml('now', base, { reply: 3 });
   assert.match(now, /<b>Alarmed<\/b> · unpleasant, keyed-up/, 'the word with the bars\' plain words');
-  assert.equal((now.match(/delta-tile-bar"/g) || []).length, 3, 'Feeling, Energy, Control');
-  assert.ok(now.indexOf('Moved by') < now.indexOf('Where and what') && now.indexOf('<dt>Goal</dt>') < now.indexOf('<dt>Pull'), 'groups in order, Pull last');
-  assert.match(now, /trust dropped: Astra lied/);
+  assert.equal((now.match(/delta-sheet-meter delta-mood-/g) || []).length, 3, 'Feeling, Energy, Control');
+  assert.ok(now.indexOf('Recent changes') < now.indexOf('Where and what') && now.indexOf('<dt>Goal</dt>') < now.indexOf('<dt>Pull'), 'groups in order, Pull last');
+  assert.match(now, /no change \u00b7 fading toward (her|his|their) calm[\s\S]*trust dropped: Astra lied/, 'a quiet reply says so, and an older cause stands as a row');
   assert.match(now, /<dt>Pull <span class="delta-new-badge">New<\/span><\/dt><dd><b>Closure<\/b> · an open thread/);
   assert.match(now, /Updated this reply \(#3\): mood, where\./);
   assert.match(sectionScreenHtml('now', base, { reply: 5 }), /Updated at reply #3: mood, where\./);
-  assert.doesNotMatch(sectionScreenHtml('now', { ...base, v2Meters: v2MetersProjection({ ...meters, mood: { ...meters.mood, cause: '' } }) }), /Moved by/, 'no cause, no group');
   const withHtml = sectionScreenHtml('with', { ...base, lastRelationshipChange: { impact: 'net', delta: { trust: 0, affection: 0, desire: 0, tension: 2 }, reason: '', turn: null, message: 3, hosted: true, event: { tier: 'meaningful', held: false, note: '', ask: [], date: 'Goldwane 21', gate: 'via praise · backfired' } } }, {});
   assert.match(withHtml, /Recent changes[\s\S]*delta-chg-when">Goldwane 21<br><small>#3<\/small>[\s\S]*data-good="no">Tension \+2[\s\S]*via praise: it backfired[\s\S]*Desire/);
   assert.doesNotMatch(withHtml, /Last relationship change/);
@@ -655,4 +655,55 @@ test('the section "‹ Dossier" pill is hidden only where the board tiles are be
   const css = fs.readFileSync(new URL('../dossier-ui-styles-sections.js', import.meta.url), 'utf8');
   assert.match(css, /@container dsr \(min-width: \$\{THREE_PANE_MIN\}px\) \{ #\$\{ROOT_ID\} \.delta-section-back \{ display:none; \} \}/);
   assert.doesNotMatch(css, /@media[^{]*\{[^}]*delta-section-back/);
+});
+
+// ---- numbers and reasons for the mood and the meters (VADFIX) ----
+test('mood rows: Feeling / Energy / Control with their number on the -3..+3 scale and this reply\'s change on the same line; the last 3 changes, a quiet reply first; "no reason given"', async () => {
+  const log = [
+    { n: 112, date: 'Goldwane 21', v: -1, a: 2, d: -1, why: 'now alarmed \u2014 the crawlers breached the fissure' },
+    { n: 108, date: 'Goldwane 21', a: 1, why: '' },
+    { n: 104, date: 'Goldwane 20', v: 1, d: 1, why: 'warned Astra in time' },
+    { n: 100, date: 'Goldwane 19', v: 1, why: 'ancient' },
+  ];
+  const meters = { mood: { word: 'Alarmed', valence: -1, energy: 2, control: -1, bars: { energy: 5, control: 2, max: 6 }, cause: '', log }, bars: [], secrets: [] };
+  const base = { ...dossierDetailProjection({ id: 'r', name: 'Rika', gender: 'female' }, {}, {}), v2Meters: v2MetersProjection(meters) };
+  const now = sectionScreenHtml('now', base, { reply: 112 });
+  assert.match(now, /delta-mood-feel[^"]*"><span>Feeling<\/span><i class="delta-sheet-track"[^>]*><b style="left:33\.3\d*%;width:16\.6\d*%"><\/b><\/i><strong>\u22121<\/strong><em class="delta-sheet-chip" data-good="no">\u22121<\/em>/, 'number and chip on the one row');
+  assert.match(now, /delta-mood-energy[^"]*"><span>Energy<\/span>[\s\S]*<strong>\+2<\/strong><em class="delta-sheet-chip" data-good="yes">\+2<\/em>/);
+  assert.equal((now.match(/class="delta-chg"/g) || []).length, 3, 'the last three changes only');
+  assert.doesNotMatch(now, /ancient/);
+  assert.match(now, /Goldwane 21<br><small>#112<\/small>[\s\S]*Feeling \u22121[\s\S]*Energy \+2[\s\S]*Control \u22121[\s\S]*the crawlers breached/);
+  assert.match(now, /Energy \+1<\/span><\/b><div class="delta-chg-via">no reason given/, 'no reason recorded is said plainly');
+  const quiet = sectionScreenHtml('now', base, { reply: 115 });
+  assert.match(quiet, /<h4>Recent changes<\/h4><ul class="delta-list"><li class="delta-chg"><span class="delta-chg-when"><small>#115<\/small><\/span><div><b><span class="delta-chg-d" data-good="muted">no change \u00b7 fading toward her calm/, 'a quiet reply starts the list');
+  assert.equal((quiet.match(/class="delta-chg"/g) || []).length, 3, 'the quiet row counts in the three');
+  assert.doesNotMatch(quiet, /delta-sheet-chip/, 'no chip when the reply on show moved nothing');
+  const board = boardHtml(base, { reply: 112 });
+  assert.match(board, /delta-mood-rows[\s\S]*Feeling[\s\S]*Energy[\s\S]*Control/, 'the board tile shows all three');
+});
+
+test('meters: the story line\'s reason shows on the Last change tile and the Recent changes row; none recorded says so; the list is capped at 3', async () => {
+  const base = dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {});
+  const change = why => ({ impact: 'net', delta: { trust: 0, affection: 2, desire: 0, tension: 2 }, reason: why, turn: null, message: 3, hosted: true, event: { tier: 'meaningful', held: false, note: '', ask: [], date: 'Goldwane 21', gate: 'via help', why } });
+  const withWhy = { ...base, lastRelationshipChange: change('Astra helped her cover up') };
+  assert.match(boardHtml(withWhy, {}), /Affection \+2 \u00b7 Tension \+2<\/b> \u00b7 [^<]*<\/span><span class="delta-tile-small">Astra helped her cover up/);
+  assert.match(sectionScreenHtml('with', withWhy), /Astra helped her cover up/);
+  const without = { ...base, lastRelationshipChange: change('') };
+  assert.match(boardHtml(without, {}), /no reason given/);
+  assert.match(sectionScreenHtml('with', without), /delta-chg-via">no reason given/);
+  const many = { ...without, recentRelationshipChanges: [1, 2, 3, 4].map(n => ({ impact: 'ordinary', reason: `r${n}`, axes: ['trust'], message: n })) };
+  assert.equal((sectionScreenHtml('with', many).match(/class="delta-chg"/g) || []).length, 3, 'at most the last three, the latest among them');
+});
+
+test('profile: every section keeps its heading and a muted one-line placeholder when empty; a thin line above every block but the first row', async () => {
+  const html = dossierProfileHtml({ id: 'r', name: 'Rika' }, { layout: 'desktop' });
+  for (const key of ['appearance', 'character', 'tastes', 'drives', 'background']) assert.match(html, new RegExp(`data-delta-profile="${key}"`), key);
+  assert.match(html, /No tastes yet: they appear when the story shows a like or dislike/);
+  assert.match(html, /All normal so far/);
+  assert.equal((html.match(/Nothing known yet/g) || []).length, 2, 'Character and Background');
+  const css = await builtCss();
+  assert.match(css, /\.delta-profile-block \{ border-top:1px solid var\(--delta-line\)/);
+  assert.match(css, /\.delta-profile-cols > \.delta-profile-block:nth-child\(2\) \{ border-top:0/, 'desktop: no line above the first row');
+  assert.match(css, /--feel: #e2c46f; --energy: #e08a5b; --control: #7fb6ad/, 'the three mood axes are skin tokens, with light-theme variants');
+  assert.match(css, /--feel: oklch\(from var\(--delta-text\)/);
 });
