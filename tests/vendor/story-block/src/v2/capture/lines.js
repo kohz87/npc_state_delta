@@ -61,6 +61,14 @@ export function stripDecoration(line) {
         .replace(/^-\s+(?=[+\-~!?]\s)/, '');
 }
 
+// A preset that marks every word with ^ ("^+ ^item ^Rope ^| ^qty: ^1"): the ^ in front of each word is decoration too. Only a line that
+// starts with ^ is touched, and only a ^ at the start of a word, so a ^ inside a word or a line that does not start with one stays.
+// Read only under the `caretWords` rule mark (turn/rule-marks.js): an older reply's Re-read keeps reading such a line as unreadable.
+export function stripCaretWords(line) {
+    const text = String(line ?? '').trim();
+    return text.startsWith('^') ? text.replace(/(^|\s)\^+(?=\S)/g, '$1') : text;
+}
+
 /**
  * A change line's text after its op and kind, as written (bold, backticks and a bullet in front are
  * decoration; a colon after the kind is drift): the whole of what a display kind shows (extras.js).
@@ -78,8 +86,8 @@ function addLabel(labels, label, value) {
 }
 
 // One line → { op, kind, name, text, labels } or { error }.
-export function parseLine(source) {
-    const line = stripDecoration(stripMarkdown(source).trim()).trim();
+export function parseLine(source, { caret = false } = {}) {
+    const line = stripDecoration(caret ? stripCaretWords(stripMarkdown(source).trim()) : stripMarkdown(source).trim()).trim();
     const opMatch = /^([+\-~!?])\s*(.*)$/s.exec(line);
     if (!opMatch) return { error: 'it does not start with + - ~ ! or ?' };
     const op = opMatch[1];
@@ -115,8 +123,9 @@ export function parseLine(source) {
  * Returns { lines: [{ op, kind, name, text, labels, raw, index }], problems: string[], over? }; `index`
  * is the line's place among the lines read (0-based), `raw` the line as written. With `max`, at most
  * that many written lines (change lines or not) are read; `over` = { count, total, first } tells the rest.
+ * With `caret`, the ^ a preset puts in front of each word is dropped first (stripCaretWords); `raw` is then the line without them.
  */
-export function parseChanges(text, { max = Infinity } = {}) {
+export function parseChanges(text, { max = Infinity, caret = false } = {}) {
     const lines = [];
     const problems = [];
     const sources = String(text ?? '').split(/\r?\n/);
@@ -137,9 +146,9 @@ export function parseChanges(text, { max = Infinity } = {}) {
             problems.push(`Line ${number + 1} "${cutAt(raw, 60)}…" is longer than ${MAX_LINE} characters, so it was not read.`);
             continue;
         }
-        const parsed = parseLine(raw);
+        const parsed = parseLine(raw, { caret });
         if (parsed.error) problems.push(`Line ${number + 1} "${raw}" is not a change line: ${parsed.error}.`);
-        else lines.push({ ...parsed, raw, index: lines.length });
+        else lines.push({ ...parsed, raw: caret ? stripCaretWords(raw) : raw, index: lines.length });
     }
     return over ? { lines, problems, over: { ...over, total: read } } : { lines, problems };
 }

@@ -86,7 +86,7 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
         },
         context: {
             // The money line (money.js moneyLine) always names the chat's currency (and its coins): it changes with the currency setting only.
-            static: () => [CORE_STATIC, moneyLine(currency())].join('\n'),
+            static: hint => [CORE_STATIC, moneyLine(currency(), hint?.view?.rule?.('oneCoin') ?? true)].join('\n'),
             // Half the budget for the lines that always go, half for the optional overflow.
             tail(view) {
                 const chars = CORE_BUDGET * 4;

@@ -120,7 +120,8 @@ export function createEventRegistration(rt, deps) {
             else source.on(events.MESSAGE_RECEIVED, stripCapture);
             source.on(events.MESSAGE_RECEIVED, async (messageId) => {
                 if (deferLoadingReceipt(messageId)) return;
-                await handleAssistantMessageReceived(messageId);
+                // The scan (a model call) is started here, not awaited: SillyTavern holds the reply and the Send button until this returns.
+                await handleAssistantMessageReceived(messageId, { detachScan: true });
             });
         }
         if (events.CHARACTER_MESSAGE_RENDERED) source.on(events.CHARACTER_MESSAGE_RENDERED, messageId => { renderCapturedReply(messageId); queueInlineRender(0); });

@@ -27,6 +27,10 @@ import { receiptCue } from './lean-rpg/cue.js';
 
 export const TAIL_ORDER = Object.freeze(['scene', 'inventory', 'party', 'combat', 'trade', 'director']);
 export const DEFAULT_TAIL_BUDGET = 1500;
+// A module's own tail lines may be `{ text, keep: true }` (kept whole whatever the budget says): at most KEPT_TAIL_LINES per module, and
+// KEPT_TAIL_TOKENS in all per reply, counted after names are filled in and shared with the kept prelude cues (`keptTokens` of assemble).
+export const KEPT_TAIL_LINES = 4;
+export const KEPT_TAIL_TOKENS = 120;
 // The most of the prompt's room (percent) Story Suite's static and tail may take together, by default.
 export const DEFAULT_CONTEXT_SHARE = 40;
 export const CONTEXT_SHARE_MIN = 10;
@@ -203,11 +207,13 @@ export function contextNotice(fit) {
  * - `substitute` (optional): text → text, run on every text before it is counted (turn.js fills in
  *   `{{user}}` and `{{char}}` with it).
  * - `ownTokens` (optional): what modules send on their own this reply (contextFit), 0 by default.
+ * - `keptTokens` (optional): the tokens the kept prelude cues already took of KEPT_TAIL_TOKENS; a module's own tail lines given as
+ *   `{ text, keep: true }` are kept while the rest of that cap and KEPT_TAIL_LINES allow, in tail order; any more are ordinary lines.
  * - `rolled` (optional): the reply has automatic rolls (an old planner record or the fight board rolled some), told to the static parts as `hint.rolled`.
  * Returns { staticText, tailText, parts: [{ module, label, place, text, tokens, dropped? }],
  * problems, fit (contextFit, or null) }. `parts` is what the What's-sent preview lists, in prompt order.
  */
-export function assemble({ registry, view, untold = [], settings = {}, cues = {}, substitute = null, context = null, ownTokens = 0, rolled = false }) {
+export function assemble({ registry, view, untold = [], settings = {}, cues = {}, substitute = null, context = null, ownTokens = 0, rolled = false, keptTokens = 0 }) {
     const problems = [];
     const fill = typeof substitute === 'function' ? text => String(substitute(text) ?? '') : text => text;
     const statics = staticParts(registry, problems, { view, rolled: rolled === true }).map(part => ({ ...part, text: fill(part.text) }));
@@ -239,12 +245,22 @@ export function assemble({ registry, view, untold = [], settings = {}, cues = {}
                 continue;
             }
             ordinary.push(fill(text));
-            if (cue?.keep === true) pinned.add(fill(text));
+            if (cue?.keep === true) pinned.add(fill(text).trimEnd());
         }
         const extra = linesOf(ordinary);
         let tail = null;
         if (typeof context.tail === 'function') tail = attempt(() => context.tail(view), null, problems, `${context.name}: this reply`);
-        const section = { context, lines: linesOf([...extra, ...linesOf(tail?.lines)].map(fill)), optional: linesOf(linesOf(tail?.optional).map(fill)), pinned, dropped: 0 };
+        let keptHere = 0;
+        const own = (Array.isArray(tail?.lines) ? tail.lines : []).map(line => {
+            if (typeof line === 'string') return line;
+            if (typeof line?.text !== 'string') return null;
+            const text = fill(line.text).trimEnd();
+            const size = estimateTokens(text);
+            if (line.keep !== true || !text.trim() || keptHere >= KEPT_TAIL_LINES || keptTokens + size > KEPT_TAIL_TOKENS) return line.text;
+            keptHere += 1; keptTokens += size; pinned.add(text);
+            return text;
+        });
+        const section = { context, lines: linesOf([...extra, ...own].map(fill)), optional: linesOf(linesOf(tail?.optional).map(fill)), pinned, dropped: 0 };
         if (!section.lines.length && !section.optional.length) continue;
         if (context.budget) section.dropped += fit(section, context.budget);
         sections.push(section);

@@ -183,11 +183,11 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
             if (line) logContent.appendChild(h(doc, 'p', 'rpg-board-order', line));
         }
         const history = (store?.receipts?.() ?? []).map(entry => entry.receipt?.data?.v2?.result).filter(result => result?.board?.id === session.id);
-        let lastRound = 0;
+        let lastRound = 0, excerptFrom = 0;
         for (const result of [...history, played.result]) {
             for (const line of result.opening ?? []) logContent.appendChild(h(doc, 'p', '', `Opening · ${labelLine(line)}`));
             for (const round of result.rounds ?? []) {
-                lastRound = round.n;
+                lastRound = round.n; excerptFrom = logContent.children.length + 1;   // the lines after this exchange's heading
                 logContent.appendChild(h(doc, 'p', 'rpg-board-round', `Exchange ${round.n}`));
                 for (const group of areaLineGroups(round.lines)) logContent.appendChild(h(doc, 'p', '', group[0].aoe ? labelAreaGroup(group) : labelLine(group[0])));
                 for (const item of round.idle ?? []) if (item.why === 'no-resource') logContent.appendChild(h(doc, 'p', '', `${item.who} cannot heal: the skill's resource is Empty.`));
@@ -196,6 +196,9 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
         if (!lastRound) logContent.appendChild(h(doc, 'p', '', 'Choose an action to begin.'));
         log.appendChild(h(doc, 'summary', '', lastRound ? `Exchange ${lastRound} · tap to read the full log` : 'Choose an action to begin.'));
         log.appendChild(logContent);
+        // A wide board shows the last exchange as a two-line excerpt box (board.css) above the "full log" summary; a phone keeps the one line.
+        const excerpt = lastRound ? [...logContent.children].slice(excerptFrom).map(node => node.textContent).join(' ') : '';
+        if (excerpt) body.appendChild(h(doc, 'p', 'rpg-board-excerpt', excerpt));
         body.appendChild(log);
         const panel = h(doc, 'div', 'rpg-board-controls');
         const gear = session.setup.gear ? equipmentForBoard(state, session.setup.gear) : {};
@@ -285,7 +288,9 @@ export function createBoardView({ doc, headState, meta, save, store, rules, quer
             panel.appendChild(list);
             if (!targeting && autoLine && session.exchanges.length && start?.waiting?.() && !start.sending?.())
                 panel.appendChild(pressButton(doc, 'Send with this fight', 'ss-button ss-button-primary rpg-board-send', () => { start.send(); redraw(); }));
-            if (targeting || chosen.length) tools.appendChild(button(doc, 'Back', 'ss-button rpg-board-back', () => { if (targeting) targeting = null; else chosen.pop(); redraw(); }));
+            const backNode = button(doc, 'Back', 'ss-button rpg-board-back', () => { if (targeting) targeting = null; else chosen.pop(); redraw(); });
+            backNode.disabled = !(targeting || chosen.length);   // always there (the mockup's row): disabled while nothing is staged to take back
+            tools.appendChild(backNode);
             if (autoNode) tools.appendChild(autoNode);
         }
         if (ended) panel.classList.add('rpg-board-ended');

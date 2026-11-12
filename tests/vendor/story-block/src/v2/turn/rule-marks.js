@@ -26,6 +26,17 @@ export const RULE_LINES = Object.freeze({
     diedAny: line => line?.kind === 'key' && line.op === '-' && [line.text, ...Object.keys(line.labels ?? {}), ...Object.values(line.labels ?? {})].some(part => DEATH.test(String(part ?? ''))),
     // `+/~/- world Event | factions: A, B`: Story Director names unknown factions from an event's tags (feat/faction-from-events). Any world line counts, so an old reply with one never gains the new creation on Re-read.
     factionTags: line => line?.kind === 'world',
+    // A Re-read pays a story XP line at the rate its first run recorded (`xpRate` in its receipt's result), not today's setting (data-modules/part/act.js). Any block line counts.
+    xpKept: line => line?.kind === 'dm',
+    // The coin line of a one-coin currency worth 1 says what a currency without coins says, "no other coins exist" (domains/money.js moneyLine). Static text: it follows the chat's first reply (persist chatMarked).
+    oneCoin: line => line?.kind === 'coin',
+    // The `+ party` grammar line names the story's own class field (join.js joinGrammarOwn). Static text: it follows the chat's first reply (persist chatMarked). Same lines as `partyRoom`.
+    partyFields: partyJoin,
+    // `- party Name`: a Re-read lets the line leave someone its first run made leave, even after the reader's persona was renamed to that name (data-modules/part/party.js). Any `- party` line counts.
+    partyLeft: line => line?.kind === 'party' && line.op === '-',
+    // A preset's ^ before every word of a change line is dropped when the block is read (capture/lines.js stripCaretWords). It changes how a
+    // line is read, not what a parsed line is, so no parsed line falls under it: only a reply's first live capture is marked.
+    caretWords: () => false,
 });
 
 /** A narrator's set-slot line, using normalized labels and the same omitted-kind inference as the handler. */
@@ -43,7 +54,7 @@ export function foeLine(line, state = null) {
     } catch { return false; }
 }
 
-export const MAX_RULE_MARKS = 8;
+export const MAX_RULE_MARKS = 16;
 const NAME = /^[A-Za-z][A-Za-z0-9]{0,31}$/u;
 
 /** The marks a record keeps: known names only, sorted, no repeats, at most MAX_RULE_MARKS. Anything else in the field is ignored. */

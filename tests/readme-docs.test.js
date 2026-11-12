@@ -37,7 +37,7 @@ test('AI-README exists, names the current version, stays short and is linked fro
 test('README carries the shared "How the four fit together" section with the suite versions', () => {
     const readme = read('README.md');
     assert.ok(readme.includes('## How the four fit together'));
-    for (const version of ['Story Block** (2.31.1)', 'Story Director** (2.14.0)', `NPC State Delta** (${manifest.version})`, 'Story Studio** (0.11.0)']) {
+    for (const version of ['Story Block** (2.31.1)', 'Story Director** (2.14.1)', `NPC State Delta** (${manifest.version})`, 'Story Studio** (0.11.1)']) {
         assert.ok(readme.includes(version), version);
     }
 });

@@ -45,7 +45,7 @@ import { pageStorage, saveOnUnload, storeSaving } from './runtime/saving.js';
 export { initialWithStart, packsFor, withPackCurrency } from './runtime/start.js';
 export { SAVE_SEQ_KEY, MEMO_PREFIX, markUsed, saveOnUnload, storeSaving } from './runtime/saving.js';
 
-export const VERSION = '2.31.0';
+export const VERSION = '2.31.1';
 
 /**
  * createRuntime({ ctx, packs?, core = true, modules = [], createStore?, createCommandBus?, notify?,
@@ -115,9 +115,12 @@ export function createRuntime({
     let turn = null;
     // What a reply's display lines (Choices, Inner chatter; extras.js) show, read from its text with the
     // same cap the capture read it with (the host's maxChangeLines).
-    const display = mes => {
+    // `message` (optional): the reply itself, for its caretWords mark.
+    const display = (mes, message = null) => {
         const cap = settings()?.maxChangeLines;
-        return displayLines(mes, { entryOf: word => registry.capture(word), max: Number.isInteger(cap) && cap > 0 ? cap : MAX_CHANGE_LINES });
+        // (the mark read directly: turn/rule-marks.js pulls in the RPG's code, which the page start must not load)
+        const marks = readRecord(message)?.rules, caret = Array.isArray(marks) && marks.includes('caretWords');
+        return displayLines(mes, { entryOf: word => registry.capture(word), max: Number.isInteger(cap) && cap > 0 ? cap : MAX_CHANGE_LINES, caret });
     };
     // Our own calls on the chat's connection (model-call.js): marked for the turn's prompt handlers.
     const ownCalls = createOwnCalls();

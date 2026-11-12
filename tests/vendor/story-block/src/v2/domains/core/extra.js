@@ -17,7 +17,7 @@ export function chatterBack(settings, extras) {
     const chat = extras.promptChat();
     const at = answeredReply(chat);
     if (at < 0) return { lines: [], optional: [] };
-    const line = chatterTail(extras.display(String(chat[at]?.mes ?? '')).chatter);
+    const line = chatterTail(extras.display(String(chat[at]?.mes ?? ''), chat[at]).chatter);
     return { lines: [], optional: line ? [line] : [] };
 }
 

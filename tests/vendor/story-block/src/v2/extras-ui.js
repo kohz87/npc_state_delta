@@ -83,7 +83,7 @@ export function createReplyExtras({
     function extrasAt(index) {
         if (!isReply(index) || !on(CHOICES_FEATURE) || !isLatest(index)) return { choices: [] };
         let read = {};
-        try { read = display(String(chat()[index]?.mes ?? '')) ?? {}; } catch { read = {}; }
+        try { read = display(String(chat()[index]?.mes ?? ''), chat()[index]) ?? {}; } catch { read = {}; }
         return { choices: (read.choice ?? []).map(item => ({ text: item.text })) };
     }
 

@@ -2,7 +2,7 @@
 // the List | Grid switch and the grid itself (tiles, folding categories, Worn per wearer, the item sheet; helpers in inventory-grid.js).
 import { KIND_ORDER } from '../domains/inventory.js';
 import { STRINGS, fill } from '../strings.js';
-import { categorySection, foldStore, itemSheet, wornSection } from './inventory-grid.js';
+import { categorySection, foldSection, foldStore, itemSheet, wornSection } from './inventory-grid.js';
 import { h, s as svg, shell } from '../view/widgets/dom.js';
 import { editable } from '../view/widgets/editable.js';
 import { addFields, addPlan } from '../view/gear-form.js';
@@ -179,7 +179,7 @@ export function createInventoryViewWidget({ storage = undefined, fallback = 'gri
                     group.setAttribute('role', 'group');
                     group.setAttribute('aria-label', S.viewLabel);
                     for (const value of ['list', 'grid']) {
-                        const button = h(doc, 'button', '', value === 'list' ? S.viewList : S.viewGrid);
+                        const button = h(doc, 'button', 'ss-tap-pill', value === 'list' ? S.viewList : S.viewGrid);   // about 30px drawn, a 44px tap area (size.css)
                         button.setAttribute('type', 'button');
                         button.setAttribute('aria-pressed', String(view === value));
                         listen(button, 'click', () => { keep(value); api?.draft?.set?.('view', value); });
@@ -300,7 +300,10 @@ export function createInventoryGridWidget({ chatKey = () => '', storage = undefi
                         if (section) parts.push(section);
                         if (rows && kind === 'equipment') {
                             const worn = wornSection(doc, { wearers: props.wearers ?? [], items, rows, open: value => folds.get(`worn-${value}`, true), onToggle: (value, on) => toggler(`worn-${value}`)(on), onOpen: open });
-                            if (worn.children.length) parts.push(worn);
+                            if (worn.children.length) {   // under one rule-style head, "WORN 9", like the mockup's: the wearers' folds are its body
+                                const count = items.filter(item => rows[item.stack]?.place && (props.wearers ?? []).some(who => who.value === rows[item.stack].byId)).length;
+                                parts.push(foldSection(doc, { id: 'cat-worn', label: G.wornTitle, count, open: folds.get('cat-worn', true), onToggle: toggler('cat-worn'), body: worn, className: 'cat cat-worn', rule: true }));
+                            }
                         }
                     }
                     if (!parts.length && (props.items ?? []).length) parts.push(h(doc, 'p', 'nomatch-grid muted', S.noMatch));

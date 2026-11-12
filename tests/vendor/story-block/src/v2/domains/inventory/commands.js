@@ -176,7 +176,7 @@ export function createInventoryCommands(env) {
             // The reader's own gear (gear on): kind, slot, rarity and bonus of a piece they added by hand.
             if (['kind', 'slot', 'rarity', 'stats'].some(key => payload[key] !== undefined)) handEdit(ctx, env, inv, stack, payload);
             const oldName = original.name;
-            const decision = typeof payload.name === 'string' ? { witness: renameDecision(inv, stack, payload) } : null;
+            const decision = typeof payload.name === 'string' ? { witness: renameDecision(inv, stack, payload, true), story: 1 } : null;
             let groupQty;
             // The screen counts separate pieces together without changing the one-piece stack invariant.
             if (payload.group === true && !original.stack && payload.qty !== undefined) {

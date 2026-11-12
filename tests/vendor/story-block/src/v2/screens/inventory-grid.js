@@ -11,10 +11,6 @@ const S = SCREEN_STRINGS.inventory;
 const G = S.gear;
 const COMMON = 'common';
 const NOT_GOOD = Object.freeze(['worn', 'torn', 'broken']);
-const KIND_ICONS = Object.freeze({
-    quest: 'fa-scroll', equipment: 'fa-shield-halved', consumable: 'fa-flask',
-    material: 'fa-cubes', goods: 'fa-box', money: 'fa-gem',
-});
 
 /** Open or closed, remembered per key. `prefix` names the chat (the caller adds it), so each chat keeps its own folds on this device. A storage that
  *  throws or is missing gives the fallback, and the choice then lasts only this page. */
@@ -48,7 +44,7 @@ function chevron(doc) {
 }
 
 /** A foldable section: a button with a chevron, the label (and an icon, a count when given) and the body under it. `onToggle(open)` gets the new state. */
-export function foldSection(doc, { id, label, icon = '', count = null, open, onToggle, body, className = '' }) {
+export function foldSection(doc, { id, label, icon = '', count = null, open, onToggle, body, className = '', rule = false }) {
     const section = h(doc, 'section', `fold-sec ${className}`.trim());
     const bodyId = `fold-body-${slug(id)}`;
     const head = h(doc, 'button', `fold-head${open ? ' is-open' : ''}`);
@@ -56,6 +52,7 @@ export function foldSection(doc, { id, label, icon = '', count = null, open, onT
     head.setAttribute('aria-expanded', String(open));
     head.setAttribute('aria-controls', bodyId);
     head.setAttribute('data-fold', String(id));
+    if (rule) head.append(chevron(doc));   // the rule-style head: chevron, label, a hairline (CSS) and the count at the right
     if (icon) {
         const mark = h(doc, 'i', `fa-solid ${icon}`);
         mark.setAttribute('aria-hidden', 'true');
@@ -63,7 +60,7 @@ export function foldSection(doc, { id, label, icon = '', count = null, open, onT
     }
     head.append(h(doc, 'span', 'fold-label', label));
     if (count !== null) head.append(h(doc, 'span', 'fold-count', String(count)));
-    head.append(chevron(doc));
+    if (!rule) head.append(chevron(doc));
     head.addEventListener('click', () => onToggle?.(!open));
     body.id = bodyId;
     body.hidden = !open;
@@ -107,7 +104,7 @@ export function itemTile(doc, item, row = null, { onOpen } = {}) {
     return tile;
 }
 
-/** The tiles of a list of items, in the order given; the CSS fits four to a line on a phone and more on a wider screen. */
+/** The tiles of a list of items, in the order given; the CSS fits four to a line on a narrow screen and more on a wide one. */
 export function tileGrid(doc, items, { rows = null, onOpen } = {}) {
     const list = h(doc, 'ul', 'tile-grid');
     list.setAttribute('aria-label', S.tilesLabel);
@@ -123,7 +120,7 @@ export function tileGrid(doc, items, { rows = null, onOpen } = {}) {
 export function categorySection(doc, { kind, title, items, rows = null, open, onToggle, onOpen }) {
     if (items.length === 0) return null;
     return foldSection(doc, {
-        id: `cat-${kind}`, label: title, icon: KIND_ICONS[kind] ?? '', count: items.length, open, onToggle,
+        id: `cat-${kind}`, label: title, count: items.length, open, onToggle, rule: true,
         body: tileGrid(doc, items, { rows, onOpen }), className: `cat cat-${kind}`,
     });
 }
@@ -135,11 +132,9 @@ export function wornSection(doc, { wearers = [], items, rows, open, onToggle, on
     for (const who of wearers) {
         const pieces = items.filter(item => rows?.[item.stack]?.byId === who.value && rows[item.stack].place);
         if (pieces.length === 0) continue;
-        const label = pieces.length === 1
-            ? fill(S.wornWhoOne, { name: who.label })
-            : fill(S.wornWho, { name: who.label, n: pieces.length });
+        const count = pieces.length === 1 ? S.wornWhoOne : fill(S.wornWho, { n: pieces.length });   // the mockup's fold: chevron, the name, "5 pieces" at the right
         wrap.append(foldSection(doc, {
-            id: `worn-${who.value}`, label, open: open(who.value),
+            id: `worn-${who.value}`, label: who.label, count, rule: true, open: open(who.value),
             onToggle: on => onToggle?.(who.value, on),
             body: tileGrid(doc, pieces, { rows, onOpen }), className: 'worn-wearer',
         }));
@@ -260,7 +255,7 @@ export function itemSheet(doc, { item, row = null, wearer = '', actions = [], re
 /** The Grid view's CSS, added after the screen's own CSS (BASE_CSS first). Tiles are square, four to a line on a phone. (The sheet's CSS is in view/mounts-*.css: it is outside the screen.) */
 export const GRID_CSS = `
 .tile-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; list-style: none; margin: 0; padding: 0; }
-@media (min-width: 760px) { .tile-grid { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); } }
+@container (min-width: 520px) { .tile-grid { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); } }
 .tile-cell { min-width: 0; }
 .tile { position: relative; display: flex; flex-direction: column; justify-content: flex-end; width: 100%; aspect-ratio: 1 / 1; min-width: 0; min-height: 36px;
   overflow: hidden; padding: 6px; border: 1.5px solid var(--rarity, var(--sb-common)); border-radius: 12px; background: var(--sb-surface);
@@ -285,8 +280,17 @@ export const GRID_CSS = `
 .fold-chev { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
 .fold-chev svg { width: 12px; height: 12px; display: block; transition: transform 0.15s; }
 .fold-head.is-open .fold-chev svg { transform: rotate(90deg); }
-.inv-view { display: inline-flex; border: 1px solid var(--sb-border); border-radius: 10px; overflow: hidden; }
-.inv-view button { min-height: 36px; padding: 0 12px; border: 0; background: transparent; color: var(--sb-em); font: inherit; cursor: pointer; }
+.fold-sec.worn-wearer > .fold-head .fold-label { font-weight: 700; }
+/* the category heads are the mockup's rule-style section heads (no box): chevron, UPPERCASE label, a hairline filling the row, the count at the right. The row is
+   30px; the 44px tap area is the button's own padding taken back with a negative margin, so the rows keep the mockup's spacing. */
+.fold-sec.cat > .fold-head { gap: 8px; min-height: 44px; margin-block: -7px; padding: 7px 0; border: 0; border-radius: 0; font-size: 11.5px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; }
+.fold-sec.cat > .fold-head .fold-label { flex: 0 1 auto; font-weight: 800; }
+.fold-sec.cat > .fold-head .fold-chev { color: var(--sb-em); }
+.fold-sec.cat > .fold-head::after { content: ""; flex: 1 1 0; min-width: 12px; height: 1px; background: var(--sb-border); }
+.fold-sec.cat > .fold-head .fold-count { order: 2; margin-left: 0; letter-spacing: 0; text-transform: none; font-weight: 700; }
+.inv-view { display: inline-flex; border: 1px solid var(--sb-border); border-radius: 9px; }   /* the mockup's slim toggle; the buttons' 44px tap areas reach outside it */
+.inv-view button { min-height: 0; padding: 4px 9px; border: 0; background: transparent; color: var(--sb-em); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.inv-view button:first-child { border-radius: 8px 0 0 8px; } .inv-view button:last-child { border-radius: 0 8px 8px 0; }
 .inv-view button[aria-pressed="true"] { background: color-mix(in srgb, var(--sb-accent) 24%, transparent); color: var(--sb-fg); }
 .inv-view button:focus-visible { outline: 2px solid var(--sb-accent); outline-offset: -2px; }
 .inv-grid-body { display: grid; gap: var(--sb-gap); }

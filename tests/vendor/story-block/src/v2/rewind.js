@@ -53,6 +53,15 @@ export function stReopen(ctx, { live = () => globalThis.SillyTavern?.getContext?
 
 const fail = (code, message) => ({ ok: false, code, message });
 
+// SillyTavern's branch / open call that never settles would keep `running` set for the whole page life (every later save point
+// or rewind answering "already going"): after this long the call counts as failed and the flag clears.
+export const STILL_WAITING_MS = 60_000;
+const limited = (work, what) => {
+    let timer;
+    const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`SillyTavern did not ${what} within ${STILL_WAITING_MS / 1000} s`)), STILL_WAITING_MS); });
+    return Promise.race([Promise.resolve().then(work), late]).finally(() => clearTimeout(timer));
+};
+
 /**
  * createRewind({ ctx, store, events?, branch?, reopen? }) → rewind({ index, beforeRev }) → Promise<
  * { ok: true, branch, index, rev, dropped, unsaved? } | { ok: false, code, message }>. `unsaved`: why the branch
@@ -86,7 +95,7 @@ export function createRewind({ ctx, store, events = null, branch = stBranch(ctx)
             }
             const from = typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx.chatId;
             let name;
-            try { name = await branch(index); } catch (error) {
+            try { name = await limited(() => branch(index), 'make the branch'); } catch (error) {
                 return fail('FAILED', `The chat could not be branched: ${error?.message ?? error}`);
             }
             if (!name) return fail('FAILED', 'SillyTavern did not create the branch.');
@@ -247,7 +256,7 @@ export function createSavePoints({
             const rev = store.head?.()?.meta?.rev;
             try { await store.flush?.(); } catch { /* the store tries again; the branch takes the chat as it is in memory */ }
             let branch;
-            try { branch = await createBranch(index); } catch (error) {
+            try { branch = await limited(() => createBranch(index), 'make the branch'); } catch (error) {
                 return fail('FAILED', `The chat could not be branched: ${error?.message ?? error}`);
             }
             if (typeof branch !== 'string' || !branch) return fail('FAILED', 'SillyTavern did not create the branch.');
@@ -274,7 +283,7 @@ export function createSavePoints({
         running = true;
         try {
             try { await store?.flush?.(); } catch { /* kept unsaved; the store tries again */ }
-            try { await open(point.branch); } catch (error) {
+            try { await limited(() => open(point.branch), 'open the branch'); } catch (error) {
                 return fail('FAILED', `The branch "${point.branch}" could not be opened (it may have been renamed or deleted in SillyTavern): ${error?.message ?? error}`);
             }
             return { ok: true, branch: point.branch };

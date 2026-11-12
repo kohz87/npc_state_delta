@@ -26,6 +26,8 @@ export const joinMode = values => (JOINS.includes(values?.[JOIN_SETTING]) ? valu
 
 /** The narrator's grammar line for party lines (one line, as every kind's is). */
 export const joinGrammar = () => J.grammar;
+/** The same line in the words of this story's own class field (`naming`, soulNaming): the classes it runs from and to; the template's gives joinGrammar's text. */
+export const joinGrammarOwn = naming => { const own = soulWords(naming); return fill(J.grammarOwn, { first: oneLine(own.first), last: oneLine(own.last) }); };
 
 /** The command a card's No runs, and the receipt `data` keys the card reads (receipt.data.join). */
 export const JOIN_NO = 'rpg.joinNo';
