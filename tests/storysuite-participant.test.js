@@ -599,3 +599,129 @@ test('opening a chat, a reply or a scan hydrates nothing and writes nothing; the
     assert.match(full.timeline().lineage, LINEAGE_ID);
     assert.equal(full.queries['npc.identity'](null, { name: 'Mira' }).nativeKey, 'npc_mira');
 });
+
+// ---- checkpoint files: packed on disk, plain in memory; a save that is thrown away removes only what it made -------------------------------
+
+/** A fake SillyTavern user-files server (upload / verify / delete / read) for the file vault. */
+function filesServer() {
+    const files = new Map();
+    const fetchFn = async (url, options = {}) => {
+        const name = url.split('/').pop();
+        if (url === '/api/files/upload') { const body = JSON.parse(options.body); files.set(body.name, Buffer.from(body.data, 'base64').toString()); return { ok: true, status: 200 }; }
+        if (url === '/api/files/verify') { const body = JSON.parse(options.body); return { ok: true, status: 200, json: async () => Object.fromEntries(body.urls.map(u => [u, files.has(u.split('/').pop())])) }; }
+        if (url === '/api/files/delete') { const had = files.delete(JSON.parse(options.body).path.split('/').pop()); return { ok: had, status: had ? 200 : 404, text: async () => '' }; }
+        return files.has(name) ? { ok: true, status: 200, text: async () => files.get(name) } : { ok: false, status: 404, text: async () => '' };
+    };
+    return { files, fetchFn, checkpointNames: () => [...files.keys()].filter(name => name.startsWith('npc-state-delta-checkpoint-nk_')) };
+}
+const bytesOf = (server, names) => names.reduce((sum, name) => sum + Buffer.byteLength(server.files.get(name)), 0);
+
+/** A chat state after `turn` replies: Delta's own rollback history holds a full snapshot per reply (the part that made every file big). */
+function stateAt(turn) {
+    const npcs = Array.from({ length: 6 }, (_, n) => npc(`npc_${n}`, `Person ${n}`, { trust: (turn + n) % 10, memories: Array.from({ length: Math.min(turn, 30) }, (_, m) => `memory ${m} of person ${n}, reply ${(turn + m) % 7}`) }));
+    const checkpoints = Array.from({ length: turn }, (_, i) => {
+        const at = i + 1;
+        return { messageId: at, fingerprint: `fp${at}`, lineageKey: `L${at}`, parentLineageKey: at > 1 ? `L${at - 1}` : null, reason: 'scan', createdAt: at, rollbackSeq: at, snapshot: { turn: at, npcs: npcs.map(item => ({ ...item, trust: (at + Number(item.id.slice(4))) % 10, memories: item.memories.slice(0, Math.min(at, 30)) })) } };
+    });
+    return { npcs, socialGraph: { edges: [] }, checkpoints, lineage: [{ id: 1 }], turn };
+}
+
+test('a checkpoint file is written packed and read back as the very document that was hashed; old plain files and unusable checkpoint lists stay as they are', async () => {
+    const server = filesServer();
+    const vault = fileVault({ fetchFn: server.fetchFn });
+    const built = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: { ...stateAt(40), timeline: { v: 1, lineage: 'lg_aaaaaaaa' } }, cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) });
+    assert.equal(await vault.put(built.id, built.doc), true, 'put says it created the file');
+    assert.equal(await vault.put(built.id, built.doc), false, 'the same id again is not a new file');
+    const stored = JSON.parse(server.files.get(`npc-state-delta-checkpoint-${built.id}.json`));
+    assert.equal(stored.kind, 'npc-state-delta-native-packed');
+    assert.equal(stored.packing.scheme, 'chain-rfc6902');
+    assert.ok(server.files.get(`npc-state-delta-checkpoint-${built.id}.json`).length * 1.5 < JSON.stringify(built.doc).length, 'much less than the plain bytes');
+    const back = await vault.get(built.id);
+    assert.deepEqual(back, built.doc);
+    assert.equal(hashJson(back), built.hash, 'the hash (and so the id) is the plain document\'s');
+    assert.equal(checkpointProblem(back, built.hash), '');
+    // An old build's plain file is read as it is, and so is a plain write (no checkpoint list, or an empty one).
+    const old = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: freshState() });
+    server.files.set(`npc-state-delta-checkpoint-${old.id}.json`, JSON.stringify(old.doc));
+    assert.deepEqual(await vault.get(old.id), old.doc);
+    for (const state of [{ npcs: [], timeline: {} }, { npcs: [], checkpoints: [], timeline: {} }]) {
+        const plainOne = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state, headHash: 'c'.repeat(64) });
+        await vault.put(plainOne.id, plainOne.doc);
+        assert.equal(JSON.parse(server.files.get(`npc-state-delta-checkpoint-${plainOne.id}.json`)).kind, plainOne.doc.kind);
+        assert.deepEqual(await vault.get(plainOne.id), plainOne.doc);
+    }
+    // A packed file that cannot be rebuilt is a file that is not there (never a partial state).
+    const broken = JSON.parse(server.files.get(`npc-state-delta-checkpoint-${built.id}.json`));
+    broken.doc.state.checkpoints.find(entry => entry.packed).packed.base = 999;
+    server.files.set(`npc-state-delta-checkpoint-${built.id}.json`, JSON.stringify(broken));
+    assert.equal(await vault.get(built.id), null);
+});
+
+test('60 replies on the file vault: the same restores as the plain memory vault, one file per save and a fraction of the bytes', async () => {
+    const server = filesServer();
+    const plainVault = memoryVault();
+    const runs = [];
+    for (const vault of [fileVault({ fetchFn: server.fetchFn }), plainVault]) {
+        const run = setup({ state: stateAt(1), vault });
+        await run.hydrate();
+        const saves = [];
+        for (let turn = 1; turn <= 60; turn += 1) {
+            run.live.state = { ...stateAt(turn), timeline: run.live.state.timeline };
+            saves.push(await run.participant.checkpoint({ cursor: { sid: `sr_${turn}` }, headHash: hashJson({ turn }) }));
+        }
+        assert.ok(saves.every(save => save.ok), 'every save succeeds');
+        // Rollback / swipe / delete / re-read / reload all come down to prepare + activate of an earlier reply's checkpoint: the installed state.
+        const installed = [];
+        for (const turn of [59, 41, 30, 3, 60, 1]) {
+            const save = saves[turn - 1];
+            const prepared = await run.participant.prepare({ return: `rt_${turn}x${installed.length}`, checkpoint: save.checkpoint, hash: save.hash });
+            assert.equal(prepared.ok, true, prepared.message);
+            const activated = await run.participant.activate({ return: `rt_${turn}x${installed.length}`, prepared: prepared.prepared });
+            assert.equal(activated.ok, true, activated.message);
+            installed.push(structuredClone(run.live.state));
+        }
+        runs.push({ saves, installed });
+    }
+    // Each run mints its own story line (its ids and the np_ map seeded by it), so those differ; what a restore installs must not.
+    const unlined = states => states.map(({ timeline, ...state }) => state);
+    assert.deepEqual(unlined(runs[0].installed), unlined(runs[1].installed), 'the same state after each restore');
+    const names = server.checkpointNames();
+    assert.equal(names.length, 61, 'one file per save (and the baseline), none lost, none extra');
+    const plainBytes = [...plainVault.docs.values()].reduce((sum, text) => sum + text.length, 0);
+    const packedBytes = bytesOf(server, names);
+    assert.ok(packedBytes * 1.5 < plainBytes, `packed ${packedBytes} bytes against ${plainBytes} plain`);
+});
+
+test('a save that is thrown away removes the file it made, and only that; a failed removal changes nothing', async () => {
+    const run = setup({ vault: memoryVault() });
+    await run.hydrate();
+    const baseId = [...run.vault.docs.keys()][0];
+    const removed = [];
+    const remove = run.vault.remove.bind(run.vault);
+    run.vault.remove = async (id, options) => { removed.push(id); return remove(id, options); };
+    // The state Delta holds changes after the checkpoint was made (the scan started): the first try is thrown away, the second stands.
+    let busyOnce = true;
+    run.port.busy = () => { const now = busyOnce; busyOnce = false; return now; };
+    const before = run.vault.docs.size;
+    const saved = await run.participant.checkpoint({ cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) });
+    assert.equal(saved.ok, true);
+    assert.equal(removed.length, 1, 'the thrown-away try was removed');
+    assert.equal(run.vault.docs.size, before + 1, 'and the one that stands is kept');
+    assert.ok(run.vault.docs.has(saved.checkpoint));
+    // The baseline checkpoint of the same state (same id, made earlier, named by the index) is never removed by a thrown-away save of it.
+    let again = true;
+    run.port.busy = () => { const now = again; again = false; return now; };
+    removed.length = 0;
+    const same = await run.participant.checkpoint({});
+    assert.equal(same.ok, true);
+    assert.equal(removed.length, 0, 'an id that existed before is not removed');
+    assert.ok(run.vault.docs.has(baseId));
+    // A removal that fails (or a crash before it) leaves the file and the save is still right.
+    run.vault.remove = async () => { throw new Error('the server went away'); };
+    let third = true;
+    run.port.busy = () => { const now = third; third = false; return now; };
+    run.live.state.npcs[0].trust = 8;
+    const kept = await run.participant.checkpoint({ cursor: { sid: 'sr_9' }, headHash: 'e'.repeat(64) });
+    assert.equal(kept.ok, true);
+    assert.ok(run.vault.docs.has(kept.checkpoint));
+});
