@@ -437,7 +437,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
       knows: [{ about: 'X', how: 'saw', day: 2, secret: true, hidden: true, text: 'a secret about X · hidden' }, { about: 'Y', how: 'heard', day: 3, text: 'Y owes a debt', secret: false, hidden: false }],
       tastes: [{ sign: '+', item: 'toffee', from: 'barge crews' }, { sign: '-', item: 'paperwork', mirrored: true }],
       ties: [{ name: 'Temiwa', tags: ['ally'] }, { name: 'Vane', tags: ['owes'] }, { name: 'Bregje', tags: [], owedBy: true }],
-      drives: [{ label: 'Conflict', strength: 3, word: 'high' }], look: { day: 3 },
+      drives: [{ label: 'Conflict', strength: 3, word: 'high', note: 'from their description' }, { label: 'Closure', strength: 2, word: 'normal', note: 'ignored when normal' }, { label: 'Belonging', strength: 1, word: 'low', note: 'eased over 2 story moments (alone)' }, { label: 'Honesty', strength: 0, word: 'off', note: '' }], look: { day: 3 },
     },
   });
   const npc = {
@@ -460,7 +460,13 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.match(ties, /I sold nothing/); assert.match(ties, /Y owes a debt/);
   assert.match(sectionScreenHtml('now', npc), /trust dropped: Astra lied/);
   const profile = dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: meters }, { layout: 'phone' });
-  assert.match(profile, /toffee/); assert.match(profile, /Conflict/); assert.match(profile, /look was set on day 3/);
+  assert.match(profile, /toffee/); assert.match(profile, /Conflict/);
+  assert.match(profile, /class="delta-drive" data-level="high"[^]*?<b class="high"><\/b>[^]*?delta-drive-word">high<[^]*?from their description/, 'a high drive: word, right-reaching bar, source note');
+  assert.match(profile, /data-level="low"[^]*?<b class="low"><\/b>[^]*?eased over 2 story moments \(alone\)/);
+  assert.match(profile, /data-level="off"[^]*?<b class="off"><\/b>/);
+  assert.match(profile, /data-level="normal"[^]*?<b class="normal"><\/b>/);
+  assert.doesNotMatch(profile, /ignored when normal/, 'a normal drive shows no source note');
+  assert.match(profile, /The middle of each bar is normal/); assert.match(profile, /look was set on day 3/);
   const bare = { ...npc, v2Meters: v2MetersProjection({ bars: [], secrets: [] }) };
   const none = boardTiles(boardModel(bare), { userName: 'Astra' });
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');

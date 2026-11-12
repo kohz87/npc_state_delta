@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    DRIVES, DRIVE_DEFAULT, DRIVES_TEXT_MAX, readDrives, setDrives, seedDrives, strengthMultiplier, applyStrength, scaledInst, driveRows,
+    DRIVES, DRIVE_DEFAULT, DRIVE_RULE, growDrives, driveEvidence, DRIVES_TEXT_MAX, readDrives, setDrives, seedDrives, strengthMultiplier, applyStrength, scaledInst, driveRows,
 } from '../src/npc-notes-drives.js';
 
 const allDefault = () => Object.fromEntries(DRIVES.map(drive => [drive.key, DRIVE_DEFAULT]));
@@ -72,14 +72,14 @@ test('seedDrives: a pack list of kind names marks those drives high and the rest
 });
 
 test('seedDrives: with no usable pack drives, the first description is scanned for drive words', () => {
-    const seeded = seedDrives({}, 'She is honest with everyone and wants to protect the village.');
+    const seeded = seedDrives({}, 'She is honest and frank with everyone and wants to protect and guard the village.');
     assert.deepEqual(seeded, { ...allDefault(), hone: 3, pres: 3 });
     assert.deepEqual(seedDrives(null, 'A quiet cook.'), allDefault());
     assert.deepEqual(seedDrives(undefined, undefined), allDefault());
 });
 
 test('seedDrives: a pack object with strengths does not also read the description', () => {
-    assert.deepEqual(seedDrives({ drives: { belonging: 1 } }, 'Honest to a fault.'), { ...allDefault(), belo: 1 });
+    assert.deepEqual(seedDrives({ drives: { belonging: 1 } }, 'Honest and frank to a fault.'), { ...allDefault(), belo: 1 });
 });
 
 test('seedDrives: short words only match whole tokens (kin does not match kingdom)', () => {
@@ -131,4 +131,82 @@ test('driveRows: strengths map to off, low, normal and high', () => {
     const rows = driveRows({ ...allDefault(), belo: 0, clos: 1, awe: 3 });
     assert.deepEqual(rows.slice(0, 3).map(row => row.word), ['off', 'low', 'high']);
     assert.deepEqual(rows.slice(0, 3).map(row => row.strength), [0, 1, 3]);
+});
+
+test('seeding: ONE cue word keeps a drive normal, TWO DIFFERENT cue words start it high, a repeated word is still one, the pack wins', () => {
+    assert.deepEqual(seedDrives({}, 'A friend to all, quiet and plain.'), allDefault(), 'one cue: normal');
+    assert.deepEqual(seedDrives({}, 'Friend, friend, friend.'), allDefault(), 'the same word three times is one cue');
+    assert.deepEqual(seedDrives({}, 'A loyal friend who misses her family.'), { ...allDefault(), belo: 3 }, 'two different cues: high');
+    assert.deepEqual(seedDrives({ drives: { honesty: 0 } }, 'A loyal friend who misses her family.'), { ...allDefault(), hone: 0 }, 'pack wins');
+    assert.deepEqual(seedDrives({ drives: ['comfort'] }, 'A loyal friend who misses her family.'), { ...allDefault(), comf: 3 }, 'a pack list wins too');
+});
+
+test('driveRows: a note says where a non-normal drive came from (pack, description, growth); normal shows none', () => {
+    const fromPack = setDrives(undefined, {}, { pack: { drives: { honesty: 3, belonging: 1 } } });
+    const rows = driveRows(readDrives(fromPack), fromPack);
+    assert.equal(rows.find(row => row.key === 'hone').note, 'set by the pack');
+    assert.equal(rows.find(row => row.key === 'belo').note, 'set by the pack');
+    assert.equal(rows.find(row => row.key === 'awe').note, '', 'normal: no note');
+    const fromText = setDrives(undefined, {}, { description: 'protect and guard' });
+    assert.equal(driveRows(readDrives(fromText), fromText).find(row => row.key === 'pres').note, 'from their description');
+    const grew = growTwice('belo-cue: a friend', 'family came to visit');
+    assert.match(driveRows(readDrives(grew), grew).find(row => row.key === 'belo').note, /^grew over 2 story moments/);
+    assert.equal(driveRows(readDrives(setDrives(undefined, {}, {})), undefined).every(row => row.note === ''), true);
+    const set = setDrives(fromPack, { hone: 2 });
+    assert.equal(driveRows(readDrives(set), set).find(row => row.key === 'hone').note, '');
+});
+
+function growTwice(a, b, leaf) {
+    const one = growDrives(leaf, [a], 'r1');
+    return growDrives(one.leaf, [b], 'r2').leaf;
+}
+
+test('growth: a cue in ONE reply only remembers it; the same drive in a SECOND, different reply steps it one level', () => {
+    const first = growDrives(undefined, ['She made a new friend'], 'r1');
+    assert.deepEqual(readDrives(first.leaf), allDefault(), 'no step yet');
+    assert.deepEqual(first.steps, []);
+    assert.equal(growDrives(first.leaf, ['another friend'], 'r1'), null, 'the same reply again counts once');
+    const second = growDrives(first.leaf, ['her family wrote'], 'r2');
+    assert.equal(readDrives(second.leaf).belo, 3);
+    assert.deepEqual(second.steps.map(step => [step.key, step.from, step.to]), [['belo', 2, 3]]);
+    assert.equal(growDrives(second.leaf, ['yet another friend'], 'r3'), null, 'max 3: nothing more');
+});
+
+test('growth: opposite cues step a drive down, never below 0, and a cue the other way restarts the count', () => {
+    const down = growTwice('she stays alone', 'an aloof loner');
+    assert.equal(readDrives(down).belo, 1);
+    assert.match(driveRows(readDrives(down), down).find(row => row.key === 'belo').note, /^eased over 2 story moments/);
+    const lower = growTwice('alone again', 'distant as ever', down);
+    assert.equal(readDrives(lower).belo, 0);
+    assert.equal(growDrives(lower, ['alone'], 'r9'), null, 'min 0');
+    const mixed = growDrives(growDrives(undefined, ['a friend'], 'r1').leaf, ['she is alone'], 'r2');
+    assert.equal(readDrives(mixed.leaf).belo, 2, 'an opposite cue replaces the pending one');
+    assert.equal(readDrives(growDrives(mixed.leaf, ['alone again'], 'r3').leaf).belo, 1);
+});
+
+test('growth: cues both ways in one reply, or none, count for nothing; one step per drive per reply; other drives are independent', () => {
+    assert.equal(growDrives(undefined, ['a friend, but alone'], 'r1'), null);
+    assert.equal(growDrives(undefined, ['nothing of note'], 'r1'), null);
+    const a = growDrives(undefined, ['a friend, honest and frank, wants to protect'], 'r1');
+    const b = growDrives(a.leaf, ['friend', 'family', 'kin'], 'r2');
+    assert.deepEqual(b.steps.map(step => step.key), ['belo'], 'only the drive whose cues showed again');
+    assert.equal(readDrives(b.leaf).belo, 3);
+    assert.equal(readDrives(b.leaf).hone, 2);
+});
+
+test('growth: only a usable leaf and a reply id are accepted; the stored leaf stays valid and short', () => {
+    assert.equal(growDrives('not json', ['friend'], 'r1'), null);
+    assert.equal(growDrives(undefined, ['friend'], null), null);
+    const full = DRIVES.reduce((leaf, drive) => growDrives(leaf, [drive.words[0]], 'r1')?.leaf ?? leaf, undefined);
+    assert.notEqual(readDrives(full), null);
+    assert.ok(full.length <= DRIVES_TEXT_MAX);
+    assert.equal(DRIVE_RULE, 1);
+});
+
+test('driveEvidence: only what is new (memories, behavior, mannerisms, the changed reason)', () => {
+    const before = { memories: ['old'], behaviorProfile: [], lastRelationshipChange: { reason: 'same' } };
+    const after = { memories: ['old', { text: 'met a friend' }], behaviorProfile: ['keeps apart'], mannerisms: ['hums'], lastRelationshipChange: { reason: 'same' } };
+    assert.deepEqual(driveEvidence(before, after), ['met a friend', 'keeps apart', 'hums']);
+    assert.deepEqual(driveEvidence(after, after), []);
+    assert.deepEqual(driveEvidence(undefined, { lastRelationshipChange: { reason: 'shared a meal' } }), ['shared a meal']);
 });

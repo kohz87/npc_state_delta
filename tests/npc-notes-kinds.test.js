@@ -554,3 +554,28 @@ test('notes tail: the Changes cue is the last optional line while someone is pre
     const empty = await suite({ allowance: null, features: ON });
     assert.ok(!optional(empty).some(line => /<Changes>/.test(line)));
 });
+
+test('notes host: npc.drives grows a drive on the 2nd different reply with a cue; live == rebuild, a swipe takes the step back, a button is refused', async () => {
+    const s = await suite({ allowance: null, features: { ...ON } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    const slice = () => s.host.head().domains.npc;
+    const belonging = () => JSON.parse(slice().npcs.oren.drives ?? '{"belo":2}').belo;
+    assert.equal((await s.host.sdk.command('npc.drives', { name: 'Oren', texts: ['a friend'], rule: 1 })).ok, false, 'not from a button');
+    assert.equal(await s.adapter.drives({ name: 'Oren', texts: ['made a friend at the inn'] }) !== null, true);
+    assert.equal(belonging(), 2, 'one reply with a cue: still normal');
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.adapter.drives({ name: 'Oren', texts: ['his family came to visit'] });
+    assert.equal(belonging(), 3, 'a second different reply with a cue: high');
+    assert.deepEqual(validateNpcSlice(slice()), []);
+    const live = JSON.stringify(slice());
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(slice()), live, 'rebuild equals live');
+    await s.adapter.drives({ name: 'Oren', texts: ['a friend again'] });
+    assert.equal(JSON.stringify(slice()), live, 'the same reply again changes nothing');
+    await s.adapter.drives({ name: 'Oren', texts: ['x'], rule: 2 });
+    assert.equal(JSON.stringify(slice()), live, 'an unknown rule is not read');
+    await s.swipe(['~ npc Oren | trust: +1']);
+    assert.equal(belonging(), 2, 'a swipe of the reply takes the step back');
+    assert.deepEqual(s.host.store.problems(), []);
+});
