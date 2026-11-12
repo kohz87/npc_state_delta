@@ -119,13 +119,9 @@ export function createHostedPart(rt, deps) {
         const made = (state?.npcs || []).filter(npc => npc?.id && npc.castFrom?.key);
         if (!made.length) return null;
         const people = castList();
-        // The pin button: Story Director offers it (hosted) and the person is not a key person yet.
-        let offered = false;
-        try { offered = storySuiteV2Meters()?.keyPinOffered?.() === true; } catch { offered = false; }
-        const keyList = offered ? keyPeopleList() : null;
         const views = {};
         for (const npc of made) {
-            const view = castView(npc, findCastPerson(people, npc.castFrom.key), { pin: offered && !isKeyNpc(npc, keyList ?? []) });
+            const view = castView(npc, findCastPerson(people, npc.castFrom.key));
             if (view) views[npc.id] = view;
         }
         return Object.keys(views).length ? views : null;

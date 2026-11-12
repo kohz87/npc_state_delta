@@ -116,18 +116,6 @@ export class DeltaDossierUi extends DossierUiRender {
         }
     }
 
-    // (the living cast) "Pin as Key people": Story Director's own command, asked through Delta's api; the button is drawn only while it is offered.
-    async pinKeyPerson(button) {
-        const id = button?.dataset?.deltaCastPin || this.selectedNpcId;
-        if (!id || typeof this.api?.pinKeyPerson !== 'function') return;
-        button.disabled = true;
-        let out = null;
-        try { out = await this.api.pinKeyPerson(id); } catch (error) { out = { ok: false, message: String(error?.message || error) }; }
-        if (out?.ok) globalThis.toastr?.success?.(`NPC State Delta: ${out.message || 'Pinned as a key person.'}`);
-        else { button.disabled = false; globalThis.toastr?.warning?.(`NPC State Delta: ${out?.message || 'Could not pin.'}`); }
-        this.scheduleRefresh();
-    }
-
     async openEditor(npcId) {
         const id = plain(npcId);
         if (!id || typeof this.api?.openEditor !== 'function') {

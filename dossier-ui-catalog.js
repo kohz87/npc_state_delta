@@ -96,12 +96,12 @@ export function castProjection(view) {
         ? { text: plain(view.lastHeard.text), on: plain(view.lastHeard.on) } : null;
     return {
         badge: plain(view.badge, 'Cast'), packName: plain(view.packName), firstMet: plain(view.firstMet),
-        goal: plain(view.goal), routine: plain(view.routine), lastHeard: heard, where: plain(view.where), doing: plain(view.doing), pin: view.pin === true,
+        goal: plain(view.goal), routine: plain(view.routine), lastHeard: heard, where: plain(view.where), doing: plain(view.doing),
     };
 }
 
 /** The "From the Ersveil cast" block: where the person came from, their own path and when they were last heard of. */
-export function castFromHtml(cast, npcId = '') {
+export function castFromHtml(cast) {
     if (!cast) return '';
     const heard = cast.lastHeard ? `<b>Last heard:</b> ${escapeHtml(cast.lastHeard.text)}${cast.lastHeard.on ? ` (${escapeHtml(cast.lastHeard.on)})` : ''}` : '';
     const now = !cast.lastHeard && (cast.doing || cast.where)
@@ -112,8 +112,6 @@ export function castFromHtml(cast, npcId = '') {
         <h5>From the ${cast.packName ? `${escapeHtml(cast.packName)} ` : ''}cast${cast.firstMet ? ` · first met ${escapeHtml(cast.firstMet)}` : ''}</h5>
         <div>Made at the first meeting from the pack's prepared dossier, no scan needed. Later scans add to it and change it as they do for anyone.</div>
         ${lines}
-        ${cast.pin ? `<button type="button" class="delta-btn delta-cast-pin" data-delta-cast-pin="${escapeHtml(npcId)}">★ Pin as Key people</button>
-        <div class="delta-muted delta-cast-pin-note">Pinned, they get the full Key people track (away, back date, return) and the narrator hears about them.</div>` : ''}
     </section>`;
 }
 
