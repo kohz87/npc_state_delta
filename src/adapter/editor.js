@@ -249,6 +249,7 @@ export function createEditorPart(session, deps) {
             const net = ownChangeOf(slice, head);
             out[npc.id] = {
                 ...(net ? { relChange: net } : {}),
+                ...(slice?.recent ? { recent: slice.recent } : {}),
                 bars: (entry?.bars ?? []).map(bar => ({ ...bar, builtIn: builtIn.has(bar.id) })),
                 rank: entry?.rank ?? '',
                 next: entry?.next ?? '',

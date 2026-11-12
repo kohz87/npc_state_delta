@@ -150,11 +150,16 @@ export function withSectionHtml(npc = {}) {
     // event is not repeated).
     const last = npc.lastRelationshipChange;
     const hasLast = last && last.impact !== 'none' && (last.reason || last.impact === 'manual' || last.hosted);
+    // The meters' own log (the last three replies' events, newest first) comes next; the reply the latest change shows is not repeated. The stored
+    // history fills what is left (a chat from before the log), never a reply already shown.
+    const log = (Array.isArray(npc.recentMeterChanges) ? npc.recentMeterChanges : []).filter(entry => !(hasLast && last.hosted && wholeNumber(last.message) !== null && entry.n === wholeNumber(last.message)));
+    const shown = new Set([...(hasLast ? [wholeNumber(last.message)] : []), ...log.map(entry => entry.n)].filter(number => number !== null));
     const earlier = (Array.isArray(npc.recentRelationshipChanges) ? npc.recentRelationshipChanges : [])
         .filter((event, index) => !(hasLast && ((index === 0 && last.reason && event.reason === last.reason) || (last.hosted && wholeNumber(event.message) !== null && wholeNumber(event.message) === wholeNumber(last.message)))))
+        .filter(event => !shown.has(wholeNumber(event.message)))
         .slice(0, 3);
     // At most the last three, the latest change counted among them.
-    const rows = [...(hasLast ? [recentChangeRowHtml({ change: last })] : []), ...earlier.map(event => recentChangeRowHtml({ event }))].slice(0, 3).join('');
+    const rows = [...(hasLast ? [recentChangeRowHtml({ change: last })] : []), ...log.map(entry => recentChangeRowHtml({ entry })), ...earlier.map(event => recentChangeRowHtml({ event }))].slice(0, 3).join('');
     return `<div class="delta-sheet">
         <div class="delta-sheet-meters">${meters}</div>
         ${summary ? `<p class="delta-sheet-prose">${escapeHtml(summary)}</p>` : ''}

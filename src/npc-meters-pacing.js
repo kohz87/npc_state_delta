@@ -37,17 +37,22 @@ export function cutToTier(changes, used, caps, value) {
 // ---- the last event of a reply (record.lastEvent): what the reply's meter lines and scans asked, and what the day's allowance made of it ----
 //
 // Stored as ONE text leaf (compact JSON), so the host always writes and replays it whole: { at: reply, date, events: [{ src, ask, tier,
-// held, note }] } (up to 4 events, the oldest of its kind making room for a fifth; `ask`: the four built-in axes' asked amounts;
-// `date`: the story date before the reply). A new reply replaces it; another event of the same reply writes the whole longer list.
+// held, note, mv }] } (up to 4 events, the oldest of its kind making room for a fifth; `ask`: the four built-in axes' asked amounts;
+// `mv`: the signed amounts the event actually moved; `date`: the story date before the reply). Another event of the same reply writes the whole longer list.
+// A new reply starts a new current event and keeps the one it replaces as the first of `prev` (the previous two replies' events, newest first, each
+// squeezed to one row by snapshotOf), so the dossier lists the last three changes. Only a text that has `prev` keeps one: an older text (no `prev`) is
+// written as it was (rule mark: old replies and their Re-reads stay byte-identical) until its reply is replaced; it then starts a log, never a made-up one.
 // Nothing that decides meters reads it; it feeds the card and the next prompt's gate cue (npc-meters-prompt.js), so a gate event stays.
 const AXES = ['trust', 'affection', 'desire', 'tension'];
 export const EVENT_MAX = 4;
-const EVENT_TEXT_MAX = 1300;
+const EVENT_TEXT_MAX = 2600;
+export const LOG_MAX = 2;   // earlier replies kept beside the current one: the dossier lists the last three
 const NOTE_MAX = 120;
 const WHY_MAX = 240;   // a story line's own why is cut to 80 where it is read (captureLine); a scan's evidence (withEvidence) may be longer
 const DATE_MAX = 40;
 const SOURCES = ['story', 'scan'];
 const wholeInt = value => Number.isSafeInteger(value);
+const axesOk = map => Boolean(map) && typeof map === 'object' && !Array.isArray(map) && Object.keys(map).every(axis => AXES.includes(axis) && wholeInt(map[axis]) && map[axis] !== 0 && Math.abs(map[axis]) <= 400);
 const replyOk = value => (typeof value === 'string' && value.length > 0 && value.length <= 80) || (wholeInt(value) && value >= 0);
 
 function validEvent(item) {
@@ -57,6 +62,7 @@ function validEvent(item) {
     if (item.why !== undefined && (typeof item.why !== 'string' || !item.why || item.why.length > WHY_MAX)) return false;   // the story line's (or, rule NSDFOLLOW-3, the scan's) own reason, or its one-pass evidence (withEvidence)
     if (item.via !== undefined && !normalizeApproachKind(item.via)) return false;
     if (item.gate !== undefined && (!item.via || gateEventProblems(item.gate).length)) return false;
+    if (item.mv !== undefined && !axesOk(item.mv)) return false;
     const ask = item.ask;
     return Boolean(ask) && typeof ask === 'object' && !Array.isArray(ask) && Object.keys(ask).every(axis => AXES.includes(axis) && wholeInt(ask[axis]) && ask[axis] !== 0);
 }
@@ -68,15 +74,51 @@ export function readEvent(text) {
     try { value = JSON.parse(text); } catch { return null; }
     if (!value || typeof value !== 'object' || !replyOk(value.at) || typeof value.date !== 'string' || value.date.length > DATE_MAX) return null;
     if (!Array.isArray(value.events) || !value.events.length || value.events.length > EVENT_MAX || !value.events.every(validEvent)) return null;
+    if (value.n !== undefined && !(wholeInt(value.n) && value.n >= 0)) return null;
+    if (value.prev !== undefined && (!Array.isArray(value.prev) || value.prev.length > LOG_MAX || !value.prev.every(validRow))) return null;
     return value;
 }
 
+// One earlier reply as a row of the log: { at, n?, date, mv? | ask?, held, note?, why? } (mv: signed amounts moved; ask only for a text from before mv was kept).
+function validRow(row) {
+    if (!row || typeof row !== 'object' || Array.isArray(row) || !replyOk(row.at) || typeof row.date !== 'string' || row.date.length > DATE_MAX || typeof row.held !== 'boolean') return false;
+    if (row.n !== undefined && !(wholeInt(row.n) && row.n >= 0)) return false;
+    if (row.note !== undefined && (typeof row.note !== 'string' || row.note.length > NOTE_MAX)) return false;
+    if (row.why !== undefined && (typeof row.why !== 'string' || !row.why || row.why.length > WHY_MAX)) return false;
+    return [row.mv, row.ask].every(map => map === undefined || axesOk(map));
+}
+
+const sumAxes = (events, key) => Object.fromEntries(AXES.map(axis => [axis, events.reduce((sum, item) => sum + (item[key]?.[axis] ?? 0), 0)]).filter(([, value]) => value !== 0));
+
+/** One current-format reply's events as one log row (the oldest events' reasons first, joined by "; "). */
+function snapshotOf(event) {
+    const events = event.events;
+    const mv = sumAxes(events, 'mv');
+    const ask = Object.keys(mv).length || events.some(item => item.mv) ? {} : sumAxes(events, 'ask');
+    const why = cutWords([...new Set(events.map(item => item.why).filter(Boolean))].join('; '));
+    const held = events.every(item => item.held);
+    const note = held ? events.find(item => item.note)?.note : '';
+    const n = wholeInt(event.n) ? event.n : (wholeInt(event.at) ? event.at : null);
+    return { at: event.at, ...(n !== null ? { n } : {}), date: event.date, ...(Object.keys(mv).length ? { mv } : Object.keys(ask).length ? { ask } : {}), held, ...(note ? { note } : {}), ...(why ? { why } : {}) };
+}
+
+/** The recent change rows of a read event, newest first: the current reply's, then the earlier ones the log kept (up to three). A text from before the log has only its own. */
+export function eventLog(event) {
+    return event ? [snapshotOf(event), ...(event.prev ?? [])].slice(0, LOG_MAX + 1) : [];
+}
+
+/** The signed amounts a run's moved meters made on the four built-in axes: { axis: n } (nothing moved: {}). */
+export const movesOf = moved => Object.fromEntries(moved.filter(item => AXES.includes(item.meter) && item.after !== item.before).map(item => [item.meter, item.after - item.before]));
+
 /** What a hosted run records for one paced event: the whole new text for the record (`prior`: the stored text), or null when it need not change. */
-export function nextEvent(prior, { reply, date, src, ask, tier, held, note, via, gate, why }) {
+export function nextEvent(prior, { reply, date, src, ask, tier, held, note, via, gate, why, mv, n = null, log = true }) {
     const old = readEvent(prior);
-    let events = old && old.at === reply ? old.events : [];
+    const same = Boolean(old) && old.at === reply;
+    // `log` false: a Re-read of a reply the older code wrote (no log) writes it as it was. The same reply's later events follow the text they join.
+    const logged = log !== false && (!same || Array.isArray(old.prev));
+    let events = same ? old.events : [];
     const mine = Object.fromEntries(AXES.filter(axis => wholeInt(ask?.[axis]) && ask[axis] !== 0).map(axis => [axis, ask[axis]]));
-    const item = { src, ask: mine, tier, held: Boolean(held), note: String(note || '').slice(0, NOTE_MAX), ...(String(why || '').trim() ? { why: String(why).trim().slice(0, WHY_MAX) } : {}), ...(via ? { via, ...(gate ? { gate } : {}) } : {}) };
+    const item = { src, ask: mine, tier, held: Boolean(held), note: String(note || '').slice(0, NOTE_MAX), ...(String(why || '').trim() ? { why: String(why).trim().slice(0, WHY_MAX) } : {}), ...(via ? { via, ...(gate ? { gate } : {}) } : {}), ...(logged && mv && Object.keys(mv).length ? { mv } : {}) };
     // A full list (EVENT_MAX) makes room by dropping the oldest event of the new one's own kind (held or spent), else the oldest, so
     // a later spent event is never hidden behind four held ones (the card would say "Nothing moved") nor the reverse. An event that
     // fired the gate is dropped last: the next prompt's gate cue reads it.
@@ -85,7 +127,12 @@ export function nextEvent(prior, { reply, date, src, ask, tier, held, note, via,
             .map(test => events.findIndex(test)).find(index => index !== -1);
         events = events.filter((_, index) => index !== at);
     }
-    const text = JSON.stringify({ at: reply, date: String(date || '').slice(0, DATE_MAX), events: [...events, item] });
+    const head = { at: reply, date: String(date || '').slice(0, DATE_MAX), events: [...events, item] };
+    let prev = logged ? (same ? old.prev : [...(old ? [snapshotOf(old)] : []), ...(old?.prev ?? [])].slice(0, LOG_MAX)) : null;
+    // A text that is too long loses the oldest log row first, never the new event.
+    const write = () => JSON.stringify(prev ? { ...head, ...(wholeInt(n) && n >= 0 ? { n } : {}), prev } : head);
+    while (prev?.length && write().length > EVENT_TEXT_MAX) prev = prev.slice(0, -1);
+    const text = write();
     return validEvent(item) && text.length <= EVENT_TEXT_MAX ? text : null;
 }
 

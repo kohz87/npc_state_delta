@@ -17,6 +17,7 @@ export function v2MetersProjection(view) {
     const net = view.relChange && typeof view.relChange === 'object' ? view.relChange : null;
     return {
         ...(net && Number.isInteger(net.message) && net.message >= 0 ? { relChange: { message: net.message, delta: net.delta, ...(net.event && typeof net.event === 'object' ? { event: net.event } : {}) } } : {}),
+        ...(recentProjection(view.recent).length ? { recent: recentProjection(view.recent) } : {}),
         bars,
         rank: plain(view.rank),
         next: plain(view.next),
@@ -28,6 +29,16 @@ export function v2MetersProjection(view) {
         ...(view.notesOn === true ? { notesOn: true } : {}),
         ...(notesProjection(view.notes) ? { notes: notesProjection(view.notes) } : {}),
     };
+}
+
+// The last meter changes (npc.entries' `recent`, newest first, at most three): { n, date, mv: { axis: signed } | ask: { axis }, held, note, why }.
+const AXIS_IDS = ['trust', 'affection', 'desire', 'tension'];
+const axisMap = value => Object.fromEntries(AXIS_IDS.map(axis => [axis, Math.round(Number(value?.[axis]) || 0)]).filter(([, amount]) => amount !== 0));
+function recentProjection(rows) {
+    return (Array.isArray(rows) ? rows : []).filter(row => row && typeof row === 'object').slice(0, 3).map(row => ({
+        n: Number.isInteger(row.n) && row.n >= 0 ? row.n : null, date: plain(row.date).slice(0, 40), mv: axisMap(row.mv), ask: axisMap(row.ask), held: row.held === true,
+        note: plain(row.note).slice(0, 120), why: plain(row.why).slice(0, 240),
+    }));
 }
 
 const int = (value, min, max, fallback = 0) => Math.max(min, Math.min(max, Number.isFinite(Number(value)) ? Math.round(Number(value)) : fallback));

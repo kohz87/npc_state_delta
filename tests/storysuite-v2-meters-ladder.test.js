@@ -14,14 +14,15 @@ import {
 } from '../src/npc-meters.js';
 import { BUILT_IN_PRESETS, presetCatalog } from '../src/npc-meters-presets.js';
 import { metersCardScreen } from '../src/npc-meters-screen.js';
+import { withSectionHtml } from '../dossier-ui-sections.js';
 import { lastRelationshipChangeHtml, projectDossierState, v2MetersHtml, v2MetersProjection, v2SecretsHtml } from '../dossier-ui.js';
 import { fakeRoot } from './helpers/fake-dom.js';
 import { fakeDocument } from './helpers/fake-dom.js';
 import { runtimeSource } from './helpers/runtime-source.js';
 import { NO_REASON, recentChangeRowHtml, relationshipHistoryHtml } from '../dossier-ui-relationship.js';
 import { storyMinuteText } from '../calendar.js';
-import { cutWords, eventSummary, withEvidence } from '../src/npc-meters-pacing.js';
-import { reasonKept } from '../src/npc-meters-slice.js';
+import { cutWords, eventLog, eventSummary, movesOf, nextEvent, readEvent, withEvidence } from '../src/npc-meters-pacing.js';
+import { logKept, reasonKept } from '../src/npc-meters-slice.js';
 
 // TRS ideas 1-4 on the NPC meters (stage ladders with several needs and milestones, per-NPC ceilings
 // and floors, fuller custom meters with presets and drift, locked-note teasers), against Story
@@ -1200,4 +1201,98 @@ test('refusedLooks: flat and named-form swaps, a name-only row and an ordinary n
     assert.deepEqual(forwardParts.refusedLooks(prior, [{ ...was, appearance: 'Pale eyes, a grey habit' }], [], [{ id: was.id, appearance: 'Pale eyes, a grey habit' }]), [], 'an accepted look is not reported');
     const role = forwardParts.refusedLooks(prior, [was], [], [{ name: 'Temiwa', role: 'Prioress' }]);
     assert.equal(role.length, 1, 'a role rewrite sent by name only is reported');
+});
+
+// ---- 10. Recent changes keeps the meters' last three changes (the reply's event, and the two replies before it) ----
+
+test('last three changes: each reply keeps its event; the list shows the newest three with amounts, date, reply and reason; older ones drop off', async () => {
+    const s = await pacedSuite(LOOSE);
+    const replies = [];
+    for (const line of ['~ npc Mira | trust: +2 | why: she was thanked', '~ npc Mira | affection: +1 | tension: +1 | why: a sharp word', '~ npc Mira | desire: +1 | why: a long look', '~ npc Mira | trust: -1 | why: a broken promise']) replies.push(await s.say([line]));
+    const recent = s.npc('Mira').recent;
+    assert.equal(recent.length, 3, 'the current reply and two before it');
+    assert.deepEqual(recent.map(row => row.mv), [{ trust: -1 }, { desire: 1 }, { affection: 1, tension: 1 }], 'newest first; the first reply dropped off');
+    assert.deepEqual(recent.map(row => row.why), ['a broken promise', 'a long look', 'a sharp word']);
+    assert.deepEqual(recent.map(row => row.n), [replies[3], replies[2], replies[1]]);
+    assert.ok(recent.every(row => row.date && !row.held));
+    assert.equal(eventOf(s).prev.length, 2, 'the stored text keeps two earlier rows');
+    // The dossier lists them (the latest from the net card, the earlier two from the log), each with its date, reply and reason.
+    const state = projectDossierState({ npcs: [{ id: 'npc_mira', name: 'Mira' }], reply: replies[3], meterViews: { npc_mira: { recent, bars: [] } } });
+    const html = withSectionHtml(state.npcs[0]);
+    assert.equal((html.match(/class="delta-chg"/g) || []).length, 3);
+    assert.match(html, /a broken promise/); assert.match(html, /a long look/); assert.match(html, /a sharp word/);
+    assert.doesNotMatch(html, /she was thanked/, 'a fourth change is not listed');
+    assert.match(html, /Tension \+1/); assert.match(html, /Desire \+1/); assert.match(html, /Trust −1/);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    const head = JSON.stringify(s.host.head());
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head()), head, 'replay equals live');
+});
+
+test('last three changes: two events of one reply make one row (the amounts moved, the reasons joined); a held reply says Held', async () => {
+    const s = await pacedSuite({ ordinary: 1, meaningful: 99, major: 99, extreme: 99 });
+    await s.say(['~ npc Mira | trust: +1 | why: first', '~ npc Mira | affection: +1 | why: second']);
+    await s.say(['~ npc Mira | trust: +1 | why: third']);
+    await s.say(['~ npc Mira | trust: +1 | why: fourth']);
+    const rows = s.npc('Mira').recent;
+    assert.ok(rows.length === 3 && rows[0].held && rows[1].held, 'the later same-day lines were held: nothing moved');
+    assert.match(rows[0].note, /./);
+    assert.match(recentChangeRowHtml({ entry: rows[0] }), /Held/);
+    assert.match(rows[2].why, /first; second/, 'one row for the reply: the reasons joined');
+    assert.deepEqual(rows[2].mv, { trust: 1 }, 'the second line of the day was held: only the first moved');
+});
+
+test('last three changes (rule mark): an older text without the log is written as it was, and starts a log only at its next reply; nothing is made up', () => {
+    const old = JSON.stringify({ at: 5, date: 'May 1', events: [{ src: 'story', ask: { trust: 2 }, tier: 'ordinary', held: false, note: '', why: 'an old reason' }] });
+    const base = { src: 'story', ask: { trust: 1 }, tier: 'ordinary', held: false, note: '', mv: { trust: 1 }, n: 6 };
+    // Same reply (a Re-read, or a second line): no log, no amounts, exactly the older shape.
+    const same = nextEvent(old, { ...base, reply: 5, date: 'May 1', log: logKept({ standing: { domains: { npc: { npcs: { a: { lastEvent: old } } } } } }, 'a', 5) });
+    assert.equal(JSON.stringify(JSON.parse(same).events[1]), JSON.stringify({ src: 'story', ask: { trust: 1 }, tier: 'ordinary', held: false, note: '' }));
+    assert.equal(readEvent(same).prev, undefined);
+    assert.equal(logKept({ standing: { domains: { npc: { npcs: { a: { lastEvent: old } } } } } }, 'a', 6), true, 'a new reply may start the log');
+    assert.equal(logKept({}, 'a', 5), true, 'a first read may');
+    // The next reply: the old event becomes the first row (its own words; no amounts it never stored), and the new one has amounts.
+    const next = readEvent(nextEvent(old, { ...base, reply: 6, date: 'May 2' }));
+    assert.equal(next.prev.length, 1);
+    assert.deepEqual(next.prev[0], { at: 5, n: 5, date: 'May 1', ask: { trust: 2 }, held: false, why: 'an old reason' });
+    assert.deepEqual(next.events[0].mv, { trust: 1 });
+    assert.equal(eventLog(next).length, 2);
+    // A fresh chat's first event starts an empty log; five more replies keep only two earlier rows.
+    let text = nextEvent('', { ...base, reply: 1, date: 'D' });
+    assert.deepEqual(readEvent(text).prev, []);
+    for (let reply = 2; reply <= 6; reply += 1) text = nextEvent(text, { ...base, reply, date: 'D', n: reply });
+    assert.deepEqual(readEvent(text).prev.map(row => row.at), [5, 4]);
+    assert.deepEqual(eventLog(readEvent(text)).map(row => row.at), [6, 5, 4]);
+    assert.deepEqual(eventLog(null), []);
+    assert.deepEqual(movesOf([{ meter: 'trust', before: 1, after: 3 }, { meter: 'tension', before: 4, after: 4 }, { meter: 'custom', before: 0, after: 2 }]), { trust: 2 });
+    // A stored text with a bad log is unusable (the slice check reports it).
+    assert.equal(readEvent(JSON.stringify({ ...JSON.parse(text), prev: [{ at: 1 }] })), null);
+});
+
+test('last three changes: a long reason on every row keeps the newest event and drops the oldest log row, never the new event', () => {
+    const why = `${'word '.repeat(60)}`.trim();
+    const base = { src: 'story', ask: { trust: 1, affection: 1, desire: 1, tension: 1 }, tier: 'ordinary', held: false, note: '', mv: { trust: 1 }, why };
+    let text = '';
+    for (let reply = 1; reply <= 5; reply += 1) text = nextEvent(text, { ...base, reply, date: 'January 12' });
+    const out = readEvent(text);
+    assert.ok(out && text.length <= 2600 && out.events[0].why);
+    assert.equal(out.at, 5);
+});
+
+test('last three changes: Recent changes lists a chat from before the log by the stored history, without repeating a reply the log shows', () => {
+    const npc = { relationship: {}, recentMeterChanges: [{ n: 9, date: 'May 2', mv: { trust: 2 }, ask: {}, held: false, note: '', why: 'kept' }], recentRelationshipChanges: [{ impact: 'ordinary', axes: ['trust'], reason: 'dup', message: 9 }, { impact: 'meaningful', axes: ['desire'], reason: 'earlier', message: 4 }] };
+    const html = withSectionHtml(npc);
+    assert.equal((html.match(/class="delta-chg"/g) || []).length, 2);
+    assert.match(html, /kept/); assert.match(html, /earlier/); assert.doesNotMatch(html, /dup/);
+    assert.match(withSectionHtml({ relationship: {} }), /No relationship change recorded yet/);
+});
+
+test('last three changes: the Recent changes rows wrap on phone, tablet and desktop (the shared row rule has no width or truncation clamp)', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    const css = fs.readFileSync(path.join(root, 'dossier-ui-styles-sections.js'), 'utf8');
+    const row = css.split('\n').find(line => line.includes('.delta-chg {')) || '';
+    assert.ok(row && !/text-overflow|line-clamp|nowrap|max-height/.test(row));
+    const via = css.split('\n').find(line => line.includes('.delta-chg-via {')) || '';
+    assert.ok(via && !/text-overflow|line-clamp|nowrap/.test(via));
+    assert.match(css.split('\n').find(line => line.includes('.delta-chg > div {')), /min-width:0/);
 });

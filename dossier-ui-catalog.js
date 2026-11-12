@@ -155,7 +155,7 @@ export function projectDossierState(state = {}, status = {}) {
         // The ties as the board shows them: type, priority order and the Older fold (core-keyrel.js); a tie tag from the notes wins over the words.
         const tieRows = readTieRows(npc, { npcs: records, roster: tieNames, day: Number.isInteger(state?.storyDay) ? state.storyDay : null, tags: noteTieTags(meters?.notes?.ties) })
             .map(({ index, ...row }) => row);
-        return { ...detail, tieRows, ...(meters?.relChange ? { lastRelationshipChange: ownRelationshipChange(detail.lastRelationshipChange, meters.relChange) } : {}), ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}), ...(Object.hasOwn(sheetLevels, String(npc?.id ?? '')) ? { levelFromSheet: true } : {}) };
+        return { ...detail, tieRows, ...(meters?.relChange ? { lastRelationshipChange: ownRelationshipChange(detail.lastRelationshipChange, meters.relChange) } : {}), ...(meters?.recent ? { recentMeterChanges: meters.recent } : {}), ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}), ...(Object.hasOwn(sheetLevels, String(npc?.id ?? '')) ? { levelFromSheet: true } : {}) };
     }).filter(npc => npc.id);
     return {
         chatKey: plain(status?.chatKey, 'no-chat'),
