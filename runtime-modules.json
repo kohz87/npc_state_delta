@@ -159,6 +159,7 @@
     { "path": "storage-identity.js", "role": "persistence-identity", "required": true },
     { "path": "storage-inspection.js", "role": "persistence-inspection", "required": true },
     { "path": "storage-payload.js", "role": "persistence-payload", "required": true },
+    { "path": "checkpoint-pack.js", "role": "checkpoint-pack", "required": true },
     { "path": "hardening-core.js", "role": "lifecycle-primitives", "required": true },
     { "path": "hardening.js", "role": "lifecycle-hardening", "required": true },
     { "path": "full-cast.js", "role": "optional-full-cast-scan", "required": false },

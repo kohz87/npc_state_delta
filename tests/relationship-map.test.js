@@ -224,7 +224,7 @@ test('map mode hides the dossier hero and gives the map the full width; meters g
 });
 
 test('the map card: ties without Focus, the numbers line, a portrait or initials, the library bar and compact tap pills', async () => {
-    const { buildFocusModel, mapCardHtml, selectedTies, cardNumbersLine, mapNodeHtml } = await import('../relationship-map-focus.js');
+    const { buildFocusModel, mapCardHtml, selectedTies, cardNumbersLine, cardNumberItems, mapNodeHtml } = await import('../relationship-map-focus.js');
     const npcs = [
         npc('rika', { name: 'Rika', relationship: { trust: 11, affection: 11, desire: 6, tension: 13 }, keyRelationships: ['Temiwa: friend', 'Bregje: rival'], v2Meters: { ties: { bregje: ['rival'] } } }),
         npc('temiwa', { name: 'Temiwa' }), npc('bregje', { name: 'Bregje' }),
@@ -232,6 +232,7 @@ test('the map card: ties without Focus, the numbers line, a portrait or initials
     const map = buildMapModel({ npcs, turn: 1 }, { selectedId: 'rika' });
     assert.deepEqual(selectedTies(map).map(t => [t.name, t.word, t.tone]), [['Bregje', 'rival', 'bad'], ['Temiwa', 'friend', 'good']], 'the ties of the selected person need no focus');
     assert.equal(cardNumbersLine(map.selected), 'Warmth +11 · Trust +11 · Tension +13', 'the mockup\'s three numbers (the dial carries all four)');
+    assert.deepEqual(cardNumberItems(map.selected), ['Warmth +11', 'Trust +11', 'Tension +13'], 'whole items, so a narrow card wraps between them, not inside one');
     const card = mapCardHtml(map, buildFocusModel({ npcs }, map, ''), 'Astra', { npc: { ...npcs[0], key: { here: true }, gender: 'female', mood: 'Alarmed' } });
     assert.match(card, /<aside class="delta-map-card" data-focus="off"[\s\S]*dossier-dial[\s\S]*<h3 class="delta-map-card-name delta-map-beside">Rika<\/h3>/, 'the dial round her portrait, then her name');
     assert.match(card, /delta-pill-key">★ Key<\/span><span class="delta-pill delta-pill-mood">Alarmed/);

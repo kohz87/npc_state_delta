@@ -21,7 +21,7 @@ import { createPortraitRefs } from '../dossier-ui-html.js';
 import { dialArcs, dialSvg } from '../dossier-ui-dial.js';
 import { dossierMenuHtml } from '../dossier-ui-header.js';
 import { v2MetersProjection } from '../dossier-ui-meters.js';
-import { dossierProfileHtml } from '../dossier-ui-profile.js';
+import { dossierProfileHtml, profileMeterItems } from '../dossier-ui-profile.js';
 import { SECTION_KEYS, createScreenState, escapeAction, goBack, layoutFor, openNpc, openSection, parseScreen, screenSignature, setSection, showScreen, stepSection, swipeStep } from '../dossier-ui-screens.js';
 import { sectionHeaderHtml, sectionScreenHtml } from '../dossier-ui-sections.js';
 import { boardModel, bondTone, libraryTone } from '../dossier-ui-view-model.js';
@@ -230,6 +230,7 @@ test('sections: five screens with arrows and dots; hidden secrets never show the
   assert.doesNotMatch(sectionHeaderHtml('secrets', {}), /data-delta-section-step="1"[^>]*aria-label="Next section"><|data-delta-section-step="1"[^>]*>(?!›)/);
   assert.match(sectionHeaderHtml('secrets', {}), /data-delta-section-step="1"[^>]*disabled/, 'no next after the last');
   assert.match(sectionHeaderHtml('with', { userName: 'Astra' }), /With Astra/);
+  assert.match(head, /class="delta-section-back" data-delta-screen="board"[^>]*>‹ Dossier<\/button>/, 'every section has a visible way back to the board');
   const now = sectionScreenHtml('now', rika, {});
   assert.match(now, /mending a net/);
   const ties = sectionScreenHtml('ties', rika, {});
@@ -252,13 +253,23 @@ test('sections: five screens with arrows and dots; hidden secrets never show the
 test('the profile: portrait first, identity and appearance, phone and desktop layouts, stale-portrait note', () => {
   const phone = dossierProfileHtml({ ...dossierDetailProjection({ id: 'rika', name: 'Rika', age: '19', homeBase: 'Bluewatch' }), portraitAppearanceChanged: true }, { layout: 'phone' });
   assert.match(phone, /delta-profile-phone/);
-  assert.match(phone, /data-delta-screen="board"[^>]*>‹ Board/);
+  assert.match(phone, /data-delta-screen="board"[^>]*>‹ Dossier</);
   assert.match(phone, /Appearance changed since portrait/);
   const desktop = dossierProfileHtml(rika, { layout: 'desktop' });
   assert.match(desktop, /delta-profile-desktop/);
-  assert.match(desktop, /T \+11 · A \+10 · D \+6 · Te \+13/);
+  assert.match(desktop, /<i>Trust \+11<\/i><i>Affection \+10<\/i><i>Desire \+6<\/i><i>Tension \+13<\/i>/);
+  assert.deepEqual(profileMeterItems({ relationship: { trust: 0, affection: 0, desire: 0, tension: 0 } }), ['Trust 0', 'Affection 0', 'Desire 0', 'Tension 0']);
+  assert.doesNotMatch(desktop, /(?:>|\s)Te \+|\bT \+11/);
+  assert.match(desktop, /‹ Dossier<\/button>/);
   assert.match(desktop, /delta-profile-cols/);
   assert.doesNotMatch(dossierProfileHtml({ name: '<i>x' }, {}), /<i>x/);
+  assert.match(dossierProfileHtml({ name: 'Ada Vale' }, { layout: 'desktop' }), /delta-portrait-placeholder[^>]*><span>AV<\/span>/, 'no portrait: two initials');
+  const opening = dossierProfileHtml({ name: 'Ada', personality: 'Calm.', fieldChanges: { latest: ['personality'], latestTurn: 0, message: 0 } }, {});
+  assert.doesNotMatch(opening, /delta-changed-mark/, 'the opening reply (#0) carries no news: no mark');
+  assert.match(opening, /<h3>Character<\/h3>/);
+  const marked = dossierProfileHtml({ name: 'Ada', personality: 'Calm.', fieldChanges: { latest: ['personality'], latestTurn: 3, message: 12 } }, {});
+  assert.match(marked, /<h3>Character <em class="delta-changed-mark[^>]*>• #12<\/em><\/h3>/, 'a later change shows its mark in the Character heading, not on a line of its own');
+  assert.doesNotMatch(marked, /<p class="delta-muted"> ?<em/, 'no stray marker line under Character');
 });
 
 test('screens: back, section arrows, Esc order, swipe, layout and the signature a refresh keeps', () => {
@@ -600,4 +611,48 @@ test("light themes: the neutral tones take their lightness from the panel's text
   assert.match(css, /--delta-accent-soft: var\(--ss-text, oklch\(from var\(--delta-text\)/, "the panel's own fallbacks follow the text colour too");
   assert.match(styles.STYLES, /--delta-good: var\(--ss-good, #9ed5b6\);[\s\S]*--delta-danger: var\(--ss-bad-text, #efaaaa\);/);
   assert.doesNotMatch(styles.STYLES, /\.delta-rel-(step|delta)-\w+ \{ color:#/);
+});
+
+test('browser back: every history.go(-n) is skipped once (a counter); in Map mode a back leaves the map and keeps the dossier screen', () => {
+  const saved = { history: globalThis.history, document: globalThis.document, CustomEvent: globalThis.CustomEvent };
+  const pushed = [];
+  const gone = [];
+  const fired = [];
+  globalThis.history = { pushState: state => pushed.push(state), go: n => gone.push(n) };
+  globalThis.CustomEvent = class { constructor(type) { this.type = type; } };
+  globalThis.document = { dispatchEvent: event => fired.push(event.type) };
+  try {
+    const ui = new DeltaDossierUi({});
+    ui.panelOpen = true;
+    ui.setScreen(openNpc(ui.screen, 'rika'));
+    ui.setScreen(openSection(ui.screen, 1));
+    assert.equal(ui.navEntries, ui.screen.history.length);
+    const depth = ui.navEntries;
+    assert.ok(depth >= 2, 'the section is more than one screen deep');
+    // two Esc presses before the first popstate arrives: two skips are owed, not one
+    ui.setScreen(goBack(ui.screen));
+    ui.setScreen(goBack(ui.screen));
+    assert.equal(ui.ignorePops, 2, 'a counter, not a flag');
+    ui.onPopState();
+    ui.onPopState();
+    assert.equal(ui.ignorePops, 0);
+    assert.equal(ui.screen.name, 'library', 'the two skipped pops did not step the screen further');
+    // Map mode: the screen stays, the map is asked to leave, the entry goes back on
+    ui.setScreen(openNpc(ui.screen, 'rika'));
+    ui.setScreen(openSection(ui.screen, 1));
+    const before = { screen: ui.screen, entries: ui.navEntries };
+    ui.root = { querySelector: selector => (selector === '.delta-spread.delta-map-mode' ? {} : null) };
+    ui.onPopState();
+    assert.equal(ui.screen, before.screen, 'the hidden dossier screen did not move');
+    assert.equal(ui.navEntries, before.entries);
+    assert.deepEqual(fired, ['npc-state-delta:leave-map']);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete globalThis[key]; else globalThis[key] = value; }
+  }
+});
+
+test('the section "‹ Dossier" pill is hidden only where the board tiles are beside the section (three panes), by the container, not a device width', () => {
+  const css = fs.readFileSync(new URL('../dossier-ui-styles-sections.js', import.meta.url), 'utf8');
+  assert.match(css, /@container dsr \(min-width: \$\{THREE_PANE_MIN\}px\) \{ #\$\{ROOT_ID\} \.delta-section-back \{ display:none; \} \}/);
+  assert.doesNotMatch(css, /@media[^{]*\{[^}]*delta-section-back/);
 });

@@ -2,9 +2,15 @@
    pruning, compact state preparation and JSON encode/decode. Moved unchanged out of storage.js;
    storage.js re-exports every public name it exported before. Never imports storage.js. */
 import { isPortraitFileRecord } from './src/portrait-file.js';
+import { lineageCheckpointKeys } from './branch-lineage.js';
+import { packCheckpoints, unpackCheckpoints } from './checkpoint-pack.js';
 
 export const NPC_STATE_FILE_FORMAT = 'npc_state_delta_chat_data';
-export const NPC_STATE_FILE_FORMAT_VERSION = 1;
+// Format 2 packs state.checkpoints on disk only (checkpoint-pack.js); the in-memory state is unchanged. Format 1 is still read, and is
+// written when packing fails (the escape hatch) and by retired markers. An older build refuses a version it does not know.
+export const NPC_STATE_FILE_FORMAT_VERSION = 2;
+export const LEGACY_FORMAT_VERSION = 1;
+export const NPC_STATE_FILE_READ_VERSIONS = Object.freeze([1, 2]);
 
 // One String.fromCharCode call per 32 KB chunk (as vault.js and portrait-file.js do): building each chunk a
 // character at a time cost hundreds of milliseconds per save of a large sidecar on the main thread.
@@ -86,16 +92,30 @@ function compactStateForFile(state) {
     return snapshot;
 }
 
+// Packing is the last step (after compactStateForFile), so portrait retention above still sees full snapshots. Any packing error
+// writes the whole payload as format 1 with full checkpoints. `packing` sits before `state` so decodeStateFileHead still works.
+function packedStateForFile(snapshot) {
+    try {
+        // A state with no checkpoint array is still written as format 2 (nothing to pack, its keys are untouched).
+        if (!Array.isArray(snapshot.checkpoints)) return { packing: packCheckpoints([]).packing, state: snapshot };
+        const { entries, packing } = packCheckpoints(snapshot.checkpoints, { activeKeys: lineageCheckpointKeys(snapshot.lineage) });
+        return { packing, state: { ...snapshot, checkpoints: entries } };
+    } catch { return null; }
+}
+
 export function encodeStateFilePayload(chatKey, state, appVersion = '', metadata = {}, writerId = '') {
+    const snapshot = compactStateForFile(state);
+    const packed = packedStateForFile(snapshot);
     const payload = {
         format: NPC_STATE_FILE_FORMAT,
-        formatVersion: NPC_STATE_FILE_FORMAT_VERSION,
+        formatVersion: packed ? NPC_STATE_FILE_FORMAT_VERSION : LEGACY_FORMAT_VERSION,
         appVersion: String(appVersion || ''),
         chatKey: String(chatKey || ''),
         updatedAt: String(metadata?.updatedAt || new Date().toISOString()),
         revision: Math.max(0, Math.trunc(Number(metadata?.revision) || 0)),
         writerId: String(metadata?.writerId || writerId),
-        state: compactStateForFile(state),
+        ...(packed ? { packing: packed.packing } : {}),
+        state: packed ? packed.state : snapshot,
     };
     return JSON.stringify(payload);
 }
@@ -103,7 +123,7 @@ export function encodeStateFilePayload(chatKey, state, appVersion = '', metadata
 export function encodeRetiredStateFilePayload(chatKey, reason = 'retired', appVersion = '', metadata = {}, writerId = '') {
     return JSON.stringify({
         format: NPC_STATE_FILE_FORMAT,
-        formatVersion: NPC_STATE_FILE_FORMAT_VERSION,
+        formatVersion: LEGACY_FORMAT_VERSION,
         appVersion: String(appVersion || ''),
         chatKey: String(chatKey || ''),
         updatedAt: new Date().toISOString(),
@@ -124,8 +144,19 @@ export function decodeStateFilePayload(text) {
     try { payload = JSON.parse(String(text ?? '')); }
     catch { throw new Error('NPC State Delta data file contains invalid JSON.'); }
     if (!payload || payload.format !== NPC_STATE_FILE_FORMAT) throw new Error('Not an NPC State Delta chat data file.');
-    if (payload.formatVersion !== NPC_STATE_FILE_FORMAT_VERSION) throw new Error(`Unsupported NPC State Delta data file version: ${payload.formatVersion}.`);
+    if (!NPC_STATE_FILE_READ_VERSIONS.includes(payload.formatVersion)) {
+        // A coded, non-retryable error: storage.js must not loop on a file a newer build wrote.
+        throw Object.assign(new Error(`Unsupported NPC State Delta data file version: ${payload.formatVersion} (saved by a newer NPC State Delta; update the extension).`), { code: 'NPC_STATE_UNSUPPORTED_FORMAT' });
+    }
     if (!payload.state || typeof payload.state !== 'object' || Array.isArray(payload.state)) throw new Error('NPC State Delta data file is missing its state object.');
+    if (payload.formatVersion === 2) {
+        if (!payload.packing || typeof payload.packing !== 'object') throw new Error('NPC State Delta data file is missing its packing header.');
+        if (Array.isArray(payload.state.checkpoints)) {
+            try { payload.state.checkpoints = unpackCheckpoints(payload.state.checkpoints, payload.packing); }
+            catch (error) { throw new Error(`NPC State Delta data file checkpoint history could not be rebuilt: ${error?.message || error}`); }
+        }
+        delete payload.packing;
+    }
     payload.retired = payload.retired === true;
     payload.revision = Math.max(0, Math.trunc(Number(payload.revision) || 0));
     payload.writerId = String(payload.writerId || '');
@@ -144,7 +175,7 @@ export function decodeStateFileHead(text) {
     if (at < 1 || at > HEAD_LIMIT) return null;
     let head;
     try { head = JSON.parse(`${raw.slice(0, at)}}`); } catch { return null; }
-    if (!head || head.format !== NPC_STATE_FILE_FORMAT || head.formatVersion !== NPC_STATE_FILE_FORMAT_VERSION) return null;
+    if (!head || head.format !== NPC_STATE_FILE_FORMAT || !NPC_STATE_FILE_READ_VERSIONS.includes(head.formatVersion)) return null;
     if (raw.charCodeAt(raw.length - 1) !== 125) return null;   // a cut-off file is decoded in full (and refused there)
     // A writer that adds `retired` after the state (another session's tool) is read by the full decode: one cheap scan, not a parse.
     if (raw.indexOf('"retired"', at) !== -1) return null;
