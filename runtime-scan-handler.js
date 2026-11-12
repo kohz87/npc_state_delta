@@ -82,7 +82,7 @@ export function createAssistantHandlerPart(rt, deps, helpers) {
             replyChanges: settings.autoScan && !settings.fullScanEveryTurn && replyNamesSomeone(state, messageId),
         });
         // A complete capture block is a scan already paid for, so it merges whatever Scan every says.
-        const captureDue = replay ? Boolean(captureJournalEntry(replay, getContext().chat || [], messageId))
+        const captureDue = replay ? Boolean(captureJournalEntry(replay, getContext().chat || [], messageId)?.parsed)
             : narrationCaptureEnabled(settings) && narrationCaptures.has(narrationCaptureKey(eventChatKey, messageId));
         const scanExpected = shouldForceBranchScan || autoScanDue || captureDue;
         // Receipt state belongs to this assistant even if scanning fails, skips or is busy.

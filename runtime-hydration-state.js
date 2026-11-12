@@ -122,7 +122,7 @@ export function installHydrationState(api, rt, deps) {
         if (key === 'no-chat') return freshChatState();
         if (replayScope()?.key === key) return replayScope().state;   // a history replay works on its private copy
         // (ONEPASSCAPR2-6) Publish a deferred notice before a reopened chat's participant reads it for activation.
-        if (key === getChatKey() && owedAnnouncements.delete(key)) notifyNativeChange(key);
+        if (key === getChatKey() && !((participantWrites.get(key) || 0) > 0) && owedAnnouncements.delete(key)) notifyNativeChange(key);
         if (!chatStateCache.has(key)) chatStateCache.set(key, freshChatState());
         touchChatCache(key);
         const state = chatStateCache.get(key);

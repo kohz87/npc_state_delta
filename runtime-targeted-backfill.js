@@ -167,7 +167,7 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
             if (!request) break;
             attemptedNpcIds.add(request.npcId);
             const savedCapture = replayScope() && captureJournalEntry(replayScope(), getContext().chat || [], request.requestedMessageId);
-            if (savedCapture && !savedCapture.fills?.[request.npcId]) continue; // (ONEPASSCAPR2-1) an unaccepted fill cannot be invented by replay
+            if (savedCapture?.parsed && !savedCapture.fills?.[request.npcId]) continue; // (ONEPASSCAPR2-1) an unaccepted fill cannot be invented by replay
             const target = state.npcs.find(npc => npc.id === request.npcId);
             const owningExchange = Number.isInteger(request.requestedMessageId) ? currentExchangeTranscript(request.requestedMessageId) : '';
             if (!automaticBackfillStillRelevant(request, target, state.npcs, owningExchange)) {

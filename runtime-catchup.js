@@ -68,7 +68,7 @@ export function createCatchUpPart(rt, deps) {
             }
         } finally { taken.delete(chatKey); }
         // The reply's own backfill start finds the chat busy while the Refresh runs; a newly met NPC's backfill runs now (one call).
-        if (getChatKey() === chatKey) await processPendingBackfills(latestMessageId(true), { limit: 1, skipNpcIds: established, admissions: true }); // (ONEPASSCAPR2-3) drain admissions queued during any refresh
+        if (getChatKey() === chatKey) await processPendingBackfills(latestMessageId(true), { limit: 0, skipNpcIds: established, admissions: true }); // (ONEPASSCAPR2-3) drain admissions queued during any refresh
     }
 
     return { noteCaptureCatchUp, runCaptureCatchUp };

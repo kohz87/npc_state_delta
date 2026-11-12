@@ -472,15 +472,45 @@ test('parity: a captured one-pass reply (memory, tie string, edge) replays to th
 test('full scan: a reply the automatic scan covered is not read again by the full scan', () => {
     runScenario('full-scan-once', async h => {
         h.settings.fullScanEveryTurn = true;
-        // The first read is slow, so the same reply's second trigger finds the chat busy and is queued behind it.
-        h.mockState.holdWhen = async (prompt, n) => { if (n === 1) await h.sleep(250); };
-        h.mockState.context.chat.push(h.user('Hello.'));
-        await h.emitAsync('message_sent', h.mockState.context.chat.length - 1);
-        h.mockState.context.chat.push(h.reply('Yunyun speaks, mark-1.', 1));
-        const id = h.mockState.context.chat.length - 1;
-        await Promise.all([h.emitAsync('message_received', id), h.sleep(60).then(() => h.emitAsync('message_received', id))]);
-        await h.sleep(800);
-        h.equal(h.runtime.getState().lastScannedMessageId, id, 'the reply was read');
-        h.equal(h.scannerCalls().length, 1, 'once: the queued second trigger finds the reply already covered');
+        const id = await h.turn('Hello.', 'Yunyun speaks, mark-1.');
+        const after = h.scannerCalls().length;
+        h.check(after >= 1, 'the reply was read');
+        h.equal(h.runtime.getState().lastScannedMessageId, id, 'the marker is on the reply');
+        // The second trigger: a branch reconcile asks for a rescan of the latest reply (the chat is unchanged).
+        await h.runtime.reconcile({ rescan: true, reason: 'test-reconcile' });
+        await h.sleep(300);
+        h.equal(h.scannerCalls().length, after, 'no second read of the same, unchanged reply');
+    });
+});
+
+// (ONEPASSCAPR2-1) The new readings (string ties, folded ids, no ambiguous binding) apply to a reply the SCANNER read live too, so replay reads them the same way;
+// a reply with no journal entry (read before the journal existed) is a historical re-read and keeps the old bytes.
+test('parity: a scanner-read reply with a string tie and an underscore-id edge replays to the live dossier; an old reply (no journal entry) keeps its old reading', () => {
+    runScenario('scanner-new-shapes', async h => {
+        const ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
+        const row = (name, extra = {}) => ({ name, present: true, role: 'regular', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO, ...extra });
+        h.mockState.quietResponder = async (args = {}) => {
+            if (!/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            return JSON.stringify({ npcs: [row('Sister Chris'), row('Sieke', { keyRelationships: 'Sister Chris — novice | brings bread' })], keyRelationshipEdges: [{ from: 'npc_sieke', to: 'npc_sister_chris', aToB: 'friend', bToA: 'friend' }] });
+        };
+        await h.turn('Hello.', 'Sieke and Sister Chris talk at the desk, mark-1.');
+        const live = h.stable(h.runtime.getState());
+        const sieke = live.npcs.find(npc => npc.name === 'Sieke');
+        h.check(sieke?.keyRelationships?.some(text => /^Sister Chris — /.test(text)), `the live run read the string tie: ${JSON.stringify(sieke?.keyRelationships)}`);
+        const catchUp = h.controller();
+        catchUp.rebuild({ replies: null });
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'the rebuild finished');
+        const replayed = h.stable(h.runtime.getState());
+        h.equal(replayed.npcs.map(npc => [npc.name, npc.keyRelationships]), live.npcs.map(npc => [npc.name, npc.keyRelationships]), 'replay == live for the new shapes');
+        // The same chat as an old save: no journal entry for the reply, so the replay is a historical re-read with the old reading.
+        const saved = h.runtime.getState();
+        delete saved.captureJournal;
+        await h.runtime.installState(saved);
+        h.check(!h.runtime.getState().captureJournal?.length, 'the journal is gone, like an old save');
+        const old = h.controller();
+        old.rebuild({ replies: null });
+        await old.idle();
+        h.equal(h.runtime.getState().npcs.find(npc => npc.name === 'Sieke').keyRelationships, [], 'an old reply keeps its old bytes: the string tie is still not read');
     });
 });

@@ -245,7 +245,8 @@ test('catch-up: every due NPC is held from the reply backfill; a newly met NPC k
     assert.equal(calls.opts.old1.fillLooks, false, 'an established person\'s Refresh never does');
     assert.deepEqual(state.pendingBackfills.map(i => i.npcId), ['new1'], 'the established entry is covered by its Refresh; the new one is kept');
     assert.equal(calls.backfill.length, 1, 'one backfill start after the Refreshes');
-    assert.equal(calls.backfill[0].limit, 1);
+    assert.equal(calls.backfill[0].limit, 0, 'no repair call beyond the admissions');
+    assert.equal(calls.backfill[0].admissions, true);
     assert.deepEqual(calls.backfill[0].skipNpcIds, ['old1'], 'established NPCs are not backfilled again');
     assert.equal(rt.catchUpTaken.has(key), false, 'the hold is released');
 });

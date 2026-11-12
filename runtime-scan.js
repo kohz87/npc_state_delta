@@ -20,7 +20,7 @@ import { normalizeAllowance } from './src/relationship-pacing.js';
 import { rememberCastAdmissions, seedCastAdmission } from './runtime-cast-sync.js';
 import { dossierFor, metWithEntry } from './src/cast-dossier.js';
 import { normalizeSourceOfTruth } from './suite-handshake.js';
-import { captureJournalEntry, recordAcceptedCapture } from './runtime-narration.js';
+import { captureJournalEntry, recordAcceptedCapture, recordReadMark } from './runtime-narration.js';
 export function createScanPart(rt, deps) {
     const { attachGeneratedSecrets, beginScanOperation, castList, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanOperationCurrent, scanScenePresent, scenePresentAt, setChatState, storySuiteV2Meters, takeNarrationCapture, updateInjection } = deps;
     // Events per story day while Delta works alone (the pass counts them on the dossier). The day is Story Director's clock, which
@@ -67,7 +67,8 @@ export function createScanPart(rt, deps) {
         const scanLineage = chatLineage(ctx.chat || []);
         let currentTranscript = currentExchangeTranscript(messageId);
         const currentProse = currentExchangeProse(messageId);
-        const savedCapture = replayScope() && !manual ? captureJournalEntry(replayScope(), ctx.chat || [], messageId) : null;
+        const journaled = replayScope() && !manual ? captureJournalEntry(replayScope(), ctx.chat || [], messageId) : null;
+        const savedCapture = journaled?.parsed ? journaled : null;
         const fullWindowScan = Boolean(!savedCapture && !manual && settings.fullScanEveryTurn);
         // (lean) A scan reads every exchange since the last scan, not only this reply: the replies the local check skipped
         // are in it, up to 30 messages. More waiting than that: the oldest are read first and the next reply scans at once
@@ -264,7 +265,7 @@ export function createScanPart(rt, deps) {
                 // the reader's own "Scan now" is deliberate and writes them.
                 ...(manual ? {} : keyAwayScanOptions(mergeBaseState)),
                 partyLevels: partyLevelList(),
-                historicalRead: Boolean(replayScope() && !savedCapture),
+                historicalRead: Boolean(replayScope() && !journaled), // (ONEPASSCAPR2-1) only a reply read before the journal existed keeps the old reading
             });
             if (earlierOnly) {
                 // Presence is the latest scene's: an earlier-only window leaves each person as last confirmed.
@@ -370,6 +371,7 @@ export function createScanPart(rt, deps) {
                 scanCount: Number(state.scanCount || 0) + 1,
             };
             if (capture && !replayScope()) recordAcceptedCapture(nextState, ctx.chat || [], targetMessageId, capture);
+            else if (!replayScope() && !manual) recordReadMark(nextState, ctx.chat || [], targetMessageId);
             const catchUpChats = replayScope()?.catchUp ?? rt.catchUpChats;
             if (skippedWindow && !skippedWindow.latest) catchUpChats.add(scanChatKey); else catchUpChats.delete(scanChatKey);
             if (!manual) queueScanFollowUps(nextState, { newlyAdmittedIds, resolvedParsed, targetMessageId, currentTranscript });

@@ -141,7 +141,8 @@ test('ONEPASSCAP-1: a change Delta saves while a participant write is in flight 
     assert.equal(heard, 0, 'the participant\'s own write is not announced');
     api.markStateDirty('chat-a');   // a one-pass scan commits while the write waits for its save
     api.markStateDirty('chat-a');
-    assert.equal(heard, 0, 'held while the participant writes');
+    api.getChatState('chat-a');   // the scan, the render and the injection all read the state inside the window
+    assert.equal(heard, 0, 'held while the participant writes, even when the state is read');
     a.release();
     assert.equal(await write, true);
     assert.equal(heard, 1, 'announced once (not once per save) when the participant\'s write ends');

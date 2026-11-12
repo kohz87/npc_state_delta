@@ -98,7 +98,8 @@ export function createTargetedPart(rt, deps) {
         setScanIndicator(true);
         job.setIndicator?.(true);
         try {
-            const replayFill = replayScope() && captureJournalEntry(replayScope(), ctx.chat || [], job.captureMessageId)?.[job.captureKind || 'fills']?.[id];
+            const journaled = replayScope() && captureJournalEntry(replayScope(), ctx.chat || [], job.captureMessageId);
+            const replayFill = journaled?.[job.captureKind || 'fills']?.[id];
             const { parsed, raw, retried } = replayFill ? { parsed: structuredClone(replayFill), raw: '', retried: false } : await generateParsedNpcJson(ctx, {
                 systemPrompt, prompt, responseLength: BACKFILL_RESPONSE_LENGTH, label, requestScope: operation.requestScope,
             });
@@ -152,7 +153,7 @@ export function createTargetedPart(rt, deps) {
                 partyLevels: partyLevelList(),
                 preservePresence: true,
                 skipRelationshipUpdate: true,
-                historicalRead: Boolean(replayScope() && !replayFill),
+                historicalRead: Boolean(replayScope() && !journaled),
                 ...job.mergeOptions,
             });
             // (I-17) One NPC only: social-edge and alias machinery may run inside the merge, but every other
