@@ -392,3 +392,27 @@ test('found old files keep the rules: a chat that cannot be read turns removal o
     assert.match(doc.slot.textContent, /The older files could not be listed\. Nothing was changed\./);
     assert.equal(server.files.size, 1);
 });
+
+// A file built on another (a patch) keeps that file, and the file it is built on, whatever the registry still says: the chain is read from the files.
+test('the clean-up keeps every base of a file that stays, even when the registry lost the record of the dependency', async () => {
+    let t = 100 * DAY;
+    const server = fakeServer(() => t);
+    const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
+    const put = (id, body, age) => { const name = `npc-state-delta-checkpoint-${id}.json`; server.files.set(name, JSON.stringify(body)); server.times.set(name, t - age * DAY); };
+    put('nk_ppppppp1', { lineage: 'lg_a' }, 60);
+    put('nk_ppppppp2', { schema: 1, kind: 'npc-state-delta-native-delta', lineage: 'lg_a', base: 'nk_ppppppp1', depth: 1, patch: [] }, 60);
+    put('nk_ppppppp3', { schema: 1, kind: 'npc-state-delta-native-delta', lineage: 'lg_a', base: 'nk_ppppppp2', depth: 2, patch: [] }, 2);
+    put('nk_ppppppp4', { lineage: 'lg_a' }, 60);
+    await vault.putIndex('lg_a', { v: 2, acks: {}, prepared: {}, returns: {}, selected: null, base: null });
+    const doc = fakeDoc();
+    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now: () => t, live, ask: async () => proof([]) });
+    row.mount(doc);
+    await settle();
+    doc.slot.button('Find older files').listeners.click();
+    await settle();
+    assert.deepEqual(row.state().plan.candidates.map(f => f.id), ['nk_ppppppp4'], 'the old files a young file is built on are not offered; the unrelated old one is');
+    doc.slot.all().find(n => n.textContent.startsWith('Clean up 1 file (')).listeners.click();
+    doc.slot.button('Remove 1 file').listeners.click();
+    await settle();
+    assert.deepEqual([1, 2, 3, 4].map(n => server.files.has(`npc-state-delta-checkpoint-nk_ppppppp${n}.json`)), [true, true, true, false]);
+});

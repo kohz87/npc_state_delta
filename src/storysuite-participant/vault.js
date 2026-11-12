@@ -5,7 +5,7 @@
 //   put(id, doc)         keeps a checkpoint; the same id again is the same bytes (the id is derived from the hash). Answers true when it
 //                        CREATED the file, false when the id was already kept (the participant removes only what it created itself).
 //                        The file vault writes it packed, or as a patch against the file it wrote before (checkpoint.js), and `get` rebuilds the
-//                        plain document, so callers never see either form. `lineageOf(id)` (file vault) names a file's story line without rebuilding it.
+//                        plain document, so callers never see either form. `describe(id)` (file vault) names a file's story line and the file it is a patch against, without rebuilding it.
 //   get(id)              the checkpoint, or null when its bytes are gone
 //   getIndex(lineage)    the lineage's index or null; putIndex(lineage, index) replaces it (a lineage id is in the chat's state, not its key)
 //   list()               { files: [{ id, size, modifiedAt }], complete } for the clean-up report (vault-sweep.js). SillyTavern has no call that lists
@@ -24,7 +24,7 @@
 // A first write (a new checkpoint, a new lineage's index) asks SillyTavern whether the file exists (storage.js `dataFileExists`) before it
 // reads it, so a file that is not there yet makes no 404 request (a red line in the browser's console); a server that cannot say is read as before.
 import { dataFileExists, deleteNpcStateDataFile } from '../../storage.js';
-import { CHECKPOINT_ID, KIND_DELTA, deltaForFile, lineageOfFile, packForFile, rebuildFromDelta, unpackFromFile } from './checkpoint.js';
+import { CHECKPOINT_ID, KIND_DELTA, DELTA_MAX_DEPTH, baseOfFile, deltaForFile, lineageOfFile, packForFile, rebuildFromDelta, unpackFromFile } from './checkpoint.js';
 
 const REGISTRY_NAME = 'npc-state-delta-checkpoint-registry.json';
 
@@ -227,11 +227,11 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
             const raw = await read(nameOf(id));
             if (!raw || raw.kind !== KIND_DELTA) return unpackFromFile(raw);
             // Follow the base (a missing, cyclic or too long chain is a file that is not there); the caller's hash check proves what comes out.
-            if (depth >= 16 || typeof raw.base !== 'string' || raw.base === id || !CHECKPOINT_ID.test(raw.base)) return null;
+            if (depth > DELTA_MAX_DEPTH + 8 || typeof raw.base !== 'string' || raw.base === id || !CHECKPOINT_ID.test(raw.base)) return null;
             const base = await get(raw.base, depth + 1);
             return base ? rebuildFromDelta(raw, base) : null;
         },
-        async lineageOf(id) { return lineageOfFile(await read(nameOf(id))); },
+        async describe(id) { const raw = await read(nameOf(id)); return { lineage: lineageOfFile(raw), base: baseOfFile(raw) }; },
         async getIndex(lineage) {
             const name = indexName(lineage);
             return (await absent(name)) ? null : read(name);

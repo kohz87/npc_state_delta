@@ -100,7 +100,7 @@ export function unpackFromFile(raw) {
 // already held). `base` is the id of that file; reading follows it (vault.js `get`) and the host's hash check of the rebuilt document is the proof.
 // The chain is at most DELTA_MAX_DEPTH long, so a restore reads a bounded number of files; the file after the last link is a packed anchor.
 export const KIND_DELTA = 'npc-state-delta-native-delta';
-export const DELTA_MAX_DEPTH = 8;
+export const DELTA_MAX_DEPTH = 16;
 const DELTA_MAX_SHARE = 0.6;
 
 /** Two JSON values with the same content (object key order does not matter, array order does). */
@@ -130,6 +130,11 @@ export function rebuildFromDelta(wrapper, baseDoc) {
     try {
         return isRecord(wrapper) && wrapper.kind === KIND_DELTA && isRecord(baseDoc) ? applyJson(baseDoc, wrapper.patch) : null;
     } catch { return null; }
+}
+
+/** The id a stored delta file is a patch against; null for any other file. */
+export function baseOfFile(raw) {
+    return isRecord(raw) && raw.kind === KIND_DELTA && typeof raw.base === 'string' && CHECKPOINT_ID.test(raw.base) ? raw.base : null;
 }
 
 /** The story line a stored file belongs to (a plain, packed or delta file), without rebuilding it; null when it names none. */

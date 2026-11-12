@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { LINEAGE_ID, NP_ID, buildCheckpoint, checkpointIdOf, checkpointProblem, createParticipant, hydrateIdentity, memoryVault, resolveIdentity, restoredState, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
 import { hashJson, sha256 } from '../src/storysuite-participant/hash.js';
 import { fileVault } from '../src/storysuite-participant/vault.js';
+import { DELTA_MAX_DEPTH } from '../src/storysuite-participant/checkpoint.js';
 import { createVaultSweep } from '../src/storysuite-participant/vault-sweep.js';
 import { isTerminalNpcDeath } from '../terminal-lifecycle.js';
 
@@ -739,25 +740,27 @@ async function saveRun(vault, from, to) {
     return out;
 }
 
-test('each file is a patch against the one written before it, with a packed anchor at most every ninth; every id reads back as its own document', async () => {
+test('each file is a patch against the one written before it, with a packed anchor after at most DELTA_MAX_DEPTH patches; every id reads back as its own document', async () => {
     const server = filesServer();
     const vault = fileVault({ fetchFn: server.fetchFn });
-    const built = await saveRun(vault, 1, 30);
+    const built = await saveRun(vault, 1, 40);
     const stored = built.map(item => fileOf(server, item.id));
     assert.equal(stored[0].kind, 'npc-state-delta-native-packed', 'the first file is an anchor');
     assert.ok(stored.filter(file => file.kind === 'npc-state-delta-native-delta').length >= 20, 'most files are patches');
-    assert.ok(stored.filter(file => file.kind !== 'npc-state-delta-native-delta').length >= 3, 'an anchor at least every ninth file');
-    assert.ok(Math.max(...stored.map(file => file.depth ?? 0)) <= 8, 'a chain is at most eight patches long');
+    assert.ok(stored.filter(file => file.kind !== 'npc-state-delta-native-delta').length >= Math.floor(stored.length / (DELTA_MAX_DEPTH + 1)), 'an anchor at least every DELTA_MAX_DEPTH + 1 files');
+    assert.ok(Math.max(...stored.map(file => file.depth ?? 0)) <= DELTA_MAX_DEPTH, 'a chain is never longer than the cap');
     for (const file of stored.filter(item => item.base)) assert.ok(server.files.has(`npc-state-delta-checkpoint-${file.base}.json`));
     for (const item of built) assert.deepEqual(await vault.get(item.id), item.doc, `${item.id} reads back whole`);
     // A fresh vault (a reload) reads the same files, and starts its own anchor.
     const reloaded = fileVault({ fetchFn: server.fetchFn });
     for (const item of built.filter((_, i) => i % 7 === 0)) assert.equal(hashJson(await reloaded.get(item.id)), item.hash);
-    const next = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: lined(31), cursor: { sid: 'sr_31' }, headHash: hashJson({ turn: 31 }) });
+    const next = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: lined(41), cursor: { sid: 'sr_41' }, headHash: hashJson({ turn: 41 }) });
     await reloaded.put(next.id, next.doc);
     assert.equal(fileOf(server, next.id).kind, 'npc-state-delta-native-packed');
-    assert.equal(await reloaded.lineageOf(built[10].id), 'lg_aaaaaaaa');
-    assert.equal(await reloaded.lineageOf(next.id), 'lg_aaaaaaaa');
+    assert.equal((await reloaded.describe(built[10].id)).lineage, 'lg_aaaaaaaa');
+    assert.equal((await reloaded.describe(next.id)).lineage, 'lg_aaaaaaaa');
+    assert.equal((await reloaded.describe(next.id)).base, null, 'an anchor is built on nothing');
+    assert.equal((await reloaded.describe(built[10].id)).base, fileOf(server, built[10].id).base ?? null);
 });
 
 test('a base is never removed while a file is a patch against it; the sweep takes both once both are old and unused; a missing base is a file that is not there', async () => {
