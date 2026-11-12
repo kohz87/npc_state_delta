@@ -70,7 +70,7 @@ function portraitHtml(npc, className, { alt = true, refs = null } = {}) {
 }
 
 // As written in the dossier, with the first letter of each part capitalised.
-const capFirst = value => { const text = plain(value); return text ? `${[...text][0].toUpperCase()}${[...text].slice(1).join('')}` : ''; };
+export const capFirst = value => { const text = plain(value); return text ? `${[...text][0].toUpperCase()}${[...text].slice(1).join('')}` : ''; };
 
 // ONE age: the real age when known, else "~N" from the apparent age (never a separate "Looks"); '' when neither is known.
 function ageText(npc) {

@@ -249,6 +249,7 @@ export const SECTIONS_STYLES = `
 @container dsr (min-width: ${TWO_PANE_MIN}px) { #${ROOT_ID} .delta-profile-cols > .delta-profile-block:nth-child(2) { border-top:0; padding-top:0; } }
 /* desktop section views: the left column's name block shows the role on its own line, then the meters (each value in its colour) */
 #${ROOT_ID} .delta-board-role, #${ROOT_ID} .delta-board-meters { display:none; }
+#${ROOT_ID} .delta-board-meters { font-weight:700; }
 #${ROOT_ID} .delta-board-meters > i { font-style:normal; white-space:nowrap; }
 #${ROOT_ID} .delta-board-meters > i:not(:last-child)::after { content:" ·"; color:var(--delta-muted); }
 #${ROOT_ID} .delta-board-meters > i[data-axis="trust"] { color:var(--trust); }

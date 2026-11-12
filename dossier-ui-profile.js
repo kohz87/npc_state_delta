@@ -37,7 +37,7 @@ function identityBody(npc) {
         .map(([name, value]) => currentCard(name, value))
         .join('');
     return `<div class="delta-current-grid">`
-        + currentCard('Age', ageText(npc), 'Unknown', changedMark(npc, 'age') || changedMark(npc, 'apparentAge'))
+        + currentCard('Age', ageText(npc), 'Unknown', npc.age ? changedMark(npc, 'age') : changedMark(npc, 'apparentAge'))
         + currentCard('Home base', npc.homeBase, 'Unknown', changedMark(npc, 'homeBase'))
         + currentCard('Known as', aliases)
         + birthdayCard(npc)
@@ -50,13 +50,13 @@ const emptyLine = text => `<p class="delta-muted delta-profile-empty">${escapeHt
 const NOTHING_YET = 'Nothing known yet';
 
 // Tastes (likes, dislikes and who or what they come from) and Drives (the instinct strengths).
-function tastesBody(notes) {
-    if (!notes?.tastes?.length) return block('tastes', 'Tastes', emptyLine('No tastes yet: they appear when the story shows a like or dislike'));
+function tastesBody(notes, on) {
+    if (!notes?.tastes?.length) return !on ? '' : block('tastes', 'Tastes', emptyLine('No tastes yet: they appear when the story shows a like or dislike'));
     return block('tastes', 'Tastes', `<ul class="delta-tastes">${notes.tastes.map(row => `<li><span class="delta-taste-sign" aria-label="${row.sign === '-' ? 'dislikes' : 'likes'}">${row.sign === '-' ? '✕' : '♥'}</span><b>${escapeHtml(row.item)}</b>${row.from || row.mirrored ? `<span class="delta-muted">${escapeHtml([row.from, row.mirrored ? 'echoes you' : ''].filter(Boolean).join(' · '))}</span>` : ''}</li>`).join('')}</ul>`);
 }
 
-function drivesBody(notes) {
-    if (!notes?.drives?.length) return block('drives', 'Drives', emptyLine('All normal so far'));
+function drivesBody(notes, on) {
+    if (!notes?.drives?.length) return !on ? '' : block('drives', 'Drives', emptyLine('All normal so far'));
     return block('drives', 'Drives', `<div class="delta-drives">${notes.drives.map(row => `<div class="delta-drive"><span>${escapeHtml(row.label)}</span><i title="${escapeHtml(row.word)}"><b style="width:${Math.round((row.strength / 3) * 100)}%"></b></i></div>`).join('')}</div>`);
 }
 
@@ -118,7 +118,9 @@ export function dossierProfileHtml(npc = {}, { layout = 'phone', portraitRefs = 
     const opening = changeStamp({ turn: npc.fieldChanges?.latestTurn, message: npc.fieldChanges?.message }).mark === '#0';
     const character = block('character', 'Character', characterBody(npc), { mark: opening ? '' : changedMark(npc, 'personality') });
     const notes = npc.v2Meters?.notes;
-    const tastes = tastesBody(notes) + drivesBody(notes);
+    // the placeholders show only when Dossier notes is on (the host says so); otherwise the blocks stay out, as before
+    const on = npc.v2Meters?.notesOn === true;
+    const tastes = tastesBody(notes, on) + drivesBody(notes, on);
     const background = block('background', 'Background', plain(npc.background) ? proseHtml(npc.background) : emptyLine(NOTHING_YET));
     // The blocks run in the mockup's order: Identity | Appearance, Character | Tastes, Drives | Background (an empty block keeps its heading and a muted line).
     const body = `<div class="delta-profile-cols">${identity}${appearance}${character}${tastes}${background}</div>`;

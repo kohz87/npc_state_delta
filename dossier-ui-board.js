@@ -1,6 +1,6 @@
 /* NPC State Delta dossier surface: the Board screen (dial, name and status, tiles). Pure markup from boardModel and dialHtml; no DOM access and no listeners. The dial and the tiles carry data-delta-screen / data-delta-section for the screens module's delegated click handler. */
 import { escapeHtml } from './src/util/html.js';
-import { initialsOf, portraitHtml } from './dossier-ui-html.js';
+import { capFirst, initialsOf, portraitHtml } from './dossier-ui-html.js';
 import { dialHtml } from './dossier-ui-dial.js';
 import { profileMeterAxes } from './dossier-ui-profile.js';
 import { boardModel, gateWords, possessiveWord } from './dossier-ui-view-model.js';
@@ -119,7 +119,7 @@ function tieFacesHtml(faces = [], { peers = null, refs = null } = {}) {
 function sectionCaptionHtml(role, npc) {
     const meters = profileMeterAxes(npc).map(item => `<i data-axis="${item.axis}">${esc(item.text)}</i>`).join('');
     const line = String(role ?? '').trim();
-    return (line ? `<p class="delta-muted delta-board-role">${esc(`${[...line][0].toUpperCase()}${[...line].slice(1).join('')}`)}</p>` : '')
+    return (line ? `<p class="delta-muted delta-board-role">${esc(capFirst(line))}</p>` : '')
         + (meters ? `<p class="delta-board-meters">${meters}</p>` : '');
 }
 
@@ -134,7 +134,7 @@ export function boardHtml(npc = {}, { refs = null, userName = 'you', peers = nul
         model.tiles?.mood?.text ? { text: model.tiles.mood.text, kind: 'mood' } : null,
     ].filter(Boolean);
     // As written in the dossier, with the first letter of each part capitalised ("male · bargemaster" reads "Male · Bargemaster").
-    const identity = [model.species, model.gender, model.role].filter(Boolean).map(part => `${[...part][0].toUpperCase()}${[...part].slice(1).join('')}`).join(' · ');
+    const identity = [model.species, model.gender, model.role].filter(Boolean).map(capFirst).join(' · ');
     const tiles = boardTiles(model, { userName, facesHtml: tieFacesHtml(model.tiles?.ties?.faces, { peers, refs }) }).map(boardTileHtml).join('');
     const profile = `<div class="delta-board-dial" role="button" tabindex="0" data-delta-screen="profile" aria-label="${esc(name)} profile">${dialHtml(npc, { refs })}</div>`;
     const nameBlock = `<div class="delta-board-name"><h3 class="delta-board-title">${esc(name)}</h3>`
