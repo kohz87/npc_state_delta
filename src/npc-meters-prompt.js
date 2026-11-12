@@ -4,7 +4,7 @@ import { BUILT_IN_METERS, IMPACT_TIERS, FEATURE_GATE, FEATURE_PRESETS, FEATURE_M
 import { meterValue } from './npc-meters-slice.js';
 import { APPROACH_KINDS, gateCue } from '../npc-meters-gate.js';
 import { readEvent } from './npc-meters-pacing.js';
-import { moodWord, normalizeMood } from '../npc-mood.js';
+import { moodWord, normalizeMood, storedMoodWord } from '../npc-mood.js';
 import { notesTail } from './npc-notes-kinds.js';
 
 export function createNpcPrompt({
@@ -73,7 +73,9 @@ export function createNpcPrompt({
             const mood = normalizeMood(readLeaf(record.mood));
             if (mood && (mood.v || mood.a || mood.d) && moods.length < PULL_PEOPLE) {
                 const control = mood.d <= -2 ? ', cornered' : mood.d >= 2 ? ', in control' : '';
-                moods.push(`${record.name} ${moodWord(mood).toLowerCase()}${control}`);
+                // The person's current word as the scan stored it (the numbers are often +-1 and sit in one table band); the table word only when none is stored.
+                // The numbers add only the strong hint (control at the band edge).
+                moods.push(`${record.name} ${storedMoodWord(mood) || moodWord(mood).toLowerCase()}${control}`);
             }
             const pull = readLeaf(record.pull);
             if (pull && PULL_WORDS[pull.kind] && pulls.length < PULL_PEOPLE) {
