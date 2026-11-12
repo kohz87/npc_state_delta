@@ -540,17 +540,43 @@ test('notes grammar: the static text is the same bytes every time and the added 
     assert.ok(added > 0 && added < 500, `added ${added} chars`);
 });
 
-test('notes tail: the Changes cue is the last optional line while someone is present, and absent with the notes feature off or nobody here', async () => {
+const CUE = /^Whenever anything changed, write the <Changes> block \(just before <Blocks>, which still ends the reply\), even if <Blocks> is empty/;
+const tailOf = s => s.host.registry.module(MODULE_ID).context.tail({ state: s.host.head(), chat: { length: s.host.ctx.chat.length } });
+const cueLines = tail => tail.lines.filter(line => CUE.test(typeof line === 'string' ? line : line?.text));
+
+test('notes tail: the Changes cue is one kept line, last of the lines, with the notes feature on whoever is in the scene, and absent with it off', async () => {
     const on = await suite({ allowance: null, features: ON });
     await on.setDay(1);
     await on.say(['~ npc Oren | trust: +1']);
-    const lines = optional(on);
-    assert.match(lines.at(-1), /^Whenever anything changed, write the <Changes> block \(just before <Blocks>, which still ends the reply\), even if <Blocks> is empty/);
-    assert.equal(lines.filter(line => /<Changes>/.test(line)).length, 1);
+    const tail = tailOf(on);
+    assert.equal(cueLines(tail).length, 1);
+    assert.deepEqual(tail.lines.at(-1), { text: tail.lines.at(-1).text, keep: true });
+    assert.match(tail.lines.at(-1).text, CUE);
+    assert.ok(!tail.optional.some(line => /<Changes>/.test(line)), 'not an optional line: the host drops those first');
     const off = await suite({ allowance: null, features: { [FEATURE_NOTES]: false } });
     await off.setDay(1);
     await off.say(['~ npc Oren | trust: +1']);
-    assert.ok(!optional(off).some(line => /<Changes>/.test(line)));
+    assert.equal(cueLines(tailOf(off)).length, 0);
+});
+
+test('notes tail: the cue is sent in a reply with nobody present (a quiet travel reply) and with no dossier at all', async () => {
     const empty = await suite({ allowance: null, features: ON });
-    assert.ok(!optional(empty).some(line => /<Changes>/.test(line)));
+    assert.equal(cueLines(tailOf(empty)).length, 1);
+    const alone = await suite({ allowance: null, features: ON, present: [] });
+    await alone.setDay(1);
+    await alone.say(['~ npc Oren | trust: +1']);
+    assert.equal(cueLines(tailOf(alone)).length, 1);
+});
+
+test('notes tail: under a tight tail budget (the run\'s 550 tokens, here 60 with a crowded section) the host still sends the cue (the meters line is the one that goes)', async () => {
+    const { assemble } = await import('./vendor/story-block/src/v2/prompt.js');
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    const view = { state: s.host.head(), query: () => null, settings: {}, chat: { length: s.host.ctx.chat.length } };
+    const built = assemble({ registry: s.host.registry, view, settings: { tailBudget: 60 } });
+    assert.ok(CUE.test(built.tailText.split('\n').find(line => CUE.test(line)) ?? ''), built.tailText);
+    const ours = built.parts.find(part => part.module === MODULE_ID && part.place === 'tail');
+    assert.match(ours.text, /Whenever anything changed/);
+    assert.ok(!/NPC meters now/.test(ours.text), 'the ordinary line was dropped, the kept cue stayed');
 });
