@@ -143,11 +143,12 @@ export function notesTail(record, { present = [] } = {}) {
 // ---- the host's side: grammar lines, the label parser and the player's view ----
 
 // One short grammar line per kind, sent only while the notes feature is on (the host leaves a kind's grammar out when its feature is off).
+// Each line says when to write it and gives one example in the same grammar (the live runs never saw these written from the bare templates).
 const GRAMMAR = Object.freeze({
-    lie: '~ lie Name | to: Astra | said: the false claim (| caught: yes once the story exposes it)',
-    know: '~ know Name | about: Other | fact: what they learned | how: saw or heard (| secret: yes; later | told: yes)',
-    taste: '~ taste Name | likes: or dislikes: an item | from: why',
-    tie: '~ tie Name | with: Other | tag: +ally, +rival or +owes (-tag drops it)',
+    lie: '~ lie Name | to: Astra | said: the false claim (write it when someone lies to Astra; | caught: yes once the story exposes it; e.g. ~ lie Pell | to: Astra | said: I never took the purse)',
+    know: '~ know Name | about: Other | fact: what they learned | how: saw or heard (write it when someone learns something about another person; | secret: yes if kept hidden, later | told: yes; e.g. ~ know Oren | about: Temiwa | fact: is ill | how: heard | secret: yes)',
+    taste: '~ taste Name | likes: or dislikes: an item | from: why (write it when someone shows a like or dislike; e.g. ~ taste Oren | likes: burnt toffee | from: ate two)',
+    tie: '~ tie Name | with: Other | tag: +ally, +rival or +owes (-tag drops it; write it when two people ally, rival or owe; e.g. ~ tie Oren | with: Temiwa | tag: +owes)',
 });
 
 /** The `kinds` entries for the host: every note kind handled by `capture` and behind the notes feature. */

@@ -175,6 +175,7 @@ const STAGES = [
 
 // ---- the definition ----
 
+const noCue = lines => lines.filter(line => !/^End the reply with the <Changes> block/.test(line)); // the flash-rare-lines cue: pinned in npc-notes-kinds.test.js
 test('the real registry accepts the definition: npc domain, npc kind, commands, queries, the NPC card screen', async () => {
     const h = await host();
     assert.equal(h.registry.domainOwner('npc'), MODULE_ID);
@@ -404,7 +405,7 @@ test('secrets: unlocked at the threshold with a receipt; locked ones are sent on
     assert.deepEqual(h.npc('Mira').unlocked, []);
     assert.equal(leaks(), false, 'locked: nowhere in the static part, the state or the queries');
     const locked = h.def.context.tail(h.view());
-    assert.deepEqual(locked.optional, [hidden(SECRET, true), hidden(SECRET_TWO)], 'present and locked: sent as hidden, the nearer to opening first (trust 25 of 30; tension 0 of -20)');
+    assert.deepEqual(noCue(locked.optional), [hidden(SECRET, true), hidden(SECRET_TWO)], 'present and locked: sent as hidden, the nearer to opening first (trust 25 of 30; tension 0 of -20)');
     assert.equal(locked.lines.some(line => line.includes(SECRET) || line.includes(SECRET_TWO)), false, 'never as a known line');
     // Delta's own prompts never carry the hidden notes.
     const record = h.delta.api.getNpc('npc_mira');
@@ -424,7 +425,7 @@ test('secrets: unlocked at the threshold with a receipt; locked ones are sent on
     assert.equal(JSON.stringify(h.store.head()).includes(SECRET), false, 'the text never enters the state');
     const opened = h.def.context.tail(h.view());
     assert.deepEqual(opened.lines.filter(line => line.includes(SECRET)), [`Mira, known to the player now; may come out: ${SECRET}`]);
-    assert.deepEqual(opened.optional, [hidden(SECRET_TWO, true)], 'the other note is still locked: hidden wording');
+    assert.deepEqual(noCue(opened.optional), [hidden(SECRET_TWO, true)], 'the other note is still locked: hidden wording');
     assert.equal(leaks(), false);
     // Not present: not told, locked or opened.
     h.delta.records.npc_mira.present = false;
@@ -846,8 +847,8 @@ test('secrets: five layers over a small budget: the nearest to opening are sent,
     h.reply('Nice.', '~ npc Mira | trust: +12');
     assert.deepEqual(h.npc('Mira').unlocked, [secretId('trust', 10, layers[0].text)], 'the lightest layer opened at 10');
     const tail = h.def.context.tail(h.view());
-    assert.equal(tail.optional.length, 4);
-    assert.deepEqual(tail.optional.map(line => /Layer (\d)/.exec(line)[1]), ['2', '3', '4', '5'], 'nearest to opening first');
+    assert.equal(noCue(tail.optional).length, 4);
+    assert.deepEqual(noCue(tail.optional).map(line => /Layer (\d)/.exec(line)[1]), ['2', '3', '4', '5'], 'nearest to opening first');
     const sentFor = () => assemble({ registry: h.registry, view: h.view(), settings: { tailBudget: 1500 } });
     let sent = sentFor();
     const part = () => sent.parts.find(item => item.module === MODULE_ID && item.place === 'tail');
@@ -861,7 +862,7 @@ test('secrets: five layers over a small budget: the nearest to opening are sent,
     for (let i = 0; i < 3; i += 1) h.reply('Closer.', '~ npc Mira | trust: +15');
     assert.equal(h.npc('Mira').meters.trust, 57);
     assert.equal(h.npc('Mira').unlocked.length, 3);
-    assert.deepEqual(h.def.context.tail(h.view()).optional.map(line => /Layer (\d)/.exec(line)[1]), ['4', '5']);
+    assert.deepEqual(noCue(h.def.context.tail(h.view()).optional).map(line => /Layer (\d)/.exec(line)[1]), ['4', '5']);
     sent = sentFor();
     assert.ok(part().text.includes('Layer 4 of her past'), 'the layer about to open is told');
     assert.equal(part().text.includes('Layer 5 of her past'), false, 'the deepest still waits');
@@ -891,7 +892,7 @@ test('secrets: NPCs with no notes get exactly the tail they had before (no hidde
     h.delta.records.npc_oren.present = true;
     h.delta.records.npc_mira.present = false;
     const tail = h.def.context.tail(h.view());
-    assert.deepEqual(tail.optional, []);
+    assert.deepEqual(noCue(tail.optional), []);
     assert.match(tail.lines[0], /^NPC meters now: Oren /);
     assert.equal(tail.lines.length, 1);
 });
