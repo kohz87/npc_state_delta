@@ -13,6 +13,7 @@ import { applyIncoming } from './core-merge-incoming.js';
 import { applyDurableProfileUpdates } from './core-development.js';
 import { consolidateAliasLinkedNpcDuplicates } from './core-merge-aliases.js';
 import { npcNamedInText } from './core-merge-names.js';
+import { withSettledGuess } from './appearance-physical.js';
 
 export { npcNamedInText, countNormalizedPhrase } from './core-merge-names.js';
 
@@ -123,7 +124,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
                 .filter((npc, index) => index !== existingIndex && npc)
                 .flatMap(npc => [npc.name, ...(Array.isArray(npc.aliases) ? npc.aliases : [])])
                 .filter(Boolean);
-            next.npcs[existingIndex] = applyIncoming(next.npcs[existingIndex], incoming, turn, relationshipCaps, sourceMessageId, { ...lifecycleOptions, presentationOtherLabels });
+            next.npcs[existingIndex] = withSettledGuess(next.npcs[existingIndex], applyIncoming(next.npcs[existingIndex], incoming, turn, relationshipCaps, sourceMessageId, { ...lifecycleOptions, presentationOtherLabels }));
             report.updated.push(next.npcs[existingIndex].id);
             if (normalizeName(previousName) !== normalizeName(next.npcs[existingIndex].name)) {
                 report.renamed.push({ id: next.npcs[existingIndex].id, from: previousName, to: next.npcs[existingIndex].name });

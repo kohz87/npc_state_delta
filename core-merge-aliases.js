@@ -98,7 +98,7 @@ function mergeAliasLinkedNpcPair(a, b) {
         : (cleanText(canonicalRecord?.homeBase, 300) || cleanText(fallbackRecord?.homeBase, 300));
     const lockedAppearanceSource = lockedSourceFor('appearance');
     if (lockedAppearanceSource) {
-        for (const key of ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion']) {
+        for (const key of ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion', 'lookGuess']) {
             if (Object.prototype.hasOwnProperty.call(lockedAppearanceSource, key)) merged[key] = structuredClone(lockedAppearanceSource[key]);
             else delete merged[key];
         }

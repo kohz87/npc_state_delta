@@ -22,7 +22,8 @@ test('the three targeted passes share one runner', () => {
     }
     const runner = index.slice(index.indexOf('async function runTargetedDossierPass'), index.indexOf('function scopeTargetedChannels'));
     assert.match(runner, /lineageMoved\(lineage, chatLineage\(getContext\(\)\.chat \|\| \[\]\), operation\.sourceMessageId\)/);
-    assert.match(runner, /forwardRelationshipChangesToHost\(latest\.npcs, merged\.state\.npcs, targetMessageId, operation\.chatHead, \[\], parsed\?\.npcs\)/);
+    // (card traits win) The Refresh's profile updates go too, so a look or role it refused is reported like a scan's.
+    assert.match(runner, /forwardRelationshipChangesToHost\(latest\.npcs, merged\.state\.npcs, targetMessageId, operation\.chatHead, parsed\?\.profileUpdates \|\| \[\], parsed\?\.npcs\)/);
     assert.match(runner, /recordScanDiagnostics\(chatKey, metrics, parsed, merged\.report/);
     assert.match(index, /\(I-14\) The Refresh prompt asks for at most three new memories \(rule 14\); its merge takes three\.\n\s*memoryInputLimit: 3,/);
 });

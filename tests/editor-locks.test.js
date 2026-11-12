@@ -126,11 +126,12 @@ test('editor locks through the synthetic host: a second Save, a later scan, a sw
         assert.deepEqual(yunyun().manualProfileFields, ['role', 'mood', 'background', 'appearance'], 'the branch restore kept the locks');
         assert.equal(yunyun().overallAppearance, 'Crimson eyes and a black cloak.');
 
-        // Unticking and saving clears the locks; the next scan may then rewrite the role.
+        // Unticking and saving clears the locks; the next scan may then rewrite the role, marked as a story change with its reason
+        // (card traits win: an established role is keep-by-default like the home base).
         await editNpc(id, { lock_profile: { checked: false } });
         assert.deepEqual(yunyun().manualProfileFields, []);
         role = 'wandering adventurer';
-        await reply('Where to?', 'Yunyun, a wandering adventurer again, points north.');
+        await reply('Where to?', 'Yunyun became a wandering adventurer again, and points north.');
         assert.equal(yunyun().role, 'wandering adventurer', 'an unlocked role follows the story again');
     });
 });

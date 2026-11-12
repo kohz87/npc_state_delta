@@ -8,6 +8,7 @@ import { identityConflict, partialNamePair, placesOverlap } from './core-merge-n
 
 import { keyRelationshipSubject, mergeKeyRelationshipUpdates, tiesTracked } from './core-keyrel.js';
 import { isSafeUnmarkedDurableReplacement } from './core-durable.js';
+import { groundedTraitEvent } from './core-durable-grounding.js';
 
 import { IMPORTANT_MEMORY_LIMIT } from './core-record-shared.js';
 import { mergeCustomFieldValues } from './core-record-custom-fields.js';
@@ -153,11 +154,18 @@ function mergeUnpinnedMemories(oldList, newList, retentionList = [], incomingLim
 // Speech and Appearance, have their own evidence-gated rules there).
 export const PROFILE_UPDATE_TEXT_FIELDS = Object.freeze(['role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'background']);
 
-// Gender, home base, background and ages are keep-by-default once established.
+// Role, gender, home base, background and ages are keep-by-default once established.
 export function durableTextAccepted(field, existing, incoming, value, options = {}) {
     if (field === 'gender') {
         const prior = normalizeGender(existing.gender);
         return !(prior && prior !== value && (incoming.genderState !== 'correct' || !String(incoming.genderReason || '').trim()));
+    }
+    if (field === 'role') {
+        // (card traits win) The source event itself supplies the reason for a bare role; an
+        // explicit reason, when supplied, must describe that same target-specific event.
+        const prior = String(existing.role || '').trim();
+        if (!prior || normalizeName(prior) === normalizeName(value)) return true;
+        return groundedTraitEvent(existing, value, incoming.roleReason, options.developmentContext, 'role');
     }
     if (field === 'homeBase') {
         const prior = String(existing.homeBase || '').trim();

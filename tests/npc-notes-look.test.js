@@ -103,3 +103,15 @@ test('isLookLocked needs both the look text and a readable stamp', () => {
     assert.equal(isLookLocked('', { day: 1, r: 'r1' }), false);
     assert.equal(isLookLocked(LOCK, { day: 1, r: '' }), false);
 });
+
+test('lookDrift names a trait the scan kept (card traits win): the story said one value, the record keeps another', () => {
+    assert.equal(
+        lookDrift('Brown eyes ringed dark.', { incoming: 'Pale eyes ringed dark.', name: 'Sister Temiwa', swaps: [{ trait: 'eyes', said: 'pale', kept: 'brown' }] }),
+        'Look drift refused: the story called Sister Temiwa\'s eyes pale; the record keeps brown.',
+    );
+    assert.equal(
+        lookDrift(LOCK, { incoming: 'black hair, green eyes', name: 'Rika', swaps: [{ trait: 'hair', said: 'black', kept: 'white' }, { trait: 'eyes', said: 'green', kept: 'yellow green' }] }),
+        'Look drift refused: the story called Rika\'s hair black; the record keeps white. The story called Rika\'s eyes green; the record keeps yellow green.',
+    );
+    assert.equal(lookDrift(LOCK, { incoming: 'black hair', swaps: [{ trait: '', said: 'x', kept: 'y' }] }), 'Look drift refused: "black hair" does not match the fixed look "white hair, yellow-green eyes".', 'a malformed swap falls back');
+});

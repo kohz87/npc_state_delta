@@ -16,7 +16,7 @@ test('an outfit change keeps omitted physical traits and retires the old outfit'
 
 test('a physical trait changes only when the update itself describes it', () => {
     const context = 'Myla dyed her hair crimson and cut it to her shoulders. She now wears a plain linen shirt.';
-    const next = applyAppearanceUpdate({ appearance: physical }, change('Hair freshly dyed crimson and cut to her shoulders; wearing a plain linen shirt.', context), { context });
+    const next = applyAppearanceUpdate({ name: 'Myla', appearance: physical }, change('Hair freshly dyed crimson and cut to her shoulders; wearing a plain linen shirt.', context), { context });
     assert.match(next.appearance, /crimson/);
     assert.doesNotMatch(next.appearance, /silver hair/, 'an explicitly re-described trait replaces the old one');
     assert.match(next.appearance, /violet eyes/);

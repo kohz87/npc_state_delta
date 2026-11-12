@@ -331,7 +331,7 @@ test('locked look: the scan forwards a refused durable look as a flag (Problem +
         assert.equal(sent.length, 1);
         assert.equal(sent[0].name, 'Rika');
         assert.equal(sent[0].reply, 7);
-        assert.deepEqual(sent[0].drift, { before: held, incoming: 'Black hair, brown eyes.' });
+        assert.deepEqual(sent[0].drift, { before: held, incoming: 'Black hair, brown eyes.', swaps: [{ trait: 'hair', said: 'black', kept: 'white' }, { trait: 'eyes', said: 'brown', kept: 'yellow green' }] });
         sent.length = 0;
         part.forwardRelationshipChangesToHost([rika(held)], [rika('Black hair, brown eyes.')], 8, null, [{ id: 'n1', overallAppearance: 'Black hair, brown eyes.' }]);
         part.forwardRelationshipChangesToHost([rika(held)], [rika(held)], 9, null, [{ id: 'n1', overallAppearance: held }]);
