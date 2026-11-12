@@ -580,16 +580,23 @@ test('v2 size and cost: 28 / 100 / 500 replies, measured against the v1 text of 
     for (const replies of [28, 100, 500]) {
         const { state } = buildChat(replies, { npcCount: 24, noteChars: 5000 });
         const v1 = legacyEncodeV1('chat:v2', state);
-        const best = fn => { fn(); let min = Infinity; for (let i = 0; i < 5; i += 1) { const t = process.hrtime.bigint(); fn(); min = Math.min(min, Number(process.hrtime.bigint() - t) / 1e6); } return min; };
+        // Interleaved rounds so a busy machine slows both sides alike; the best round of each is kept.
         let v2 = '';
-        const encodeMs = best(() => { v2 = encodeStateFilePayload('chat:v2', state, 't'); });
         let back;
-        const decodeMs = best(() => { back = decodeStateFilePayload(v2); });
-        const v1EncodeMs = best(() => JSON.stringify(structuredClone(state)));   // today's encode: one clone + one stringify
+        let encodeMs = Infinity; let coldMs = Infinity; let decodeMs = Infinity; let v1EncodeMs = Infinity;
+        const timed = fn => { const t = process.hrtime.bigint(); fn(); return Number(process.hrtime.bigint() - t) / 1e6; };
+        encodeStateFilePayload('chat:v2', state, 't');   // warm: the memo of this chat now holds the saved pairs
+        for (let round = 0; round < 9; round += 1) {
+            v1EncodeMs = Math.min(v1EncodeMs, timed(() => JSON.stringify(structuredClone(state))));   // today's encode: one clone + one stringify
+            encodeMs = Math.min(encodeMs, timed(() => { v2 = encodeStateFilePayload('chat:v2', state, 't'); }));
+            coldMs = Math.min(coldMs, timed(() => encodeStateFilePayload(`chat:v2:cold:${replies}:${round}`, state, 't')));   // first save of a chat: empty memo
+            decodeMs = Math.min(decodeMs, timed(() => { back = decodeStateFilePayload(v2); }));
+        }
         same(back.state, state);
-        rows.push({ replies, checkpoints: state.checkpoints.length, snapshotKB: Math.round(JSON.stringify(state.checkpoints[0].snapshot).length / 1024), v1KB: Math.round(v1.length / 1024), v2KB: Math.round(v2.length / 1024), ratio: +(v2.length / v1.length).toFixed(3), encodeMs, decodeMs, v1EncodeMs });
+        rows.push({ replies, checkpoints: state.checkpoints.length, snapshotKB: Math.round(JSON.stringify(state.checkpoints[0].snapshot).length / 1024), v1KB: Math.round(v1.length / 1024), v2KB: Math.round(v2.length / 1024), ratio: +(v2.length / v1.length).toFixed(3), encodeMs, coldEncodeMs: coldMs, decodeMs, v1EncodeMs });
         assert.ok(v2.length < v1.length * 0.5, `${replies} replies: ${v2.length} vs ${v1.length}`);
-        assert.ok(encodeMs <= 2 * v1EncodeMs, `v2 encode ${encodeMs} ms vs today's ${v1EncodeMs} ms (bound 2x)`);
+        assert.ok(encodeMs <= 2 * v1EncodeMs, `v2 encode ${encodeMs} ms vs today's ${v1EncodeMs} ms (bound 2x, warm memo)`);
+        assert.ok(coldMs <= 3 * v1EncodeMs, `v2 first-save encode ${coldMs} ms vs today's ${v1EncodeMs} ms (guard 3x; measured about 1.6-2x on a quiet machine)`);
     }
     console.log('V2-SIZE', JSON.stringify(rows));
 });
