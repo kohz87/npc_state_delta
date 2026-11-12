@@ -14,7 +14,7 @@ export function createAssistantHandlerPart(rt, deps, helpers) {
     const { assistantReceipts, narrationCaptures } = rt;
     const { replyParentKey, sameReplyRewritten, scanInner } = helpers;
 
-    async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard = false, forceBranchRescan = false } = {}) {
+    async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard = false, forceBranchRescan = false, detachScan = false } = {}) {
         const settings = getSettings();
         if (!settings.enabled) return;
         const eventChatKey = getChatKey();
@@ -90,6 +90,17 @@ export function createAssistantHandlerPart(rt, deps, helpers) {
         renderDossier();
         updateInjection();
 
+        if (scanExpected && detachScan && !replay) {
+            // The live MESSAGE_RECEIVED listener: SillyTavern keeps the Send button locked (and the reply undrawn) until every
+            // listener returns, and an automatic scan is a model call (seconds). It starts now, in this tick (scanNow counts as
+            // dossier work from its first line), and the backfills follow it; a scan thrown away because the state moved on is
+            // asked for again (scanNowInner), so nothing is lost.
+            const chainEnd = () => getChatKey() === eventChatKey && latestMessageId(true) === messageId && sourceStillHere();
+            scanNow({ manual: false, messageId, allowDuringSwipe: bypassSwipeGuard })
+                .then(done => { if (done !== false && chainEnd()) scheduleReplyBackfills(eventChatKey, messageId); })
+                .catch(error => console.warn('[NPC State Delta] the scan of a new reply stopped.', error));
+            return;
+        }
         if (scanExpected) {
             // A replay runs the scan itself (no queue, no gate wait: the chat is held) and a failed one stops the whole catch-up.
             if (await (replay ? scanInner({ manual: false, messageId, allowDuringSwipe: true }) : scanNow({ manual: false, messageId, allowDuringSwipe: bypassSwipeGuard })) === false) {

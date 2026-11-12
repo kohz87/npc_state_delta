@@ -107,7 +107,7 @@ async function withWriterLock(chatKey, task) {
 }
 
 function retryableWriteError(error) {
-    if (['NPC_STATE_WRITE_CONFLICT', 'NPC_STATE_WRITE_CANCELLED'].includes(error?.code)) return false;
+    if (['NPC_STATE_WRITE_CONFLICT', 'NPC_STATE_WRITE_CANCELLED', 'NPC_STATE_UNSUPPORTED_FORMAT'].includes(error?.code)) return false;
     if (error?.code === 'NPC_STATE_LOCK_TIMEOUT') return true;
     const status = Number(error?.status || 0);
     if ([408, 425, 429].includes(status) || status >= 500) return true;

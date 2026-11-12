@@ -40,7 +40,8 @@ Generated 2026-11-07.
 - `core-relationship-events.js`: Relationship evidence grounding, event history, duplicate checks and summary calibration split from `core-relationship.js`.
 - `core-relationship-text.js`: Durable concept tokens, grounding coverage, semantic similarity and compact-text helpers split from `core-relationship.js`.
 - `storage-identity.js`: Per-storage-instance writer identity, sidecar path tokens and deterministic data/recovery file names split from `storage.js`.
-- `storage-payload.js`: Sidecar format markers, base64 encoding, portrait-asset pruning and JSON payload encode/decode split from `storage.js`.
+- `storage-payload.js`: Sidecar format markers (writes format 2, reads 1 and 2, coded `NPC_STATE_UNSUPPORTED_FORMAT` for newer), base64 encoding, portrait-asset pruning, JSON payload encode/decode and the checkpoint pack/unpack call, split from `storage.js`.
+- `checkpoint-pack.js`: Pure checkpoint packing for sidecar format 2 (full anchors/newest replies, RFC 6902 patches against earlier snapshots, verified byte for byte per entry, `unpackCheckpoints` for decode); imports nothing, called only by `storage-payload.js`.
 - `storage-files.js`: Sidecar upload/delete/existence calls and cast-portrait user-file helpers split from `storage.js`.
 - `storage-inspection.js`: Sidecar read slots, validator cache, revision inspection and pointer adoption split from `storage.js`.
 - `src/npc-meters-commands.js`: Story-line capture, milestone intake and the hosted npc command handlers split from `src/npc-meters.js`.
