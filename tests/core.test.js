@@ -3752,30 +3752,34 @@ test('name collisions: the alias consolidation pass keeps a surname-alias pair o
     assert.equal(out.npcs.length, 2);
 });
 
-// Card-only ghost: a name only the card's greeting (World State roster) holds is never admitted.
+// Card-only ghost: a name only the greeting's World State roster or a hidden Notebook note holds is never admitted.
 import { storyTextsForAdmission } from '../scan-context.js';
-const GREETING = 'Mist over Bluewatch. **📡 Off-Screen:**\n* Watch-Captain Edda Rorke - Counting a short garrison';
+const GREETING = 'Mist over Bluewatch, and Astra waits at the gate.\n<Blocks><World_State>\n**📡 Off-Screen:**\n* Watch-Captain Edda Rorke - Counting a short garrison\n</World_State></Blocks>';
+const REPLY1 = 'The guard nods at you.\n<Blocks><Notebook>\nSecret: the toll is forged.\nHidden from: Astra, Edda Rorke, the reader\nComes out when: Astra speaks directly with Watch-Captain Edda Rorke\n</Notebook><CYOA>\n1. Ask about the toll\n</CYOA></Blocks>';
 const ghostRow = name => ({ npcs: [{ name, identityKind: 'proper_name', dossierSignal: 'meaningful', present: false, worldActive: true }] });
-test('card-only name in the greeting roster is not admitted (storyTextsForAdmission skips chat[0])', () => {
-    const chat = [{ mes: GREETING, is_user: false }, { mes: 'I ride to the gate.', is_user: true }, { mes: 'The guard nods at you.', is_user: false }];
-    const texts = storyTextsForAdmission(chat);
-    assert.equal(texts.length, 2);
-    assert.ok(!texts.some(t => t.includes('Edda')));
-    const merged = mergeScanResult({ npcs: [], candidates: [], turn: 1 }, ghostRow('Edda Rorke'), { turn: 1, storyTexts: texts });
-    assert.equal(merged.state.npcs.length, 0);
-    assert.equal(merged.state.candidates.length, 0);
-    assert.deepEqual(merged.report.skipped, ['Edda Rorke']);
+const admit = (chat, upTo) => mergeScanResult({ npcs: [], candidates: [], turn: 1 }, ghostRow('Edda Rorke'), { turn: 1, storyTexts: storyTextsForAdmission(chat, upTo) });
+test('card-only name (greeting roster, reply-1 Notebook secret) is not admitted at any scan', () => {
+    const chat = [{ mes: GREETING, is_user: false }, { mes: 'I ride to the gate.', is_user: true }, { mes: REPLY1, is_user: false }];
+    for (const upTo of [0, 1, 2]) {
+        const texts = storyTextsForAdmission(chat, upTo);
+        assert.ok(!texts.some(t => t.includes('Edda')));
+        const merged = admit(chat, upTo);
+        assert.equal(merged.state.npcs.length, 0);
+        assert.equal(merged.state.candidates.length, 0);
+        assert.deepEqual(merged.report.skipped, ['Edda Rorke']);
+    }
 });
-test('a person named in a reply or the player text is admitted, also by surname or alias', () => {
-    const chat = [{ mes: GREETING }, { mes: 'Captain Rorke waves you over.' }];
-    const merged = mergeScanResult({ npcs: [], candidates: [], turn: 1 }, ghostRow('Edda Rorke'), { turn: 1, storyTexts: storyTextsForAdmission(chat) });
-    assert.equal(merged.state.npcs.length, 1);
-    const user = mergeScanResult({ npcs: [], candidates: [], turn: 1 }, ghostRow('Edda Rorke'), { turn: 1, storyTexts: storyTextsForAdmission([{ mes: GREETING }, { mes: 'I ask for Edda Rorke.', is_user: true }]) });
-    assert.equal(user.state.npcs.length, 1);
+test('a person named in the greeting prose is admitted at the greeting scan; later messages do not count', () => {
+    const chat = [{ mes: 'Captain Rorke eyes the gate.' }, { mes: 'I ask for Edda Rorke.', is_user: true }];
+    assert.equal(admit(chat, 0).state.npcs.length, 1);
+    const later = [{ mes: GREETING }, { mes: 'I ask for Edda Rorke.', is_user: true }];
+    assert.equal(admit(later, 0).state.npcs.length, 0);
+    assert.equal(admit(later, 1).state.npcs.length, 1);
+    assert.equal(admit([{ mes: GREETING }, { mes: 'Edda Rorke nods.', is_system: true }], 1).state.npcs.length, 0);
 });
 test('an existing ghost dossier keeps updating, no storyTexts means no check', () => {
     const base = mergeScanResult({ npcs: [], candidates: [], turn: 1 }, ghostRow('Edda Rorke'), { turn: 1 });
     assert.equal(base.state.npcs.length, 1);
-    const again = mergeScanResult(base.state, ghostRow('Edda Rorke'), { turn: 2, storyTexts: [GREETING.replace('Edda Rorke', 'someone')] });
+    const again = mergeScanResult(base.state, ghostRow('Edda Rorke'), { turn: 2, storyTexts: ['someone'] });
     assert.equal(again.state.npcs.length, 1);
 });

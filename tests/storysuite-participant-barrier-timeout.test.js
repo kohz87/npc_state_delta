@@ -30,7 +30,7 @@ test('a reply\'s scan whose barrier wait timed out is kept and runs when the bar
             if (args.jsonSchema) return '{"npcs":[]}';
             return JSON.stringify({ npcs: [{ name, present: true, role: 'wanderer', species: 'Human', age: '30', appearance: `${name} wears a grey cloak.`, personality: 'quiet', speech: 'brief', relationshipImpact: 'ordinary' }] });
         };
-        const reply = text => { mockState.context.chat.length || mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'The greeting opens the story.', swipe_id: 0 }); mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0 }); return mockState.context.chat.length - 1; };
+        const reply = text => { mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0 }); return mockState.context.chat.length - 1; };
         // 1. The barrier is up when the reply arrives and does not come down in time.
         mockState.gate.pending = true;
         mockState.quietResponder = responder('Vale');
@@ -80,7 +80,7 @@ test('a reconcile after a deleted message and the injection of a generation wait
         await api.flush();
         mockState.quietResponder = async (args = {}) => (args.jsonSchema ? '{"npcs":[]}' : JSON.stringify({ npcs: [{ name: 'Vale', present: true, role: 'wanderer', species: 'Human', age: '30', appearance: 'Vale wears a grey cloak.', personality: 'quiet', speech: 'brief', relationshipImpact: 'ordinary' }] }));
         const chat = mockState.context.chat;
-        chat.length || chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'The greeting opens the story.', swipe_id: 0 }); chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Vale, a wanderer in a grey cloak, nods to the party at the gate and says nothing more for a while.', swipe_id: 0 });
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Vale, a wanderer in a grey cloak, nods to the party at the gate and says nothing more for a while.', swipe_id: 0 });
         mockState.gate.pending = false;
         eventSource.emit('message_received', chat.length - 1);
         assert.equal(await waitFor(() => api.getState().npcs.some(npc => npc.name === 'Vale'), 8000), true);
