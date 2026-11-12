@@ -51,7 +51,9 @@ export function createNpcPrompt({
     const HIDDEN_ONCE = 'Lines marked (hidden) are secrets: never state or reveal them; let them shape how that person acts.';
     // One short cue, with the notes feature on (whoever is in the scene): the block is written, just before <Blocks>, even when <Blocks> is empty.
     // Sent as a kept line ({ text, keep: true }): the host's tail budget (the run used 550 tokens) drops this module's optional lines first,
-    // and its section is last, so as an optional line the cue never reached a prompt. A host without kept lines takes the text as a line.
+    // and its section is last, so as an optional line the cue never reached a prompt. The host counts kept lines in tail order against one
+    // shared cap (120 tokens): Story Director's pulse, [Earlier days] and Initiative lines come before this section and win; when they leave
+    // no room the cue is an ordinary line (the first of this section's lines dropped). Needs Story Block 2.31.1+ (older hosts drop object lines).
     const CHANGES_CUE = 'Whenever anything changed, write the <Changes> block (just before <Blocks>, which still ends the reply), even if <Blocks> is empty; a lie, secret, taste, tie or turning point gets its own line.';
     const HIDDEN_LINE = new RegExp(`^(.+?)(?:, ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}| \\(hidden\\)): .*$`, 'gm');
 
@@ -147,7 +149,8 @@ export function createNpcPrompt({
             if (first >= 0) noted[first] = `${HIDDEN_ONCE}\n${noted[first]}`;
             optional.push(...noted);
         }
-        // Last of the per-reply parts: the model drifts into ending on an empty <Blocks> and drops <Changes> (the data of the live runs).
+        // The last required line (the host writes this section's optional lines after it): the model drifts into ending on an empty
+        // <Blocks> and drops <Changes> (the data of the live runs).
         const cue = featureOn(FEATURE_NOTES) ? [{ text: CHANGES_CUE, keep: true }] : [];
         return { lines: [...lines, ...notes, ...cue], optional };
     }

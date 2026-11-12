@@ -580,3 +580,31 @@ test('notes tail: under a tight tail budget (the run\'s 550 tokens, here 60 with
     assert.match(ours.text, /Whenever anything changed/);
     assert.ok(!/NPC meters now/.test(ours.text), 'the ordinary line was dropped, the kept cue stayed');
 });
+
+// The run's conditions: tailBudget 550, a crowded earlier section (Story Director's lines) with a kept Initiative line, a kept pulse prelude, nobody present.
+async function crowded(keptTokens) {
+    const { assemble, estimateTokens, KEPT_TAIL_TOKENS } = await import('./vendor/story-block/src/v2/prompt.js');
+    const s = await suite({ allowance: null, features: ON, present: [] });
+    await s.setDay(1);
+    const initiative = 'Initiative: Mira acts first, then the guards, then Oren.';
+    const filler = Array.from({ length: 11 }, (_, i) => `Scene note ${i + 1}: ${'the harbour street holds its breath '.repeat(5)}`.trim());
+    s.host.registry.register({ id: 'aa-crowd', name: 'Crowd', context: { tail: () => ({ lines: [{ text: initiative, keep: true }, ...filler, 'Guild: the last ordinary line.'] }) } });
+    const view = { state: s.host.head(), query: () => null, settings: {}, chat: { length: s.host.ctx.chat.length } };
+    const built = assemble({ registry: s.host.registry, view, settings: { tailBudget: 550 }, keptTokens });
+    return { built, initiative, estimateTokens, KEPT_TAIL_TOKENS };
+}
+
+test('notes tail: tailBudget 550, nobody present, a crowded section: the other module\'s kept line wins, the cue is kept when it fits after it, the tail is under budget', async () => {
+    const { built, initiative, estimateTokens } = await crowded(32);
+    assert.ok(built.tailText.includes(initiative), 'the Initiative kept line stays');
+    assert.ok(CUE.test(built.tailText.split('\n').find(line => CUE.test(line)) ?? ''), 'the cue is sent');
+    assert.ok(estimateTokens(built.tailText) <= 550, `tail ${estimateTokens(built.tailText)} tokens`);
+    assert.ok(!built.tailText.includes('Guild: the last'), 'ordinary lines go before the kept ones (the crowd was over budget)');
+});
+
+test('notes tail: when the shared kept cap is spent (past 120 tokens) the cue is an ordinary line: the other kept lines still stay, the tail is under budget', async () => {
+    const { built, initiative, estimateTokens } = await crowded(100);
+    assert.ok(built.tailText.includes(initiative), 'the kept line stays whatever happens to the cue');
+    assert.ok(estimateTokens(built.tailText) <= 550, `tail ${estimateTokens(built.tailText)} tokens`);
+    assert.ok(!/Whenever anything changed/.test(built.tailText), 'no room after the others\' kept lines: the cue goes first, as an ordinary line');
+});

@@ -44,7 +44,7 @@ export const NOTE_SOURCES = Object.freeze(['pack', 'scan']);
 export const MILESTONE_MAX = 60;
 export const DESCRIBE_MAX = 100;
 export const TAIL_SECRETS_PER_NPC = 3;
-// 250 tokens for the notes and meters lines, plus about 55 for the kept Changes cue (npc-meters-prompt.js), which is always sent.
+// 250 tokens for the notes and meters lines, plus about 55 for the kept Changes cue (npc-meters-prompt.js), which is always sent. The budget is fixed: with Dossier notes off (no cue) the section has those 55 tokens more.
 export const CONTEXT_BUDGET = 305;
 
 // The optional mechanics (MODULES §F100). A host without the Features API gets each one's default.
