@@ -137,6 +137,7 @@ test('hosted: a scan\'s relationship change goes to the slice as npc.adjust; the
         assert.deepEqual(sent[0].payload.meters, { trust: relationship.trust });
         assert.deepEqual(sent[0].payload.start, { trust: 0, affection: 0, desire: 0, tension: 0 });
         assert.equal(sent[0].payload.reply, id);
+        assert.equal(sent[0].payload.reason, 'Yunyun confided a private secret to Kazuma.', 'rule NSDFOLLOW-3: the scan\'s reason for this reply rides along');
         assert.deepEqual(sent[0].options, { background: true }, 'sent as Delta\'s own action (cause ui), and as a background change: Story Block saves it in its late window');
         const injectionBefore = api.injectionPreview().text;
         // The slice says otherwise: views and the injection follow it, Delta's own data does not.

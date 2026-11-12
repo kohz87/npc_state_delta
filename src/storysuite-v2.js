@@ -216,7 +216,7 @@ export function createStorySuiteV2Adapter({
         /** The page API Story Director's World screen uses (PAGE_API). */
         pageApi,
         /** While hosted: Delta's scanner changes for one NPC → `npc.adjust` (a promise of the result, or null); `why`: a one-pass block's evidence per meter. */
-        adjust: ({ name, meters, start, reply, impact, why, guard } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(typeof impact === 'string' ? { impact } : {}), ...(why && typeof why === 'object' ? { why } : {}) }, { own: true, background: true, guard }),
+        adjust: ({ name, meters, start, reply, impact, reason, why, guard } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(typeof impact === 'string' ? { impact } : {}), ...(typeof reason === 'string' && reason.trim() ? { reason } : {}), ...(why && typeof why === 'object' ? { why } : {}) }, { own: true, background: true, guard }),
         /** While hosted: Delta's scan admitted a person → `npc.meet` (an entry with the dossier's meters, a resting mood and drives, like a cast meeting). */
         meet: ({ name, personality, about, reply, guard } = {}) => send('npc.meet', { name, ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(personality ? { personality: String(personality).slice(0, 600) } : {}), ...(about ? { about: String(about).slice(0, 600) } : {}) }, { own: true, background: true, guard }),
         /** While hosted: Delta's scan wrote a new mood word for a person → `npc.mood` (its numbers: the three the scan gave, else the fixed word list; with the reason the scan recorded). */

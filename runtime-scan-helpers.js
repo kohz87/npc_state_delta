@@ -159,9 +159,9 @@ export function clearUserDismissedSuppression(state, target) {
 
 // What a committed scan tells the slice, read from the people before and after it (moved from runtime-hosted.js, bodies unchanged).
 // Each person's relationship moves since the scan began, as npc.adjust payloads; the tier the scanner gave the scan's newest event rides along
-// (one event however many meters it moved); none known: sent without one, and not counted. `onePassRows` (a one-pass block's own rows, else null): each
-// person's relationshipEvidence for the axes the row moved rides along as `why`, also with no move of its own (the slice uses it only as the reason
-// of the same reply's story line that gave none; the sidecar drops a one-pass delta, which carries no relationshipChangeReason).
+// (one event however many meters it moved); none known: sent without one, and not counted. (rule NSDFOLLOW-3) So does the reason the scan recorded for it.
+// `onePassRows` (a one-pass block's own rows, else null): each person's relationshipEvidence for the axes the row moved rides along as `why`, also with no move of its own
+// (the slice uses it only as the reason of the same reply's story line that gave none; the sidecar drops a one-pass delta, which carries no relationshipChangeReason).
 export function relationshipChanges(prior, after, baseline, messageId, onePassRows = null) {
     const changes = [];
     for (const npc of after || []) {
@@ -172,7 +172,8 @@ export function relationshipChanges(prior, after, baseline, messageId, onePassRo
         const last = npc.lastRelationshipChange;
         const fresh = last && JSON.stringify(last) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange);
         const why = onePassRows ? onePassEvidence(onePassRows, npc) : null;
-        if (Object.keys(meters).length || why) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}), ...(why ? { why } : {}) });
+        const reason = fresh ? String(last.reason ?? '').trim() : '';
+        if (Object.keys(meters).length || why) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}), ...(reason ? { reason } : {}), ...(why ? { why } : {}) });
     }
     return changes;
 }
