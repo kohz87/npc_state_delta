@@ -72,6 +72,8 @@ export function mergeScanResult(state, scanResult, options = {}) {
     if (Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext')) {
         lifecycleOptions.userDevelopmentContext = String(options.userDevelopmentContext || '');
     }
+    // `storyTexts` (optional): the story's own texts, never the card greeting; omitted = no check.
+    const storyTexts = Array.isArray(options.storyTexts) ? options.storyTexts.map(text => String(text || '')).filter(Boolean) : null;
     const incomingList = Array.isArray(scanResult?.npcs) ? scanResult.npcs : [];
     const normalizedCandidates = (Array.isArray(state?.candidates) ? state.candidates : [])
         .map(normalizeNpcCandidate)
@@ -127,6 +129,14 @@ export function mergeScanResult(state, scanResult, options = {}) {
                 report.renamed.push({ id: next.npcs[existingIndex].id, from: previousName, to: next.npcs[existingIndex].name });
             }
             next.candidates = next.candidates.filter(candidate => !scanLabelsMatch(candidate, incoming));
+            continue;
+        }
+
+        // A person new to the registry must appear in the story (a reply or the player's text). A name found only in the
+        // character card's greeting (its World State roster) is background, never admitted. Existing dossiers are untouched.
+        if (storyTexts && inferNpcIdentityKind(incoming.name, incoming.identityKind) === 'proper_name'
+            && !storyTexts.some(text => npcNamedInText({ name: incoming.name, aliases: incoming.aliases || [] }, text))) {
+            report.skipped.push(incoming.name);
             continue;
         }
 
