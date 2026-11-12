@@ -3793,3 +3793,29 @@ test('an existing ghost dossier keeps updating, no storyTexts means no check', (
     const again = mergeScanResult(base.state, ghostRow('Edda Rorke'), { turn: 2, storyTexts: ['someone'] });
     assert.equal(again.state.npcs.length, 1);
 });
+
+// Live run 3: "leader in the gambeson" (a description the scanner wrote for an unnamed man) became a dossier at the second sighting.
+import { isDescriptivePhrase } from '../core-identity.js';
+test('a descriptive phrase is not admitted as a person; names, role labels and uncased scripts are', () => {
+    const row = name => ({ npcs: [{ name, identityKind: 'proper_name', dossierSignal: 'meaningful', present: true, sameIndividual: true }] });
+    let state = { npcs: [], candidates: [], turn: 1 };
+    for (const turn of [1, 2, 3]) {
+        const merged = mergeScanResult(state, row('leader in the gambeson'), { turn, storyTexts: ['The leader in the gambeson shouts.'] });
+        state = merged.state;
+        assert.deepEqual(merged.report.skipped, ['leader in the gambeson']);
+    }
+    assert.equal(state.npcs.length, 0);
+    assert.equal(state.candidates.length, 0);
+    assert.equal(mergeScanResult({ npcs: [], candidates: [], turn: 1 }, row('Marda'), { turn: 1 }).state.npcs.length, 1);
+    assert.equal(mergeScanResult({ npcs: [], candidates: [], turn: 1 }, row('the Butcher of Vell'), { turn: 1 }).state.npcs.length, 1);
+    assert.equal(mergeScanResult({ npcs: [], candidates: [], turn: 1 }, row('老王'), { turn: 1 }).state.npcs.length, 1);
+    assert.equal(isDescriptivePhrase('the innkeeper'), false);
+    assert.equal(isDescriptivePhrase('old man'), false);
+    assert.equal(isDescriptivePhrase('woman with the scar'), true);
+    assert.equal(isDescriptivePhrase('ライラ の 友人 で'), false);
+    // A dossier that already exists (made before this rule) keeps updating.
+    const had = { npcs: [createNpcRecord('leader in the gambeson', [])], candidates: [], turn: 1 };
+    const again = mergeScanResult(had, row('leader in the gambeson'), { turn: 2 });
+    assert.equal(again.state.npcs.length, 1);
+    assert.deepEqual(again.report.skipped, []);
+});

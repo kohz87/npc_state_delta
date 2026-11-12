@@ -4,7 +4,7 @@
    exported before. Never imports core-mechanics.js or core.js. */
 import { cleanText, normalizeName } from './core-text.js';
 import { DEFAULT_RELATIONSHIP, DEFAULT_RELATIONSHIP_CAPS, normalizeRelationshipBaseline, normalizeRelationshipCaps } from './core-relationship.js';
-import { findInterimIdentityPromotionIndex, inferNpcIdentityKind, normalizeGender } from './core-identity.js';
+import { findInterimIdentityPromotionIndex, inferNpcIdentityKind, isDescriptivePhrase, normalizeGender } from './core-identity.js';
 import { applySheetLevels, withoutSheetLevels, candidateMatches, createNpcRecord, IMPORTANT_MEMORY_LIMIT, makeNpcCandidate, mergeLists, normalizeCustomFieldNames, normalizeNpcAdmissionMode, normalizeNpcCandidate, normalizeNpcRecord, normalizeScanNpc, NPC_CANDIDATE_LIMIT, NPC_CANDIDATE_TTL_TURNS, scanLabelsMatch, shouldCreateDossierImmediately, shouldPromoteCandidate } from './core-record.js';
 import { applyKeyRelationshipEdges } from './core-keyrel.js';
 import { canonicalizeNpcKeyRelationships, reconcileSocialState } from './social.js';
@@ -129,6 +129,13 @@ export function mergeScanResult(state, scanResult, options = {}) {
                 report.renamed.push({ id: next.npcs[existingIndex].id, from: previousName, to: next.npcs[existingIndex].name });
             }
             next.candidates = next.candidates.filter(candidate => !scanLabelsMatch(candidate, incoming));
+            continue;
+        }
+
+        // A description is not a person ("leader in the gambeson", live run 3): never admitted, as a dossier or a candidate. A real name or a
+        // role label ("the innkeeper") is unaffected; people already in the registry were matched above.
+        if (isDescriptivePhrase(incoming.name)) {
+            report.skipped.push(incoming.name);
             continue;
         }
 
