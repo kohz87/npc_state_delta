@@ -307,6 +307,7 @@ export function createHostedPart(rt, deps) {
             for (const item of grown) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.drives({ name: item.name, before: item.before, after: item.after, reply: messageId });
+                stage1Refresh();   // an open dossier draws again when a drive stepped
             }
             for (const npc of looks) {
                 if (!chatHeadUnchanged(head)) return dropped();

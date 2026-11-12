@@ -13,7 +13,7 @@
 export const DRIVE_MIN = 0;
 export const DRIVE_MAX = 3;
 export const DRIVE_DEFAULT = 2;
-export const DRIVES_TEXT_MAX = 800;
+export const DRIVES_TEXT_MAX = 900;   // the largest leaf the caps below allow is 803 characters
 export const DRIVE_RULE = 1;
 export const DRIVE_LIST_STRENGTH = 3;
 const DESCRIPTION_MAX = 2000;
@@ -37,7 +37,7 @@ const OPPOSITES = Object.freeze({
     pres: ['reckless', 'abandon', 'neglect', 'expose'],
     comf: ['austere', 'ascetic', 'spartan', 'hardship'],
     conf: ['peaceful', 'calm', 'gentle', 'forgive', 'truce'],
-    hone: ['lied', 'lying', 'liar', 'deceit', 'deceive'],
+    hone: ['lied', 'lying', 'liar', 'lies', 'lie', 'deceit', 'deceive', 'dishonest', 'untruthful'],
 });
 const SOURCES = new Set(['p', 'd', 'u', 'l']);
 const KEYS = new Set(DRIVES.map(drive => drive.key));
@@ -64,8 +64,26 @@ export function readExtras(leaf) {
     try { const parsed = JSON.parse(leaf); return parsed && validExtras(parsed.x) ? parsed.x : {}; } catch { return {}; }
 }
 const tokensOf = text => String(text ?? '').slice(0, DESCRIPTION_MAX).toLowerCase().split(/[^a-z]+/);
-// The distinct cue words of `words` found in the tokens (whole words, or a prefix for words of six letters or more).
-const hitsOf = (words, tokens) => words.filter(word => tokens.some(token => token === word || (word.length >= 6 && token.startsWith(word))));
+// A word shortly before a cue that turns it round ("has no family", "never honest", "doesn't care": n't leaves a lone "t").
+const NEGATORS = new Set(['no', 'not', 'never', 'without', 'nor', 'neither', 'none', 'nobody', 'nothing', 'cannot', 'hardly', 'barely', 'lack', 'lacks', 'lacking', 'low', 'little', 'weak', 'poor', 't']);
+const NEGATION_REACH = 3;
+const MATCH = (word, token) => token === word || (word.length >= 6 && token.startsWith(word));
+// The cue words of `words` found in the tokens (whole words, or a prefix for words of six letters or more): { pos, neg }, the distinct
+// words said plainly and the ones a negator stands just before. A token in `skip` (the person's own name or role) is no evidence.
+function cueHits(words, tokens, skip) {
+    const pos = [];
+    const neg = [];
+    tokens.forEach((token, at) => {
+        if (!token || skip?.has(token)) return;
+        const word = words.find(item => MATCH(item, token));
+        if (!word) return;
+        const negated = tokens.slice(Math.max(0, at - NEGATION_REACH), at).some(before => NEGATORS.has(before));
+        const into = negated ? neg : pos;
+        if (!into.includes(word)) into.push(word);
+    });
+    return { pos, neg };
+}
+const hitsOf = (words, tokens) => cueHits(words, tokens).pos;
 
 // A stored leaf: absent (undefined, null, '') reads as the defaults; a present leaf must be a JSON object of known keys with
 // whole-number strengths 0..3 (missing keys take the default). Anything else is null, so the validator can reject the command.
@@ -206,18 +224,19 @@ export function driveEvidence(before, after) {
 // One reply's evidence (`texts`, plain strings) against the stored leaf, for the reply `rid`: { leaf, steps } or null when nothing is
 // stored or moved. A drive whose cues (and no opposite cue) show for the first time since its last change only remembers the reply; the
 // same drive and direction in a DIFFERENT reply steps it one level (3 and 0 are the ends). Never more than one step per drive per reply.
-export function growDrives(leaf, texts, rid) {
+export function growDrives(leaf, texts, rid, skipText) {
     const key = rid === null || rid === undefined ? '' : String(rid);
     const base = readDrives(leaf);
     if (!base || !key || key.length > 40 || !Array.isArray(texts)) return null;
     const extras = readExtras(leaf);
-    const tokens = tokensOf(texts.join(' | '));
+    const skip = new Set(tokensOf(skipText).filter(token => token.length > 1));
+    const found = leverCues(texts, skip);
     const next = { ...base };
     const steps = [];
     let touched = false;
     for (const drive of DRIVES) {
-        const up = hitsOf(drive.words, tokens);
-        const down = hitsOf(OPPOSITES[drive.key], tokens);
+        const up = found[drive.key].up;
+        const down = found[drive.key].down;
         if (!up.length === !down.length) continue;   // no cue, or cues both ways: nothing to count
         const dir = up.length ? 'u' : 'd';
         const cue = (up.length ? up : down)[0];
@@ -237,4 +256,34 @@ export function growDrives(leaf, texts, rid) {
         }
     }
     return touched ? { leaf: serialize(next, extras), steps } : null;
+}
+
+const LEVEL_UP = /^(?:very |quite |fairly )?(?:high|strong|great)$/;
+const LEVEL_DOWN = /^(?:very |quite |fairly )?(?:low|none|weak|nil|minimal|absent)$/;
+// Each line read on its own (a negator never reaches across lines): { key: { up: [cue words], down: [cue words] } }. A lever line
+// ("Honesty: low - lies to cover") whose label names a drive counts by its LEVEL word alone (low or none = down, high = up, else
+// nothing); any other line loses its "Label:" part and counts by its body. A negated cue counts toward the opposite direction, and a
+// negated opposite cue counts for nothing, so evidence that says a drive is weak never raises it.
+function leverCues(texts, skip) {
+    const out = Object.fromEntries(DRIVES.map(drive => [drive.key, { up: [], down: [] }]));
+    const add = (list, word) => { if (!list.includes(word)) list.push(word); };
+    for (const text of texts) {
+        const lever = /^\s*([A-Za-z ]{1,24}):\s*([A-Za-z ]{2,14}?)\s*(?:[-\u2013\u2014:]|$)/.exec(String(text));
+        const named = lever && DRIVES.find(drive => drive.label.toLowerCase() === lever[1].trim().toLowerCase() || drive.kind === lever[1].trim().toLowerCase());
+        if (named) {
+            const level = lever[2].trim().toLowerCase();
+            if (LEVEL_UP.test(level)) add(out[named.key].up, named.kind);
+            else if (LEVEL_DOWN.test(level)) add(out[named.key].down, named.kind);
+            continue;
+        }
+        const tokens = tokensOf(String(text).replace(/^\s*[A-Za-z ]{1,24}:\s*/, ''));
+        for (const drive of DRIVES) {
+            const same = cueHits(drive.words, tokens, skip);
+            const opposite = cueHits(OPPOSITES[drive.key], tokens, skip);
+            same.pos.forEach(word => add(out[drive.key].up, word));
+            same.neg.forEach(word => add(out[drive.key].down, word));
+            opposite.pos.forEach(word => add(out[drive.key].down, word));
+        }
+    }
+    return out;
 }

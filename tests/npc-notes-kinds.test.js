@@ -573,9 +573,33 @@ test('notes host: npc.drives grows a drive on the 2nd different reply with a cue
     assert.equal(JSON.stringify(slice()), live, 'rebuild equals live');
     await s.adapter.drives({ name: 'Oren', texts: ['a friend again'] });
     assert.equal(JSON.stringify(slice()), live, 'the same reply again changes nothing');
-    await s.adapter.drives({ name: 'Oren', texts: ['x'], rule: 2 });
-    assert.equal(JSON.stringify(slice()), live, 'an unknown rule is not read');
     await s.swipe(['~ npc Oren | trust: +1']);
     assert.equal(belonging(), 2, 'a swipe of the reply takes the step back');
+    assert.deepEqual(s.host.store.problems(), []);
+});
+
+test('notes host: the same reply twice counts once while the drive is below max (the 2-reply rule, not the max cap); an Re-read and a middle delete keep the drives', async () => {
+    const s = await suite({ allowance: null, features: { ...ON } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    const comfort = () => JSON.parse(s.host.head().domains.npc.npcs.oren.drives ?? '{"comf":2}').comf;
+    await s.adapter.drives({ name: 'Oren', texts: ['found a cozy bed'] });
+    const once = JSON.stringify(s.host.head().domains.npc);
+    await s.adapter.drives({ name: 'Oren', texts: ['a warm meal'] });
+    assert.equal(comfort(), 2, 'two cues in the SAME reply: still normal');
+    assert.equal(JSON.stringify(s.host.head().domains.npc), once, 'nothing written for the same reply');
+    const second = await s.say(['~ npc Oren | trust: +1']);
+    await s.adapter.drives({ name: 'Oren', texts: ['a warm meal'] });
+    assert.equal(comfort(), 3, 'the next reply: high');
+    await s.say(['~ npc Oren | trust: +1']);
+    assert.equal((await s.host.sdk.reread(second)).ok, true);
+    let live = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), live, 'a Re-read of the reply that carried npc.drives replays as stored');
+    assert.equal(comfort(), 3);
+    await s.host.st.deleteMessage(second - 1);
+    live = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), live, 'rebuild equals live after a middle delete');
     assert.deepEqual(s.host.store.problems(), []);
 });

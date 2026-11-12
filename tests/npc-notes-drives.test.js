@@ -210,3 +210,39 @@ test('driveEvidence: only what is new (memories, behavior, mannerisms, the chang
     assert.deepEqual(driveEvidence(after, after), []);
     assert.deepEqual(driveEvidence(undefined, { lastRelationshipChange: { reason: 'shared a meal' } }), ['shared a meal']);
 });
+
+test('negation: evidence that says a drive is weak never raises it, for every drive', () => {
+    const twice = (a, b) => growDrives(growDrives(undefined, [a], 'r1')?.leaf, [b], 'r2');
+    const liar = readDrives(twice('Honesty: low - lies to cover for her brother', 'Honesty: low - lies again').leaf);
+    assert.equal(liar.hone, 1, 'a low Honesty lever lowers Honesty');
+    assert.equal(readDrives(twice('Honesty: high - tells the truth', 'Honesty: high - speaks frankly').leaf).hone, 3);
+    assert.equal(twice('Honesty: moderate - hedges', 'Honesty: moderate - hedges again'), null, 'a middle level counts for nothing');
+    const cases = { belo: 'has no family and no friend', clos: 'never feels closure, no unresolved debt', awe: 'no wonder, not curious', pres: 'does not protect, will not defend', comf: 'no rest, never cozy', conf: 'no feud, no rival', hone: 'not honest, never candid' };
+    for (const drive of DRIVES) {
+        const text = cases[drive.key];
+        const result = twice(text, `${text} again`);
+        const after = result ? readDrives(result.leaf)[drive.key] : 2;
+        assert.ok(after <= 2, `${drive.label}: "${text}" never raises it`);
+    }
+    assert.equal(readDrives(twice('dishonest and a liar', 'a dishonest man').leaf).hone, 1, 'dishonest counts down');
+    assert.match(growDrives(undefined, ['not honest, no truth'], 'r1').leaf, /"e":"d:r1"/, 'negated cues count toward the opposite direction, never up');
+    assert.equal(seedDrives(undefined, 'not honest and no truth at all')[DRIVES[6].key], 2, 'seeding reads negation too');
+    assert.equal(seedDrives(undefined, 'honest and frank')[DRIVES[6].key], 3);
+});
+
+test('growth: a cue only in the NPC\'s name or role text is no evidence; a negator does not reach across lines', () => {
+    const a = growDrives(undefined, ['Guard Rilke stood'], 'r1', 'Rilke Guard');
+    assert.equal(a, null, 'guard is the role');
+    const b = growDrives(undefined, ['she will protect Rilke'], 'r1', 'Rilke Guard');
+    assert.ok(b, 'protect is not the role');
+    assert.equal(readDrives(growDrives(b.leaf, ['a shield for the village'], 'r2', 'Rilke Guard').leaf).pres, 3);
+    const lines = growDrives(growDrives(undefined, ['no luck', 'a friend'], 'r1').leaf, ['her family', 'not at all'], 'r2');
+    assert.equal(readDrives(lines.leaf).belo, 3, 'a negator on one line leaves the next line\'s cue alone');
+});
+
+test('leaf size: the worst leaf the caps allow still reads (the limit holds it)', () => {
+    const x = Object.fromEntries(DRIVES.map(drive => [drive.key, { s: 'u', n: 999, c: 'c'.repeat(24), e: `u:${'r'.repeat(40)}`.slice(0, 42) }]));
+    const leaf = JSON.stringify({ ...Object.fromEntries(DRIVES.map(drive => [drive.key, 3])), x });
+    assert.ok(leaf.length <= DRIVES_TEXT_MAX, `${leaf.length} characters`);
+    assert.notEqual(readDrives(leaf), null);
+});

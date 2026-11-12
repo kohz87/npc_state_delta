@@ -241,7 +241,7 @@ export function createNpcCommands({
             return out;
         },
         /**
-         * npc.drives { name, texts: [plain strings], reply, rule }: what Delta's scan newly recorded for one person (new memories, behavior and
+         * npc.drives { name, texts: [plain strings], ignore?: role text, reply, rule }: what Delta's scan newly recorded for one person (new memories, behavior and
          * mannerism lines, the relationship reason), read for drive cues (npc-notes-drives.js growDrives, rule 1: a drive steps one level when
          * its cues show in 2 different replies since its last change). The leaf is written whole on the reply, so a swipe, a delete, a Re-read
          * and a rebuild give the drives live had. Only rule 1 is understood, so a reply that never carried it replays as it was.
@@ -256,7 +256,7 @@ export function createNpcCommands({
             if (!have) ctx.fail('REFUSED', 'No one by that name has an entry.');
             const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : headReply();
             const texts = (Array.isArray(payload?.texts) ? payload.texts : []).map(item => clean(item, 200)).filter(Boolean).slice(0, 12);
-            const grown = growDrives(have.drives, texts, commandReply(ctx, at));
+            const grown = growDrives(have.drives, texts, commandReply(ctx, at), `${have.name} ${clean(payload?.ignore, 120)}`);   // the person's name and role are no evidence
             if (!grown) ctx.fail('REFUSED', 'Nothing to update.');
             const moved = grown.steps.map(step => `${step.label} ${step.to > step.from ? 'grew' : 'eased'} (${step.cue})`);
             const done = run(ctx, { label: payload.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, leaf: { field: 'drives', text: grown.leaf } });
