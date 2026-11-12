@@ -314,6 +314,8 @@ test('a scan cancelled by "server revision advanced" is queued again once; a rea
 test('without a v2 host the same turns send nothing, and the sidecar and the injection are the same as hosted', () => {
     const run = (name, prelude) => scenarioOutput(runHostScenario(name, prelude, async () => {
         const api = globalThis.NPCStateDelta;
+        // Memory facts are standalone-only (hosted, the slice applies the move and derives none), so this parity compares the runs without them.
+        mockState.extensionSettings.npc_state_delta.memoryFacts = false;
         await sleep(200);
         const { relationship } = await turns();
         const yunyun = api.getState().npcs.find(npc => npc.name === 'Yunyun');

@@ -11,6 +11,7 @@ import { BEHAVIOR_PROFILE_LIMIT, normalizeBehaviorProfile } from './core-behavio
 import { PORTRAIT_NPC_PROMPT_LIMIT } from './core-portrait.js';
 import { emptyProfileEvidence, normalizeProfileEvidence } from './core-evidence.js';
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
+import { normalizeFactMemories } from './src/memory-fact-store.js';
 import { CAST_APPEARANCE_WIDE, castAppearanceKept, normalizeAppearanceCanon, normalizeLifeStateCertainty, normalizeMemoryStamps, normalizePortraitSeed, normalizeStoredMemories, stripRecordCitations } from './core-record-shared.js';
 import { portraitHasImage } from './src/portrait-file.js';
 import { impactDayProblems } from './src/relationship-pacing.js';
@@ -104,13 +105,17 @@ export function normalizeNpcRecord(rawInput = {}) {
     npc.portraitPromptReplace = normalizeBoolean(raw.portraitPromptReplace ?? raw.portrait_prompt_replace);
     npc.portraitSeed = normalizePortraitSeed(raw.portraitSeed ?? raw.portrait_seed);
     npc.aliases = cleanList(raw.aliases, 8, 120);
-    npc.memories = normalizeStoredMemories(raw.memories);
+    // A dossier carrying memory facts keeps its facts through an exact-text pass only (src/memory-fact-store.js); any other runs the original normalizer.
+    const factual = raw.memoryFacts ? normalizeFactMemories(raw.memories, raw.memoryFacts, raw.manualMemories) : null;
+    npc.memories = factual ? factual.memories : normalizeStoredMemories(raw.memories);
     // The memories the reader entered by hand (never evicted by a later scan), while they are stored.
     const manualMemories = Array.isArray(raw.manualMemories)
         ? raw.manualMemories.map(item => cleanText(item, DURABLE_PROFILE_LIMITS.memory)).filter(item => item && npc.memories.some(stored => normalizeName(stored) === normalizeName(item)))
         : [];
     if (manualMemories.length) npc.manualMemories = [...new Set(manualMemories)];
     else delete npc.manualMemories;
+    if (factual?.facts) npc.memoryFacts = factual.facts;
+    else delete npc.memoryFacts;
     const memoryStamps = normalizeMemoryStamps(raw.memoryStamps, npc.memories);
     if (memoryStamps) npc.memoryStamps = memoryStamps;
     else delete npc.memoryStamps;

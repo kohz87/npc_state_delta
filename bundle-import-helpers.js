@@ -155,4 +155,5 @@ export function withoutSourceReplyNumbers(npc) {
     }
     delete npc.fieldChangeMessages;
     delete npc.memoryStamps;
+    delete npc.memoryFacts;   // another chat's event keys, ledger and source replies never suppress or date this chat's events
 }

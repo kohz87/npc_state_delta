@@ -24,6 +24,7 @@ import {
     stampChangedFields,
 } from '../core.js';
 import { isScannerRoutingError } from '../scanner-routing.js';
+import { applyNpcMemories, scanFactCandidates } from './memory-fact-apply.js';
 import { spendEvent } from './relationship-pacing.js';
 import { RELATIONSHIP_RESPONSE_LENGTH, generateParsedNpcJson } from './scanner-request.js';
 
@@ -218,7 +219,7 @@ export function stampNpcChanges(npc, before, { turn, message = null, storyDay = 
 
 // `pace`: { allowance, day } while Delta works alone (src/relationship-pacing.js: the events each person can have per story day,
 // counted on the dossier's own `impactDay`); null while hosted (the slice counts) or with no story day.
-export function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessageId, report = null, pace = null) {
+export function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessageId, report = null, pace = null, facts = null) {
     if (!decisions?.size) return state;
     for (const [id, decision] of decisions) {
         const npc = state.npcs.find(item => item.id === id);
@@ -296,6 +297,9 @@ export function applyFocusedRelationshipDecisions(state, decisions, caps, source
         } else {
             npc.relationshipEventHistory = normalizeRelationshipEventHistory(npc.relationshipEventHistory);
         }
+        // (memory facts) This pass applies most real movements, after the merge: the applied delta of an accepted event is a fact candidate (null without the rule/mark).
+        const factMove = facts && eventAccepted ? scanFactCandidates(npc, update, { facts, R: sourceMessageId, player: facts.player }) : [];
+        if (factMove.length) applyNpcMemories(npc, npc, {}, { candidates: factMove, locked: (npc.manualProfileFields || []).includes('memories') });
         if (eventAccepted || update.progressChanged || summaryChanged) {
             npc.updatedAt = Date.now();
             if (report?.updated && !report.updated.includes(id)) report.updated.push(id);

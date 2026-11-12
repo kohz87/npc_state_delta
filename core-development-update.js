@@ -7,7 +7,8 @@ import { durableProfileEvidenceReason, gradualProfileEvolutionReady, mergeProfil
 import { cleanText, normalizeName } from './core-text.js';
 import { DURABLE_PROFILE_LIMITS, durableEvidenceGroundsValue, durableSeedGrounded } from './core-relationship.js';
 import { durableRefinementCandidateGrounded, filterSafeMannerismRefinements, groundedAppearanceChange, groundedAppearanceCorrection, identityMoralityConflict, isExplicitRecurringMannerism, isSafeIdentityTextRefinement, isSafeSpeechRefinement, isSafeUnmarkedDurableFieldReplacement, isSafeUnmarkedDurableRefinement, mergeDurableTextRefinement, normalizeMannerisms, presentationContinuationEvidence, speechSupportContext } from './core-durable.js';
-import { durableTextAccepted, incomingCustomFields, incomingKeyRelationships, mergeImportantMemories, normalizeScanNpc, PROFILE_UPDATE_TEXT_FIELDS } from './core-record.js';
+import { durableTextAccepted, incomingCustomFields, incomingKeyRelationships, normalizeScanNpc, PROFILE_UPDATE_TEXT_FIELDS } from './core-record.js';
+import { applyNpcMemories } from './src/memory-fact-apply.js';
 import { PROFILE_EVIDENCE_FIELDS } from './src/fields/registry.js';
 import { durableProfileCollectionCandidateGrounded, durableProfileCollectionEquivalent, groundedBehaviorProfile, mergeBehaviorProfileRefinements, normalizeBehaviorProfile, reconcileBehaviorProfileWithPersonality, recoverBehaviorProfileKeepAdditions } from './core-behavior.js';
 import { developmentScaleReady } from './core-development-episode.js';
@@ -257,7 +258,7 @@ export function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
     // here the same way: added to the stored ones, deduplicated, capped, never replacing them.
     if ((incoming.memories || []).length && !manualFields.has('memories')) {
         const before = JSON.stringify(npc.memories || []);
-        npc.memories = mergeImportantMemories(npc.memories, incoming.memories, incoming.memoryRetention, options.memoryInputLimit || 3, npc.manualMemories, { stamps: npc.memoryStamps, message: options.sourceMessageId });
+        applyNpcMemories(npc, { ...npc }, incoming, { limit: options.memoryInputLimit || 3, sameReply: { stamps: npc.memoryStamps, message: options.sourceMessageId } });
         if (JSON.stringify(npc.memories) !== before) changed = true;
     }
 

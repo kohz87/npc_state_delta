@@ -4,6 +4,7 @@
 import { cleanText, normalizeName } from './core-text.js';
 import { DEFAULT_RELATIONSHIP, DEFAULT_RELATIONSHIP_PROGRESS, normalizeRelationshipBaseline, RELATIONSHIP_KEYS } from './core-relationship.js';
 import { inferNpcIdentityKind, isInterimNpcLabel, normalizeGender } from './core-identity.js';
+import { mergeAliasFacts } from './src/memory-fact-alias.js';
 import { mergeLists, normalizeCustomFields, normalizeNpcRecord, normalizePortraitSeed, normalizeStoredMemories } from './core-record.js';
 import { ALIAS_MERGE_TEXT_FIELDS } from './src/fields/registry.js';
 import { normalizeMannerisms } from './core-durable.js';
@@ -139,6 +140,7 @@ function mergeAliasLinkedNpcPair(a, b) {
     merged.memories = normalizeStoredMemories([...(a.memories || []), ...(b.memories || [])]);
     merged.manualMemories = [...(a.manualMemories || []), ...(b.manualMemories || [])];
     merged.memoryStamps = { ...(b.memoryStamps || {}), ...(a.memoryStamps || {}) };
+    if (a.memoryFacts || b.memoryFacts) mergeAliasFacts(merged, a, b);
     const mannerismLock = lockedSourceFor('mannerisms');
     const behaviorLock = lockedSourceFor('behaviorProfile');
     const relationshipLock = lockedSourceFor('keyRelationships');

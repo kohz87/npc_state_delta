@@ -47,6 +47,16 @@ Generated 2026-11-07.
 - `src/npc-meters-commands.js`: Story-line capture, milestone intake and the hosted npc command handlers split from `src/npc-meters.js`.
 - `src/npc-meters-queries.js`: Read-only npc meter/cast/next/social queries and their screen views split from `src/npc-meters.js`.
 - `src/relationship-pacing.js`: Events-per-story-day allowance by impact tier: the used-tier rule, the per-NPC `impactDay` count, pacing defaults and migration. Pure.
+- `src/memory-fact-key.js`: SHA-256 (synchronous), canonical tuple and the v1 event key of a memory fact. Pure.
+- `src/memory-fact-text.js`: Per-kind fallback sentence and the closed sentence grammar a model phrasing must equal. Pure.
+- `src/memory-fact-ledger.js`: The per-NPC `memoryFacts` sidecar, its bounded suppression ledger and floor, and its normalisation against the visible memories.
+- `src/memory-fact-store.js`: The identity-aware five-slot memory pipeline (pins > first meeting > A > O > ordinary), candidate admission and display collisions.
+- `src/memory-fact-events.js`: The event catalog: structured events (applied meter move, milestone, caught lie, quest, fight, party, met, gift) to fact candidates. Pure.
+- `src/memory-fact-apply.js`: Caller entry points: the original merge when a dossier has no facts, the fact pipeline otherwise; standalone scan and hosted candidates.
+- `src/memory-fact-alias.js`: Union of two dossiers' memory facts on an alias merge (tombstones beat duplicates, larger floor).
+- `src/memory-fact-marks.js`: The `memoryFacts` rule and the live-eligibility marks (exact lineage keys of genuinely new live replies).
+- `src/memory-fact-phrase.js`: Handles, the conditional MEMORY FACTS paragraph and the commit-time phrasing of a pending fact inside an already scheduled call.
+- `src/memory-fact-scan.js`: The scan's touch points for memory facts (prompt paragraph, merge option, phrasing after merge), split from `runtime-scan.js`.
 - `src/npc-meters-pacing.js`: The reader's words for a held event and the cut of a forwarded scanner change to a lower tier, split from `src/npc-meters.js`.
 - `src/npc-meters-prompt.js`: The NPC meter prompt line, reminder tail and locked-note redaction split from `src/npc-meters.js`.
 - `src/npc-notes-kinds.js`: NPC note kinds (lie, know, taste, tie): the handlers that call run() through a notes option, NOTE_FIELDS, validateNotes for the record, and notesTail with the cap (2 per present NPC, 4 in all). The only file that imports the six npc-notes-* files (pure).

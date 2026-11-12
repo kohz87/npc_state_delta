@@ -16,6 +16,7 @@
 // Pure. The block is plain JSON and is part of every checkpoint (restoring puts the saved map and deaths back; `reserved` is merged with the
 // live one so an id the dead timeline issued is not issued again).
 
+import { unionMarks } from '../memory-fact-marks.js';
 import { cleanApplied } from './checkpoint.js';
 import { firstLineageDivergence } from '../../branch-core.js';
 import { cleanIdentity } from './identity.js';
@@ -85,6 +86,9 @@ export function restoredState(saved, live) {
         for (const entry of live.captureJournal) if (entry?.key) entries.set(entry.key, structuredClone(entry));
         state.captureJournal = [...entries.values()];
     }
+    // (memory facts) The live-eligibility marks survive any restore (exact keys only; src/memory-fact-marks.js unionMarks).
+    const marks = unionMarks(state.memoryFactMarks, live?.memoryFactMarks);
+    if (marks) state.memoryFactMarks = marks;
     const then = cleanTimeline(state.timeline);
     const now = cleanTimeline(live?.timeline);
     // A checkpoint of a former line of this chat, installed in the line it has now, leaves that line recorded as a former one.
