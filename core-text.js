@@ -334,6 +334,22 @@ export function parseNarrationCapture(raw) {
     try { return parseScanJson(raw); } catch { return null; }
 }
 
+// Scan row keys: trim, "Name" -> name, "home_base" -> homeBase; a clean key in the row wins, colliding variants stay as sent.
+const cleanScanKey = key => {
+    const t = key.trim().replace(/[_-]+([a-z0-9])/gi, (_, c) => c.toUpperCase());
+    return /^[A-Z0-9]+$/.test(t) ? t.toLowerCase() : t.charAt(0).toLowerCase() + t.slice(1);
+};
+function normaliseScanRow(row) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+    const keys = Object.keys(row), hits = {};
+    for (const key of keys) hits[cleanScanKey(key)] = (hits[cleanScanKey(key)] || 0) + 1;
+    return Object.fromEntries(keys.map(key => { const to = cleanScanKey(key); return [to && hits[to] === 1 && !keys.includes(to) ? to : key, row[key]]; }));
+}
+export const normaliseScanKeys = parsed => {
+    for (const list of ['npcs', 'profileUpdates', 'profile_updates', 'keyRelationshipEdges', 'key_relationship_edges']) parsed[list] &&= Array.isArray(parsed[list]) ? parsed[list].map(normaliseScanRow) : parsed[list];
+    return parsed;
+};
+
 export function parseScanJson(raw) {
     if (raw && typeof raw === 'object') return raw;
     let text = String(raw ?? '').trim();
@@ -352,7 +368,7 @@ export function parseScanJson(raw) {
         throw new Error('Scanner response is not a JSON object.');
     }
     if (!Array.isArray(parsed.npcs)) parsed.npcs = [];
-    return parsed;
+    return normaliseScanKeys(parsed);
 }
 
 export function cleanText(value, max = 1200) {
