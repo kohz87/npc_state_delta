@@ -56,8 +56,7 @@ export function createNpcPrompt({
     const HIDDEN_LINE = new RegExp(`^(.+?)(?:, ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}| \\(hidden\\)): .*$`, 'gm');
 
     // Mood and pull for present people (feature mood-pull): "Mood: Mira alarmed, cornered; Tomas wary." and
-    // "Pull: Mira wants closure (the stolen letter, 3 days)". At most PULL_PEOPLE people each; sent as optional lines so the
-    // host's budget drops them first. A mood of all zeros says nothing.
+    // "Pull: Mira wants closure (the stolen letter, 3 days)". At most PULL_PEOPLE people each; sent as kept lines (see tail()). A mood of all zeros says nothing.
     const PULL_PEOPLE = 3;
     const PULL_WORDS = { belonging: 'belonging', closure: 'closure', awe: 'awe' };
     function moodPullLines(npcs, here) {
@@ -138,7 +137,6 @@ export function createNpcPrompt({
         hidden.sort((a, b) => a.distance - b.distance || a.order - b.order);
         // The wording rides on the nearest note (the host drops the farthest first, so it stays while any note does).
         const optional = [...cues, ...hidden.map((item, i) => (i ? item.short : `${HIDDEN_ONCE}\n${item.short}`))];
-        if (featureOn(FEATURE_MOOD_PULL)) optional.push(...moodPullLines(npcs, here));
         // Notes (npc-notes-kinds.js): at most two lines a person and four in all, after the meters, opened notes and mood (optional).
         if (featureOn(FEATURE_NOTES)) {
             const noted = notesTail(npcs, { present: Object.keys(npcs).sort().filter(key => here.has(key)) });
@@ -149,7 +147,11 @@ export function createNpcPrompt({
         }
         // Last of the per-reply parts: the model drifts into ending on an empty <Blocks> and drops <Changes> (the data of the live runs).
         const cue = featureOn(FEATURE_NOTES) ? [{ text: CHANGES_CUE, keep: true }] : [];
-        return { lines: [...lines, ...notes, ...cue], optional };
+        // Pull then Mood, kept lines after the cue (feature mood-pull): as optional lines of this last-sorted section the host's tail budget
+        // cut them from every prompt of run 3. Kept lines share the host's one cap after Story Director's and Story Block's own, which come
+        // earlier in tail order and keep theirs; over the cap a line is an ordinary one, as before.
+        const felt = featureOn(FEATURE_MOOD_PULL) ? moodPullLines(npcs, here).reverse().map(text => ({ text, keep: true })) : [];
+        return { lines: [...lines, ...notes, ...cue, ...felt], optional };
     }
 
     /**
