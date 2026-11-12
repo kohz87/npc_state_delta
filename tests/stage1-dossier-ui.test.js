@@ -13,6 +13,7 @@ import {
   projectDossierState,
   sortDossierIndex,
 } from '../dossier-ui.js';
+import { setStoryClockSource } from '../calendar.js';
 import { dossierUiSource } from './helpers/dossier-ui-source.js';
 import { DeltaDossierUi } from '../dossier-ui.js';
 import { boardHtml, boardTiles } from '../dossier-ui-board.js';
@@ -497,6 +498,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.match(withUser, /a lie you have not caught/); assert.match(withUser, /I sold nothing/);
   assert.doesNotMatch(withUser + sectionScreenHtml('secrets', npc), /SECRET WORDS|a secret about/);
   assert.ok(withUser.indexOf('Lies told') > withUser.indexOf('delta-sheet-meters') && withUser.indexOf('Lies told') < withUser.indexOf('Recent changes'), 'Lies told sits after the meters and before Recent changes');
+  assert.doesNotMatch(withUser + sectionScreenHtml('secrets', npc), /\bday \d/i, 'lies and knows rows never print the raw day counter');
   const secretsHtml = sectionScreenHtml('secrets', npc);
   assert.match(secretsHtml, /Knows about others[\s\S]*Y owes a debt/);
   assert.equal((ties.match(/class="delta-bond"/g) || []).length, 3, 'each tie is one entry');
@@ -508,7 +510,14 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.match(profile, /data-level="off"[^]*?<b class="off"><\/b>/);
   assert.match(profile, /data-level="normal"[^]*?<b class="normal"><\/b>/);
   assert.doesNotMatch(profile, /ignored when normal/, 'a normal drive shows no source note');
-  assert.match(profile, /The middle of each bar is normal/); assert.match(profile, /look was set on day 3/);
+  assert.match(profile, /The middle of each bar is normal/); assert.match(profile, /Look locked since it was first seen: it changes only when you edit it or the story changes it/, 'no calendar reading: "first seen", never the raw day');
+  assert.doesNotMatch(profile, /day 3\b/);
+  setStoryClockSource(() => ({ minutes: 3 * 1440, calendar: { months: [{ name: 'Goldwane', days: 30 }, { name: 'Icewane', days: 30 }], leapYears: false } }));
+  try {
+    const dated = dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: meters }, { layout: 'phone' });
+    assert.match(dated, /Look locked since Goldwane 4: it changes/, 'the story calendar date, not day 3');
+    assert.doesNotMatch(dated, /day 3\b/);
+  } finally { setStoryClockSource(null); }
   const bare = { ...npc, v2Meters: v2MetersProjection({ bars: [], secrets: [] }) };
   const none = boardTiles(boardModel(bare), { userName: 'Astra' });
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
