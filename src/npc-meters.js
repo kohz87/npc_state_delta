@@ -423,7 +423,7 @@ export function createNpcPart(hooks = {}) {
         queries,
         kinds: {
             [NPC_KIND]: { grammar: '~ npc Name | trust: +N | affection: -N', apply: captureLine },
-            [MILESTONE_KIND]: { grammar: '+ milestone Name — the turning point that just happened between you (once)', apply: captureLine, feature: FEATURE_STAGES },
+            [MILESTONE_KIND]: { grammar: '+ milestone Name — the turning point that just happened between you (once, when a bond changes for good; e.g. + milestone Person A — a promise was kept)', apply: captureLine, feature: FEATURE_STAGES },
             ...noteKinds(captureLine),
         },
         context: { static: staticText, tail, budget: CONTEXT_BUDGET },

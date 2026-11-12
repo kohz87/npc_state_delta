@@ -20,6 +20,7 @@ import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-sui
 // (3 ordinary, 1 meaningful, 1 major, 1 extreme). An event over its allowance counts as the next tier down; the count is on the
 // slice record (`impactDay`), so it replays. Story Director's clock is stood in for by a small module with `director.time`.
 
+const noCue = lines => lines.filter(line => !/^Whenever anything changed, write the <Changes> block/.test(line)); // the flash-rare-lines cue: pinned in npc-notes-kinds.test.js
 test('the allowance setting: a blank field is no limit (null), a missing one is the default, 0 is none, 0..99 whole numbers', () => {
     assert.deepEqual(normalizeAllowance(undefined), { ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
     assert.deepEqual(normalizeAllowance({ ordinary: null, meaningful: '', major: 0, extreme: 250 }), { ordinary: null, meaningful: null, major: 0, extreme: 99 });
@@ -768,7 +769,7 @@ test('the tail tells mood and pull for present people only; feature off: the tai
     const view = { state, chat: { length: 3 } };
     const off = make(false);
     const base = off.context.tail(view);
-    assert.deepEqual(base.optional, [], 'off: no mood or pull line at all');
+    assert.deepEqual(noCue(base.optional), [], 'off: no mood or pull line at all');
     const bare = JSON.parse(JSON.stringify(view));
     for (const person of Object.values(bare.state.domains.npc.npcs)) { delete person.mood; delete person.pull; delete person.inst; }
     assert.equal(JSON.stringify(base), JSON.stringify(off.context.tail(bare)), 'off: the tail does not read mood or pull at all');
@@ -776,10 +777,10 @@ test('the tail tells mood and pull for present people only; feature off: the tai
     assert.equal(on.context.static(), off.context.static(), 'the static prompt never changes');
     const told = on.context.tail(view);
     assert.deepEqual(told.lines, base.lines, 'the meter lines are untouched');
-    assert.deepEqual(told.optional, ['Mood: Mira alarmed, cornered; Oren content.', 'Pull: Mira: closure (the stolen letter, 3 days).'], 'present people only: Tomas is not here');
+    assert.deepEqual(noCue(told.optional), ['Mood: Mira alarmed, cornered; Oren content.', 'Pull: Mira: closure (the stolen letter, 3 days).'], 'present people only: Tomas is not here');
     const tokens = text => Math.ceil(text.length / 4);
-    assert.ok(tokens(told.optional.join('\n')) <= 30, `the two lines stay small (${tokens(told.optional.join('\n'))} tokens, budget ${CONTEXT_BUDGET})`);
-    assert.ok(told.optional.every(line => !/[<>]/.test(line)));
+    assert.ok(tokens(noCue(told.optional).join('\n')) <= 30, `the two lines stay small (${tokens(noCue(told.optional).join('\n'))} tokens, budget ${CONTEXT_BUDGET})`);
+    assert.ok(noCue(told.optional).every(line => !/[<>]/.test(line)));
 });
 
 test('mood and pull: replay equals rebuild through swipes, a Re-read, a middle delete and a cold reload; the slice validates; a feature-off chat gets no new field', async t => {
