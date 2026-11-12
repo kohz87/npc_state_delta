@@ -524,6 +524,14 @@ test('notes grammar: the example lines use generic placeholder people and facts,
     assert.ok((all.match(/Person [AB]/g) ?? []).length >= 4);
 });
 
+test('notes grammar: the lie line agrees with itself: when and example both use the host\'s {{user}} macro, no hard-coded name', () => {
+    const lie = noteKinds(() => {}).lie.grammar;
+    assert.match(lie, /^~ lie Name \| to: \{\{user\}\} \|/);
+    assert.match(lie, /write it when someone lies to \{\{user\}\};/);
+    assert.match(lie, /e\.g\. ~ lie Person A \| to: \{\{user\}\} \|/);
+    assert.ok(!/Astra|to the player|to: Person B/.test(lie));
+});
+
 test('notes grammar: the static text is the same bytes every time and the added text stays small', async () => {
     const once = JSON.stringify(noteKinds(() => {}));
     assert.equal(JSON.stringify(noteKinds(() => {})), once);
