@@ -193,6 +193,14 @@ export function createScanOpsPart(rt, deps) {
             return Boolean(current) && fingerprintMessage(current) === fingerprint && lineageCheckpointKey(chatLineage(now), messageId) === lineageKey;
         };
     }
+    /** What a targeted pass (Refresh, backfill, import) was built from when it was asked for, as a test for a retry: the chat's line and the dossier
+     *  state's version. Its prompt and its target were read from them, so a pass kept while the host's barrier was up is given up when either moved
+     *  meanwhile (a delete, a regenerate, a restore installed): run later it would merge a reading of the old story into the new state. */
+    function passGuard(key) {
+        const lineage = chatLineage(getContext().chat || []);
+        const version = Number(stateVersions.get(key) || 0);
+        return () => getChatKey() === key && Number(stateVersions.get(key) || 0) === version && !lineageMoved(lineage, chatLineage(getContext().chat || []), null);
+    }
     /** Whether dossier work is running, due or queued for the chat: an active operation, an intent, a queued automatic scan. */
     function scanWorkPending(key = getChatKey()) {
         return isScanBusy(key) || (scanIntents.get(key) || 0) > 0 || pendingAutoScans.has(key) || deferredWorkPending(key);
@@ -306,5 +314,5 @@ export function createScanOpsPart(rt, deps) {
         });
     }
 
-    return { recordScanDiagnostics, beginScanOperation, scanOperationCurrent, scanCanonicalBaseCurrent, endScanOperation, cancelScanOperation, withScanIntent, deferUntilSettled, replyGuard, scanWorkPending, scanIdle, generationReady, queuePendingAutoScan, drainPendingAutoScanInner, noteScanFailure, BACKFILLS_PER_REPLY, scheduleReplyBackfills };
+    return { recordScanDiagnostics, beginScanOperation, scanOperationCurrent, scanCanonicalBaseCurrent, endScanOperation, cancelScanOperation, withScanIntent, deferUntilSettled, replyGuard, passGuard, scanWorkPending, scanIdle, generationReady, queuePendingAutoScan, drainPendingAutoScanInner, noteScanFailure, BACKFILLS_PER_REPLY, scheduleReplyBackfills };
 }

@@ -108,15 +108,20 @@ export function createTargetedPart(rt, deps) {
                 job.onStale();
                 return false;
             }
-            // (v2 hidden notes) Story events the pass was told to look for: sent whatever else the answer holds.
-            if (job.notes?.watch?.length) forwardSecretEventsToHost(job.notes.watch, parsed?.secretEvents, operation.chatHead);
             const latest = getChatState(chatKey);
             const liveBefore = latest.npcs.find(npc => npc.id === id) || null;
-            // A Refresh's tastes for this person: recorded on the head reply, like a `~ taste` line.
-            if (job.notes?.tastes && liveBefore) forwardTastesToHost(liveBefore, parsed?.npcs, operation.chatHead);
+            // (v2 hidden notes) Story events the pass was told to look for, sent whatever else the answer holds, and a Refresh's tastes for this
+            // person, recorded on the head reply like a `~ taste` line: the rows as the model returned them (the scope below narrows parsed.npcs).
+            // Sent only once the result is accepted (all or nothing): a pass discarded below tells the host nothing.
+            const returnedRows = parsed?.npcs;
+            const forwardNotes = () => {
+                if (job.notes?.watch?.length) forwardSecretEventsToHost(job.notes.watch, parsed?.secretEvents, operation.chatHead);
+                if (job.notes?.tastes && liveBefore) forwardTastesToHost(liveBefore, returnedRows, operation.chatHead);
+            };
             const scoped = job.scope(parsed, { latest, liveBefore });
             if (!scoped.ok) {
                 if (scoped.noChange) {
+                    forwardNotes();
                     const metrics = targetedPassMetrics(metricsLabel, { startedAt, prompt, raw, retried, parsed, localEdges: scoped.localEdges });
                     if (job.reportsScanMetrics) rt.lastScanMetrics = metrics;
                     recordScanDiagnostics(chatKey, metrics, parsed, null, { targeted: true, npcIds: [id], sourceMessageId: latestMessageId(true) });
@@ -159,6 +164,7 @@ export function createTargetedPart(rt, deps) {
                 job.onLateStale?.();
                 return false;
             }
+            forwardNotes();
             if (targetMessageId >= 0) {
                 job.beforeCheckpoint?.(merged.state, result, targetMessageId);
                 commitBranchCheckpoint(merged.state, targetMessageId, job.checkpoint);
