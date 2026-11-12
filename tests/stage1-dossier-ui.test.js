@@ -551,7 +551,7 @@ test('fix 3: two-letter initials, mood bars in Right now, flat profile rows in t
 });
 
 test('round 2 fix 2-4: the Mood section with three bars and the Pull last, Right now with where and what, Recent changes list, plain coloured tie words', async () => {
-  const meters = { mood: { word: 'Alarmed', valence: -2, bars: { energy: 5, control: 2, max: 6 }, cause: 'trust dropped: Astra lied' }, pull: { kind: 'closure', level: 3, days: 0, cause: 'an open thread' },
+  const meters = { mood: { word: 'Alarmed', valence: -2, energy: 2, bars: { energy: 5, control: 2, max: 6 }, cause: 'trust dropped: Astra lied' }, pull: { kind: 'closure', level: 3, days: 0, cause: 'an open thread' },
     secrets: [], bars: [], notes: { ties: [{ name: 'Bregje', tags: ['rival'] }], lies: [{ hidden: true, day: 5 }], knows: [], tastes: [], drives: [] } };
   const base = { ...dossierDetailProjection({ id: 'r', name: 'Rika', location: 'Deck', goal: 'Pay the crew', status: 'Tense', keyRelationships: ['Bregje: rival | clashes'],
     fieldChanges: { mood: 3, location: 3 }, fieldChangeMessages: { mood: 3, location: 3 }, relationshipEventHistory: [{ impact: 'ordinary', reason: 'a gift', evidence: { desire: 'toffee' }, message: 1 }] }, {}, {}), v2Meters: v2MetersProjection(meters) };
@@ -563,7 +563,8 @@ test('round 2 fix 2-4: the Mood section with three bars and the Pull last, Right
   assert.doesNotMatch(now, /Where and what|<dt>Goal/, 'where and what moved to Right now');
   assert.doesNotMatch(where, /Recent changes|delta-mood-rows|<dt>Mood|delta-pull-row/, 'Right now has no mood part');
   assert.match(where, /<dt>Where<\/dt>[\s\S]*<dt>Goal<\/dt>[\s\S]*<dt>Condition<\/dt>/);
-  assert.match(now, /no change \u00b7 fading toward (her|his|their) calm[\s\S]*trust dropped: Astra lied/, 'a quiet reply says so, and an older cause stands as a row');
+  assert.doesNotMatch(now, /no change/, 'the reply changed the mood (the Updated line says so): no "no change" row');
+  assert.match(now, /Earlier: trust dropped: Astra lied/, 'an older cause stands as a plain line, not a row');
   assert.match(now, /<h4 class="delta-subhead">Pull<\/h4><div class="delta-pull-row"><b>Closure<\/b><span class="delta-pips"[^>]*><i class="on"><\/i><i class="on"><\/i><i class="on"><\/i><\/span><span class="delta-muted">high · 0 days · an open thread<\/span> <span class="delta-new-badge">New<\/span>/);
   assert.match(now, /Updated this reply \(#3\): mood\./);
   assert.match(where, /Updated this reply \(#3\): where\./);
@@ -717,7 +718,9 @@ test('meters: the story line\'s reason shows on the Last change tile and the Rec
   assert.match(boardHtml(withWhy, {}), /Affection \+2 \u00b7 Tension \+2<\/b> \u00b7 [^<]*<\/span><span class="delta-tile-small">Astra helped her cover up/);
   assert.match(sectionScreenHtml('with', withWhy), /delta-chg-via">via help — Astra helped her cover up/, 'how it came about and why on one line');
   const without = { ...base, lastRelationshipChange: change('') };
-  assert.match(boardHtml(without, {}), /no reason given/);
+  assert.doesNotMatch(boardHtml(without, {}), /no reason given/, 'the gate words stand alone: no "no reason given" under them');
+  const bare = { ...base, lastRelationshipChange: { ...change(''), event: { ...change('').event, gate: '' } } };
+  assert.match(boardHtml(bare, {}), /no reason given/, 'neither a reason nor gate words: said plainly');
   assert.match(sectionScreenHtml('with', without), /delta-chg-via">via help — no reason given/);
   const many = { ...without, recentRelationshipChanges: [1, 2, 3, 4].map(n => ({ impact: 'ordinary', reason: `r${n}`, axes: ['trust'], message: n })) };
   assert.equal((sectionScreenHtml('with', many).match(/class="delta-chg"/g) || []).length, 3, 'at most the last three, the latest among them');
@@ -798,4 +801,28 @@ test('Past: a stamped memory shows its story date and reply as a small label; an
   assert.match(cssAll, /\.delta-timeline li, #\S+ \.delta-timeline li:first-child \{ display:grid[^}]*padding-bottom:clamp\(8px/, 'the first Past item has the same gap as the others');
   const projected = dossierDetailProjection({ id: 'r', name: 'R', memories, memoryStamps: { ...stamps, 'gone one': { m: 1 } } });
   assert.deepEqual(Object.keys(projected.memoryStamps), ['met astra at the counter', 'spilled the ink'], 'the projection keeps stamps of stored memories only');
+});
+
+// ---- polish 2: mood words from the shown numbers, no bare "last mood move" row, quiet row vs. the updated line, empty Right now ----
+test('mood words come from the rows\' numbers; the old cause folds into a row or stands as one line, never a bare row; a changed mood is not "no change"', async () => {
+  const mk = (mood, extra = {}) => ({ ...dossierDetailProjection({ id: 'r', name: 'Rika', gender: 'female', ...extra }, {}, {}), v2Meters: v2MetersProjection({ mood, bars: [], secrets: [] }) });
+  const flat = sectionScreenHtml('mood', mk({ word: 'Alarmed', valence: -2, energy: 0, control: 0, bars: { energy: 6, control: 0, max: 6 }, cause: '' }), { reply: 3 });
+  assert.match(flat, /<b>Alarmed<\/b> · unpleasant<\/dd>/, 'Energy 0 and Control 0 say nothing, whatever the step bars hold');
+  const old = sectionScreenHtml('mood', mk({ word: 'Wary', valence: 0, energy: 0, control: 0, bars: { energy: 3, control: 3, max: 6 }, cause: 'trust dropped: Astra lied' }));
+  assert.doesNotMatch(old, /last mood move/);
+  assert.match(old, /delta-muted">Earlier: trust dropped: Astra lied<\/p>/, 'no row to join: one muted line');
+  const quietOld = sectionScreenHtml('mood', mk({ word: 'Wary', valence: 0, energy: 0, control: 0, bars: { energy: 3, control: 3, max: 6 }, cause: 'trust dropped: Astra lied' }), { reply: 5 });
+  assert.match(quietOld, /<small>#5<\/small>[\s\S]*delta-chg-via">Earlier: trust dropped: Astra lied<\/div><\/div><\/li>/, 'folded into the oldest row');
+  const changed = sectionScreenHtml('mood', mk({ word: 'Wary', valence: 0, energy: 0, control: 0, bars: { energy: 3, control: 3, max: 6 }, cause: '' }, { fieldChanges: { mood: 3 }, fieldChangeMessages: { mood: 3 } }), { reply: 3 });
+  assert.match(changed, /Updated this reply \(#3\): mood/);
+  assert.doesNotMatch(changed, /no change/, 'the reply changed the mood: no "no change" row');
+  assert.match(sectionScreenHtml('now', mk(null)), /Nothing recorded yet\./, 'an empty Right now says so');
+});
+
+test('mood lexicon tokens keep a curly apostrophe; scanner numbers must be numbers or numeric strings', async () => {
+  const { plainMoodWords, moodNumbers } = await import('../npc-mood.js');
+  assert.deepEqual(plainMoodWords('she isn\u2019t angry'), [], 'curly n\u2019t negates like the straight one');
+  assert.deepEqual(plainMoodWords("she isn't angry"), []);
+  assert.deepEqual(moodNumbers({ moodV: '2', moodA: -1, moodD: 0 }), { v: 2, a: -1, d: 0 });
+  for (const bad of [true, [2], ' ', {}]) assert.equal(moodNumbers({ moodV: bad, moodA: 1, moodD: 1 }), null, `${JSON.stringify(bad)} is not a number`);
 });

@@ -19,8 +19,8 @@
 // from the rest kinds. Fight and hurt are NOT derived here: no NSD reader of RPG receipts exists yet.
 // TODO: add 'hurt' and 'fight' events when that reader lands (NSDMAP section 1, RPG receipts).
 // Wired in src/: run() applies the events of a line's trust move (feature npc-state-delta.mood-pull), the tick decays, the tail and the dossier row read the word.
-// A mood WORD the scanner wrote ("mortified and flustered") is read through the fixed lexicon below (MOOD_LEXICON, moodFromWord): the scanner gives no numbers
-// (its prompt is locked), so the axes are the average of the words found, rounded; a text with no known word gives no numbers and leaves the axes as they are.
+// A mood WORD the scanner wrote ("mortified and flustered") is read through the fixed lexicon below (MOOD_LEXICON, moodFromWord): the scanner may give no numbers
+// (its prompt is locked) unless it gave numbers too (moodNumbers); without numbers the axes are the average of the words found, rounded; a text with no known word gives no numbers and leaves the axes as they are.
 // Never imports the host, the meter modules or the instinct modules.
 
 export const MOOD_MIN = -3;
@@ -268,7 +268,7 @@ const NEGATORS = new Set(['not', 'no', 'never', 'hardly', 'less', 'without', 'no
 export function plainMoodWords(text) {
     const out = [];
     for (const clause of (typeof text === 'string' ? text.toLowerCase() : '').split(/[,.;:!?()—–]+/)) {
-        const tokens = clause.match(/[\p{L}']+/gu) ?? [];
+        const tokens = clause.match(/[\p{L}'\u2019]+/gu) ?? [];
         tokens.forEach((word, at) => {
             if (!hasOwn(MOOD_LEXICON, word)) return;
             if (tokens.slice(Math.max(0, at - 2), at).some(before => NEGATORS.has(before) || before.endsWith("n't") || before.endsWith('n\u2019t'))) return;
@@ -294,7 +294,7 @@ export function moodFromWord(text) {
 
 /** Three numbers the scanner gave with its mood word ({ moodV, moodA, moodD } or { v, a, d }): whole numbers, each clamped to -3..3; all three or none → { v, a, d } or null. */
 export function moodNumbers(raw) {
-    const pick = (...keys) => { const key = keys.find(name => raw?.[name] !== undefined && raw[name] !== null && raw[name] !== ''); const n = key === undefined ? NaN : Number(raw[key]); return Number.isFinite(n) ? clampAxis(n) : null; };
+    const pick = (...keys) => { const key = keys.find(name => raw?.[name] !== undefined && raw[name] !== null && raw[name] !== ''); const value = key === undefined ? null : raw[key]; const n = typeof value === 'number' || (typeof value === 'string' && value.trim() !== '') ? Number(value) : NaN; return Number.isFinite(n) ? clampAxis(n) : null; };
     const [v, a, d] = [pick('moodV', 'v'), pick('moodA', 'a'), pick('moodD', 'd')];
     return v === null || a === null || d === null ? null : { v, a, d };
 }

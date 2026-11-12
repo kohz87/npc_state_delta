@@ -154,13 +154,12 @@ export function moodTile(npc, reply = null) {
     return { title: 'Mood', text: plain(npc.mood) || moodWord(null), feeling: rest.max / 2, energy: rest.energy, control: rest.control, max: rest.max, rows: MOOD_AXES.map(([key, label, tone]) => ({ key, label, tone, value: 0, change: 0 })), log: [], known: false, quiet: false };
 }
 
-// The few plain words under the mood word, from the three bars (a step 0..max, the middle is neutral): only a bar well off the
-// middle (two steps or more, the code's band edge) speaks: unpleasant / pleasant, slack / keyed-up, cornered / in control.
+// The few plain words under the mood word, from the three numbers the rows show (-3..+3, 0 neutral): only a number at the code's band edge
+// (2 or more away from 0) speaks: unpleasant / pleasant, slack / keyed-up, cornered / in control. Same numbers as the rows, so they always agree.
 export function moodDescriptors(mood) {
-    if (!mood?.max) return [];
-    const mid = mood.max / 2;
-    const word = (value, low, high) => (value <= mid - 2 ? low : (value >= mid + 2 ? high : ''));
-    return [word(mood.feeling, 'unpleasant', 'pleasant'), word(mood.energy, 'slack', 'keyed-up'), word(mood.control, 'cornered', 'in control')].filter(Boolean);
+    const value = key => Number(mood?.rows?.find(row => row.key === key)?.value) || 0;
+    const word = (key, low, high) => (value(key) <= -2 ? low : (value(key) >= 2 ? high : ''));
+    return [word('v', 'unpleasant', 'pleasant'), word('a', 'slack', 'keyed-up'), word('d', 'cornered', 'in control')].filter(Boolean);
 }
 
 // "Her", "His" or "Their" (lower-case for a sentence) from the gender the dossier holds.
