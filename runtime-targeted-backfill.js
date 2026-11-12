@@ -30,7 +30,7 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
         };
     }
 
-    async function backfillNpcFromHistory(request, messageId = null, { automatic = false } = {}) {
+    async function backfillNpcFromHistory(request, messageId = null, { automatic = false, retried = false } = {}) {
         const settings = getSettings();
         const ctx = getContext();
         const chatKey = getChatKey();
@@ -83,6 +83,7 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
             label: `backfill for ${request.label}`,
             systemPrompt: "You are NPC State Delta's isolated dossier backfill scanner. Use only the supplied scanner payload. Return only the requested JSON object.",
             indicator: 'backfill',
+            retry: () => retried ? false : backfillNpcFromHistory(request, messageId, { automatic, retried: true }),   // (REFRESHCANCEL) only its target changed
             staleLabel: 'dossier backfill',
             checkpoint: 'dossier-backfill',
             metricsLabel: 'dossier-backfill',

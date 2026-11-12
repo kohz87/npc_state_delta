@@ -187,3 +187,145 @@ test('a Refresh cancelled or discarded mid-flight leaves the dossier state byte-
         mockState.quietResponder = null;
     });
 });
+
+// (owner, 12 Nov) A manual Refresh on an absent role-label person failed again and again with "The scan was cancelled or its chat/dossier source
+// changed": the scope stood on the whole dossier state version and the saved revision, so any unrelated write (another person, a save of an earlier
+// change, a Story Block forward) cancelled it. It now stands on its own person's record and the chat's line.
+test('REFRESHCANCEL: a Refresh survives an unrelated NPC write, retries once when its own person changed, and a delete still cancels', () => {
+    runEditorHostScenario('refresh-cancel-unrelated', async () => {
+        const runtime = globalThis.NPCStateDelta;
+        const chat = mockState.context.chat;
+        chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is at the door?' });
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'The inspector, a stern woman in grey, waits by the gate. She says she keeps the tax rolls and distrusts the guild.', swipe_id: 0, swipes: ['x'] });
+        mockState.quietResponder = async () => '{"npcs":[]}';
+        await manualAddNpc('The inspector');
+        await runtime.flush();
+        await sleep(300);
+        const id = runtime.getState().npcs.find(npc => npc.name === 'The inspector').id;
+        let calls = 0;
+        const held = (memory, onEnter) => {
+            let entered, release;
+            const inFlight = new Promise(resolve => { entered = resolve; });
+            const gate = new Promise(resolve => { release = resolve; });
+            mockState.quietResponder = async () => {
+                calls += 1;
+                if (calls % 2 === 1 || !onEnter) { entered(); await gate; }
+                return JSON.stringify({ npcs: [{ id, name: 'The inspector', role: 'tax inspector', memories: [memory] }] });
+            };
+            return { inFlight, release };
+        };
+        // 1. An unrelated person is added (state version and saved revision both move) while the Refresh waits for its model: it still lands.
+        let step = held('The inspector keeps the tax rolls.');
+        let refreshing = runtime.refreshFromChat(id);
+        await step.inFlight;
+        await manualAddNpc('Mira');
+        await runtime.flush();
+        step.release();
+        assert.equal(await refreshing, true, 'an unrelated write did not cancel the Refresh');
+        assert.ok(runtime.getNpc(id).memories.some(text => /tax rolls/.test(text)), 'its result was committed');
+        assert.ok(runtime.getState().npcs.some(npc => npc.name === 'Mira'), 'the unrelated person is kept');
+        // 2. Its own person is written meanwhile: one automatic retry on the new record, which then lands.
+        calls = 0;
+        step = held('The inspector distrusts the guild.', true);
+        refreshing = runtime.refreshFromChat(id);
+        await step.inFlight;
+        const edited = await runtime.updateAppearance(id, { overallAppearance: 'A stern woman in grey.', currentForm: '__none__', currentAppearance: '', formsText: '' }, { chatKey: runtime.uiStatus().chatKey, lockAppearance: true });
+        assert.equal(edited, true, 'the same person was written meanwhile');
+        step.release();
+        assert.equal(await refreshing, true, 'a change to the same person retried once and landed');
+        assert.equal(calls, 2, 'one retry, no more');
+        assert.ok(runtime.getNpc(id).memories.some(text => /distrusts/.test(text)));
+        // 3. A delete of the last reply (the chat's line) still cancels it, unrelated writes or not.
+        calls = 0;
+        step = held('The inspector never existed.');
+        const before = JSON.stringify(runtime.getState());
+        refreshing = runtime.refreshFromChat(id);
+        await step.inFlight;
+        const removed = chat.pop();
+        step.release();
+        assert.equal(await refreshing, false, 'a delete cancels the Refresh');
+        assert.equal(calls, 1, 'and it is not retried');
+        assert.equal(JSON.stringify(runtime.getState()), before, 'nothing was changed');
+        chat.push(removed);
+        mockState.quietResponder = null;
+    });
+});
+
+test('REFRESHCANCEL2: an unrelated write during the final freshness read survives; a throw after the commit is reported not retried; a plain error is not retried', () => {
+    runEditorHostScenario('refresh-cancel-round2', async () => {
+        const runtime = globalThis.NPCStateDelta;
+        const chat = mockState.context.chat;
+        chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is at the door?' });
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'The inspector, a stern woman in grey, waits by the gate. She keeps the tax rolls.', swipe_id: 0, swipes: ['x'] });
+        mockState.quietResponder = async () => '{"npcs":[]}';
+        await manualAddNpc('The inspector');
+        await runtime.flush();
+        await sleep(300);
+        const id = runtime.getState().npcs.find(npc => npc.name === 'The inspector').id;
+        let calls = 0;
+        const answer = memory => async () => {
+            calls += 1;
+            return JSON.stringify({ npcs: [{ id, name: 'The inspector', role: 'tax inspector', memories: [memory] }] });
+        };
+        // 1. The sidecar read of the final commit is held; an unrelated person is written meanwhile: the Refresh lands and the person is kept.
+        let entered;
+        const reached = new Promise(resolve => { entered = resolve; });
+        let releaseSecond;
+        const secondHeld = { entered, promise: new Promise(resolve => { releaseSecond = resolve; }) };
+        let releaseFirst;
+        let firstEntered;
+        const firstReached = new Promise(resolve => { firstEntered = resolve; });
+        mockState.quietResponder = answer('The inspector keeps the tax rolls.');
+        mockState.readBarrier = { entered: firstEntered, promise: new Promise(resolve => { releaseFirst = resolve; }) };
+        const refreshing = runtime.refreshFromChat(id);
+        const outcome = await Promise.race([firstReached.then(() => 'held'), sleep(4000).then(() => 'never')]);
+        if (outcome === 'held') {
+            mockState.readBarrier = secondHeld;   // the next read (the final commit's) is the held one
+            releaseFirst();
+            await Promise.race([reached, sleep(2000)]);
+            const added = runtime.getState();
+            added.npcs.push({ ...structuredClone(added.npcs[0]), id: 'npc-mira-test', name: 'Mira', aliases: [], memories: [] });
+            const installing = runtime.installState(added);   // not awaited before the release: it waits on the same held read
+            releaseSecond();
+            await installing;
+        }
+        const landed = await refreshing;
+        assert.equal(landed, true, 'the Refresh landed');
+        assert.ok(runtime.getNpc(id).memories.some(text => /tax rolls/.test(text)), 'its result was committed');
+        if (outcome === 'held') assert.ok(runtime.getState().npcs.some(npc => npc.name === 'Mira'), 'the unrelated person written during the final read is kept');
+        mockState.readBarrier = null;
+        // 2. A throw after the commit (the success toast) is reported and not retried: exactly one model call.
+        calls = 0;
+        mockState.quietResponder = answer('The inspector distrusts the guild.');
+        const toasts = globalThis.toastr;
+        const warned = [];
+        globalThis.toastr = { ...toasts, success() { throw new Error('toast broke'); }, warning: text => warned.push(text) };
+        try { await runtime.refreshFromChat(id); } finally { globalThis.toastr = toasts; }
+        assert.equal(calls, 1, 'no second model call after the commit');
+        assert.ok(warned.some(text => /toast broke/.test(text)), 'the error was reported');
+        assert.equal(runtime.getNpc(id).memories.filter(text => /distrusts/.test(text)).length, 1, 'committed once');
+        // 3. A real model error is reported even when the person changed meanwhile: one call, no retry.
+        calls = 0;
+        let failEntered;
+        const failReached = new Promise(resolve => { failEntered = resolve; });
+        let failRelease;
+        const failGate = new Promise(resolve => { failRelease = resolve; });
+        mockState.quietResponder = async () => { calls += 1; failEntered(); await failGate; throw new Error('upstream exploded'); };
+        const failing = runtime.refreshFromChat(id);
+        await failReached;
+        await runtime.updateAppearance(id, { overallAppearance: 'A grey woman.', currentForm: '__none__', currentAppearance: '', formsText: '' }, { chatKey: runtime.uiStatus().chatKey, lockAppearance: true });
+        failRelease();
+        assert.equal(await failing, false);
+        assert.equal(calls, 1, 'a genuine error is not retried');
+        mockState.quietResponder = null;
+    });
+});
+
+test('REFRESHCANCEL2: the revision is re-based only for this session\'s own writer, and the final read precedes the merge', () => {
+    const scanOps = fs.readFileSync(new URL('../runtime-scan-ops.js', import.meta.url), 'utf8');
+    assert.match(scanOps, /meta\.writerId === currentWriterId\(\) && meta\.latestObservedServerWriterId === currentWriterId\(\)/);
+    assert.match(scanOps, /currentRevision !== baseRevision && ownWrite/);
+    const runner = fs.readFileSync(new URL('../runtime-targeted.js', import.meta.url), 'utf8');
+    assert.ok(runner.indexOf('final commit') < runner.indexOf('const latest = getChatState(chatKey);'), 'no await between reading the state and committing it');
+    assert.match(runner, /!committed && isScannerRoutingError\(error\)/);
+});
