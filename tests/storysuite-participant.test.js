@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { LINEAGE_ID, NP_ID, buildCheckpoint, checkpointIdOf, checkpointProblem, createParticipant, hydrateIdentity, memoryVault, resolveIdentity, restoredState, selectionBehind, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
+import { LINEAGE_ID, NP_ID, buildCheckpoint, checkpointIdOf, checkpointProblem, createParticipant, hydrateIdentity, memoryVault, resolveIdentity, restoredState, selectionBehind, selectionMaxBehind, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
 import { hashJson, sha256 } from '../src/storysuite-participant/hash.js';
 import { fileVault } from '../src/storysuite-participant/vault.js';
 import { isTerminalNpcDeath } from '../terminal-lifecycle.js';
@@ -621,29 +621,41 @@ async function behindSetup(extra = {}) {
     return { ...made, told, first, parent };
 }
 
-test('selectionBehind: the swiped reply and its turn are reachable, a state many messages behind where the dossiers and the chat part is not', () => {
+test('selectionBehind: the swiped reply and its turn are as expected, a state many messages behind where the dossiers and the chat part is told', () => {
     const live = names(13);
     const chat = [...names(12), 'swiped'];
-    assert.equal(selectionBehind({ saved: names(11), live, chat }), null, 'the exact parent (the reader\'s turn is not in it)');
-    assert.equal(selectionBehind({ saved: names(9), live, chat }), null, 'one exchange further back');
-    assert.deepEqual(selectionBehind({ saved: names(3), live, chat }), { behind: 9, at: 12 });
-    assert.deepEqual(selectionBehind({ saved: names(3), live: names(13), chat: names(8) }), { behind: 5, at: 8 }, 'a chat shortened by a delete: it ends where the chat does');
-    for (const missing of [{ live: [] }, { chat: [] }, { saved: null }, { chat: null }]) assert.equal(selectionBehind({ saved: names(3), live, chat, ...missing }), null, 'too little known to say');
+    assert.equal(selectionBehind({ saved: names(11), live, chat, max: 4 }), null, 'the exact parent (the reader\'s turn is not in it)');
+    assert.equal(selectionBehind({ saved: names(9), live, chat, max: 4 }), null, 'one exchange further back');
+    assert.deepEqual(selectionBehind({ saved: names(3), live, chat, max: 4 }), { behind: 9, at: 12 });
+    assert.deepEqual(selectionBehind({ saved: names(3), live: names(13), chat: names(8), max: 4 }), { behind: 5, at: 8 }, 'a chat shortened by a delete: it ends where the chat does');
+    for (const missing of [{ live: [] }, { chat: [] }, { saved: null }, { chat: null }]) assert.equal(selectionBehind({ saved: names(3), live, chat, max: 4, ...missing }), null, 'too little known to say');
 });
 
-test('a head selection far behind the swipe is refused: the dossiers stay, it says so, it is answered as done and stays done', async () => {
-    const { participant, live, told, first } = await behindSetup();
+test('selectionMaxBehind: at least 4, and wider with a longer "Scan every"', () => {
+    assert.deepEqual([undefined, 1, 5, 20, 'x'].map(selectionMaxBehind), [12, 4, 12, 42, 12]);
+});
+
+test('a head selection far behind the swipe is installed all the same, and told: the answer carries a Problem line, nothing is refused', async () => {
+    const { participant, live, told, first } = await behindSetup({ scanEvery: () => 1 });
     const prepared = await participant.prepare({ return: 'hs_00000001', checkpoint: first.checkpoint, hash: first.hash });
     assert.equal(prepared.ok, true);
     const answer = await participant.activate({ return: 'hs_00000001', prepared: prepared.prepared });
-    assert.deepEqual({ ...answer, kept: typeof answer.kept }, { ok: true, checkpoint: first.checkpoint, hash: first.hash, kept: 'string' }, 'answered as done, with what the host records as a Problem');
-    assert.match(answer.kept, /8 messages behind the change at message 11/);
-    assert.equal(live.installs, 0, 'nothing installed');
-    assert.equal(live.state.npcs.some(item => item.id === 'npc_late'), true, 'the progress is still there');
-    assert.equal(told.length, 1);
-    assert.equal(told[0], answer.kept);
-    assert.equal((await participant.status({ return: 'hs_00000001' })).status, 'active', 'a recovery asked again does not install it either');
-    assert.equal(live.installs, 0);
+    assert.deepEqual({ ...answer, older: typeof answer.older }, { ok: true, checkpoint: first.checkpoint, hash: first.hash, older: 'string' });
+    assert.match(answer.older, /^Restored an older dossier state than expected: 8 messages back/);
+    assert.equal(answer.kept, undefined);
+    assert.equal(live.installs, 1, 'installed: a legitimate older selection is never refused');
+    assert.equal(live.state.npcs.some(item => item.id === 'npc_late'), false, 'the selected state is what is live');
+    assert.deepEqual(told, [answer.older]);
+    assert.equal((await participant.status({ return: 'hs_00000001' })).status, 'active');
+});
+
+test('a quiet stretch inside the "Scan every" reach is installed without a line', async () => {
+    const { participant, live, told, first } = await behindSetup({ scanEvery: () => 5 });
+    const prepared = await participant.prepare({ return: 'hs_00000005', checkpoint: first.checkpoint, hash: first.hash });
+    const answer = await participant.activate({ return: 'hs_00000005', prepared: prepared.prepared });
+    // 8 messages back is within 2*5+2
+    assert.equal(answer.older, undefined);
+    assert.deepEqual([live.installs, told], [1, []]);
 });
 
 test('a head selection at the exact parent installs; a reader\'s restore far back installs; a port that cannot read the chat installs', async () => {
@@ -660,7 +672,7 @@ test('a head selection at the exact parent installs; a reader\'s restore far bac
     // (the host walked back to this one because the checkpoints nearer were gone, and reads the replies it missed: that is its design, not asked)
     const walked = await behindSetup();
     const back = await walked.participant.prepare({ return: 'hs_00000004', fallback: true, checkpoint: walked.first.checkpoint, hash: walked.first.hash });
-    assert.equal((await walked.participant.activate({ return: 'hs_00000004', prepared: back.prepared })).kept, undefined);
+    assert.equal((await walked.participant.activate({ return: 'hs_00000004', prepared: back.prepared })).older, undefined);
     assert.deepEqual([walked.live.installs, walked.told], [1, []]);
 
     const blind = await behindSetup({ chatLineage: undefined });
@@ -669,7 +681,7 @@ test('a head selection at the exact parent installs; a reader\'s restore far bac
     assert.equal(blind.live.installs, 1, 'without the chat nothing is judged');
 });
 
-test('the run data: the first reply\'s checkpoint is refused for the swipe of the sixth reply, the fifth reply\'s is not (when the run data is here)', async t => {
+test('the run data: the first reply\'s checkpoint is told for the swipe of the sixth reply, the fifth reply\'s is not (when the run data is here)', async t => {
     const { readFile } = await import('node:fs/promises');
     const { chatLineage } = await import('../branch.js');
     const dir = process.env.SWIPECHK_FILES;
@@ -683,8 +695,8 @@ test('the run data: the first reply\'s checkpoint is refused for the swipe of th
     // (the chat in the file is the one after the swipe and the replies that followed: its first 12 messages are the ones before the swiped reply)
     const now = chatLineage(chat.slice(0, 13));
     const dossiers = [...now.slice(0, 12), 'the swiped reply as it was'];
-    assert.equal(selectionBehind({ saved: first.state.lineage, live: dossiers, chat: now })?.behind > 4, true);
-    assert.equal(selectionBehind({ saved: fifth.state.lineage, live: dossiers, chat: now }), null);
+    assert.equal(selectionBehind({ saved: first.state.lineage, live: dossiers, chat: now, max: 4 })?.behind > 4, true);
+    assert.equal(selectionBehind({ saved: fifth.state.lineage, live: dossiers, chat: now, max: 4 }), null);
     assert.equal(first.state.lineage.every((entry, at) => entry === now[at]), true, 'the stored fingerprints are the chat\'s own, so the comparison reads real lineage');
     assert.ok(live.state.lineage.length > 11);
 });

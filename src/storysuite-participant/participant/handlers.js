@@ -5,7 +5,7 @@
 import { PARTICIPANT_SCHEMA } from '../checkpoint.js';
 import { isTerminalNpcDeath } from '../../../terminal-lifecycle.js';
 import { hashJson } from '../hash.js';
-import { restoredState, selectionBehind, storedTimeline, timelineOf } from '../timeline.js';
+import { restoredState, selectionBehind, selectionMaxBehind, storedTimeline, timelineOf } from '../timeline.js';
 import { fail, isRecord, plain, preparedId } from './support.js';
 
 export function createParticipantHandlers({
@@ -116,21 +116,11 @@ export function createParticipantHandlers({
                     install = false;
                     schedulePublish(0);
                 }
-                // A head selection (the host's `hs_`) that the host chose outright (not walked back to, `fallback`) and that would install a state far behind
-                // where the story and the dossiers part is not what a swipe or a delete asked for (it can only reach the replies it touched): it keeps the dossiers
-                // as they are, says so (`kept`, which the host records as a Problem), and is answered as done, so the story goes on; what the dossiers hold is
-                // published with the next change, as always. A fallback walk (the host could not use the checkpoints nearer, and reads the replies missed after
-                // it), a reader's restore and a save point are exact and not asked.
-                const behind = install && entry.fallback !== true && String(input.return).startsWith('hs_') ? selectionBehind({ saved: got.doc.state?.lineage, live: live?.lineage, chat: port.chatLineage?.() }) : null;
-                if (behind) {
-                    const kept = `Dossiers were kept as they are: the state the story selected is ${behind.behind} messages behind the change at message ${behind.at}, which is more than that change can reach.`;
-                    warn(kept);
-                    entry.kept = true;
-                    preparedAt.delete(input.prepared);
-                    idx.returns[input.return] = { ...ret, status: 'active' };
-                    await save();
-                    return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash, kept };
-                }
+                // A head selection (the host's `hs_`) chosen outright (not walked back to, `fallback`) that installs a state far behind where the story and
+                // the dossiers part is installed all the same (after a quiet stretch it is the right one; a refusal would keep a swiped reply's facts), and
+                // said: `older`, which the host records as a Problem, so that a wrong selection that comes back is seen, not hidden.
+                const behind = install && entry.fallback !== true && String(input.return).startsWith('hs_') ? selectionBehind({ saved: got.doc.state?.lineage, live: live?.lineage, chat: port.chatLineage?.(), max: selectionMaxBehind(port.scanEvery?.()) }) : null;
+                const older = behind ? `Restored an older dossier state than expected: ${behind.behind} messages back from the change at message ${behind.at}.` : '';
                 if (install) {
                     // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).
                     await port.installState(restoredState(got.doc.state, live));
@@ -151,7 +141,8 @@ export function createParticipantHandlers({
                 entry.return = input.return;
                 idx.returns[input.return] = { ...ret, status: 'active' };
                 await save();
-                return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash };
+                if (older) warn(older);
+                return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash, ...(older ? { older } : {}) };
             }),
 
             abort,
@@ -163,7 +154,7 @@ export function createParticipantHandlers({
                 // The host's recovery asks this to learn whether the participant switched already, and skips the activation when it says active. It
                 // says so only while the live state is the bytes of that checkpoint; otherwise (a write that never reached the file, bytes that are
                 // gone) it says prepared, and the activation is asked for again, which installs them or refuses.
-                if (ret.status === 'active' && s.index.prepared[ret.prepared]?.kept !== true) {
+                if (ret.status === 'active') {
                     const got = await verified(ret.checkpoint, ret.hash);
                     if (!got.ok || !standsOnBytes(got.doc)) return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: 'prepared' };
                 }

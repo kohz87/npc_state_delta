@@ -90,17 +90,21 @@ export function restoredState(saved, live) {
     return state;
 }
 
-/** The most messages a head selection may install a state behind where the story and the dossiers part: the swiped reply, the reader's turn before it, and one more exchange. */
-export const SELECTION_MAX_BEHIND = 4;
+/**
+ * How many messages behind the point where the story and the dossiers part a selected state may be before it is worth a line in the Problems:
+ * the swiped reply, the reader's turn before it and one more exchange (4), or, when Delta publishes only on a change and a stretch of replies
+ * named nobody, the replies a scan skips (`scanEvery`) with their turns, and one more exchange. A heuristic on lineage length: it only says, it never refuses.
+ */
+export const selectionMaxBehind = scanEvery => Math.max(4, 2 * (Number.isInteger(scanEvery) && scanEvery > 0 ? scanEvery : 5) + 2);
 
 /**
- * Whether a head selection (the host's own, `hs_`) would install a state far older than the change can reach: `saved` is the lineage of the
+ * Whether a head selection (the host's own, `hs_`) installs a state further behind the change than expected: `saved` is the lineage of the
  * state to install, `live` the lineage of the dossiers now, `chat` the lineage of the chat now (each a list of message fingerprints). The
- * story and the dossiers part at the first message they do not share (a swiped reply, the end of a shortened chat); a state that stops
- * more than SELECTION_MAX_BEHIND messages before it belongs to an older story, and is not what this change asked for. → { behind, at }
- * (messages, and where they part) or null (fine, or too little known to say).
+ * story and the dossiers part at the first message they do not share (a swiped reply, the end of a shortened chat). The state is installed
+ * either way (it can be the right one after a quiet stretch); a long way back is told, so that a real recurrence of a wrong selection is seen.
+ * → { behind, at } (messages, and where they part) or null (as expected, or too little known to say).
  */
-export function selectionBehind({ saved, live, chat, max = SELECTION_MAX_BEHIND }) {
+export function selectionBehind({ saved, live, chat, max = selectionMaxBehind() }) {
     if (![saved, live, chat].every(Array.isArray) || !live.length || !chat.length) return null;
     const divergence = firstLineageDivergence(live, chat);
     const at = divergence === -1 ? chat.length : divergence;
