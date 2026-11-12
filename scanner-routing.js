@@ -242,6 +242,10 @@ export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
         let value = response;
         if (profileId) {
             value = typeof response === 'string' ? response : response?.content;
+            // Some providers hand back the JSON reply already parsed (content is an object, as the proxy log shows it): keep it as its text.
+            // An empty object carries nothing and stays refused below.
+            if (value && typeof value === 'object' && !Array.isArray(value) && value.type === 'text' && typeof value.text === 'string') value = value.text;
+            else if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length) value = JSON.stringify(value);
             if (typeof value !== 'string') {
                 throw scannerRoutingError('The selected profile returned no text content. Check its text-generation configuration.', 'NPC_SCANNER_PROFILE_RESPONSE');
             }
