@@ -52,7 +52,7 @@ function createReplayBoundaries(deps) {
         all: () => activeReplyIds(),
         active: ids => { const now = new Set(activeReplyIds()); return ids.every(id => now.has(id)); },
         copy: () => structuredClone(normalizeChatState(getChatState())),
-        empty: () => structuredClone(freshChatState()),
+        empty: () => ({ ...structuredClone(freshChatState()), ...(getChatState().captureJournal ? { captureJournal: structuredClone(getChatState().captureJournal) } : {}) }),
         state: () => getChatState(),
         markRead,
         head: () => {
@@ -72,9 +72,10 @@ function createReplayBoundaries(deps) {
             if (Number.isFinite(sent)) run.time = sent;
             const scope = {
                 key, state: copy, chat: real.slice(0, id + 1), at: id, sink, receipts: run.receipts, catchUp: run.catchUp, failed: null,
+                captureJournal: structuredClone(getChatState(key).captureJournal || []),
                 now: () => run.time ?? Date.now(),
                 replace: next => { for (const name of Object.keys(copy)) delete copy[name]; return Object.assign(copy, next); },
-                backfills: mid => processPendingBackfills(mid, { limit: hostedOnePass() ? 1 : BACKFILLS_PER_REPLY, skipNpcIds: [] }).catch(() => {}),
+                backfills: mid => processPendingBackfills(mid, { limit: hostedOnePass() ? 1 : BACKFILLS_PER_REPLY, skipNpcIds: [], admissions: hostedOnePass() }).catch(() => {}),
             };
             await inReplay(scope, () => handleAssistantMessageReceivedInner(id, { bypassSwipeGuard: true }));
             return scope.failed ? { ok: false, message: scope.failed } : undefined;

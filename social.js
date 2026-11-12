@@ -6,7 +6,7 @@ import {
 } from './social-primitives.js';
 import { socialRelationFamily, inverseSocialRelation } from './social-relations.js';
 import { parseKeyRelationshipEntry, compactSocialKeyRelationship } from './social-bonds.js';
-import { resolveNpcReference, normalizeSocialGraph, addEdge } from './social-graph.js';
+import { resolveNpcId, resolveNpcReference, normalizeSocialGraph, addEdge } from './social-graph.js';
 import {
     canonicalizeNpcKeyRelationships, alignGraphWithCanonicalRelationships,
     parseScanEdges, edgeFromKeyRelationship,
@@ -29,9 +29,19 @@ export function reconcileSocialState(state = {}, options = {}) {
     graph.unresolved = graph.unresolved.filter(slot => npcIds.has(slot.ownerId));
     graph = alignGraphWithCanonicalRelationships(graph, npcs);
     repairMirroredKeyRelationships(npcs, graph);
-    const meta = { provenance: options.provenance || 'scanner', sourceMessageId: options.sourceMessageId, turn: options.turn };
+    const meta = { provenance: options.provenance || 'scanner', sourceMessageId: options.sourceMessageId, turn: options.turn, historicalRead: options.historicalRead };
 
-    for (const edge of parseScanEdges(options.scanResult || {}, npcs, meta)) addEdge(graph, edge);
+    for (const edge of parseScanEdges(options.scanResult || {}, npcs, meta)) {
+        // (ONEPASSCAPR2-4) A reasonless summary edge cannot replace a detailed bond accepted from the same row.
+        if (!options.historicalRead && edge.reason === 'scanner social edge') for (const [ownerId, otherId, side] of [[edge.aId, edge.bId, 'a'], [edge.bId, edge.aId, 'b']]) {
+            const owner = npcs.find(npc => npc.id === ownerId);
+            const row = (options.scanResult?.npcs || []).find(item => item?.id === ownerId || (item?.name && resolveNpcReference(npcs, item.name)?.id === ownerId));
+            const input = typeof row?.keyRelationships === 'string' ? row.keyRelationships.split(/\r?\n/) : row?.keyRelationships;
+            const tie = (Array.isArray(input) ? input : []).map(parseKeyRelationshipEntry).find(item => item && resolveNpcReference(npcs, item.subject)?.id === otherId);
+            if (owner && tie && !edge[`${side}Dynamic`]) { edge[`${side}To${side === 'a' ? 'B' : 'A'}`] = tie.relation; edge[`${side}Dynamic`] = tie.dynamic; }
+        }
+        addEdge(graph, edge);
+    }
     for (const owner of npcs) {
         const locked = Array.isArray(owner.manualProfileFields) && owner.manualProfileFields.includes('keyRelationships');
         for (const raw of Array.isArray(owner.keyRelationships) ? owner.keyRelationships : []) {
@@ -60,7 +70,7 @@ export {
     SOCIAL_GRAPH_SUPPRESSED_LIMIT, SOCIAL_KEY_RELATIONSHIP_MAX_CHARS, SOCIAL_DYNAMIC_MAX_CHARS,
     socialRelationFamily, inverseSocialRelation,
     parseKeyRelationshipEntry, compactSocialKeyRelationship,
-    resolveNpcReference, normalizeSocialGraph,
+    resolveNpcId, resolveNpcReference, normalizeSocialGraph,
     canonicalizeNpcKeyRelationships, extractUnresolvedSocialFacts,
     remapSocialGraphNpcIds, remapSocialGraphNpcId,
     purgeNpcStructuredReferences, removeNpcFromSocialGraph, socialGraphLabelsForNpc,

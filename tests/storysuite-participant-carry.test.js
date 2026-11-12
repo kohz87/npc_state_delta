@@ -102,3 +102,84 @@ test('N2: every durable write of the chat\'s state ends in the one function that
     for (const name of ['scanNow', 'drainPendingAutoScan', 'processPendingBackfills', 'runTargetedDossierPass', 'handleAssistantMessageReceived']) assert.match(index, new RegExp(`function ${name}\\([^)]*\\) \\{\\s*(?:const key = [^;]*;\\s*)?return withScanIntent\\(`), name);
     assert.match(index, /function scanWorkPending\(key = getChatKey\(\)\) \{\s*return isScanBusy\(key\) \|\| \(scanIntents.get\(key\) \|\| 0\) > 0 \|\| pendingAutoScans.has\(key\) \|\| deferredWorkPending\(key\);/);
 });
+
+// (ONEPASSCAP-1) A participant write (installState, writeTimeline, the catch-up's writes) holds back native-change announcements for the whole chat
+// while it waits for its durable save. A change Delta saved in that window (a one-pass reply's scan has no model call, so it commits as the host
+// records the reply; a backfill can land there too) used to go unannounced: never published, and the host's next activate installed the older
+// checkpoint over it. It is now announced once the participant's write ends; the participant's own change (made in the write's first step) never is.
+test('ONEPASSCAP-1: a change Delta saves while a participant write is in flight is announced when the write ends; the participant\'s own never is', async t => {
+    // The real module in a temp tree beside a stub host (it imports SillyTavern's extensions.js), as settings-debounce.test.js loads it.
+    const [fs, os, path, url] = await Promise.all([import('node:fs'), import('node:os'), import('node:path'), import('node:url')]);
+    const sourceRoot = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..');
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'npc-quietly-'));
+    const extRoot = path.join(tempRoot, 'public', 'scripts', 'extensions', 'third-party', 'npc_state_delta');
+    fs.writeFileSync(path.join(tempRoot, 'package.json'), JSON.stringify({ type: 'module' }));
+    for (const { path: file } of JSON.parse(fs.readFileSync(path.join(sourceRoot, 'runtime-modules.json'), 'utf8')).modules) {
+        fs.mkdirSync(path.dirname(path.join(extRoot, file)), { recursive: true });
+        fs.copyFileSync(path.join(sourceRoot, file), path.join(extRoot, file));
+    }
+    fs.cpSync(path.join(sourceRoot, 'src'), path.join(extRoot, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tempRoot, 'public', 'scripts', 'extensions.js'), 'export const extension_settings = {};\nexport function getContext() { return { chat: [] }; }\n');
+    fs.writeFileSync(path.join(tempRoot, 'public', 'script.js'), 'export function getRequestHeaders() { return {}; }\nexport async function saveSettings() {}\n');
+    t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+    const { installHydrationState } = await import(url.pathToFileURL(path.join(extRoot, 'runtime-hydration-state.js')).href);
+    const rt = {
+        chatStateCache: new Map(), hydratedChatKeys: new Set(), hydratedStateMeta: new Map(), workingCopyAdoptions: new Map(), freshnessEvents: [],
+        hydrationErrors: new Map(), stateWriteTimers: new Map(), stateWritePromises: new Map(), stateVersions: new Map(), persistedVersions: new Map(),
+        nativeChangeListeners: new Set(), participantWrites: new Map(),
+    };
+    let open = 'chat-a';
+    const api = {};
+    installHydrationState(api, rt, { getChatKey: () => open, touchChatCache: () => {}, checkPortraitFilesSoon: () => {}, BACKFILL_MAX_ATTEMPTS: 3 });
+    let heard = 0;
+    rt.nativeChangeListeners.add(() => { heard += 1; });
+    const window = () => { let release; const gate = new Promise(resolve => { release = resolve; }); return { gate, release }; };
+
+    // The participant's own write: its change is made in its first step and is not a native change.
+    const a = window();
+    const write = api.quietly('chat-a', async () => { api.markStateDirty('chat-a'); await a.gate; return true; });
+    assert.equal(heard, 0, 'the participant\'s own write is not announced');
+    api.markStateDirty('chat-a');   // a one-pass scan commits while the write waits for its save
+    api.markStateDirty('chat-a');
+    api.getChatState('chat-a');   // the scan, the render and the injection all read the state inside the window
+    assert.equal(heard, 0, 'held while the participant writes, even when the state is read');
+    a.release();
+    assert.equal(await write, true);
+    assert.equal(heard, 1, 'announced once (not once per save) when the participant\'s write ends');
+
+    // Nothing of Delta's own meanwhile: nothing announced.
+    await api.quietly('chat-a', async () => { api.markStateDirty('chat-a'); await null; });
+    assert.equal(heard, 1);
+
+    // Nested writes: announced only when the last one ends; a write that throws still announces the held change.
+    const b = window();
+    const outer = api.quietly('chat-a', async () => { await b.gate; });
+    const inner = api.quietly('chat-a', async () => { await null; throw new Error('save failed'); });
+    api.markStateDirty('chat-a');
+    await assert.rejects(inner, /save failed/);
+    assert.equal(heard, 1, 'the outer write still runs');
+    b.release();
+    await outer;
+    assert.equal(heard, 2);
+
+    // Another chat opened meanwhile: the held change belongs to a chat no longer open, so it is not announced to the open one.
+    const c = window();
+    const away = api.quietly('chat-a', async () => { await c.gate; });
+    api.markStateDirty('chat-a');
+    open = 'chat-b';
+    c.release();
+    await away;
+    assert.equal(heard, 2);
+
+    // (ONEPASSCAPR2-6) The change stays owed to its own chat: reopening it publishes it, once, before the participant reads it to activate.
+    open = 'chat-a';
+    api.getChatState('chat-a');
+    assert.equal(heard, 3, 'announced when the chat is open again');
+    api.getChatState('chat-a');
+    assert.equal(heard, 3, 'and only once');
+
+    // A task that throws before it returns a promise still releases its hold: announcements are not suppressed for good.
+    await assert.rejects(api.quietly('chat-a', () => { throw new Error('sync failure'); }), /sync failure/);
+    api.markStateDirty('chat-a');
+    assert.equal(heard, 4, 'the hold was released');
+});

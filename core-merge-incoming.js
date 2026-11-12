@@ -5,7 +5,8 @@ import { appendRelationshipEvent, applyRelationshipDelta, applyRelationshipMiles
 import { developmentScaleReady } from './core-development.js';
 import { cleanText, normalizeName } from './core-text.js';
 import { identityLabelsRelated, inferNpcIdentityKind, isInterimNpcLabel } from './core-identity.js';
-import { durableTextAccepted, incomingCustomFields, incomingKeyRelationships, mergeImportantMemories, mergeLists } from './core-record.js';
+import { durableTextAccepted, incomingCustomFields, incomingKeyRelationships, mergeLists } from './core-record.js';
+import { applyNpcMemories, scanFactCandidates } from './src/memory-fact-apply.js';
 import { TEXT_FIELDS } from './src/fields/registry.js';
 import { durableRefinementCandidateGrounded, filterSafeMannerismRefinements, groundedAppearanceChange, groundedAppearanceCorrection, isExplicitRecurringMannerism, isSafeIdentityTextRefinement, isSafeSpeechRefinement, isSafeUnmarkedDurableFieldReplacement, isSafeUnmarkedDurableRefinement, mergeDurableTextRefinement, normalizeMannerisms, presentationContinuationEvidence, speechSeedVetoed, speechSupportContext } from './core-durable.js';
 import { groundedBehaviorProfile, mergeBehaviorProfileRefinements, reconcileBehaviorProfileWithPersonality } from './core-behavior.js';
@@ -201,9 +202,8 @@ export function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAU
     if (normalizeName(incomingName) === normalizeName(merged.name) && incoming.identityKind) {
         merged.identityKind = inferNpcIdentityKind(merged.name, incoming.identityKind);
     }
-    merged.memories = manualFields.has('memories')
-        ? [...(existing.memories || [])]
-        : mergeImportantMemories(existing.memories, incoming.memories, incoming.memoryRetention, lifecycleOptions.memoryInputLimit || 3, existing.manualMemories, { stamps: existing.memoryStamps, message: sourceMessageId });
+    applyNpcMemories(merged, existing, incoming, { limit: lifecycleOptions.memoryInputLimit || 3, sameReply: { stamps: existing.memoryStamps, message: sourceMessageId }, locked: manualFields.has('memories') });
+    let factCandidates = [];
     if (manualFields.has('mannerisms')) {
         merged.mannerisms = [...(existing.mannerisms || [])];
     } else if ((existing.mannerisms || []).length) {
@@ -318,6 +318,7 @@ export function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAU
         );
         relationshipEventAccepted = relationshipUpdate.evidenceAccepted;
         const relationshipActuallyChanged = RELATIONSHIP_KEYS.some(key => relationshipUpdate.appliedDelta[key] !== 0);
+        factCandidates = scanFactCandidates(existing, relationshipUpdate, { facts: lifecycleOptions.memoryFacts, R: sourceMessageId, player: lifecycleOptions.memoryFacts?.player });
         const relationshipStateAdvanced = relationshipActuallyChanged
             || relationshipUpdate.progressChanged
             || relationshipUpdate.milestoneCrossings.length > 0;
@@ -407,5 +408,7 @@ export function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAU
     // A scanner update must never erase a portrait or user/manual metadata.
     merged.portrait = existing.portrait || null;
     merged.manualProfileFields = [...manualFields];
+    // Code-derived memory facts of this reply (src/memory-fact-store.js); none without the rule, a mark or an applied movement.
+    if (factCandidates.length) applyNpcMemories(merged, merged, {}, { candidates: factCandidates, locked: manualFields.has('memories') });
     return merged;
 }

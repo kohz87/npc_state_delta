@@ -1,12 +1,12 @@
 // NPC meters, the per-reply slice: the initial slice, key-person absence and cast memory, slice validation, meter moves, the stage
 // and ladder settling, and the change text. A pure part of npc-meters.js (same owner, moved without change); npc-meters.js
 // re-exports every name it exported before. Never imports npc-meters.js.
-import { readLeaf, leafText, clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KEYS, isInt, isObject, isReplyId, KEY_MAX, MAX_METERS_PER_NPC, MAX_MILESTONES, MAX_NPCS, MAX_PROBLEMS, MAX_RUNGS, MAX_UNLOCKED, METER_ID_MAX, MILESTONE_MAX, NAME_MAX, needMet, npcKey, own, RECORD_FIELDS, replyKey, sameReply, signed, STAGE_NAME_MAX, stageAt, thresholdReached, WORDS } from './npc-meters-config.js';
+import { clean, readLeaf, leafText, clamp, CUSTOM_RANGE, DEFAULT_CONFLICT_AT, DISPOSITION_MAX, FORBIDDEN_KEYS, isInt, isObject, isReplyId, KEY_MAX, MAX_METERS_PER_NPC, MAX_MILESTONES, MAX_NPCS, MAX_PROBLEMS, MAX_RUNGS, MAX_UNLOCKED, METER_ID_MAX, MILESTONE_MAX, NAME_MAX, needMet, npcKey, own, RECORD_FIELDS, replyKey, sameReply, signed, STAGE_NAME_MAX, stageAt, thresholdReached, WORDS } from './npc-meters-config.js';
 import { isKey, memoryKey, RECENT_REPLIES } from './key-people.js';
 import { CAST_KEY, metWithEntry } from './cast-dossier.js';
 import { RELATIONSHIP_KEYS } from '../core-mechanics.js';
 import { flatDayProblems } from './relationship-pacing.js';
-import { readEvent } from './npc-meters-pacing.js';
+import { readEvent, cutWords } from './npc-meters-pacing.js';
 import { readApproachRing } from '../npc-meters-gate.js';
 import { decayMood, normalizeMood, nextMoodLog, readMoodLog } from '../npc-mood.js';
 import { INSTINCT_KINDS } from '../npc-instincts.js';
@@ -380,8 +380,18 @@ export function writeMood(ctx, key, record, { prev, mood, day, n = null, s = nul
     const text = !ctx.standing || own(ctx.standing.domains?.npc?.npcs?.[key], 'moodLog') ? nextMoodLog(record.moodLog, { n, s, date, change: { v: mood.v - was.v, a: mood.a - was.a, d: mood.d - was.d }, why }) : null;
     if (text) record.moodLog = asStored(ctx, key, 'moodLog', JSON.parse(text));
 }
-/** The reason a story line gave, as the reply's last event may keep it: a Re-read of a reply whose earlier read kept none (older code) keeps none. */
-export const reasonKept = (ctx, key, reason) => (!ctx.standing || /"why"/.test(String(ctx.standing.domains?.npc?.npcs?.[key]?.lastEvent ?? '')) ? reason : '');
+/**
+ * The reason a story line gave, as the reply's last event may keep it: a Re-read of a reply whose earlier read kept none (older code) keeps none.
+ * Rule mark (reason length): a reason is kept to 240 characters, cut at a word with an ellipsis (cutWords). A Re-read of a reply whose earlier read
+ * stored its reason cut to 80 (no stored why over 80) keeps writing that: the first 80 characters, as before. Only text is shaped (the evidence map passes).
+ */
+export const reasonKept = (ctx, key, reason) => {
+    if (ctx.standing && !/"why"/.test(String(ctx.standing.domains?.npc?.npcs?.[key]?.lastEvent ?? ''))) return '';
+    if (typeof reason !== 'string') return reason;
+    const earlier = ctx.standing ? readEvent(ctx.standing.domains?.npc?.npcs?.[key]?.lastEvent) : null;
+    const wide = !earlier || earlier.events.some(item => String(item.why ?? '').length > 80);
+    return wide ? cutWords(reason) : clean(reason, 80);
+};
 export const moodStands = (ctx, key) => !ctx.standing || isObject(readLeaf(ctx.standing.domains?.npc?.npcs?.[key]?.mood));
 
 export const sentence = parts => parts.filter(Boolean).map(part => (/[.!?]$/.test(part) ? part : `${part}.`)).join(' ');

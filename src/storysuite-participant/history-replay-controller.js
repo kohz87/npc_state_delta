@@ -38,6 +38,8 @@ export function createCatchUp(port) {
         const { ids, reason } = job;
         const cap = Math.max(0, Number.isFinite(job.cap) ? job.cap : ids.length);
         const base = job.empty ? L.empty() : L.copy();
+        const marks = L.state()?.memoryFactMarks;
+        if (marks) base.memoryFactMarks = structuredClone(marks);   // (memory facts) the live-eligibility marks are the replay's authority: a rebuild keeps them
         if (job.saved) base.catchUp = job.saved; else delete base.catchUp;
         const head = L.head();
         const sameHead = now => now.key === key && now.length === head.length && now.last === head.last && now.swipe === head.swipe;

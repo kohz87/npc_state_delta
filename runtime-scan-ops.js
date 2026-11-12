@@ -309,7 +309,7 @@ export function createScanOpsPart(rt, deps) {
         queueMicrotask(() => {
             if (getChatKey() !== chatKey || latestMessageId(true) !== messageId) return;
             const skipNpcIds = [...(rt.catchUpTaken?.get(chatKey) || [])];
-            processPendingBackfills(messageId, { limit, skipNpcIds })
+            processPendingBackfills(messageId, { limit, skipNpcIds, admissions: hostedOnePass() })
                 .catch(error => console.warn('[NPC State Delta] queued dossier backfills stopped.', error));
         });
     }

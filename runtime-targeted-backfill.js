@@ -1,19 +1,20 @@
 /* NPC State Delta targeted backfill (role: targeted-backfill). The history backfill for one NPC and the queue
    of pending backfills. Split from runtime-targeted.js; bodies are moved without change. */
 
-import { chatContext as getContext, awayFromReplay } from './runtime-scan-helpers.js';
+import { chatContext as getContext, awayFromReplay, replayScope, latestMessageId } from './runtime-scan-helpers.js';
 import { isScannerRoutingError } from './scanner-routing.js';
 import { automaticBackfillStillRelevant, backfillNeedsRequest } from './scan-context.js';
-import { recentTranscript, recentUserDevelopmentContext, currentExchangeTranscript, refreshMessageGate } from './src/transcript.js';
-import { IMPORTANT_MEMORY_LIMIT, inferNpcIdentityKind, npcCurrentlyAbsentInText, buildBackfillPrompt } from './core.js';
+import { recentTranscript, recentUserDevelopmentContext, currentExchangeTranscript, currentExclusions, storyDayAt, storyDaysForTranscript, refreshMessageGate } from './src/transcript.js';
+import { IMPORTANT_MEMORY_LIMIT, DEFAULT_RELATIONSHIP, inferNpcIdentityKind, npcCurrentlyAbsentInText, buildBackfillPrompt, buildProfileRefreshPrompt, extractExplicitKeyRelationshipEdges } from './core.js';
 import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { fillAllowed, FILL_MERGE_OPTION } from './appearance-fill.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
+import { captureJournalEntry } from './runtime-narration.js';
 
-const { backfillScanMatchesTarget, rowContradictsTarget, soleRowMayBeTarget, transcriptMentionsBackfillTarget } = createTargetedScopePart();
+const { backfillScanMatchesTarget, rowContradictsTarget, soleRowMayBeTarget, transcriptMentionsBackfillTarget, edgeTouchesResolvedTarget } = createTargetedScopePart();
 
 export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase, scopeTargetedChannels }) {
-    const { BACKFILL_MAX_ATTEMPTS, ensureChatStateLoaded, getChatKey, getChatState, hostedTargetNotes, isHostSwipeActive, isScanBusy, noteScanFailure, persist, recordInlineCardsInState, removeNpcInlineCardAtMessage, requireReadyChatMutation, runTargetedDossierPass, targetNoteOptions } = deps;
+    const { BACKFILL_MAX_ATTEMPTS, ensureChatStateLoaded, getChatKey, getChatState, hostedMeterView, hostedTargetNotes, isHostSwipeActive, isScanBusy, noteScanFailure, persist, recordInlineCardsInState, removeNpcInlineCardAtMessage, requireReadyChatMutation, runTargetedDossierPass, targetNoteOptions } = deps;
 
     const BACKFILL_RETRY_COOLDOWN_MS = 60 * 1000;
 
@@ -44,30 +45,40 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
         const state = getChatState(chatKey);
         const existing = state.npcs.find(npc => npc.id === request.npcId);
         if (!existing) return false;
-        const transcript = recentTranscript(settings.scanDepth);
+        // (FOLLOWREFRESH) A newly admitted person's one follow-up is read exactly like a Refresh (same prompt, same story window, so memories,
+        // relationships, looks, tastes and open business come back as a Refresh gives them); the guards below (live state, scope, meters) stay the backfill's.
+        const refreshLike = request.reason === 'new-admission';
+        const transcript = recentTranscript(settings.scanDepth, refreshLike ? { messageIds: true } : undefined);
         if (!transcript) return false;
+        const developmentSourceMessageIds = refreshLike ? [...transcript.matchAll(/^\[m(\d+)\]/gm)].map(match => Number(match[1])).filter(Number.isInteger) : [];
         if (automatic) {
             if (!automaticBackfillStillRelevant(request, existing, state.npcs, currentExchangeTranscript(request.requestedMessageId))) return true;
         } else if (!backfillNeedsRequest(existing, state.npcs)) {
             return true;
         }
-        const notes = hostedTargetNotes(existing, { newDossier: request.reason === 'new-admission', messageId });
+        const notes = hostedTargetNotes(existing, { newDossier: request.reason === 'new-admission', messageId, ...(refreshLike ? { tastes: true } : {}) });
         // A newly met person's one backfill also fills the looks the story never gave (appearance-fill.js). A retry of it may too, while looks are
         // still wanted; a missed-participant repair and an established person never do. No extra call: the line rides on this request.
         const fillLooks = request.reason === 'new-admission' && fillAllowed(existing, ctx.name1);
-        const prompt = buildBackfillPrompt({
+        const common = {
             transcript,
-            targetName: request.label,
-            existingNpc: existing,
             userName: ctx.name1 || 'User',
             charName: ctx.name2 || 'Character',
             memoryCriteria: settings.memoryCriteria,
             customFieldNames: effectiveCustomFieldNames(settings),
             fillLooks,
             ...targetNoteOptions(notes),
-        });
+        };
+        const prompt = refreshLike
+            ? buildProfileRefreshPrompt({
+                ...common,
+                targetNpc: hostedMeterView([existing])[0],
+                turn: Number.isInteger(state.turn) ? state.turn : null,
+                storyDay: storyDayAt(latestMessageId(true)),
+            })
+            : buildBackfillPrompt({ ...common, targetName: request.label, existingNpc: existing });
         return runTargetedDossierPass({
-            chatKey, ctx, prompt, messageId, notes,
+            chatKey, ctx, prompt, messageId, notes, captureMessageId: request.requestedMessageId,
             id: request.npcId,
             label: `backfill for ${request.label}`,
             systemPrompt: "You are NPC State Delta's isolated dossier backfill scanner. Use only the supplied scanner payload. Return only the requested JSON object.",
@@ -113,13 +124,20 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
                 // A single-target backfill may change only its target, in every result channel: profile
                 // updates and social edges for other dossiers are dropped like their npc rows.
                 scopeTargetedChannels(parsed, target, roster);
-                return { ok: true, preserved, keptPresent, repairedPresence };
+                // A Refresh also adds the ties the story window states outright.
+                let localEdges;
+                if (refreshLike) {
+                    localEdges = extractExplicitKeyRelationshipEdges(transcript, roster, currentExclusions()).filter(edge => edgeTouchesResolvedTarget(edge, target, roster));
+                    parsed.keyRelationshipEdges = [...parsed.keyRelationshipEdges, ...localEdges];
+                }
+                return { ok: true, preserved, keptPresent, repairedPresence, localEdges };
             },
             mergeOptions: {
                 // The backfill prompt asks for up to five memories (a first, whole dossier).
                 memoryInputLimit: IMPORTANT_MEMORY_LIMIT,
                 allowTargetedDurableSeed: true,
                 ...(fillLooks ? { [FILL_MERGE_OPTION]: true } : {}),
+                ...(refreshLike ? { developmentSourceMessageIds, storyDays: storyDaysForTranscript(transcript) } : {}),
                 developmentContext: transcript,
                 userDevelopmentContext: recentUserDevelopmentContext(settings.scanDepth, { messageIds: true }),
             },
@@ -132,6 +150,10 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
                     ? Math.max(Number(preserved.lastSeenTurn || 0), Number(state.turn || 0))
                     : Number(preserved.lastSeenTurn || 0);
                 finalNpc.lastWorldActiveTurn = Number(preserved.lastWorldActiveTurn || 0);
+                if (refreshLike) {   // the meters are never this pass's (as a Refresh)
+                    finalNpc.relationship = structuredClone(preserved.relationship || DEFAULT_RELATIONSHIP);
+                    finalNpc.lastRelationshipChange = structuredClone(preserved.lastRelationshipChange || finalNpc.lastRelationshipChange);
+                }
             },
             beforeCheckpoint: (nextState, finalNpc, targetMessageId) => {
                 if (!finalNpc.archived && finalNpc.present) recordInlineCardsInState(nextState, targetMessageId, [finalNpc.id], 'dossier-backfill');
@@ -150,19 +172,23 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
         });
     }
 
-    async function processPendingBackfillsInner(messageId = null, { limit = Infinity, skipNpcIds = [] } = {}) {
+    async function processPendingBackfillsInner(messageId = null, { limit = Infinity, skipNpcIds = [], admissions = false } = {}) {
         const chatKey = getChatKey();
         if (chatKey === 'no-chat' || !requireReadyChatMutation('process queued dossier backfills', chatKey, { notify: false }) || isScanBusy(chatKey) || isHostSwipeActive()) return 0;
         let processed = 0;
         // Model calls made (each backfill is one request, plus a compact retry at most).
         let calls = 0;
         const attemptedNpcIds = new Set(skipNpcIds);
-        while (getChatKey() === chatKey && !isScanBusy(chatKey) && calls < limit) {
+        while (getChatKey() === chatKey && !isScanBusy(chatKey)) {
             const state = getChatState(chatKey);
             if (!Array.isArray(state.pendingBackfills) || !state.pendingBackfills.length) break;
-            const request = state.pendingBackfills.find(item => item?.npcId && !attemptedNpcIds.has(item.npcId));
+            // (ONEPASSCAPR2-3) Hosted one-pass: each new admission owns its queued fill, once (the admission cap bounds it); the per-reply cap still limits other repairs.
+            const request = state.pendingBackfills.find(item => item?.npcId && !attemptedNpcIds.has(item.npcId)
+                && (calls < limit || (admissions && item.reason === 'new-admission')));
             if (!request) break;
             attemptedNpcIds.add(request.npcId);
+            const savedCapture = replayScope() && captureJournalEntry(replayScope(), getContext().chat || [], request.requestedMessageId);
+            if (savedCapture?.parsed && !savedCapture.fills?.[request.npcId]) continue; // (ONEPASSCAPR2-1) an unaccepted fill cannot be invented by replay
             const target = state.npcs.find(npc => npc.id === request.npcId);
             const owningExchange = Number.isInteger(request.requestedMessageId) ? currentExchangeTranscript(request.requestedMessageId) : '';
             if (!automaticBackfillStillRelevant(request, target, state.npcs, owningExchange)) {

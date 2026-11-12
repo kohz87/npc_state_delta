@@ -175,6 +175,8 @@ const DEFAULTS = Object.freeze({
     behaviorCriteria: DEFAULT_BEHAVIOR_CRITERIA,
     autoArchiveDeaths: true,
     autoReactivateArchived: true,
+    // (memory facts) The code derives memory facts from structured events of a new live reply (src/memory-fact-*.js). Off: none derived, no prompt text, no marks.
+    memoryFacts: true,
     // (v2 hidden notes) A scan that builds a new dossier also writes 2 to 5 layered hidden notes. Hosted only.
     layeredSecrets: true,
     dataFiles: {},

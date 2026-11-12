@@ -873,6 +873,109 @@ test('runtime: removing the cast dossier is final; a dossier a scan made earlier
     assert.equal(alone.views, null);
 });
 
+// (ONEPASSCAPR2-2) A pack person met for the first time in the reply that also admits her: the one-pass row or scan is the first writer, and the
+// pack's card wins over what the narration made up (looks, eyes, home base, background, hidden notes). A dossier a scan made EARLIER is still left alone.
+test('runtime: a cast member admitted by the same reply as her first meeting is seeded from the card, not from the narration', () => {
+    const scenario = async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const sdk = mockState.sdk;
+        sdk.people = [{ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: { on: 0, where: 'the gate' }, alive: true,
+            entry: { id: 'fenna', name: 'Fenna', about: 'Runs the night ferry.', look: 'Tall and weathered, grey eyes, rope-scarred hands.', personality: 'Stubborn and quietly kind.', history: 'Lost her husband to the weir.',
+                start: { place: 'Bluewatch docks', goal: 'Find who opened the weir' }, secrets: [{ title: 'The weir', text: 'She saw who opened the gates.', when: 'the party learns of the toll-gang' }] } }];
+        mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+        await Promise.all((mockState.listeners.get('message_sent') || []).map(fn => fn(mockState.context.chat.length - 1)));
+        const text = 'Fenna poles the ferry in. Her eyes are green.';
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
+        const id = mockState.context.chat.length - 1;
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Fenna', present: true, role: 'boatwoman', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true,
+            relationshipImpact: 'none', relationshipReason: '', personality: 'Invented: cheerful.', background: 'Invented: a farm girl.', homeBase: 'Invented town', overallAppearance: 'Short, green eyes.' }] });
+        await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+        await Promise.all((mockState.listeners.get('character_message_rendered') || []).map(fn => fn(id)));
+        await sleep(300);
+        await sdk.handlers.turn?.({ type: 'normal' });
+        await sleep(300);
+        const fenna = api.getState().npcs.filter(npc => npc.name === 'Fenna');
+        const one = fenna[0] || {};
+        console.log('RESULT ' + JSON.stringify({ count: fenna.length, look: one.overallAppearance, personality: one.personality, background: one.background, homeBase: one.homeBase, cast: Boolean(one.castFrom), secrets: (one.secrets || []).map(item => item.from + ':' + item.text) }));
+    };
+    const prelude = async () => {
+        const sdk = {
+            registered: [], people: [], made: {}, handlers: {},
+            registerModule(def) { sdk.registered.push(def); },
+            on(name, fn) { sdk.handlers[name] = fn; return () => {}; },
+            command: async type => {
+                if (type === 'npc.tick') for (const person of sdk.people) if (person.met && person.entry) sdk.made[person.key] = { name: person.name };
+                return { ok: true, receipt: { summary: '' } };
+            },
+            query: name => (name === 'director.cast' ? structuredClone(sdk.people) : name === 'npc.castMade' ? structuredClone(sdk.made)
+                : name === 'packs.list' ? [{ id: 'ersveil', name: 'Ersveil' }] : name === 'scene.present' ? [] : null),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    const out = scenarioOutput(runHostScenario('cast-dossier-first-admission', prelude, scenario));
+    assert.equal(out.count, 1, 'one dossier, not a scan one beside a cast one');
+    assert.equal(out.look, 'Tall and weathered, grey eyes, rope-scarred hands.', 'the card\'s look wins over the narration\'s');
+    assert.equal(out.personality, 'Stubborn and quietly kind.');
+    assert.equal(out.background, 'Lost her husband to the weir.', 'the card\'s background, not an invented one');
+    assert.equal(out.homeBase, 'Bluewatch docks', 'the card\'s home base');
+    assert.equal(out.cast, true, 'marked as made from the cast');
+    assert.deepEqual(out.secrets, ['pack:She saw who opened the gates.'], 'the authored hidden notes, no invented ones');
+});
+
+// (ONEPASSCAPR2-2) The other ordering: the host's turn step makes the cast dossier before the reply's scan row arrives; the card's words stay.
+test('runtime: the other order (the host\'s turn makes the cast dossier first, then the reply\'s row merges): the card still wins', () => {
+    const scenario = async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const sdk = mockState.sdk;
+        sdk.people = [{ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: { on: 0, where: 'the gate' }, alive: true,
+            entry: { id: 'fenna', name: 'Fenna', about: 'Runs the night ferry.', look: 'Tall and weathered, grey eyes, rope-scarred hands.', personality: 'Stubborn and quietly kind.', history: 'Lost her husband to the weir.',
+                start: { place: 'Bluewatch docks', goal: 'Find who opened the weir' }, secrets: [{ title: 'The weir', text: 'She saw who opened the gates.', when: 'the party learns of the toll-gang' }] } }];
+        await sdk.handlers.turn?.({ type: 'normal' });
+        await sleep(300);
+        mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+        await Promise.all((mockState.listeners.get('message_sent') || []).map(fn => fn(mockState.context.chat.length - 1)));
+        const text = 'Fenna poles the ferry in. Her eyes are green.';
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
+        const id = mockState.context.chat.length - 1;
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Fenna', present: true, role: 'boatwoman', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true,
+            relationshipImpact: 'none', relationshipReason: '', personality: 'Invented: cheerful.', background: 'Invented: a farm girl.', homeBase: 'Invented town', overallAppearance: 'Short, green eyes.' }] });
+        await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+        await Promise.all((mockState.listeners.get('character_message_rendered') || []).map(fn => fn(id)));
+        await sleep(300);
+        const fenna = api.getState().npcs.filter(npc => npc.name === 'Fenna');
+        const one = fenna[0] || {};
+        console.log('RESULT ' + JSON.stringify({ count: fenna.length, look: one.overallAppearance, personality: one.personality, background: one.background, homeBase: one.homeBase, cast: Boolean(one.castFrom), secrets: (one.secrets || []).map(item => item.from + ':' + item.text) }));
+    };
+    const prelude = async () => {
+        const sdk = {
+            registered: [], people: [], made: {}, handlers: {},
+            registerModule(def) { sdk.registered.push(def); },
+            on(name, fn) { sdk.handlers[name] = fn; return () => {}; },
+            command: async type => {
+                if (type === 'npc.tick') for (const person of sdk.people) if (person.met && person.entry) sdk.made[person.key] = { name: person.name };
+                return { ok: true, receipt: { summary: '' } };
+            },
+            query: name => (name === 'director.cast' ? structuredClone(sdk.people) : name === 'npc.castMade' ? structuredClone(sdk.made)
+                : name === 'packs.list' ? [{ id: 'ersveil', name: 'Ersveil' }] : name === 'scene.present' ? [] : null),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    const out = scenarioOutput(runHostScenario('cast-dossier-turn-first', prelude, scenario));
+    assert.equal(out.count, 1, 'one dossier, not a scan one beside a cast one');
+    assert.equal(out.look, 'Tall and weathered, grey eyes, rope-scarred hands.', 'the card\'s look wins over the narration\'s');
+    assert.equal(out.personality, 'Stubborn and quietly kind.');
+    assert.equal(out.background, 'Lost her husband to the weir.', 'the card\'s background, not an invented one');
+    assert.equal(out.homeBase, 'Bluewatch docks', 'the card\'s home base');
+    assert.equal(out.cast, true, 'marked as made from the cast');
+    assert.deepEqual(out.secrets, ['pack:She saw who opened the gates.'], 'the authored hidden notes, no invented ones');
+});
+
 test('the cast box sits in Right now, and the "Next:" line has its own space under the meters', () => {
     const ui = dossierUiSource();
     // The section bar is gone with the one long page: the cast and away blocks head the Right now section.

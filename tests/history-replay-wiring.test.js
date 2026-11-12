@@ -107,7 +107,8 @@ async function helpers(mockState, eventSource, sleep, replayUrl) {
     const stable = state => {
         const copy = JSON.parse(JSON.stringify(state));
         // The dossiers, the counters and the cards; not the clock stamps, the journal of rollbacks or the branch bookkeeping (those differ by when they ran).
-        for (const key of Object.keys(copy)) if (/^(rollback|branch)|^(lastScanAt|timeline|catchUp|checkpoints|scanCount|lineage|portraitAssets|formPortraitAssets)$/.test(key)) delete copy[key];
+        // The live-eligibility marks (memory facts) are bookkeeping too: a rebuild keeps them, but their position among the state's keys differs.
+        for (const key of Object.keys(copy)) if (/^(rollback|branch)|^(lastScanAt|timeline|catchUp|checkpoints|scanCount|lineage|portraitAssets|formPortraitAssets|memoryFactMarks)$/.test(key)) delete copy[key];
         for (const item of [...(copy.pendingBackfills || []), ...(copy.inlineCards || [])]) for (const key of ['requestedAt', 'lastAttemptAt', 'createdAt']) delete item[key];
         for (const list of [copy.npcs, ...(copy.inlineCards || []).map(entry => entry.cards)]) for (const npc of list || []) for (const key of ['createdAt', 'updatedAt', 'archivedAt']) delete npc[key];
         return copy;
@@ -119,6 +120,7 @@ test('parity: replaying a chat from an empty state gives the dossiers of the liv
     runScenario('parity', async h => {
         for (let i = 1; i <= 5; i += 1) await h.turn('We walk on.', i % 2 ? `Yunyun speaks, mark-${i}.` : `The road goes on, mark-${i}.`);
         const live = h.stable(h.runtime.getState());
+        const marksBefore = [...(h.runtime.getState().memoryFactMarks?.keys || [])];
         h.check(live.npcs.length >= 1, 'the live run made a dossier');
         const calls = h.scannerCalls().length;
         const catchUp = h.controller();
@@ -132,6 +134,7 @@ test('parity: replaying a chat from an empty state gives the dossiers of the liv
         h.equal(catchUp.status().outcome, 'done', 'the rebuild finished');
         h.check(h.scannerCalls().length > calls, 'the replay made model calls');
         h.equal(h.stable(h.runtime.getState()), live, 'replay from empty == the live run');
+        h.check(JSON.stringify([...(h.runtime.getState().memoryFactMarks?.keys || [])].sort()) === JSON.stringify([...marksBefore].sort()) && marksBefore.length > 0, 'the live-eligibility marks survive the rebuild');
         h.equal(h.published(), 1, 'one publication');
     });
 });
@@ -431,6 +434,87 @@ test('a publication that fails after a successful install: the catch-up is done,
         h.equal(retried, 1, 'the normal publication path was asked to retry');
         h.check(h.runtime.getState().catchUp === undefined, 'the field is gone (installed)');
         h.check(catchUp.canGenerate() === true, 'sending is back');
+    });
+});
+
+// (ONEPASSCAPR2-1) A reply whose one-pass block was accepted is rebuilt from that accepted block, not from a model's answer: replay == live.
+test('parity: a captured one-pass reply (memory, tie string, edge) replays to the live dossiers; the old reply read again keeps its bytes', () => {
+    runScenario('captured-parity', async h => {
+        h.settings.narrationCapture = true;
+        const mockState = h.mockState;
+        const block = payload => `\n\n<!--npc_state_delta\n${JSON.stringify(payload)}\n-->`;
+        const ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
+        const scanner = mockState.quietResponder;
+        // An accepted admission fill: the backfill answers for the person asked, with a look.
+        mockState.quietResponder = async (args = {}) => {
+            const asked = (/backfill scanner/i.test(String(args.systemPrompt || '')) ? String(args.prompt || '').match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] : undefined);
+            return asked ? JSON.stringify({ npcs: [{ name: asked, present: true, overallAppearance: 'Human woman. Dark hair, wide brown eyes.', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : scanner(args);
+        };
+        const row = { name: 'Sieke', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'clerk', directInteraction: true, present: true, role: 'Clerk', species: 'Human', gender: 'female',
+            memories: ['Registered Astra at the guild desk.'], keyRelationships: 'Sister Temiwa — novice | brings bread', relationshipImpact: 'none', relationshipDelta: ZERO };
+        await h.turn('Hello.', `Sieke, a clerk, sits at the guild desk. Sister Temiwa waits.${block({ npcs: [row, { ...row, name: 'Sister Temiwa', memories: [], keyRelationships: [] }], keyRelationshipEdges: [{ from: 'Sieke', to: 'Sister Temiwa', aToB: 'friend', bToA: 'friend' }] })}`);
+        await h.turn('Go on.', `Sieke stamps a form.${block({ npcs: [{ name: 'Sieke', present: true, memories: ['Stamped Astra\'s form while the novice watched.'], relationshipImpact: 'none', relationshipDelta: ZERO }] })}`);
+        const live = h.stable(h.runtime.getState());
+        h.check(live.npcs.find(npc => npc.name === 'Sieke')?.memories?.length >= 2, 'the live run kept both memories');
+        const catchUp = h.controller();
+        catchUp.rebuild({ replies: null });
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'the rebuild finished');
+        const replayed = h.stable(h.runtime.getState());
+        const moved = [];
+        for (const key of new Set([...Object.keys(live), ...Object.keys(replayed)])) {
+            if (key === 'npcs') for (const npc of live.npcs) { const other = replayed.npcs.find(item => item.id === npc.id) || {}; for (const field of Object.keys(npc)) if (JSON.stringify(npc[field]) !== JSON.stringify(other[field])) moved.push(`${npc.id}.${field}`); }
+            else if (JSON.stringify(live[key]) !== JSON.stringify(replayed[key])) moved.push(key);
+        }
+        if (moved.includes('pendingBackfills')) h.fail(`backfills ${JSON.stringify(live.pendingBackfills)} vs ${JSON.stringify(replayed.pendingBackfills)}`);
+        h.equal(moved, [], 'replay of captured replies == the live run (nothing lost)');
+    });
+});
+
+// (ONEPASSCAPR2-8) With Full scan every reply on, a deferred full scan of a reply the automatic scan already read is skipped: one read per reply.
+test('full scan: a reply the automatic scan covered is not read again by the full scan', () => {
+    runScenario('full-scan-once', async h => {
+        h.settings.fullScanEveryTurn = true;
+        const id = await h.turn('Hello.', 'Yunyun speaks, mark-1.');
+        const after = h.scannerCalls().length;
+        h.check(after >= 1, 'the reply was read');
+        h.equal(h.runtime.getState().lastScannedMessageId, id, 'the marker is on the reply');
+        // The second trigger: a branch reconcile asks for a rescan of the latest reply (the chat is unchanged).
+        await h.runtime.reconcile({ rescan: true, reason: 'test-reconcile' });
+        await h.sleep(300);
+        h.equal(h.scannerCalls().length, after, 'no second read of the same, unchanged reply');
+    });
+});
+
+// (ONEPASSCAPR2-1) The new readings (string ties, folded ids, no ambiguous binding) apply to a reply the SCANNER read live too, so replay reads them the same way;
+// a reply with no journal entry (read before the journal existed) is a historical re-read and keeps the old bytes.
+test('parity: a scanner-read reply with a string tie and an underscore-id edge replays to the live dossier; an old reply (no journal entry) keeps its old reading', () => {
+    runScenario('scanner-new-shapes', async h => {
+        const ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
+        const row = (name, extra = {}) => ({ name, present: true, role: 'regular', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO, ...extra });
+        h.mockState.quietResponder = async (args = {}) => {
+            if (!/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            return JSON.stringify({ npcs: [row('Sister Chris'), row('Sieke', { keyRelationships: 'Sister Chris — novice | brings bread' })], keyRelationshipEdges: [{ from: 'npc_sieke', to: 'npc_sister_chris', aToB: 'friend', bToA: 'friend' }] });
+        };
+        await h.turn('Hello.', 'Sieke and Sister Chris talk at the desk, mark-1.');
+        const live = h.stable(h.runtime.getState());
+        const sieke = live.npcs.find(npc => npc.name === 'Sieke');
+        h.check(sieke?.keyRelationships?.some(text => /^Sister Chris — /.test(text)), `the live run read the string tie: ${JSON.stringify(sieke?.keyRelationships)}`);
+        const catchUp = h.controller();
+        catchUp.rebuild({ replies: null });
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'the rebuild finished');
+        const replayed = h.stable(h.runtime.getState());
+        h.equal(replayed.npcs.map(npc => [npc.name, npc.keyRelationships]), live.npcs.map(npc => [npc.name, npc.keyRelationships]), 'replay == live for the new shapes');
+        // The same chat as an old save: no journal entry for the reply, so the replay is a historical re-read with the old reading.
+        const saved = h.runtime.getState();
+        delete saved.captureJournal;
+        await h.runtime.installState(saved);
+        h.check(!h.runtime.getState().captureJournal?.length, 'the journal is gone, like an old save');
+        const old = h.controller();
+        old.rebuild({ replies: null });
+        await old.idle();
+        h.equal(h.runtime.getState().npcs.find(npc => npc.name === 'Sieke').keyRelationships, [], 'an old reply keeps its old bytes: the string tie is still not read');
     });
 });
 

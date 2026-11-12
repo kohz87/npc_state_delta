@@ -61,11 +61,13 @@ export const FIELDS = Object.freeze({
     mannerisms: { kind: 'list', evidence: 3, tracked: 11, editorLock: 11, lock: [12, ['mannerisms']], revertList: 1, refreshChanged: 19, snapshot: [21, 'list'], v2: 15 },
     behaviorProfile: { kind: 'list', evidence: 4, tracked: 10, dayTracked: 2, editorLock: 9, lock: [10, ['behaviorProfile']], revertList: 2, refreshChanged: 10, snapshot: [12, 'list'], v2: 16 },
     background: { kind: 'text', text: 9, tracked: 15, dayTracked: 3, editorLock: 10, lock: [11, ['background']], aliasMerge: 7, refreshChanged: 11, snapshot: [13, 'text'], v2: 17 },
-    memories: { kind: 'list', tracked: 17, editorLock: 20, lock: [21, ['memories', 'manualMemories']], revertList: 0, refreshChanged: 20, snapshot: [20, 'list'], v2: 18 },
+    memories: { kind: 'list', tracked: 17, editorLock: 20, lock: [21, ['memories', 'manualMemories', 'memoryFacts']], revertList: 0, refreshChanged: 20, snapshot: [20, 'list'], v2: 18 },
     // The memories the reader entered by hand: a later scan never evicts them (core-mechanics mergeImportantMemories).
     manualMemories: { kind: 'part', userMeta: 6 },
     // Where and when each memory was recorded: { normalized text: { m: reply, d: story date } }, beside the list (core-record-shared.js stampMemories).
     memoryStamps: { kind: 'part' },
+    // Code-derived memory facts (src/memory-fact-*.js): entries aligned to the memories above and a bounded suppression ledger. Absent on a dossier without facts.
+    memoryFacts: { kind: 'part' },
     keyRelationships: { kind: 'list', tracked: 16, editorLock: 12, lock: [13, ['keyRelationships']], revertList: 3, refreshChanged: 12, snapshot: [22, 'list'], v2: 19 },
     relationshipSummary: { kind: 'text', text: 10, tracked: 14, editorLock: 15, lock: [16, ['relationshipSummary']], terminalFrozen: 9, aliasMerge: 8, refreshChanged: 13, snapshot: [14, 'text'], v2: 20 },
     relationship: {

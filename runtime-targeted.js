@@ -13,6 +13,8 @@ import { replayScope, setNpcDossierScanIndicator, lineageMoved, setScanIndicator
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
 import { createTargetedRefreshPart } from './runtime-targeted-refresh.js';
 import { createTargetedBackfillPart } from './runtime-targeted-backfill.js';
+import { advanceCastAdmission } from './runtime-cast-sync.js';
+import { captureJournalEntry, recordAcceptedFill } from './runtime-narration.js';
 
 export function createTargetedPart(rt, deps) {
     const { attachGeneratedSecrets, BACKFILL_MAX_ATTEMPTS, beginScanOperation, chatHydrationStatus, commitBranchCheckpoint, editorIsMounted, endScanOperation, ensureChatStateLoaded, ensureHydratedStateFresh, findMeguminDossierSources, flushStateFile, forwardRelationshipChangesToHost, forwardSecretEventsToHost, forwardTastesToHost, getChatKey, getChatState, hostedMeterView, hostedTargetNotes, isHostSwipeActive, isScanBusy, noteScanFailure, partyLevelList, persist, recordInlineCardsInState, recordScanDiagnostics, removeNpcInlineCardAtMessage, renderDossier, requireReadyChatMutation, runTargetedDossierPass, saveNpcEditor, scanCanonicalBaseCurrent, scanOperationCurrent, scenePresentAt, setChatState, settleStateFileWrite, staleHostActive, targetNoteOptions, updateInjection } = deps;
@@ -96,9 +98,12 @@ export function createTargetedPart(rt, deps) {
         setScanIndicator(true);
         job.setIndicator?.(true);
         try {
-            const { parsed, raw, retried } = await generateParsedNpcJson(ctx, {
+            const journaled = replayScope() && captureJournalEntry(replayScope(), ctx.chat || [], job.captureMessageId);
+            const replayFill = journaled?.[job.captureKind || 'fills']?.[id];
+            const { parsed, raw, retried } = replayFill ? { parsed: structuredClone(replayFill), raw: '', retried: false } : await generateParsedNpcJson(ctx, {
                 systemPrompt, prompt, responseLength: BACKFILL_RESPONSE_LENGTH, label, requestScope: operation.requestScope,
             });
+            const acceptedInput = !replayScope() && Number.isInteger(job.captureMessageId) ? structuredClone(parsed) : null;
             if (!scanOperationCurrent(chatKey, operation) || !await scanCanonicalBaseCurrent(chatKey, operation, job.staleLabel)) {
                 console.info(`[NPC State Delta] discarded expired, superseded, or stale-canonical ${job.staleLabel}.`);
                 return false;
@@ -148,6 +153,7 @@ export function createTargetedPart(rt, deps) {
                 partyLevels: partyLevelList(),
                 preservePresence: true,
                 skipRelationshipUpdate: true,
+                historicalRead: Boolean(replayScope() && !journaled),
                 ...job.mergeOptions,
             });
             // (I-17) One NPC only: social-edge and alias machinery may run inside the merge, but every other
@@ -159,12 +165,14 @@ export function createTargetedPart(rt, deps) {
             // (v2 hidden notes) A backfill of a dossier that is new: the layered notes the model wrote for it.
             if (job.notes?.layered) attachGeneratedSecrets(merged.state, [id], parsed);
             job.afterMerge?.(result, { liveBefore, scoped, merged });
+            if (liveBefore) advanceCastAdmission(merged.state, liveBefore, result); // (ONEPASSCAPR2-2) an automatic fill is still subordinate to the pack
             if (liveBefore) Object.assign(result, protectTerminalNpc(liveBefore, result));
             if (!await scanCanonicalBaseCurrent(chatKey, operation, `${job.staleLabel} final commit`)) {
                 job.onLateStale?.();
                 return false;
             }
             forwardNotes();
+            if (acceptedInput) recordAcceptedFill(merged.state, ctx.chat || [], job.captureMessageId, id, acceptedInput, job.captureKind || 'fills');
             if (targetMessageId >= 0) {
                 job.beforeCheckpoint?.(merged.state, result, targetMessageId);
                 commitBranchCheckpoint(merged.state, targetMessageId, job.checkpoint);

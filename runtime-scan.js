@@ -3,12 +3,12 @@
    parts are split beside this file, and this factory keeps the public scan part. Built by index.js once per module instance. */
 import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { isScannerRoutingError } from './scanner-routing.js';
-import { readAheadOf, settleScan, storyTextsForAdmission } from './scan-context.js';
+import { readAheadOf, replyScanned, settleScan, storyTextsForAdmission } from './scan-context.js';
 import { recentTranscript, recentUserDevelopmentContext, currentExchangeUserDevelopmentContext, currentExchangeTranscript, skippedExchangesWindow, recentReplyIds, activeReplyIds, activeChat, currentExchangeProse, storyDayAt, tieDayAt, currentExclusions, refreshMessageGate } from './src/transcript.js';
 import { FULL_SCAN_RESPONSE_LENGTH, SCAN_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { applyFocusedRelationshipDecisions, runFocusedRelationshipPass, suppressPrimaryRelationshipForFocusedDecisions } from './src/relationship-pass.js';
 import { prepareFullWindowRelationshipPayload, buildScannerPrompt, mergeScanResult, tagScanEvidence, resolveInterimIdentityPromotions, hasCompactMeguminWorldState, extractExplicitKeyRelationshipEdges } from './core.js';
-import { chatLineage, fingerprintMessage } from './branch.js';
+import { chatLineage, fingerprintMessage, lineageCheckpointKey } from './branch.js';
 import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { clockNow, lineageMoved, notify, replayScope, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 import { createCatchUpPart } from './runtime-catchup.js';
@@ -17,8 +17,13 @@ import { applyStaleLifecycleAfterScan } from './runtime-scan-stale.js';
 import { createScanReplyPart } from './runtime-scan-reply.js';
 import { createAssistantHandlerPart } from './runtime-scan-handler.js';
 import { normalizeAllowance } from './src/relationship-pacing.js';
+import { rememberCastAdmissions, seedCastAdmission } from './runtime-cast-sync.js';
+import { dossierFor, metWithEntry } from './src/cast-dossier.js';
+import { normalizeSourceOfTruth } from './suite-handshake.js';
+import { captureJournalEntry, recordAcceptedCapture, recordReadMark } from './runtime-narration.js';
+import { phraseMerged, scanMemoryFacts, scanMemoryParagraph } from './src/memory-fact-scan.js';
 export function createScanPart(rt, deps) {
-    const { attachGeneratedSecrets, beginScanOperation, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanOperationCurrent, scanScenePresent, scenePresentAt, setChatState, takeNarrationCapture, updateInjection } = deps;
+    const { attachGeneratedSecrets, beginScanOperation, castList, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanOperationCurrent, scanScenePresent, scenePresentAt, setChatState, storySuiteV2Meters, takeNarrationCapture, updateInjection } = deps;
     // Events per story day while Delta works alone (the pass counts them on the dossier). The day is Story Director's clock, which
     // there is not without a host: no day, no limit (relationship-pacing.js). Hosted, the slice counts them when the change is forwarded
     // and Delta's numbers are set from the slice afterwards (runtime-hosted.js), so the pass does not count (null).
@@ -47,6 +52,10 @@ export function createScanPart(rt, deps) {
             && sourceFingerprint !== fingerprintMessage(getContext().chat?.[messageId] || {})
             && !sameReplyRewritten(scanChatKey, messageId, sourceParent));
         await ensureChatStateLoaded(scanChatKey);
+        // (ONEPASSCAPR2-8) A deferred full scan must not reread a reply an automatic scan already covered.
+        const scanned = getChatState(scanChatKey);
+        if (!manual && settings.fullScanEveryTurn && Number.isInteger(messageId) && replyScanned(scanned, messageId)
+            && lineageCheckpointKey(scanned.lineage, messageId) === lineageCheckpointKey(chatLineage(ctx.chat || []), messageId)) return true;
         if (!replayScope()) await refreshMessageGate();   // the host's fade flags are for the whole chat, not a replay's prefix
         if (sourceMoved()) return false;
         if (isScanBusy(scanChatKey)) {
@@ -59,11 +68,13 @@ export function createScanPart(rt, deps) {
         const scanLineage = chatLineage(ctx.chat || []);
         let currentTranscript = currentExchangeTranscript(messageId);
         const currentProse = currentExchangeProse(messageId);
-        const fullWindowScan = Boolean(!manual && settings.fullScanEveryTurn);
+        const journaled = replayScope() && !manual ? captureJournalEntry(replayScope(), ctx.chat || [], messageId) : null;
+        const savedCapture = journaled?.parsed ? journaled : null;
+        const fullWindowScan = Boolean(!savedCapture && !manual && settings.fullScanEveryTurn);
         // (lean) A scan reads every exchange since the last scan, not only this reply: the replies the local check skipped
         // are in it, up to 30 messages. More waiting than that: the oldest are read first and the next reply scans at once
         // (catch-up). Nothing skipped: the current exchange alone.
-        const skippedWindow = !manual && !fullWindowScan && Number.isInteger(messageId) && !(!replayScope() && narrationCaptures.has(narrationCaptureKey(scanChatKey, messageId)))
+        const skippedWindow = !manual && !fullWindowScan && Number.isInteger(messageId) && !savedCapture && !(!replayScope() && narrationCaptures.has(narrationCaptureKey(scanChatKey, messageId)))
             ? skippedExchangesWindow(messageId, {
                 afterId: getChatState(scanChatKey)?.lastScannedMessageId,
                 fresh: chatNeverScanned(getChatState(scanChatKey), messageId),
@@ -97,9 +108,8 @@ export function createScanPart(rt, deps) {
         const state = hostedScanState(getChatState(scanChatKey));
         const newChatAtStart = chatNeverScanned(state, Number.isInteger(messageId) ? messageId : (ctx.chat || []).length - 1);
         const scanStateVersion = Number(stateVersions.get(scanChatKey) || 0);
-        const pendingCapture = !replayScope() && !manual && !fullWindowScan && Number.isInteger(messageId)
-            ? takeNarrationCapture(scanChatKey, messageId)
-            : null;
+        const pendingCapture = savedCapture ? { parsed: structuredClone(savedCapture.parsed), watch: savedCapture.watch, raw: '' }
+            : (!replayScope() && !manual && !fullWindowScan && Number.isInteger(messageId) ? takeNarrationCapture(scanChatKey, messageId) : null);
         const fallback = pendingCapture?.fallback === true;
         const capture = fallback ? null : pendingCapture;
         const scanLabel = capture ? 'narration-capture' : (manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'));
@@ -110,14 +120,17 @@ export function createScanPart(rt, deps) {
         const hostedNotes = hostedMeters();
         const noteOptions = hostedNotes && !capture ? hostedNotePromptOptions(state, settings, messageId) : {};
         const eventWatch = capture ? (Array.isArray(capture.watch) ? capture.watch : []) : (noteOptions.eventWatch || []);
+        // (memory facts) Pending facts of replies inside this call's own window may be phrased in it; a one-pass capture sends none.
+        const memoryAsk = capture ? { text: '', handles: [] } : scanMemoryParagraph(state, settings, skippedWindow ? skippedWindow.readIds : ((manual || fullWindowScan) ? recentReplyIds(settings.scanDepth) : [messageId]), ctx.chat);
         const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, {
             currentTranscript, earlierOnly, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId), ...noteOptions,
-        }));
+        })) + memoryAsk.text;
 
         let relationshipEdgeCount = 0;
         let relationshipEdgeFallbacks = 0;
         let profileUpdateCount = 0;
         let catchUpIds = [];
+        let replayRefreshIds = [];
         try {
             const scanStartedAt = performance.now?.() ?? Date.now();
             const { parsed, raw, retried } = capture ? { ...capture, retried: false } : await generateParsedNpcJson(ctx, {
@@ -138,15 +151,9 @@ export function createScanPart(rt, deps) {
                     promptChars: prompt.length,
                     responseChars: String(raw ?? '').length,
                     retried: Boolean(retried),
-                    relationshipPass: false,
-                    relationshipTargets: 0,
-                    relationshipResponseChars: 0,
-                    relationshipRetried: false,
-                    relationshipEdges: relationshipEdgeCount,
-                    relationshipEdgeFallbacks,
-                    profileUpdates: profileUpdateCount,
-                    profileApplied: 0,
-                    profileEvidenceAdded: 0,
+                    relationshipPass: false, relationshipTargets: 0, relationshipResponseChars: 0, relationshipRetried: false,
+                    relationshipEdges: relationshipEdgeCount, relationshipEdgeFallbacks,
+                    profileUpdates: profileUpdateCount, profileApplied: 0, profileEvidenceAdded: 0,
                     stale: true,
                     at: Date.now(),
                 };
@@ -234,6 +241,8 @@ export function createScanPart(rt, deps) {
                 npc.present = false;
                 if (!compactWorldStateTurn) npc.worldActive = false;
             }
+            // (memory facts) Standalone only: hosted, the slice applies the move (its allowance, tier cut and gates), which this scan cannot see.
+            const factOpt = hostedMeters() ? null : scanMemoryFacts(state, settings, currentLineage, targetMessageId, ctx.name1);
             const merged = mergeScanResult(mergeBaseState, parsedForMerge, {
                 maxNpcs: settings.maxNpcs,
                 excludeNames: [...currentExclusions(), ...(state.dismissed || [])],
@@ -257,7 +266,10 @@ export function createScanPart(rt, deps) {
                 // the reader's own "Scan now" is deliberate and writes them.
                 ...(manual ? {} : keyAwayScanOptions(mergeBaseState)),
                 partyLevels: partyLevelList(),
+                historicalRead: Boolean(replayScope() && !journaled), // (ONEPASSCAPR2-1) only a reply read before the journal existed keeps the old reading
+                memoryFacts: factOpt,
             });
+            merged.state = phraseMerged(merged.state, memoryAsk.handles, parsed, getContext().chat || []);
             if (earlierOnly) {
                 // Presence is the latest scene's: an earlier-only window leaves each person as last confirmed.
                 const before = new Map((state.npcs || []).map(npc => [npc.id, npc]));
@@ -299,7 +311,7 @@ export function createScanPart(rt, deps) {
                         responseChars: combinedResponseChars,
                         retried: combinedRetried,
                     };
-                    applyFocusedRelationshipDecisions(merged.state, combinedDecisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings));
+                    applyFocusedRelationshipDecisions(merged.state, combinedDecisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings), factOpt);
                     if (rt.lastScanMetrics) {
                         rt.lastScanMetrics.newNpcRelationshipTargets = combinedTargetCount;
                         rt.lastScanMetrics.newNpcRelationshipResponseChars = combinedResponseChars;
@@ -322,7 +334,7 @@ export function createScanPart(rt, deps) {
                 rt.lastScanMetrics.profileDevelopment = Array.isArray(merged.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [];
                 console.info('[NPC State Delta] dossier scan metrics', rt.lastScanMetrics);
             }
-            applyFocusedRelationshipDecisions(merged.state, relationshipPass.decisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings));
+            applyFocusedRelationshipDecisions(merged.state, relationshipPass.decisions, settings.relationshipCaps, targetMessageId, merged.report, scanPace(settings), factOpt);
             const postCleanup = applyStaleLifecycleAfterScan(merged.state, parsedForMerge, currentTranscript || transcript, settings, { keepIds: keyKeepIds(merged.state), noDelete: hostedReadsFailed(), now: clockNow() });
             const staleArchived = [...preCleanup.archived, ...postCleanup.archived]
                 .filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index);
@@ -361,11 +373,25 @@ export function createScanPart(rt, deps) {
                 readAhead: settled.readAhead,
                 scanCount: Number(state.scanCount || 0) + 1,
             };
+            if (capture && !replayScope()) recordAcceptedCapture(nextState, ctx.chat || [], targetMessageId, capture);
+            else if (!replayScope() && !manual) recordReadMark(nextState, ctx.chat || [], targetMessageId);
             const catchUpChats = replayScope()?.catchUp ?? rt.catchUpChats;
             if (skippedWindow && !skippedWindow.latest) catchUpChats.add(scanChatKey); else catchUpChats.delete(scanChatKey);
             if (!manual) queueScanFollowUps(nextState, { newlyAdmittedIds, resolvedParsed, targetMessageId, currentTranscript });
             // (v2 hidden notes) The layered notes for the dossiers this scan built.
             if (hostedNotes && settings.layeredSecrets !== false) attachGeneratedSecrets(nextState, newlyAdmittedIds, parsedForMerge, resolvedParsed, parsed);
+            if (hostedNotes && newlyAdmittedIds.length) {
+                rememberCastAdmissions(nextState, newlyAdmittedIds, targetMessageId, currentLineage);
+                const people = metWithEntry(castList?.());
+                const names = storySuiteV2Meters?.()?.packNames?.() ?? {};
+                for (const npc of nextState.npcs.filter(item => newlyAdmittedIds.includes(item.id))) {
+                    const matches = people.filter(person => dossierFor([npc], person));
+                    if (matches.length !== 1 || nextState.npcs.filter(other => dossierFor([other], matches[0])).length !== 1) continue;
+                    const person = matches[0];
+                    const seeded = seedCastAdmission(nextState, npc, person, { packName: names[person.pack] ?? '', calendarOwn: normalizeSourceOfTruth(settings.sourceOfTruth).calendar === 'mine' });
+                    if (seeded) nextState.npcs = nextState.npcs.map(item => item.id === npc.id ? seeded : item);
+                }
+            }
             const inlineIds = scanInlineNpcIds(resolvedParsed, merged);
             if (targetMessageId >= 0) {
                 clearInlineCardsAtMessage(nextState, targetMessageId);
@@ -384,7 +410,8 @@ export function createScanPart(rt, deps) {
             persist();
             renderDossier();
             updateInjection();
-            if (capture) catchUpIds = noteCaptureCatchUp(scanChatKey, inlineIds);
+            if (capture && replayScope()) replayRefreshIds = Object.keys(savedCapture.refreshes || {});
+            else if (capture) catchUpIds = noteCaptureCatchUp(scanChatKey, inlineIds);
             if (manual) {
                 const { created, updated, candidates, promoted, skipped, staleArchived = [], stalePruned = [] } = merged.report;
                 globalThis.toastr?.success?.(`NPC State Delta scan complete: ${created.length} new, ${updated.length} updated${promoted.length ? `, ${promoted.length} promoted` : ''}${candidates.length ? `, ${candidates.length} candidate${candidates.length === 1 ? '' : 's'} held` : ''}${staleArchived.length ? `, ${staleArchived.length} stale archived` : ''}${stalePruned.length ? `, ${stalePruned.length} stale deleted` : ''}${skipped.length ? `, ${skipped.length} skipped` : ''}.`);
@@ -414,6 +441,7 @@ export function createScanPart(rt, deps) {
             updateInjection();
             if (getChatKey() === scanChatKey && !replayScope()) void drainPendingAutoScan(scanChatKey);
             if (catchUpIds.length) void runCaptureCatchUp(scanChatKey, catchUpIds);
+            for (const id of replayRefreshIds) await refreshNpcFromChat(id, { automatic: true, fillLooks: false }); // (ONEPASSCAPR2-1) replay accepted catch-up work in order
         }
     }
 

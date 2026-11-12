@@ -51,7 +51,7 @@ try {
     globalThis.ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
     // A backfill finds the NPC it asks for; every other request finds nothing new.
     mockState.quietResponder = async (args = {}) => {
-        const asked = String(args.prompt || '').match(/^Requested NPC: (.+)$/m)?.[1];
+        const asked = (/backfill scanner/i.test(String(args.systemPrompt || '')) ? String(args.prompt || '').match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] : undefined);
         return asked ? JSON.stringify({ npcs: [{ name: asked, present: true, role: 'regular', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : '{"npcs":[]}';
     };
     const emitAll = async (event, ...args) => { await Promise.all((mockState.listeners.get(event) || []).map(fn => fn(...args))); };
@@ -142,10 +142,11 @@ test('hosted, catch-up 1, new admissions: each new NPC gets the Refresh and a ba
     });
     // Changed (new-NPC rule): a newly met NPC gets the catch-up's targeted Refresh (it writes the structured appearance) AND its backfill.
     assert.deepEqual(r.one, { scanner: 0, relationship: 0, backfill: 1, refresh: 1 }, 'the new person: the Refresh and the backfill');
-    assert.equal(r.two.backfill, 1, 'two new people: one backfill this reply');
+    // (ONEPASSCAPR2-3) Every new admission gets its one fill in its own reply, none waits for another reply.
+    assert.equal(r.two.backfill, 2, 'two new people: each gets its backfill this reply');
     assert.equal(r.two.refresh, 2, 'both people in the reply are new admissions: each gets the Refresh');
-    assert.equal(r.queuedAfterTwo, 1, 'the other waits, not lost');
-    assert.equal(r.three.backfill, 1, 'the next reply takes it');
+    assert.equal(r.queuedAfterTwo, 0, 'nothing waits');
+    assert.equal(r.three.backfill, 0, 'the next reply owes nothing');
     assert.equal(r.queued, 0);
 });
 
@@ -208,7 +209,7 @@ test('an old saved state with pendingBackfills drains one per reply, the 100 cap
         for (let i = 0; i < 3; i += 1) { await reply('Quiet.', { npcs: [] }); sizes.push(globalThis.NPCStateDelta.getState().pendingBackfills.length); }
         return { sizes };
     });
-    assert.deepEqual(r.sizes, [2, 1, 0, 0]);
+    assert.deepEqual(r.sizes, [0, 0, 0, 0], '(ONEPASSCAPR2-3) every admission is filled in its own reply, none waits');
 });
 
 test('catch-up: every due NPC is held from the reply backfill; a newly met NPC keeps its queue entry and gets its backfill after the Refresh (established ones skipped)', async () => {
@@ -240,11 +241,12 @@ test('catch-up: every due NPC is held from the reply backfill; a newly met NPC k
     assert.deepEqual([...rt.catchUpTaken.get(key)].sort(), ['new1', 'old1'], 'the reply backfill start skips both');
     await part.runCaptureCatchUp(key, due);
     assert.deepEqual(calls.refresh.sort(), ['new1', 'old1'], 'one Refresh each');
-    assert.equal(calls.opts.new1.fillLooks, true, 'the newly met person\'s Refresh may fill the blank or partial looks (a partial description does not stop it)');
+    assert.equal(calls.opts.new1.fillLooks, false, '(ONEPASSCAPR2-3) the admission backfill owns the one fill, so the newly met person\'s Refresh does not fill');
     assert.equal(calls.opts.old1.fillLooks, false, 'an established person\'s Refresh never does');
     assert.deepEqual(state.pendingBackfills.map(i => i.npcId), ['new1'], 'the established entry is covered by its Refresh; the new one is kept');
     assert.equal(calls.backfill.length, 1, 'one backfill start after the Refreshes');
-    assert.equal(calls.backfill[0].limit, 1);
+    assert.equal(calls.backfill[0].limit, 0, 'no repair call beyond the admissions');
+    assert.equal(calls.backfill[0].admissions, true);
     assert.deepEqual(calls.backfill[0].skipNpcIds, ['old1'], 'established NPCs are not backfilled again');
     assert.equal(rt.catchUpTaken.has(key), false, 'the hold is released');
 });
@@ -348,4 +350,31 @@ test('send-drop: an earlier message edited during the scan (nothing appended) ru
     const r = runSend('send-edit', { edit: true, sendAt: 150, settle: 4000 });
     assert.equal(r.total, 2, `scanner calls: ${r.total}`);
     assert.ok(r.names.includes('Yunyun'), 'its result landed: ' + JSON.stringify(r.names));
+});
+
+test('FOLLOWREFRESH: a new person\'s follow-up is read like a Refresh (memories, tie, look), keeps the reply\'s one-pass live fields and never moves meters', () => {
+    const r = runCalls('followrefresh', true, async ({ reply, mockState }) => {
+        const prompts = [];
+        mockState.quietResponder = async (args = {}) => {
+            if (!/backfill scanner/i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            prompts.push(String(args.prompt || ''));
+            return JSON.stringify({ npcs: [{ name: 'Yunyun', present: false, mood: 'furious', goal: 'leave town', status: 'asleep', location: 'the cellar', role: 'adventurer',
+                memories: ['Yunyun once saved a lost lamb on the moor.'], keyRelationships: ['Mira — innkeeper | trades gossip with her'],
+                overallAppearance: 'A slim young woman, long dark hair, crimson eyes.', relationshipImpact: 'major', relationshipDelta: { trust: 5, affection: 5, desire: 0, tension: 0 }, relationshipChangeReason: 'x' }] });
+        };
+        await reply('Yunyun waves at the gate.', { npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', mood: 'calm', goal: 'guard the gate', status: 'standing watch', location: 'the gate', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] });
+        const npc = globalThis.NPCStateDelta.getState().npcs.find(item => item.name === 'Yunyun');
+        return { count: prompts.length, refreshForm: /TARGETED REFRESH FROM CHAT/.test(prompts[0] || ''), oldForm: /targeted dossier backfill extractor/.test(prompts[0] || ''), fill: /FILL LOOKS/.test(prompts[0] || ''), window: /^\[m\d+\]/m.test(prompts[0] || ''),
+            memories: npc.memories, ties: npc.keyRelationships, look: npc.overallAppearance, live: { present: npc.present, mood: npc.mood, goal: npc.goal, status: npc.status, location: npc.location }, relationship: npc.relationship };
+    });
+    assert.equal(r.count, 1, 'still one call for the new person');
+    assert.equal(r.refreshForm, true);
+    assert.equal(r.oldForm, false);
+    assert.equal(r.fill, true, 'the look fill rides on the same call');
+    assert.equal(r.window, true, 'the Refresh story window (with message ids)');
+    assert.ok(r.memories.some(text => /lost lamb/.test(text)), 'memories come back like a Refresh');
+    assert.ok(r.ties.some(text => /^Mira/.test(text)), 'ties come back like a Refresh');
+    assert.match(r.look || '', /crimson eyes/, 'the fill is kept');
+    assert.deepEqual(r.live, { present: true, mood: 'calm', goal: 'guard the gate', status: 'standing watch', location: 'the gate' }, 'the same reply\'s one-pass live fields are kept');
+    assert.deepEqual({ ...r.relationship }, { trust: 0, affection: 0, desire: 0, tension: 0 }, 'meters never move');
 });
