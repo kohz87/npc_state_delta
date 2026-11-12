@@ -637,8 +637,8 @@ test('browser back: every history.go(-n) is skipped once (a counter); in Map mod
   }
 });
 
-test('the section "‹ Dossier" pill is hidden by the panel\'s container layout (two panes or more), not by a device width', () => {
+test('the section "‹ Dossier" pill is hidden only where the board tiles are beside the section (three panes), by the container, not a device width', () => {
   const css = fs.readFileSync(new URL('../dossier-ui-styles-sections.js', import.meta.url), 'utf8');
-  assert.match(css, /@container dsr \(min-width: \$\{TWO_PANE_MIN\}px\) \{ #\$\{ROOT_ID\} \.delta-section-back \{ display:none; \} \}/);
+  assert.match(css, /@container dsr \(min-width: \$\{THREE_PANE_MIN\}px\) \{ #\$\{ROOT_ID\} \.delta-section-back \{ display:none; \} \}/);
   assert.doesNotMatch(css, /@media[^{]*\{[^}]*delta-section-back/);
 });
