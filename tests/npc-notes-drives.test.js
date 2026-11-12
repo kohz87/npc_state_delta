@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    DRIVES, DRIVE_DEFAULT, DRIVE_RULE, growDrives, driveEvidence, DRIVES_TEXT_MAX, readDrives, setDrives, seedDrives, strengthMultiplier, applyStrength, scaledInst, driveRows,
+    DRIVES, DRIVE_DEFAULT, DRIVE_RULE, growDrives, parseLever, driveEvidence, DRIVES_TEXT_MAX, readDrives, setDrives, seedDrives, strengthMultiplier, applyStrength, scaledInst, driveRows,
 } from '../src/npc-notes-drives.js';
 
 const allDefault = () => Object.fromEntries(DRIVES.map(drive => [drive.key, DRIVE_DEFAULT]));
@@ -149,7 +149,7 @@ test('driveRows: a note says where a non-normal drive came from (pack, descripti
     assert.equal(rows.find(row => row.key === 'awe').note, '', 'normal: no note');
     const fromText = setDrives(undefined, {}, { description: 'protect and guard' });
     assert.equal(driveRows(readDrives(fromText), fromText).find(row => row.key === 'pres').note, 'from their description');
-    const grew = growTwice('belo-cue: a friend', 'family came to visit');
+    const grew = growTwice('a new friend', 'family came to visit');
     assert.match(driveRows(readDrives(grew), grew).find(row => row.key === 'belo').note, /^grew over 2 story moments/);
     assert.equal(driveRows(readDrives(setDrives(undefined, {}, {})), undefined).every(row => row.note === ''), true);
     const set = setDrives(fromPack, { hone: 2 });
@@ -245,4 +245,156 @@ test('leaf size: the worst leaf the caps allow still reads (the limit holds it)'
     const leaf = JSON.stringify({ ...Object.fromEntries(DRIVES.map(drive => [drive.key, 3])), x });
     assert.ok(leaf.length <= DRIVES_TEXT_MAX, `${leaf.length} characters`);
     assert.notEqual(readDrives(leaf), null);
+});
+
+// Every distinct "Label: level - text" lever string found in the stored live runs (one per label and level; texts cut to 80 characters).
+// The first list names a drive; the expected [key, direction] is from the level alone (high up, low or none down, anything else null).
+const REAL_DRIVE_LEVERS = [
+    ["Conflict: aggressive - snaps orders and lashes beasts with the crop when under p", null],
+    ["Conflict: direct - curses his mule with wheezing spite and issues blunt instruct", null],
+    ["Conflict: avoid - warns nosy strangers to leave before patrols notice them", null],
+    ["Honesty: high - bluntly deflates compliments about her plain food", ['hone', 'u']],
+    ["Conflict: blunt - cuts through polite small talk with immediate, direct accusati", null],
+    ["Conflict: low - Snaps at couriers and loiterers from behind the wire grating but", ['conf', 'd']],
+    ["Honesty: blunt - warns strangers plainly about vouchers and market closures whil", null],
+    ["Honesty: strict - Enforces intake fees and official protocols before providing s", null],
+    ["Conflict: rigid - halts inquiries until required guild fees or warrants are sett", null],
+    ["Honesty: low - peddles loose gate rumors and fabrications to extract coins or dr", ['hone', 'd']],
+    ["Conflict: high - sprang up from dirty blankets and leveled a rusted billhook to ", ['conf', 'u']],
+    ["Honesty: straightforward - bluntly warns travelers of dangerous road hazards and", null],
+    ["Conflict: pragmatic - Advises readiness without seeking unnecessary trouble.", null],
+    ["Conflict: unyielding - Risks drowning wheels in swollen fords rather than submit", null],
+    ["Honesty: fair - Pays two copper bits for hard physical help hauling his cart fre", null],
+    ["Honesty: candid - Readily shares rumors about empty watchposts and nightly cart ", null],
+    ["Honesty: medium - trades genuine civic intelligence, but only for coin, trade, o", null],
+    ["Conflict: passive - enforces rules through curt bureaucratic denial rather than ", null],
+    ["Conflict: active - cracks iron kitchen tools against wood to quiet the taproom a", null],
+    ["Conflict: guarded - Wouter swung the flat of his blade against the coaming to dr", null],
+    ["Honesty: direct - Demands exact tolls and clearance stamps before granting any s", null],
+    ["Conflict: explosive - snaps into screeching reprimands the moment a customer sta", null],
+];
+const REAL_OTHER_LEVERS = [
+    "Last Gains: none - opening scene",
+    "Label: level - effect",
+    "Loyalty: moderate - maintains the Bluewatch post despite months of unpaid wages ",
+    "Care: moderate - prioritizes the safety and order of the border settlement again",
+    "Mercy: high - she stitches gently and takes her time, even with people who don't",
+    "Care: high - she is fiercely protective of the dead",
+    "Loyalty: high - she is warm and steady once someone matters to her",
+    "Independence: high - she fears being used",
+    "Expression: low - she speaks little, and her care shows in what she does",
+    "Presentation: low - a seductive air she doesn't mean; stares mortify her and she",
+    "Threat: firm - grits through cold water and physical strain to salvage his axle",
+    "Analytical: medium - sizes up travelers' origin and armaments immediately upon a",
+    "Presentation: curt - Processes arrivals mechanically and provides blunt directio",
+    "Analytical: observant - Scans traveler equipment, mount branding, and regional a",
+    "Disposition: curt - Assesses entrants flatly and issues tolls without ceremony.",
+    "Analytical: level - Identifies origins by speech and clothing cut immediately.",
+    "Presentation: plain - Directs strangers to practical city lodgings based on thei",
+    "Threat: Low - Deflects risks by snapping warnings and demanding a transaction or",
+    "Presentation: strict - Enforces intake fees and rank prerequisites before granti",
+    "Presentation: guarded - keeps his focus sharp and wary, assessing newcomers' wea",
+    "Pragmatism: high - Serves plain fare bluntly and dismisses travelers' compliment",
+    "Disposition: suspicious - treats unsolicited compliments as a front for unpaid b",
+    "Rigidity: high - Strictly enforces intake wicket boundaries against wanderers an",
+    "Threat: aggressive - Rises immediately with weapon in hand and calls out intrude",
+    "Duty: high - Manages Bluewatch defenses despite garrison shortages and logistica",
+    "Care: cautious - measures out goods and words with deliberate restraint under pa",
+    "Disposition: indifferent - unhurriedly directs entrants to standard registration",
+    "Threat: high - Draws a notched cleaver and issues lethal ultimatums the moment a",
+    "Disposition: weary - mutters cynical assessments of road conditions while casual",
+    "Care: watchful - warns departing riders of seasonal hazards, wolves, and marcher",
+    "Care: low - casually pares turnips and spits into drainage ditches while travele",
+    "Disposition: guarded - warns travelers to keep coin hidden and look out for beas",
+    "Drive: dutiful - levers open the heavy ash gate barrier despite complaining of c",
+    "Analytical: moderate - Observes potential customers, mounts, and gear before spe",
+    "Analytical: high - Carefully assesses arms, clothing, and travel marks before co",
+    "Threat: cautious - keeps careful watch over palisade gates and warns travelers o",
+    "Expression: high - repeats exaggerated rumors and gossip as absolute fact to see",
+    "Drive: moderate - Immediately pitches wares to anyone sharing camp to secure cop",
+    "Presentation: high - Loudly hawks cheap tallow and wares the instant he encounte",
+    "Presentation: moderate - Maintains rigid decorum behind the registry counter",
+    "Threat: watchful - sizes up mounts, weapons, and traveler gear immediately upon ",
+    "Threat: direct - warns travelers plainly about greedy levies and scrappers down ",
+    "Care: guarded - warns travelers of predatory tolls while remaining wary of fine ",
+    "Drive: greedy - Ambush travelers specifically to plunder valuable mounts.",
+    "Disposition: reserved - Handles gate traffic efficiently with pragmatic advice [",
+    "Presentation: modest - Checks newcomers methodically while maintaining the gate'",
+    "Disposition: neutral - Directs travelers pragmatically without unnecessary hosti",
+    "Presentation: blunt - Answers queries without fuss but immediately guards her st",
+    "Presentation: direct - delivers practical guidance and district realities withou",
+    "Threat: avoidant - flees unnatural omens and hastens to fortified settlements [m",
+    "Disposition: open - reaches out a welcoming hand to thank strangers who offer ai",
+    "Threat: observant - measures newcomers' weapons and mounts while noting down the",
+    "Drive: high - leverages local gossip and market trade to stay ahead of city seiz",
+    "Disposition: cynical - assumes sweet words conceal bad intent or a leaking purse",
+    "Threat: medium - tracks armed city patrols and authority figures silently until ",
+    "Presentation: rigid - enforces guild admission rules and fee requirements withou",
+    "Presentation: practical - Quotes strict rates for food and lodging without givin",
+    "Disposition: gruff - brushes aside compliments and demands unvarnished transacti",
+    "Threat: vigilant - monitors town guard interest and secures her premises against",
+    "Drive: opportunistic - feeds exaggerated rumors to out-of-towners to angle for e",
+    "Disposition: blunt - answers plain questions with raw practical facts of the riv",
+    "Drive: working - focuses on chocking crates and hauling freight despite interrup",
+    "Drive: medium - Balances garrison shortages against impending regional threats.",
+    "Disposition: brusque - sets plain, non-negotiable terms and points out river obs",
+    "Disposition: pragmatic - Answers travelers bluntly while continuing manual wharf",
+    "Analytical: observational - Keeps track of river depths, alternate routes, and g",
+    "Expression: neutral - Explains local river routes and military requisitions plai",
+    "Analytical: pragmatic - keeps an eye on imperial or military risks like town wat",
+    "Analytical: cautious - stays alert to local authorities and impending vessel sei",
+    "Mercy: low - refuses deck space or ship provisions without upfront coin in hand",
+    "Disposition: hostile - Shoves past locals and barks brusque instructions to newc",
+    "Presentation: brisk - monitors cargo loading with tally slate and dismisses idle",
+    "Disposition: low - Spits into the slip gap and dismissively directs inquiries to",
+    "Care: pragmatic - Prioritizes keeping her garrison intact and dealing with logis",
+    "Duty: committed - Manages administrative neglect and late pay ahead of regional ",
+    "Disposition: sour - Snaps blunt directions and spits into the water rather than ",
+    "Expression: blunt - gives direct, unvarnished river directions without pleasantr",
+    "Drive: steady - continues hammering oakum and caulking without dropping his tool",
+    "Presentation: bold - shouts out hawking calls directly beside potential customer",
+    "Presentation: boisterous - clangs kitchen iron and bellows dockside threats to d",
+    "Disposition: abrasive - snorts at polite requests and serves bitter alternatives",
+    "Drive: relentless - pushes sales over other workers' shouting and workspace boun",
+];
+
+const leverResult = text => {
+    const lever = parseLever(text);
+    if (!lever) return 'prose';
+    const found = growDrives(growDrives(undefined, [text], 'r1')?.leaf, [text], 'r2');
+    if (!found) return null;
+    const after = readDrives(found.leaf);
+    const moved = DRIVES.find(drive => after[drive.key] !== DRIVE_DEFAULT);
+    return moved ? [moved.key, after[moved.key] > DRIVE_DEFAULT ? 'u' : 'd'] : null;
+};
+
+test('levers: every real drive lever from the runs counts by its level alone', () => {
+    for (const [text, expected] of REAL_DRIVE_LEVERS) assert.deepEqual(leverResult(text), expected, text);
+});
+
+test('levers: every real lever with another label (Care, Threat, Disposition ...) counts for nothing, whatever its text says', () => {
+    for (const text of REAL_OTHER_LEVERS) assert.equal(leverResult(text), null, text);
+});
+
+test('levers: combined, bracketed and synonym labels use the level, never the label or the text as a cue', () => {
+    for (const text of ['Honesty/Candor: low - conceals local barrow issues', 'Honesty/Candor: guarded - holds back', 'Honesty/Candor: transactional - trades facts',
+        'Honesty (strangers): low - lies to outsiders', 'Honesty & Loyalty: low - sells out anyone', 'Candor: low - evasive', 'Secrecy: high - hides the truth', 'Deception: high - honest-looking lies', 'Sincerity: medium - truth for coin']) {
+        const twice = growDrives(growDrives(undefined, [text], 'r1')?.leaf, [text], 'r2');
+        const after = twice ? readDrives(twice.leaf).hone : 2;
+        assert.ok(after <= 2, `${text} never raises Honesty (${after})`);
+    }
+    assert.equal(leverResult('Honesty/Candor: low - conceals things')[1], 'd');
+    assert.equal(leverResult('Honesty/Candor: high - speaks plainly')[1], 'u');
+    assert.equal(leverResult('Honesty (strangers): low - lies')[1], 'd');
+    assert.equal(leverResult('Secrecy: high - hides the truth')[1], 'd', 'a high Secrecy lever lowers Honesty');
+    assert.equal(leverResult('Secrecy: low - open about it'), null, 'a low Secrecy lever counts for nothing');
+    assert.deepEqual(leverResult('Honesty: high, candid and frank'), ['hone', 'u'], 'a level followed by a comma is read too');
+    assert.equal(parseLever('she lied to him: and ran'), null, 'prose with a colon is not a lever');
+    assert.deepEqual(parseLever('Honesty/Candor (to kin): very low - hides it').parts, ['honesty', 'candor', 'to kin']);
+});
+
+test('levers: cue words still read free prose, with negation', () => {
+    const twice = (a, b) => readDrives(growDrives(growDrives(undefined, [a], 'r1').leaf, [b], 'r2').leaf);
+    assert.equal(twice('she lied to the guard', 'a liar again').hone, 1);
+    assert.equal(twice('a friend of the family', 'her family again').belo, 3);
 });
