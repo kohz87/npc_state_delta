@@ -52,7 +52,7 @@ try {
     globalThis.ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
     // A backfill finds the NPC it asks for; every other request finds nothing new.
     mockState.quietResponder = async (args = {}) => {
-        const asked = String(args.prompt || '').match(/^Requested NPC: (.+)$/m)?.[1];
+        const asked = (/backfill scanner/i.test(String(args.systemPrompt || '')) ? String(args.prompt || '').match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] : undefined);
         return asked ? JSON.stringify({ npcs: [{ name: asked, present: true, role: 'regular', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : '{"npcs":[]}';
     };
     const emitAll = async (event, ...args) => { await Promise.all((mockState.listeners.get(event) || []).map(fn => fn(...args))); };
@@ -178,7 +178,7 @@ test('hosted one-pass: the backfill runs on the reply, the catch-up Refresh on i
 const onePassCapture = async ({ reply, mockState, sleep }) => {
     const BASE = 'Human woman, ~20, petite build, round cheeks, remarkably large bust';
     mockState.quietResponder = async (args = {}) => {
-        const asked = String(args.prompt || '').match(/^Requested NPC: (.+)$/m)?.[1];
+        const asked = (/backfill scanner/i.test(String(args.systemPrompt || '')) ? String(args.prompt || '').match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] : undefined);
         if (asked === 'Sieke') {
             return JSON.stringify({
                 npcs: [{ id: 'npc_sieke', name: 'Sieke', present: true, overallAppearance: `${BASE}. Dark hair, wide brown eyes.`,
