@@ -111,3 +111,24 @@ export function selectionBehind({ saved, live, chat, max = selectionMaxBehind() 
     const behind = at - saved.length;
     return behind > max ? { behind, at } : null;
 }
+
+/**
+ * Whether installing a selected state would drop dossiers that replies still in the story made (run 4: a delete and two Re-reads of a middle
+ * reply cut eight dossiers to three). The dossiers the live state has and the saved one lacks came from the messages Delta read after the two
+ * part (`live.lineage` past what it shares with `saved.lineage`); when one of those is a reply still in the chat (`replies`: the fingerprints of
+ * the chat's replies now), installing would take away what a reply that stays made. A swiped or deleted reply is no longer in the chat, so what
+ * only it made may go. → { names, replies } (the dossiers dropped, how many of those replies stay) or null (nothing dropped, or too little known).
+ */
+export function selectionDrops({ saved, live, replies }) {
+    if (!Array.isArray(replies) || !isRecord(saved) || !isRecord(live)) return null;
+    const kept = new Set((Array.isArray(saved.npcs) ? saved.npcs : []).map(npc => npc?.id));
+    const dropped = (Array.isArray(live.npcs) ? live.npcs : []).filter(npc => typeof npc?.id === 'string' && !kept.has(npc.id));
+    if (!dropped.length) return null;
+    const before = Array.isArray(saved.lineage) ? saved.lineage : [];
+    const after = Array.isArray(live.lineage) ? live.lineage : [];
+    let shared = 0;
+    while (shared < before.length && shared < after.length && before[shared] === after[shared]) shared += 1;
+    const here = new Set(replies);
+    const staying = after.slice(shared).filter(fingerprint => here.has(fingerprint)).length;
+    return staying ? { names: dropped.map(npc => String(npc.name || npc.id)), replies: staying } : null;
+}

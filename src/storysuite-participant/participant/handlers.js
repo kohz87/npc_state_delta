@@ -5,7 +5,7 @@
 import { PARTICIPANT_SCHEMA } from '../checkpoint.js';
 import { isTerminalNpcDeath } from '../../../terminal-lifecycle.js';
 import { hashJson } from '../hash.js';
-import { restoredState, selectionBehind, selectionMaxBehind, storedTimeline, timelineOf } from '../timeline.js';
+import { restoredState, selectionBehind, selectionDrops, selectionMaxBehind, storedTimeline, timelineOf } from '../timeline.js';
 import { fail, isRecord, plain, preparedId } from './support.js';
 
 export function createParticipantHandlers({
@@ -115,6 +115,23 @@ export function createParticipantHandlers({
                     // route, which is asked for now (the host cannot take a change while it is finishing this one, so it follows the acknowledgement).
                     install = false;
                     schedulePublish(0);
+                }
+                // A head selection (the host's `hs_`) chosen outright (not walked back to, `fallback`) that would drop dossiers made by replies still in the
+                // story is not installed: the dossiers stay, the answer says so (`kept`, a Problem line on the host), and the state they are in is published
+                // next on the selected checkpoint, so the head stands on it again. A swiped or deleted reply's own dossiers may go (selectionDrops).
+                const drops = install && entry.fallback !== true && String(input.return).startsWith('hs_') ? selectionDrops({ saved: got.doc.state, live, replies: port.chatReplies?.() }) : null;
+                if (drops) {
+                    const who = drops.names.length > 4 ? `${drops.names.slice(0, 4).join(', ')} and ${drops.names.length - 4} more` : drops.names.join(', ');
+                    const kept = `Dossiers were kept as they are: the state the story selected would drop ${who}, made by replies that are still in the story.`;
+                    preparedAt.delete(input.prepared);
+                    idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: hashJson(got.doc.state) };
+                    idx.selected = entry.checkpoint;
+                    entry.return = input.return;
+                    idx.returns[input.return] = { ...ret, status: 'active' };
+                    await save();
+                    warn(kept);
+                    schedulePublish(0);
+                    return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash, kept };
                 }
                 // A head selection (the host's `hs_`) chosen outright (not walked back to, `fallback`) that installs a state far behind where the story and
                 // the dossiers part is installed all the same (after a quiet stretch it is the right one; a refusal would keep a swiped reply's facts), and

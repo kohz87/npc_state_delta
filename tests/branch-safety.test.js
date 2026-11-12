@@ -121,3 +121,44 @@ test('a swipe of the latest of six replies restores the state of the reply befor
     assert.notEqual(result.state.npcs[0].trust,1);
   }
 });
+
+// Run 4 (12 Nov): eight replies, each meeting a person; a delete of a middle reply, a Re-read of a middle reply (the chat unchanged) and a swipe of
+// the latest, from sidecar format 1 and format 2: Delta's own reconcile keeps the dossiers of the replies that stay, and a head selection of an
+// earlier reply's state is one that would drop them (selectionDrops), while the swipe's parent drops only the swiped reply's own person.
+test('run 4 shape: a middle delete and a Re-read keep the eight dossiers; a swipe of the latest gives its parent, from sidecar format 1 and format 2',async()=>{
+  const {encodeStateFilePayload,decodeStateFilePayload}=await import('../storage-payload.js');
+  const {selectionDrops}=await import('../src/storysuite-participant/timeline.js');
+  const chat=[assistant('Greeting')];
+  const state=baseState();
+  const states=[];
+  for(let reply=1;reply<=8;reply+=1){
+    chat.push(user(`Turn ${reply}`));
+    state.lineage=chatLineage(chat);
+    recordBranchCheckpoint(state,chat,chat.length-1,'state');
+    chat.push(assistant(`Reply ${reply}: the party meets Person ${reply}, with enough text to be worth a patch against its neighbours.`));
+    const met=createNpcRecord(`Person ${reply}`); met.id=`npc_p${reply}`; met.notes='A long note about this person that every checkpoint repeats. '.repeat(6);
+    state.npcs=[...state.npcs,met];
+    state.turn=reply;
+    state.lineage=chatLineage(chat);
+    recordBranchCheckpoint(state,chat,chat.length-1,'state');
+    states.push(JSON.parse(JSON.stringify(state)));
+  }
+  const replies=list=>chatLineage(list).filter((_,at)=>!list[at].is_user);
+  const viaFile=(value,version)=>{
+    const text=version===2?encodeStateFilePayload('chat:a.png:one',value):JSON.stringify({format:'npc_state_delta_chat_data',formatVersion:1,chatKey:'chat:a.png:one',revision:1,state:JSON.parse(JSON.stringify(value))});
+    assert.equal(JSON.parse(text).formatVersion,version);
+    return decodeStateFilePayload(text).state;
+  };
+  for(const version of [1,2]){
+    const deleted=chat.filter((_,at)=>at!==2*4);
+    const own=reconcileBranchState(viaFile(state,version),deleted,{explicitDivergence:2*4,operation:'delete'});
+    for(const reply of [5,6,7,8]) assert.equal(own.state.npcs.some(npc=>npc.id===`npc_p${reply}`),true,`format ${version}: Delta's own reconcile keeps Person ${reply}`);
+    const live=viaFile(state,version);
+    assert.deepEqual(selectionDrops({saved:viaFile(states[2],version),live,replies:replies(deleted)})?.names,['Person 4','Person 5','Person 6','Person 7','Person 8'],`format ${version}: delete`);
+    assert.equal(selectionDrops({saved:viaFile(states[3],version),live,replies:replies(chat)})?.replies,4,`format ${version}: Re-read of reply 5`);
+    const swiped=[...chat.slice(0,-1),assistant('Reply 8, swiped.')];
+    assert.equal(selectionDrops({saved:viaFile(states[6],version),live,replies:replies(swiped)}),null,`format ${version}: the swipe's parent may be installed`);
+    const result=reconcileBranchState(viaFile(state,version),swiped,{explicitDivergence:swiped.length-1,operation:'swipe'});
+    assert.deepEqual(result.state.npcs.map(npc=>npc.id).sort(),states[6].npcs.map(npc=>npc.id).sort(),`format ${version}: the swipe gives reply 7's dossiers`);
+  }
+});

@@ -155,6 +155,7 @@ export function createTimelinePart(session, deps) {
             readState: () => runtime()?.getState?.() ?? { npcs: [] },
             started: () => runtime()?.timelineStarted?.() === true,
             chatLineage: () => { try { return runtime()?.chatLineage?.() ?? null; } catch { return null; } },
+            chatReplies: () => { try { return runtime()?.chatReplies?.() ?? null; } catch { return null; } },
             scanEvery: () => { try { return runtime()?.scanEvery?.() ?? null; } catch { return null; } },
             // Whether Delta has loaded the open chat's state, and its load: the participant reads nothing before it (a reload's recovery comes early).
             ready: () => (runtime()?.timelineReady?.() ?? runtime()?.stateReady?.()) === true,

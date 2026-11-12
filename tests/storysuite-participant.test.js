@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { LINEAGE_ID, NP_ID, buildCheckpoint, checkpointIdOf, checkpointProblem, createParticipant, hydrateIdentity, memoryVault, resolveIdentity, restoredState, selectionBehind, selectionMaxBehind, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
+import { LINEAGE_ID, NP_ID, buildCheckpoint, checkpointIdOf, checkpointProblem, createParticipant, hydrateIdentity, memoryVault, resolveIdentity, restoredState, selectionBehind, selectionDrops, selectionMaxBehind, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
 import { hashJson, sha256 } from '../src/storysuite-participant/hash.js';
 import { fileVault } from '../src/storysuite-participant/vault.js';
 import { isTerminalNpcDeath } from '../terminal-lifecycle.js';
@@ -679,6 +679,76 @@ test('a head selection at the exact parent installs; a reader\'s restore far bac
     const head = await blind.participant.prepare({ return: 'hs_00000003', checkpoint: blind.first.checkpoint, hash: blind.first.hash });
     assert.equal((await blind.participant.activate({ return: 'hs_00000003', prepared: head.prepared })).ok, true);
     assert.equal(blind.live.installs, 1, 'without the chat nothing is judged');
+});
+
+// Run 4 (12 Nov): a delete of a middle reply and two Re-reads of a middle reply installed the state of an earlier reply, and eight dossiers fell
+// to three. A head selection that would drop dossiers made by replies still in the story keeps the dossiers instead; a swiped or deleted reply's
+// own dossiers may still go. The chat: a greeting, then a turn and a reply each (`u<n>`, `r<n>`), each reply meeting one person (`p<n>`).
+const turns = count => ['g', ...Array.from({ length: count }, (_, at) => [`u${at + 1}`, `r${at + 1}`]).flat()];
+const peopleAt = count => ({ npcs: Array.from({ length: count }, (_, at) => npc(`npc_p${at + 1}`, `P${at + 1}`)), lineage: turns(count) });
+const repliesOf = lineage => lineage.filter(item => item.startsWith('r') || item === 'g');
+
+test('selectionDrops: a middle delete or Re-read would drop what later replies made; a swipe or delete of the latest drops only its own', () => {
+    const live = peopleAt(8);
+    const deleted = turns(8).filter(item => item !== 'r4');
+    assert.deepEqual(selectionDrops({ saved: peopleAt(3), live, replies: repliesOf(deleted) }), { names: ['P4', 'P5', 'P6', 'P7', 'P8'], replies: 4 }, 'delete of reply 4: replies 5 to 8 stay');
+    assert.deepEqual(selectionDrops({ saved: peopleAt(4), live, replies: repliesOf(turns(8)) }), { names: ['P5', 'P6', 'P7', 'P8'], replies: 4 }, 'Re-read of reply 5: the chat is unchanged');
+    assert.equal(selectionDrops({ saved: peopleAt(7), live, replies: repliesOf([...turns(7), 'u8', 'r8-swiped']) }), null, 'swipe of the latest: its person goes');
+    assert.equal(selectionDrops({ saved: peopleAt(7), live, replies: repliesOf([...turns(7), 'u8']) }), null, 'delete of the latest');
+    assert.equal(selectionDrops({ saved: peopleAt(5), live, replies: repliesOf([...turns(5), 'u6']) }), null, 'several latest replies deleted');
+    assert.equal(selectionDrops({ saved: peopleAt(8), live, replies: repliesOf(turns(8)) }), null, 'nothing dropped');
+    assert.equal(selectionDrops({ saved: peopleAt(3), live, replies: null }), null, 'the chat unknown: nothing judged');
+});
+
+async function dropSetup(chat, extra = {}) {
+    const told = [];
+    const made = setup({ state: peopleAt(8), extra: { warn: text => told.push(text), chatReplies: () => repliesOf(chat), ...extra } });
+    made.live.state = peopleAt(3);
+    await made.hydrate();
+    const third = await made.participant.checkpoint({ cursor: { sid: 'sr_3' }, headHash: '3'.repeat(64) });
+    made.live.state = { ...peopleAt(7), timeline: made.live.state.timeline };
+    const seventh = await made.participant.checkpoint({ cursor: { sid: 'sr_7' }, headHash: '7'.repeat(64) });
+    made.live.state = { ...peopleAt(8), timeline: made.live.state.timeline };
+    await made.hydrate();
+    return { ...made, told, third, seventh };
+}
+
+test('a head selection that would drop dossiers of replies still in the story keeps them: answered done with `kept`, not installed, published next', async () => {
+    const run = await dropSetup(turns(8).filter(item => item !== 'r4'));
+    const prepared = await run.participant.prepare({ return: 'hs_00000010', checkpoint: run.third.checkpoint, hash: run.third.hash });
+    const answer = await run.participant.activate({ return: 'hs_00000010', prepared: prepared.prepared });
+    assert.deepEqual({ ...answer, kept: typeof answer.kept }, { ok: true, checkpoint: run.third.checkpoint, hash: run.third.hash, kept: 'string' });
+    assert.match(answer.kept, /^Dossiers were kept as they are: the state the story selected would drop P4, P5, P6, P7 and 1 more, made by replies that are still in the story\.$/);
+    assert.equal(run.live.installs, 0);
+    assert.equal(run.live.state.npcs.length, 8, 'all eight dossiers stay');
+    assert.deepEqual(run.told, [answer.kept]);
+    // The dossiers as they are are published on the selected checkpoint: the head stands on them again.
+    const calls = [];
+    run.participant.attach(handleFor(calls));
+    const out = await run.flush();
+    assert.equal(out.ok, true, out.message);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].made.before.checkpoint, run.third.checkpoint);
+    // Asked again (a recovery), the same answer and still nothing installed.
+    const again = await run.participant.activate({ return: 'hs_00000010', prepared: prepared.prepared });
+    assert.deepEqual([again.ok, typeof again.kept, run.live.installs], [true, 'string', 0]);
+});
+
+test('a swipe of the latest reply still installs its parent; a fallback walk and a reader\'s restore install; no chat port installs', async () => {
+    const swipe = await dropSetup([...turns(7), 'u8', 'r8-swiped']);
+    const prepared = await swipe.participant.prepare({ return: 'hs_00000011', checkpoint: swipe.seventh.checkpoint, hash: swipe.seventh.hash });
+    const answer = await swipe.participant.activate({ return: 'hs_00000011', prepared: prepared.prepared });
+    assert.deepEqual([answer.ok, answer.kept, swipe.live.installs, swipe.live.state.npcs.length], [true, undefined, 1, 7]);
+    const middle = turns(8).filter(item => item !== 'r4');
+    for (const [ret, fallback] of [['rt_00000012', false], ['hs_00000013', true]]) {
+        const run = await dropSetup(middle);
+        const ready = await run.participant.prepare({ return: ret, ...(fallback ? { fallback: true } : {}), checkpoint: run.third.checkpoint, hash: run.third.hash });
+        const done = await run.participant.activate({ return: ret, prepared: ready.prepared });
+        assert.deepEqual([done.ok, done.kept, run.live.installs], [true, undefined, 1], `${ret}: exact, chosen by the reader or walked back to`);
+    }
+    const blind = await dropSetup(middle, { chatReplies: undefined });
+    const head = await blind.participant.prepare({ return: 'hs_00000014', checkpoint: blind.third.checkpoint, hash: blind.third.hash });
+    assert.deepEqual([(await blind.participant.activate({ return: 'hs_00000014', prepared: head.prepared })).kept, blind.live.installs], [undefined, 1]);
 });
 
 test('the run data: the first reply\'s checkpoint is told for the swipe of the sixth reply, the fifth reply\'s is not (when the run data is here)', async t => {

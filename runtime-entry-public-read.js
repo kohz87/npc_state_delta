@@ -157,6 +157,8 @@ export function createPublicApiReadPart(deps) {
     getState: () => structuredClone(getChatState()),
     // The fingerprints of the open chat's messages now (the timeline participant asks it of a head selection that would install an older state).
     chatLineage: () => chatLineage(getContext().chat || []),
+    // The fingerprints of the open chat's replies (not the reader's messages): a head selection that would drop dossiers these made is not installed.
+    chatReplies: () => { const chat = getContext().chat || []; return chatLineage(chat).filter((_, at) => !chat[at]?.is_user); },
     // The reader's "Scan every" (the timeline participant sizes what a quiet stretch can be from it).
     scanEvery: () => getSettings().scanEvery,
     };
