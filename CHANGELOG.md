@@ -1,5 +1,6 @@
 ## Unreleased
 
+- **Fix: a body written into the clothes field now shows and saves as Look.** Build, height, hair and the like move to Look in their own words (display for old records, stored on the next write); body phrases Look already states leave Wearing, so a trait is never shown twice. A Refresh fill keeps the stored apparent age and asks for plain wording and the stored height. Prompt change (flagged): the import and fill prompts say plainly body = Look, clothes = Wearing (import prompt +93 characters; Stage 9 baseline re-recorded).
 - **Deleting, editing or Re-reading a middle reply now restores the NPC dossiers to before that reply.** The dossiers go back to the state saved just before the changed reply, are rebuilt from the replies after it (including any between the saved state's last read reply and the change), and a note tells you what was rebuilt, kept or not read. If no safe earlier state exists, the current dossiers are kept and the note says so. Deleting or swiping the latest reply is unchanged, unless a scan of it was written and not yet published (or the chat has no saved history line): then the dossiers are kept and a note says so. Replies already written replay as before.
 
 ## 1.17.0

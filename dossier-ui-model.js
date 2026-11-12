@@ -1,5 +1,6 @@
 /* NPC State Delta dossier surface: dossier record lookups and presentation projections. */
 import { appearanceFingerprint, currentPresentationText, normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
+import { withSplitLook } from './appearance-fill.js';
 import { PACK_BIRTHDAY_REASON, formatBirthDate } from './birthday.js';
 import { escapeHtml } from './src/util/html.js';
 import { normalizeMemoryStamps } from './core-record-shared.js';
@@ -172,7 +173,8 @@ function shownCustomFields(npc, customFieldNames) {
         .map(([name, value]) => [plain(name), plain(value)]).filter(([name, value]) => name && value).slice(0, 12);
 }
 
-export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortraits = {}, { customFieldNames } = {}) {
+export function dossierDetailProjection(stored = {}, portraitAssets = {}, formPortraits = {}, { customFieldNames } = {}) {
+    const npc = withSplitLook(stored);   // display only: a body written into the clothes field shows as Look; stored data waits for a write
     const rel = npc?.relationship && typeof npc.relationship === 'object' ? npc.relationship : {};
     const shown = displayedPortrait(npc, portraitAssets, formPortraits);
     return {
