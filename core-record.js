@@ -5,7 +5,7 @@ import { inferNpcIdentityKind, makeNpcId, normalizeBoolean, normalizeGender, nor
 import { appendRelationshipEvent, calibrateRelationshipSummary, compactDurableText, DEFAULT_RELATIONSHIP, DURABLE_PROFILE_LIMITS, normalizeRelationshipAuditDelta, normalizeRelationshipBaseline, normalizeRelationshipEventHistory, normalizeRelationshipEvidence, normalizeRelationshipImpact, normalizeRelationshipMilestones, normalizeRelationshipProgress, RELATIONSHIP_KEYS, relationshipEventMessage } from './core-relationship.js';
 import { cleanList, cleanText, normalizeName } from './core-text.js';
 
-import { compactKeyRelationshipEntry, KEY_RELATIONSHIP_LIMIT, mergeKeyRelationshipUpdates } from './core-keyrel.js';
+import { cleanTieSeen, compactKeyRelationshipEntry, KEY_RELATIONSHIP_LIMIT, mergeKeyRelationshipUpdates } from './core-keyrel.js';
 import { normalizeMannerisms } from './core-durable.js';
 import { BEHAVIOR_PROFILE_LIMIT, normalizeBehaviorProfile } from './core-behavior.js';
 import { PORTRAIT_NPC_PROMPT_LIMIT } from './core-portrait.js';
@@ -130,6 +130,7 @@ export function normalizeNpcRecord(rawInput = {}) {
                 .map(compactKeyRelationshipEntry).filter(Boolean).slice(0, KEY_RELATIONSHIP_LIMIT)
             : [])
         : mergeKeyRelationshipUpdates([], raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family);
+    { const seen = cleanTieSeen(raw.tieSeen); if (seen) npc.tieSeen = seen; }   // last story day each tie's person was mentioned (core-keyrel.js)
     npc.profileEvidence = normalizeProfileEvidence(raw.profileEvidence ?? raw.profile_evidence);
     // Current Thoughts are not durable dossier state; NPC Inner Chatter is ephemeral.
     delete npc.thoughts;
