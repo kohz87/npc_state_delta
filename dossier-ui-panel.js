@@ -33,7 +33,7 @@ export class DossierUiPanel {
         this.boundFocus = () => { if (this.panelOpen) this.scheduleRefresh(); };
         // The browser's back gesture steps one dossier screen back: one history entry per screen the dossier has pushed.
         this.navEntries = 0;
-        this.ignorePop = false;
+        this.ignorePops = 0;   // history.go(-n) calls whose popstate we expect and skip
         this.boundPop = () => this.onPopState();
     }
 
@@ -45,15 +45,22 @@ export class DossierUiPanel {
         if (this.navEntries > want) {
             const back = this.navEntries - want;
             this.navEntries = want;
-            this.ignorePop = true;
+            this.ignorePops += 1;
             history.go(-back);
         }
     }
 
     onPopState() {
-        if (this.ignorePop) { this.ignorePop = false; return; }
+        if (this.ignorePops > 0) { this.ignorePops -= 1; return; }
         if (!this.panelOpen || this.navEntries <= 0) return;
         this.navEntries -= 1;
+        // in Map mode the dossier screen is hidden: the back gesture leaves the map (the map listens) and the screen stays; its entry goes back on
+        if (this.root?.querySelector('.delta-spread.delta-map-mode')) {
+            document.dispatchEvent(new CustomEvent('npc-state-delta:leave-map'));
+            this.navEntries += 1;
+            history.pushState({ npcStateDeltaScreen: true }, '');
+            return;
+        }
         this.setScreen(goBack(this.screen));
     }
 

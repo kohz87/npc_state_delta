@@ -1,7 +1,7 @@
 /* NPC State Delta dossier surface: the profile screen (portrait with the four meter numbers, identity, appearance forms,
    character, background). Markup only, built from the detail projection; the screens module draws it and fills portraits. */
 import { escapeHtml } from './src/util/html.js';
-import { plain } from './dossier-ui-model.js';
+import { changeStamp, plain } from './dossier-ui-model.js';
 import { appearanceFormsHtml, birthdayCard, changedMark, currentCard, identityLine, portraitHtml, proseHtml } from './dossier-ui-html.js';
 
 const METER_LABELS = Object.freeze([['trust', 'Trust'], ['affection', 'Affection'], ['desire', 'Desire'], ['tension', 'Tension']]);
@@ -105,7 +105,9 @@ export function dossierProfileHtml(npc = {}, { layout = 'phone', portraitRefs = 
     const desktop = layout === 'desktop';
     const identity = block('identity', 'Identity', identityBody(npc), { heading: false });
     const appearance = block('appearance', 'Appearance', appearanceBody(npc, portraitRefs));
-    const character = block('character', 'Character', characterBody(npc), { mark: changedMark(npc, 'personality') })   // the change mark sits in the heading, in line with the other rows' marks;
+    // the change mark sits in the heading, in line with the other rows' marks; the opening reply (#0) carries no news, so it shows none
+    const opening = changeStamp({ turn: npc.fieldChanges?.latestTurn, message: npc.fieldChanges?.message }).mark === '#0';
+    const character = block('character', 'Character', characterBody(npc), { mark: opening ? '' : changedMark(npc, 'personality') });
     const notes = npc.v2Meters?.notes;
     const tastes = tastesBody(notes) + drivesBody(notes);
     const background = block('background', 'Background', proseHtml(npc.background));

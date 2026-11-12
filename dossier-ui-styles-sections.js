@@ -231,8 +231,10 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-profile-meters > i { font-style:normal; white-space:nowrap; }
 #${ROOT_ID} .delta-profile-meters > i:not(:last-child)::after { content:" ·"; }
 
-/* ‹ Dossier: the way back from a section (and the profile) to the board, always visible */
+/* ‹ Dossier: the way back from a section (and the profile) to the board; on a section it shows only when the section fills the panel (one pane), */
+/* by the panel's own layout (the container), never by device width: with the board beside it the pill is hidden */
 #${ROOT_ID} .delta-section-back { justify-self:start; display:inline-flex; align-items:center; min-height:40px; margin:10px 12px 0; padding:4px 14px; border:1px solid var(--delta-line); border-radius:999px; background:transparent; color:var(--delta-text); font-size:var(--dt-pill); font-weight:700; cursor:pointer; }
 #${ROOT_ID} .delta-section-back:hover { background:color-mix(in srgb, var(--delta-accent) 12%, transparent); }
 #${ROOT_ID} .delta-section-head { margin-top:2px; }
+@container dsr (min-width: ${TWO_PANE_MIN}px) { #${ROOT_ID} .delta-section-back { display:none; } }
 `;

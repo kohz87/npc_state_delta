@@ -189,10 +189,14 @@ export function selectedTies(model) {
 }
 
 // "Warmth +11 · Trust +11 · Tension +13": the selected person's numbers toward the player (the dial in the card carries all four).
-export function cardNumbersLine(selected) {
+export function cardNumberItems(selected) {
     const by = Object.fromEntries((selected?.axes || []).map(axis => [axis.key, axis.value]));
     const warmth = Math.round(((by.trust || 0) + (by.affection || 0)) / 2);
-    return [['Warmth', warmth], ['Trust', by.trust || 0], ['Tension', by.tension || 0]].map(([label, value]) => `${label} ${signed(value)}`).join(' · ');
+    return [['Warmth', warmth], ['Trust', by.trust || 0], ['Tension', by.tension || 0]].map(([label, value]) => `${label} ${signed(value)}`);
+}
+
+export function cardNumbersLine(selected) {
+    return cardNumberItems(selected).join(' · ');
 }
 
 export { possessiveWord };
@@ -231,7 +235,7 @@ export function mapCardHtml(model, focus, persona, { refs = null, npc = null } =
         <button type="button" class="delta-map-card-dial delta-map-beside" data-map-profile="${id}" aria-label="${escapeHtml(`${sel.name}: open the profile`)}">${dial}</button>
         <h3 class="delta-map-card-name delta-map-beside">${escapeHtml(sel.name)}</h3>
         <div class="delta-map-card-pills delta-map-beside">${pills}</div>
-        <p class="delta-map-card-line delta-map-beside">${escapeHtml(cardNumbersLine(sel))}</p>
+        <p class="delta-map-card-line delta-map-beside">${cardNumberItems(sel).map(item => `<i>${escapeHtml(item)}</i>`).join('')}</p>
         ${focused ? '' : `<div class="delta-map-card-who delta-map-stacked"><span class="delta-map-card-face">${portraitHtml({ name: sel.name, portrait: node?.portrait || '' }, 'delta-map-card-img', { alt: false, refs })}</span><p><b>${escapeHtml(sel.name)}</b> <span>${escapeHtml(compactLine(sel, ties, shortOf))}</span></p></div>`}
         <div class="delta-map-ties${focused ? ' delta-map-ties-focus' : ''}">${focused ? heading : `<b class="delta-map-ties-head delta-map-beside">Bonds on the map</b>`}
             <p class="delta-map-ties-inline${focused ? '' : ' delta-map-beside'}">${inline}</p>${focused ? `<div class="delta-map-ties-rows delta-map-beside">${rows}</div>` : ''}</div>
@@ -278,6 +282,8 @@ ${root} .delta-map-ties-rows .delta-map-tie { display:block; }
 ${root} .delta-map-ties-rows .delta-map-tie b { color:var(--delta-text); }
 ${root} .delta-map-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 ${root} .delta-map-card-empty .delta-map-card-line { margin:0; }
+${root} .delta-map-card-line > i { display:inline-block; margin-right:.5em; font-style:normal; white-space:nowrap; }   /* whole items that wrap whole */
+${root} .delta-map-card-line > i:not(:last-child)::after { content:" ·"; }
 @container dsr (min-width: ${MAP_CARD_BESIDE_MIN}px) {
   ${root} .delta-map-body { display:grid; grid-template-columns:minmax(0,1fr) clamp(${MAP_CARD_MIN}px,28cqw,360px); grid-template-rows:minmax(0,1fr); overflow:hidden; }
   ${root} .delta-map-stage { min-height:0; display:grid; grid-template-rows:minmax(0,1fr); padding-bottom:14px; }

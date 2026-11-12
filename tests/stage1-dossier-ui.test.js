@@ -264,8 +264,11 @@ test('the profile: portrait first, identity and appearance, phone and desktop la
   assert.match(desktop, /delta-profile-cols/);
   assert.doesNotMatch(dossierProfileHtml({ name: '<i>x' }, {}), /<i>x/);
   assert.match(dossierProfileHtml({ name: 'Ada Vale' }, { layout: 'desktop' }), /delta-portrait-placeholder[^>]*><span>AV<\/span>/, 'no portrait: two initials');
-  const marked = dossierProfileHtml({ name: 'Ada', personality: 'Calm.', fieldChanges: { latest: ['personality'], latestTurn: 0, message: 0 } }, {});
-  assert.match(marked, /<h3>Character <em class="delta-changed-mark[^>]*>• #0<\/em><\/h3>/, 'the personality change mark sits in the Character heading, not on a line of its own');
+  const opening = dossierProfileHtml({ name: 'Ada', personality: 'Calm.', fieldChanges: { latest: ['personality'], latestTurn: 0, message: 0 } }, {});
+  assert.doesNotMatch(opening, /delta-changed-mark/, 'the opening reply (#0) carries no news: no mark');
+  assert.match(opening, /<h3>Character<\/h3>/);
+  const marked = dossierProfileHtml({ name: 'Ada', personality: 'Calm.', fieldChanges: { latest: ['personality'], latestTurn: 3, message: 12 } }, {});
+  assert.match(marked, /<h3>Character <em class="delta-changed-mark[^>]*>• #12<\/em><\/h3>/, 'a later change shows its mark in the Character heading, not on a line of its own');
   assert.doesNotMatch(marked, /<p class="delta-muted"> ?<em/, 'no stray marker line under Character');
 });
 
@@ -594,4 +597,48 @@ test('round 3 fix 2-6: no tier line under a change row, a muted secrets intro, L
   assert.match(css, /\.delta-section-body p\.delta-secrets-intro\.delta-muted \{[^}]*font-size:var\(--dt-meta\)/);
   assert.match(css, /--delta-muted: color-mix\(in srgb, var\(--delta-text\) 62%, transparent\);/);
   assert.match(fs.readFileSync(new URL("../dossier-ui-styles-board.js", import.meta.url), "utf8"), /\.delta-tile-dots::before \{ content:""; position:absolute/);
+});
+
+test('browser back: every history.go(-n) is skipped once (a counter); in Map mode a back leaves the map and keeps the dossier screen', () => {
+  const saved = { history: globalThis.history, document: globalThis.document, CustomEvent: globalThis.CustomEvent };
+  const pushed = [];
+  const gone = [];
+  const fired = [];
+  globalThis.history = { pushState: state => pushed.push(state), go: n => gone.push(n) };
+  globalThis.CustomEvent = class { constructor(type) { this.type = type; } };
+  globalThis.document = { dispatchEvent: event => fired.push(event.type) };
+  try {
+    const ui = new DeltaDossierUi({});
+    ui.panelOpen = true;
+    ui.setScreen(openNpc(ui.screen, 'rika'));
+    ui.setScreen(openSection(ui.screen, 1));
+    assert.equal(ui.navEntries, ui.screen.history.length);
+    const depth = ui.navEntries;
+    assert.ok(depth >= 2, 'the section is more than one screen deep');
+    // two Esc presses before the first popstate arrives: two skips are owed, not one
+    ui.setScreen(goBack(ui.screen));
+    ui.setScreen(goBack(ui.screen));
+    assert.equal(ui.ignorePops, 2, 'a counter, not a flag');
+    ui.onPopState();
+    ui.onPopState();
+    assert.equal(ui.ignorePops, 0);
+    assert.equal(ui.screen.name, 'library', 'the two skipped pops did not step the screen further');
+    // Map mode: the screen stays, the map is asked to leave, the entry goes back on
+    ui.setScreen(openNpc(ui.screen, 'rika'));
+    ui.setScreen(openSection(ui.screen, 1));
+    const before = { screen: ui.screen, entries: ui.navEntries };
+    ui.root = { querySelector: selector => (selector === '.delta-spread.delta-map-mode' ? {} : null) };
+    ui.onPopState();
+    assert.equal(ui.screen, before.screen, 'the hidden dossier screen did not move');
+    assert.equal(ui.navEntries, before.entries);
+    assert.deepEqual(fired, ['npc-state-delta:leave-map']);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete globalThis[key]; else globalThis[key] = value; }
+  }
+});
+
+test('the section "‹ Dossier" pill is hidden by the panel\'s container layout (two panes or more), not by a device width', () => {
+  const css = fs.readFileSync(new URL('../dossier-ui-styles-sections.js', import.meta.url), 'utf8');
+  assert.match(css, /@container dsr \(min-width: \$\{TWO_PANE_MIN\}px\) \{ #\$\{ROOT_ID\} \.delta-section-back \{ display:none; \} \}/);
+  assert.doesNotMatch(css, /@media[^{]*\{[^}]*delta-section-back/);
 });

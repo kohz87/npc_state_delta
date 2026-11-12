@@ -389,6 +389,8 @@ function start() {
     installStyles();
     document.addEventListener('npc-state-delta:dossier-rendered', onDossierRendered);
     document.addEventListener('npc-state-delta:settings-mounted', mountRelationshipMapSettings);
+    // the browser's back gesture in Map mode leaves the map (the panel fires this) instead of stepping the hidden dossier screen
+    document.addEventListener('npc-state-delta:leave-map', () => { if (view.mode === 'map') setMode(dossierUi(), 'dossier'); });
     mountRelationshipMapSettings();
     onDossierRendered();
 }

@@ -10,12 +10,12 @@ export class DeltaDossierUi extends DossierUiRender {
     async open() {
         if (!this.root) return;
         this.panelOpen = true;
-        this.syncNavEntries();
         this.root.querySelector('.delta-panel').hidden = false;
         this.root.querySelector('.delta-launcher')?.setAttribute('aria-expanded', 'true');
         try { await this.api?.ensureFresh?.({ reason: 'dossier-ui-open' }); }
         catch (error) { console.warn('[NPC State Delta] dossier view freshness check failed safely.', error); }
         await this.refresh({ force: true });
+        this.syncNavEntries();   // after the refresh has settled the screen, so no entries are pushed for a screen that is then replaced
         // Focus the panel, never the search box: focusing a text field raises the phone/tablet
         // keyboard over the dossier. Search is focused only when the user taps it.
         this.root.querySelector('.delta-panel')?.focus?.({ preventScroll: true });
