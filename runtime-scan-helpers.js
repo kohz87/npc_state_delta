@@ -159,7 +159,7 @@ export function clearUserDismissedSuppression(state, target) {
 
 // What a committed scan tells the slice, read from the people before and after it (moved from runtime-hosted.js, bodies unchanged).
 // Each person's relationship moves since the scan began, as npc.adjust payloads; the tier the scanner gave the scan's newest event rides along
-// (one event however many meters it moved); none known: sent without one, and not counted.
+// (one event however many meters it moved); none known: sent without one, and not counted. (rule NSDFOLLOW-3) So does the reason the scan recorded for it.
 export function relationshipChanges(prior, after, baseline, messageId) {
     const changes = [];
     for (const npc of after || []) {
@@ -169,7 +169,8 @@ export function relationshipChanges(prior, after, baseline, messageId) {
         const meters = Object.fromEntries(Object.keys(to).filter(key => to[key] !== from[key]).map(key => [key, to[key] - from[key]]));
         const last = npc.lastRelationshipChange;
         const fresh = last && JSON.stringify(last) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange);
-        if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}) });
+        const reason = fresh ? String(last.reason ?? '').trim() : '';
+        if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}), ...(reason ? { reason } : {}) });
     }
     return changes;
 }

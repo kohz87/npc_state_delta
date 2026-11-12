@@ -208,6 +208,21 @@ test('a forwarded scanner change shares the allowance with the story line, count
     await y.adapter.adjust({ name: 'Oren', meters: { trust: 3, affection: 3 }, reply, impact: 'major' }); assert.equal(y.day('oren').meaningful, 1, 'the surviving meter spends one event');
 });
 
+test('rule NSDFOLLOW-3: a forwarded scanner change carries the scanner\'s reason onto the reply\'s last event (as a story line\'s); none given keeps none; rebuild equals live', async () => {
+    const s = await suite();
+    await s.setDay(7);
+    const index = await s.say();
+    await s.adapter.adjust({ name: 'Oren', meters: { trust: 2 }, reply: index, impact: 'meaningful', reason: 'Astra kept the quay inspector off her back' });
+    const event = () => eventSummary(readEvent(s.host.head().domains.npc.npcs.oren.lastEvent));
+    assert.equal(event().why, 'Astra kept the quay inspector off her back');
+    const next = await s.say();
+    await s.adapter.adjust({ name: 'Oren', meters: { affection: 1 }, reply: next, impact: 'ordinary' });
+    assert.equal(event().why, undefined, 'a change with no reason keeps none');
+    const live = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), live, 'rebuild equals live');
+});
+
 test('an adjust with no tier, a reader\'s edit and an unknown tier are never held and never counted', async () => {
     const s = await suite();
     await s.setDay(1);
