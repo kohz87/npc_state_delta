@@ -22,7 +22,7 @@ roleplay model about the NPCs who are present. With Story Block it also keeps me
 Data flows one way: Studio writes a pack; Story Block validates and stores it; Story Director reads what Story Block holds; Delta
 reads both. Delta reads Story Block's `packs.portrait` and `packs.content`, and Story Director's `director.cast`,
 `director.keyPeople`, `director.calendar`, `director.world.here`. It only writes to Story Block through commands on its own `npc`
-domain, and sends Story Director one command (`keypeople.pin`, from the reader's button). It never writes to Studio or to
+domain, and sends Story Director no commands. It never writes to Studio or to
 packs. Nothing flows back to Studio.
 
 ## Install & requirements
@@ -96,7 +96,7 @@ packs. Nothing flows back to Studio.
   (`render(el, { slot })`, `onChange(fn)`, `available()`). Without Story Director the cards sit at the top of Dossiers. An in-chat
   strip is a setting ("Present NPCs in chat": full cards, compact strip, only in Story Block, off).
 - **Cast dossier**: made on the reply where Story Director reports a met person with an entry. Badge "<Pack> cast", a "From the
-  cast" box, optional "Pin as Key people" button (calls `keypeople.pin`).
+  cast" box. Key people are pinned and unpinned only from Story Director's World tab; Delta shows the "Key person" pill, never pins.
 - **Key person**: badge, While away timeline, return note (below), meters held while away.
 - **Secrets section**: "n opened, m still hidden"; a locked note is a blank bar and "Opens at Trust 40" or "Opens with the story".
 - **Portraits**: upload, replace, remove, prompt building and generation through SillyTavern's Image Generation (preview first,

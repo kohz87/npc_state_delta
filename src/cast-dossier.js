@@ -408,7 +408,7 @@ export const castBadge = castFrom => (castFrom?.packName ? `${castFrom.packName}
  * null, where, doing }. `person` is Story Director's answer for it (null without Story Director: then the starting words the
  * pack gave stand, and there is no "last heard"). Text only: the view draws it escaped. Null for any other dossier.
  */
-export function castView(npc, person = null, { pin = false } = {}) {
+export function castView(npc, person = null) {
     const from = npc?.castFrom;
     if (!isObject(from) || !from.key) return null;
     const start = person?.entry?.start;
@@ -424,6 +424,5 @@ export function castView(npc, person = null, { pin = false } = {}) {
         lastHeard: person?.lastHeard ?? null,
         where: person?.where ?? '',
         doing: person?.doing ?? '',
-        pin: pin === true,
     };
 }

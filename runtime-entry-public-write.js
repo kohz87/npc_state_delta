@@ -170,13 +170,6 @@ export function createPublicApiStatePart(deps) {
     },
     /** The configured custom field names (the dossier shows these; a stored value under another name stays in the editor only). */
     customFieldNames: () => [...effectiveCustomFieldNames()],
-    /** (the living cast) The reader pins this dossier's person as a key person (Story Director's `keypeople.pin`) → { ok, message }. */
-    pinKeyPerson: async npcId => {
-        const adapter = storySuiteV2Meters();
-        const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
-        if (!adapter || !npc) return { ok: false, message: 'Story Director does not offer Key people here.' };
-        return adapter.pinKeyPerson({ name: npc.name, aliases: npc.aliases });
-    },
     getDossierState: () => {
         const state = getChatState();
         const formPortraits = {};

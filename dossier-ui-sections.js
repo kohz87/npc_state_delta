@@ -84,7 +84,7 @@ export function nowSectionHtml(npc = {}, { reply = null } = {}) {
         ['Condition', escapeHtml(plain(npc.status))],
         ...(pull ? [['Pull', `<b>${escapeHtml(pull.text)}</b>${[pull.cause, pull.note].filter(Boolean).map(part => ` · ${escapeHtml(part)}`).join('')}`, pull.fresh ? 'New' : '']] : []),
     ].filter(([, value]) => value);
-    const blocks = `${npc.key ? keyAwayHtml(npc.key) : ''}${npc.cast ? castFromHtml(npc.cast, npc.id) : ''}`;
+    const blocks = `${npc.key ? keyAwayHtml(npc.key) : ''}${npc.cast ? castFromHtml(npc.cast) : ''}`;
     const words = moodDescriptors(mood);
     const cause = plain(npc.v2Meters?.mood?.cause);
     const kv = list => `<dl class="delta-kv">${list.map(([label, value, badge]) => `<dt>${escapeHtml(label)}${badge ? ` <span class="delta-new-badge">${escapeHtml(badge)}</span>` : ''}</dt><dd>${value}</dd>`).join('')}</dl>`;
