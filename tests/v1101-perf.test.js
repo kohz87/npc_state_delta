@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bytesToBase64, encodeStateFilePayload, inspectNpcStateDataFile, writeNpcStateDataFile } from '../storage.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { runHostScenario } from './helpers/host-scenario.js';
 
 // 1.10.1: the freezes of a long chat with many dossiers and portraits. Each fix keeps what is saved, read
 // and shown exactly as before; these tests hold the results equal and count the work that was removed.
@@ -186,4 +187,44 @@ test('1.10.1 own write: the read-back of the bytes just written is not parsed, a
         writeNpcStateDataFile({ chatKey, state: { npcs }, appVersion: '1.10.1', pointer: { ...next }, fetchFn: racingFetch, headers, continuousRetry: false }),
         error => error.code === 'NPC_STATE_WRITE_CONFLICT',
     );
+});
+
+test('hosted live read: calendarAge follows the story clock; dossiers are re-derived only when the clock, the set or the state version moved', () => {
+    const prelude = async () => {
+        const sdk = {
+            clock: null, registerModule() {}, on() { return () => {}; }, command: async () => ({ ok: true, receipt: { summary: '' } }), settings: () => ({}),
+            query: name => name === 'director.time' ? (sdk.clock ? { minutes: sdk.clock } : null)
+                : name === 'director.calendar' ? { era: '', leapYears: true, months: [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31].map((days, at) => ({ name: `M${at + 1}`, days })) } : null,
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    const scenario = async () => {
+        const api = globalThis.NPCStateDelta;
+        await sleep(300);
+        const sdk = globalThis.StoryBlock.sdk;
+        const out = {};
+        const state = api.getState();
+        state.npcs = [{ id: 'npc_mira', name: 'Mira', age: '21', birthDate: { era: '', year: 600, month: '03', day: 4 }, birthDateSource: 'established', birthDateYearSource: 'established' }];
+        await api.installState(state);
+        const age = () => api.getState().npcs[0].calendarAge;
+        out.noClock = age();
+        sdk.clock = (621 * 365 + 200) * 1440;
+        out.withClock = age();
+        const { calendarAgeStats } = await import(pathToFileURL(path.join(extRoot, 'core.js')).href);
+        const passes = calendarAgeStats.passes;
+        for (let at = 0; at < 20; at += 1) age();
+        out.passesTotal = passes;
+        out.passesSameClock = calendarAgeStats.passes - passes;
+        sdk.clock = (631 * 365 + 200) * 1440;
+        out.clockMoved = age();
+        console.log('RESULT ' + JSON.stringify(out));
+    };
+    const output = runHostScenario('hosted-live-calendar-age', prelude, scenario);
+    const out = JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
+    assert.equal(out.noClock, null, 'no hosted date: no calendar age');
+    assert.ok(Number.isInteger(out.withClock) && out.withClock >= 20, `the live read takes the age from the clock (${out.withClock}); fails if getChatState stops refreshing`);
+    assert.ok(out.passesTotal >= 1, 'the counter is the runtime\'s own');
+    assert.equal(out.passesSameClock, 0, 'same clock, same state: 20 reads, no pass over the dossiers');
+    assert.ok(Number.isInteger(out.clockMoved) && out.clockMoved > out.withClock, `a moved clock re-derives (${out.clockMoved})`);
 });
