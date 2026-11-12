@@ -80,7 +80,7 @@ export function createParticipantHandlers({
                 const got = await verified(input.checkpoint, input.hash);
                 if (!got.ok) return got;
                 const prepared = preparedId({ return: input.return, checkpoint: input.checkpoint, hash: input.hash, lineage: s.lineage, again: held ? 1 : 0 });
-                idx.prepared[prepared] = { checkpoint: input.checkpoint, hash: input.hash, return: input.return, inPlace: false, stateHash: null };
+                idx.prepared[prepared] = { checkpoint: input.checkpoint, hash: input.hash, return: input.return, inPlace: false, stateHash: null, ...(input.fallback === true ? { fallback: true } : {}) };
                 idx.returns[input.return] = { prepared, checkpoint: input.checkpoint, hash: input.hash, status: 'prepared' };
                 await save();
                 return { ok: true, prepared, hash: input.hash };
@@ -116,18 +116,20 @@ export function createParticipantHandlers({
                     install = false;
                     schedulePublish(0);
                 }
-                // A head selection (the host's `hs_`) that would install a state far behind where the story and the dossiers part is not what a swipe or
-                // a delete asked for (it can only reach the replies it touched): it keeps the dossiers as they are, says so, and is answered as done, so the
-                // story goes on. The dossiers are published next, on the baseline they have. A reader's restore and a save point are exact and not asked.
-                const behind = install && String(input.return).startsWith('hs_') ? selectionBehind({ saved: got.doc.state?.lineage, live: live?.lineage, chat: port.chatLineage?.() }) : null;
+                // A head selection (the host's `hs_`) that the host chose outright (not walked back to, `fallback`) and that would install a state far behind
+                // where the story and the dossiers part is not what a swipe or a delete asked for (it can only reach the replies it touched): it keeps the dossiers
+                // as they are, says so (`kept`, which the host records as a Problem), and is answered as done, so the story goes on; what the dossiers hold is
+                // published with the next change, as always. A fallback walk (the host could not use the checkpoints nearer, and reads the replies missed after
+                // it), a reader's restore and a save point are exact and not asked.
+                const behind = install && entry.fallback !== true && String(input.return).startsWith('hs_') ? selectionBehind({ saved: got.doc.state?.lineage, live: live?.lineage, chat: port.chatLineage?.() }) : null;
                 if (behind) {
-                    warn(`NPC State Delta kept its dossiers: the selected state is ${behind.behind} messages behind the change at message ${behind.at}, which is older than that change can reach.`);
+                    const kept = `Dossiers were kept as they are: the state the story selected is ${behind.behind} messages behind the change at message ${behind.at}, which is more than that change can reach.`;
+                    warn(kept);
                     entry.kept = true;
-                    schedulePublish(0);
                     preparedAt.delete(input.prepared);
                     idx.returns[input.return] = { ...ret, status: 'active' };
                     await save();
-                    return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash };
+                    return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash, kept };
                 }
                 if (install) {
                     // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).

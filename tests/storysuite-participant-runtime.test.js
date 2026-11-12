@@ -228,5 +228,7 @@ test('a hosted chat that never uses the timeline keeps its state and its files e
         await sleep(60);
         assert.match(api.getState().timeline.lineage, /^lg_[0-9a-z]{8}$/);
         assert.equal(api.timelineStarted(), true);
+        // what the participant's head-selection guard reads of the chat (the real API, through the adapter's port)
+        assert.equal(Array.isArray(api.chatLineage()), true);
     });
 });

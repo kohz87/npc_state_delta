@@ -636,11 +636,12 @@ test('a head selection far behind the swipe is refused: the dossiers stay, it sa
     const prepared = await participant.prepare({ return: 'hs_00000001', checkpoint: first.checkpoint, hash: first.hash });
     assert.equal(prepared.ok, true);
     const answer = await participant.activate({ return: 'hs_00000001', prepared: prepared.prepared });
-    assert.deepEqual(answer, { ok: true, checkpoint: first.checkpoint, hash: first.hash });
+    assert.deepEqual({ ...answer, kept: typeof answer.kept }, { ok: true, checkpoint: first.checkpoint, hash: first.hash, kept: 'string' }, 'answered as done, with what the host records as a Problem');
+    assert.match(answer.kept, /8 messages behind the change at message 11/);
     assert.equal(live.installs, 0, 'nothing installed');
     assert.equal(live.state.npcs.some(item => item.id === 'npc_late'), true, 'the progress is still there');
     assert.equal(told.length, 1);
-    assert.match(told[0], /kept its dossiers/);
+    assert.equal(told[0], answer.kept);
     assert.equal((await participant.status({ return: 'hs_00000001' })).status, 'active', 'a recovery asked again does not install it either');
     assert.equal(live.installs, 0);
 });
@@ -656,6 +657,12 @@ test('a head selection at the exact parent installs; a reader\'s restore far bac
     assert.equal((await restoreCase.participant.activate({ return: 'rt_00000001', prepared: restore.prepared })).ok, true);
     assert.deepEqual([restoreCase.live.installs, restoreCase.told], [1, []], 'a save point is exact and chosen by the reader');
 
+    // (the host walked back to this one because the checkpoints nearer were gone, and reads the replies it missed: that is its design, not asked)
+    const walked = await behindSetup();
+    const back = await walked.participant.prepare({ return: 'hs_00000004', fallback: true, checkpoint: walked.first.checkpoint, hash: walked.first.hash });
+    assert.equal((await walked.participant.activate({ return: 'hs_00000004', prepared: back.prepared })).kept, undefined);
+    assert.deepEqual([walked.live.installs, walked.told], [1, []]);
+
     const blind = await behindSetup({ chatLineage: undefined });
     const head = await blind.participant.prepare({ return: 'hs_00000003', checkpoint: blind.first.checkpoint, hash: blind.first.hash });
     assert.equal((await blind.participant.activate({ return: 'hs_00000003', prepared: head.prepared })).ok, true);
@@ -665,7 +672,8 @@ test('a head selection at the exact parent installs; a reader\'s restore far bac
 test('the run data: the first reply\'s checkpoint is refused for the swipe of the sixth reply, the fifth reply\'s is not (when the run data is here)', async t => {
     const { readFile } = await import('node:fs/promises');
     const { chatLineage } = await import('../branch.js');
-    const dir = '/home/raven/story_suite/scratch/batch/SMALL/night/swipechk_files';
+    const dir = process.env.SWIPECHK_FILES;
+    if (!dir) { t.skip('SWIPECHK_FILES (the run data folder) is not set'); return; }
     let chat; let first; let fifth; let live;
     try {
         chat = (await readFile(`${dir}/chat.jsonl`, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).slice(1);
