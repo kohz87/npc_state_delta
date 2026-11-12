@@ -25,6 +25,7 @@ export function v2MetersProjection(view) {
         ...(tiesProjection(view.ties) ? { ties: tiesProjection(view.ties) } : {}),
         ...(moodProjection(view.mood) ? { mood: moodProjection(view.mood) } : {}),
         ...(pullProjection(view.pull) ? { pull: pullProjection(view.pull) } : {}),
+        ...(view.notesOn === true ? { notesOn: true } : {}),
         ...(notesProjection(view.notes) ? { notes: notesProjection(view.notes) } : {}),
     };
 }
