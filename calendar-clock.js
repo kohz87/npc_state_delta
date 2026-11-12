@@ -36,6 +36,19 @@ function readStoryClock() {
     return storyClockMemo.clock;
 }
 
+// (memory dates) The story's date as of reply `index`, in the dossier's words ("Icewane 27"), or '' without a host clock. index.js sets a
+// source that asks the hosted adapter at that reply, so a date is the same live and in a replay (the date of the reply, not of viewing).
+let storyDateAtSource = null;
+
+export function setStoryDateAtSource(source = null) {
+    storyDateAtSource = typeof source === 'function' ? source : null;
+}
+
+export function storyDateTextAt(index) {
+    if (!storyDateAtSource || !Number.isInteger(index) || index < 0) return '';
+    try { return String(storyDateAtSource(index) ?? '').trim().slice(0, 40); } catch { return ''; }
+}
+
 const STORY_DAY_MINUTES = 1440;
 const GREGORIAN_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 

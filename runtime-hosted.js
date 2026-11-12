@@ -3,7 +3,7 @@
    relationship changes, secret events and hidden-note options Delta sends back, and the words for why no one shows as present. Built by index.js once per module instance with the shared
    runtime state and the controller functions it calls. Bodies are moved from index.js without change. */
 
-import { chatContext as getContext, replayScope, scopedAdapter } from './runtime-scan-helpers.js';
+import { chatContext as getContext, refusedLooks, relationshipChanges, replayScope, scanMoodNumbers, scopedAdapter } from './runtime-scan-helpers.js';
 import { replyScanned } from './scan-context.js';
 import { normalizeRelationshipBaseline, isTerminalNpcDeath, npcMatchesLabel, storyMinuteText } from './core.js';
 import { defersArea, resolveDossierTarget } from './suite-handshake.js';
@@ -11,9 +11,7 @@ import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNot
 import { castView, findCastPerson, normalizeCast } from './src/cast-dossier.js';
 import { getSettings, setRpgProbe } from './runtime-settings.js';
 import { sheetLevelOf } from './core-record.js';
-import { rejectedOverallLook } from './appearance-update.js';
 import { stage1Refresh } from './dossier-tools-core.js';
-import { moodNumbers } from './npc-mood.js';
 
 export function createHostedPart(rt, deps) {
     const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex } = deps;
@@ -45,6 +43,10 @@ export function createHostedPart(rt, deps) {
     }
     // (v2) Story Director's clock while hosted ({ minutes, calendar }), for calendar.js; null otherwise (and
     // while the reader keeps the calendar here: the adapter's calendarOwn).
+    // The story's date after reply `index` as the dossier writes it ("Icewane 27"), '' with no host clock (calendar.js setStoryDateAtSource).
+    function hostedStoryDateAt(index) {
+        try { return String(storySuiteV2Meters()?.storyDateText?.(index) ?? ''); } catch { return ''; }
+    }
     function hostedStoryClock() {
         const adapter = storySuiteV2Meters();
         if (!adapter) return null;
@@ -258,36 +260,14 @@ export function createHostedPart(rt, deps) {
         if (replayScope()) return;   // Story Block already holds these changes in its own per-reply records
         const adapter = storySuiteV2Meters();
         if (!adapter) return;
-        const dropped = () => {
-            console.info('[NPC State Delta] the chat moved on during the scan (a swipe or a new or deleted reply); its relationship changes were not sent to Story Suite.');
-        };
+        const dropped = () => console.info('[NPC State Delta] the chat moved on during the scan (a swipe or a new or deleted reply); its relationship changes were not sent to Story Suite.');
         if (!chatHeadUnchanged(head)) return dropped();
         const prior = new Map((before || []).map(npc => [npc?.id, npc]));
-        const baseline = normalizeRelationshipBaseline(getSettings().relationshipBaseline);
-        const changes = [];
-        for (const npc of after || []) {
-            if (!npc?.id || npc.archived) continue;
-            const from = prior.has(npc.id) ? normalizeRelationshipBaseline(prior.get(npc.id).relationship) : baseline;
-            const to = normalizeRelationshipBaseline(npc.relationship);
-            const meters = Object.fromEntries(Object.keys(to).filter(key => to[key] !== from[key]).map(key => [key, to[key] - from[key]]));
-            // The tier the scanner gave this scan's event (its newest relationship change), so the slice's allowance counts it like a
-            // story line's: one event however many meters it moved. None known: sent without one, and not counted.
-            const last = npc.lastRelationshipChange;
-            const fresh = last && JSON.stringify(last) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange);
-            if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}) });
-        }
+        const changes = relationshipChanges(prior, after, normalizeRelationshipBaseline(getSettings().relationshipBaseline), messageId);
         // A person's look set for the first time by this scan: its day and reply are stamped (the notes feature's locked look).
         const looks = (after || []).filter(npc => npc?.id && !npc.archived && String(npc.overallAppearance ?? '').trim() && !String(prior.get(npc.id)?.overallAppearance ?? '').trim());
         // A durable look the scan refused (the story did not explain a change): a Problem and a next-reply cue, never a silent change.
-        const refused = [];
-        const afterBy = new Map((after || []).map(npc => [npc?.id, npc]));
-        for (const row of Array.isArray(updates) ? updates : []) {
-            const was = prior.get(row?.id);
-            const now = afterBy.get(row?.id);
-            if (!was || !now || now.archived) continue;
-            const rejected = rejectedOverallLook(was.overallAppearance, now.overallAppearance, row);
-            if (rejected && !refused.some(item => item.id === now.id)) refused.push({ id: now.id, name: now.name, before: was.overallAppearance, incoming: rejected.incoming });
-        }
+        const refused = refusedLooks(prior, after, updates);
         // (scan-admitted people) A dossier the scan made (an id the sidecar did not have) gets a slice entry the way a cast meeting gives one;
         // an adjust below has made it first when the scan moved its meters, and the meeting then only adds the mood and drives. Not the dead
         // and not incidental extras: the slice holds 80 people, and a long chat must not fill it with people who never matter.
@@ -302,10 +282,13 @@ export function createHostedPart(rt, deps) {
         const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && (!prior.has(npc.id) || owed(npc))) : [];
         // A mood word the scan wrote (new or changed) gets its numbers in the slice (npc.mood): the three the scan gave (its row's moodV / moodA / moodD), else the fixed word list's, with the reason the scan recorded for the same reply. Not the dead or incidental extras; after the meeting.
         const moodOf = npc => String(npc?.mood ?? '').trim();
-        const vadOf = npc => { const row = (Array.isArray(rows) ? rows : []).find(item => item && ((item.id && item.id === npc.id) || (item.name && npcMatchesLabel(npc, item.name)))); return moodOf(row) ? moodNumbers(row) : null; };
+        const vadOf = npc => scanMoodNumbers(rows, npc, moodOf);
         const reasonOf = npc => (JSON.stringify(npc.lastRelationshipChange) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange) ? String(npc.lastRelationshipChange?.reason ?? '').trim() : '');
         const moods = typeof adapter.mood === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && moodOf(npc) && (moodOf(npc) !== moodOf(prior.get(npc.id)) || (touched(npc) && !moodTried.has(`${getChatKey()}|${npc.id}`)))) : [];
-        if (!changes.length && !looks.length && !refused.length && !met.length && !moods.length) return;
+        // (drive growth) The before and after of a person who already had a dossier: the adapter reads what is new in them (memories, behavior,
+        // mannerisms, the relationship reason) and the slice reads it for drive cues; a person the scan only just made has no earlier reply to count against.
+        const grown = typeof adapter.drives === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && prior.has(npc.id)).map(npc => ({ name: npc.name, before: prior.get(npc.id), after: npc })) : [];
+        if (!changes.length && !looks.length && !refused.length && !met.length && !moods.length && !grown.length) return;
         void (async () => {
             // The slice entry comes first (adjust, else meet): a look flag never makes one, so a new person's look lock needs it.
             for (const change of changes) {
@@ -329,13 +312,14 @@ export function createHostedPart(rt, deps) {
                 await adapter.mood({ name: npc.name, word: moodOf(npc), vad: vadOf(npc), reason: reasonOf(npc), reply: messageId, again: moodOf(npc) === moodOf(prior.get(npc.id)), personality: npc.personality, about: npc.background });
                 stage1Refresh();
             }
-            for (const npc of looks) {
+            for (const item of grown) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                await adapter.flag?.({ name: npc.name, lock: true, reply: messageId });
+                await adapter.drives({ name: item.name, before: item.before, after: item.after, reply: messageId });
+                stage1Refresh();   // an open dossier draws again when a drive stepped
             }
-            for (const item of refused) {
+            for (const flag of [...looks.map(npc => ({ name: npc.name, lock: true })), ...refused.map(item => ({ name: item.name, drift: { before: item.before, incoming: item.incoming } }))]) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                await adapter.flag?.({ name: item.name, drift: { before: item.before, incoming: item.incoming }, reply: messageId });
+                await adapter.flag?.({ ...flag, reply: messageId });
             }
         })();
     }
@@ -362,17 +346,33 @@ export function createHostedPart(rt, deps) {
     // (v2 hidden notes) What a targeted pass (backfill, Refresh) is asked about hidden notes: { layered, watch } or null when
     // nothing is asked (not hosted, or no setting and no event note to look for). `layered`: this dossier is new (a backfill
     // queued at admission) and has no notes yet. `watch`: this one person's locked event notes, when they are present.
-    function hostedTargetNotes(npc, { newDossier = false, messageId = null } = {}) {
+    // `tastes` (Refresh only): the pass also asks for this person's tastes (the notes feature on) and forwards them (forwardTastesToHost).
+    function hostedTargetNotes(npc, { newDossier = false, messageId = null, tastes = false } = {}) {
         const adapter = storySuiteV2Meters();
         if (!adapter || !npc) return null;
         const layered = newDossier && getSettings().layeredSecrets !== false && !(Array.isArray(npc.secrets) && npc.secrets.length);
         const watch = hostedEventWatch({ npcs: [npc] }, messageId);
-        return layered || watch.length ? { layered, watch } : null;
+        const asked = tastes === true && adapter.asksTastes?.() === true;
+        return layered || watch.length || asked ? { layered, watch, ...(asked ? { tastes: true } : {}) } : null;
     }
     const targetNoteOptions = notes => ({
         ...(notes?.layered ? { layeredSecrets: true } : {}),
         ...(notes?.watch?.length ? { eventWatch: notes.watch } : {}),
+        ...(notes?.tastes ? { askTastes: true } : {}),
     });
+
+    // A Refresh's answered tastes (the target's row of `rows`: { tastes: [{ sign, item, from }] }) → npc.taste on the head reply the Refresh read, once the
+    // chat is known not to have moved (as forwardSecretEventsToHost). Nothing while replaying.
+    function forwardTastesToHost(npc, rows, head = null) {
+        if (replayScope()) return;
+        const adapter = storySuiteV2Meters();
+        const list = Array.isArray(rows) ? rows : [];
+        const row = list.find(item => String(item?.id || '') === npc?.id || (item?.name && npcMatchesLabel(npc, String(item.name)))) || (list.length === 1 ? list[0] : null);
+        if (!adapter || !npc || !Array.isArray(row?.tastes) || !row.tastes.length) return;
+        if (!chatHeadUnchanged(head)) return;
+        const reply = latestMessageId(true);
+        void adapter.tastes({ name: npc.name, tastes: row.tastes, ...(reply >= 0 ? { reply } : {}) });
+    }
 
     // A committed scan's `secretEvents` (the keys of the watched story events the current exchange showed) open those notes
     // as npc.open (cause ui, recorded on the head reply, so a swipe takes them back). Nothing is sent when the chat moved
@@ -446,5 +446,5 @@ export function createHostedPart(rt, deps) {
         return { text: 'The latest scan found no NPC in the scene.', scan: true };
     }
 
-    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
+    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedStoryDateAt, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, forwardTastesToHost, attachGeneratedSecrets, castEmptyReason };
 }

@@ -2,7 +2,7 @@
    stored-memory normalization, label matching and scanner-citation stripping. Split from core-record.js without change;
    core-record.js re-exports the names it exported before. Never imports core-record.js, core-mechanics.js or core.js. */
 import { AGE_NUMBER_WORD_RE } from './core-identity.js';
-import { compactDurableText, DURABLE_PROFILE_LIMITS, semanticDedupeItems } from './core-relationship.js';
+import { compactDurableText, DURABLE_PROFILE_LIMITS, durableSemanticSimilarity, semanticDedupeItems } from './core-relationship.js';
 import { cleanList, cleanText, normalizeName, stripMessageCitations } from './core-text.js';
 import { TEXT_FIELDS } from './src/fields/registry.js';
 export const NPC_ADMISSION_MODES = Object.freeze(['conservative', 'balanced', 'manual_only']);
@@ -89,6 +89,45 @@ export function normalizeStoredMemories(value) {
     return cleaned.slice(-IMPORTANT_MEMORY_LIMIT);
 }
 
+
+// (memory dates) `memoryStamps`: a parallel map { normalized memory text: { m: reply index, d: story date text } } beside the memories list,
+// whose own shape never changes. Only memories that are stored have an entry; one stored before this had none shows no date (never guessed).
+export function normalizeMemoryStamps(value, memories) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const out = {};
+    for (const text of Array.isArray(memories) ? memories : []) {
+        const key = normalizeName(text);
+        const stamp = key && Object.prototype.hasOwnProperty.call(source, key) ? source[key] : null;
+        const message = Number(stamp?.m);
+        if (!Number.isInteger(message) || message < 0) continue;
+        const date = typeof stamp.d === 'string' ? stamp.d.trim().slice(0, 40) : '';
+        out[key] = date ? { m: message, d: date } : { m: message };
+    }
+    return Object.keys(out).length ? out : undefined;
+}
+
+// The stamps after a change from `before` to `after`: a kept memory keeps its stamp; a new one gets the reply it was recorded in and that reply's
+// story date (`dateAt(message)`); one the merge only re-worded (similar to a memory that left) inherits the old stamp; a memory gone loses its.
+export function stampMemories(before, after, message = null, dateAt = null) {
+    const memories = Array.isArray(after?.memories) ? after.memories : [];
+    const old = normalizeMemoryStamps(after?.memoryStamps ?? before?.memoryStamps, [...(Array.isArray(before?.memories) ? before.memories : []), ...memories]) ?? {};
+    const had = new Set((Array.isArray(before?.memories) ? before.memories : []).map(normalizeName));
+    const gone = (Array.isArray(before?.memories) ? before.memories : []).filter(text => !memories.some(item => normalizeName(item) === normalizeName(text)));
+    const out = {};
+    let date = null;
+    for (const text of memories) {
+        const key = normalizeName(text);
+        if (!key) continue;
+        if (old[key]) { out[key] = old[key]; continue; }
+        if (had.has(key)) continue;   // stored before stamps existed: no date, never a guessed one
+        const reworded = gone.find(item => durableSemanticSimilarity(item, text) >= 0.58);
+        if (reworded) { const inherited = old[normalizeName(reworded)]; if (inherited) out[key] = inherited; continue; }   // an undated old memory stays undated
+        if (!Number.isInteger(message) || message < 0) continue;
+        date ??= String(dateAt?.(message) ?? '').trim().slice(0, 40);
+        out[key] = date ? { m: message, d: date } : { m: message };
+    }
+    return Object.keys(out).length ? out : undefined;
+}
 
 // (stage 73) Message citations ("[m1, m2]") the scanner's model appended to a field are not dossier text: normalizeNpcRecord strips them from
 // every stored text field and list item, so a saved dossier is cleaned the next time it is normalized. An evidence item keeps its intended

@@ -63,7 +63,7 @@ function notesProjection(notes) {
     const knows = list(notes.knows, 6).filter(row => !row.hidden && plain(row.text)).map(row => ({ about: plain(row.about), how: plain(row.how), day: day(row.day), text: plain(row.text), secret: row.secret === true }));
     const tastes = list(notes.tastes, 12).filter(row => plain(row.item)).map(row => ({ sign: row.sign === '-' ? '-' : '+', item: plain(row.item), from: plain(row.from), mirrored: row.mirrored === true }));
     const ties = list(notes.ties, 12).filter(row => plain(row.name)).map(row => ({ name: plain(row.name), tags: (Array.isArray(row.tags) ? row.tags : []).filter(tag => TIE_WORDS.has(tag)), owedBy: row.owedBy === true }));
-    const drives = list(notes.drives, 8).filter(row => plain(row.label)).map(row => ({ label: plain(row.label), strength: int(row.strength, 0, 3), word: plain(row.word) }));
+    const drives = list(notes.drives, 8).filter(row => plain(row.label)).map(row => ({ label: plain(row.label), strength: int(row.strength, 0, 3), word: plain(row.word), note: plain(row.note) }));
     const look = notes.look && Number.isInteger(notes.look.day) ? { day: notes.look.day } : null;
     return lies.length || knows.length || tastes.length || ties.length || drives.length || look ? { lies, knows, tastes, ties, drives, look } : null;
 }

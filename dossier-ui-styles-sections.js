@@ -91,7 +91,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-bond > p { grid-column:1 / -1; margin:0; font-size:var(--dt-body); color:var(--delta-muted); overflow-wrap:anywhere; }
 
 /* Every entry of a list (a tie, a lie told, something she knows) has its own thin divider above it, the first one too, and the same spacing. */
-#${ROOT_ID} .delta-bond, #${ROOT_ID} .delta-note-row { margin:0; padding:10px 0; border-top:1px solid var(--delta-line); }
+#${ROOT_ID} .delta-bond, #${ROOT_ID} .delta-note-row { margin:0; padding:clamp(12px,1.6cqw,18px) 0; border-top:1px solid var(--delta-line); }
 /* ONE spacing above every sub-heading inside a section (Where and what, Recent changes, Pull, Lies told, Knows about others); none when it opens the section */
 #${ROOT_ID} .delta-sheet .delta-subhead { margin:18px 0 0; }
 #${ROOT_ID} .delta-sheet > .delta-subhead:first-child { margin-top:0; }
@@ -178,11 +178,12 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-meter.delta-sheet-meter-chip { grid-template-columns:clamp(54px,7cqw,92px) minmax(28px,1fr) 32px minmax(26px,auto); }
 #${ROOT_ID} .delta-sheet-meter > span { color:var(--delta-text); }
 #${ROOT_ID} .delta-secret-bar { height:12px; border-radius:3px; background:#0b0a0c; background-image:none; }
-/* Ties: the relation word leads the name, the dynamic sits under */
-#${ROOT_ID} .delta-bond { grid-template-columns:auto minmax(0,1fr); align-items:baseline; gap:2px 8px; }
-#${ROOT_ID} .delta-bond-word { display:inline; grid-column:1; grid-row:1; padding:0; border:0; border-radius:0; text-align:left; font-size:var(--dt-kick); letter-spacing:.06em; text-transform:uppercase; }
-#${ROOT_ID} .delta-bond > b { grid-column:2; grid-row:1; font-size:clamp(14px,.5cqw + 12px,17px); }
-#${ROOT_ID} .delta-bond > p { color:var(--delta-text); }
+/* Ties: each bond is three stacked lines (the relation type as a small label that may wrap, the name in bold, the dynamic), with clear space between
+   the lines and a hairline with room above and below between one tie and the next. Sizes follow the container (cqw), never the device. */
+#${ROOT_ID} .delta-bond { grid-template-columns:minmax(0,1fr); align-items:start; gap:clamp(4px,.6cqw,8px); }
+#${ROOT_ID} .delta-bond-word { display:block; grid-column:1; grid-row:1; padding:0; border:0; border-radius:0; text-align:left; font-size:var(--dt-kick); letter-spacing:.08em; line-height:1.35; text-transform:uppercase; overflow-wrap:anywhere; }
+#${ROOT_ID} .delta-bond > b { grid-column:1; grid-row:2; font-size:clamp(14px,.5cqw + 12px,17px); line-height:1.3; }
+#${ROOT_ID} .delta-bond > p { grid-column:1; grid-row:3; color:var(--delta-text); line-height:1.5; }
 @container dsr (max-width: ${TWO_PANE_MIN - 0.02}px) { #${ROOT_ID} .delta-section-screen::before { content:""; display:block; width:36px; height:4px; margin:8px auto 0; border-radius:2px; background:var(--dial); } }
 
 /* Right now: the three bars run the full row; headings and the Pull badge as the mockup draws them */
@@ -232,14 +233,28 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-timeline { position:relative; }
 #${ROOT_ID} .delta-timeline li, #${ROOT_ID} .delta-timeline li:first-child { position:relative; padding:0 0 4px 22px; border-top:0; }
 #${ROOT_ID} .delta-timeline li > i { position:absolute; left:0; top:.45em; }
+/* a dated memory: the story date and reply as a small label on its dot, the memory under it (an older memory has no label) */
+#${ROOT_ID} .delta-timeline li, #${ROOT_ID} .delta-timeline li:first-child { display:grid; gap:clamp(2px,.4cqw,5px); padding-bottom:clamp(8px,1.1cqw,14px); }
+#${ROOT_ID} .delta-timeline li > .delta-mem-when { font-size:var(--dt-kick); letter-spacing:.06em; color:var(--delta-muted); line-height:1.3; }
 #${ROOT_ID} .delta-timeline::before { content:""; position:absolute; left:4px; top:8px; bottom:8px; width:1px; background:var(--delta-line); }
 #${ROOT_ID} .delta-tastes { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
 #${ROOT_ID} .delta-tastes li { display:grid; grid-template-columns:22px minmax(0,1fr); column-gap:6px; }
 #${ROOT_ID} .delta-tastes li > .delta-muted { grid-column:2; font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-taste-sign { color:var(--trust, var(--delta-accent-soft)); }
-#${ROOT_ID} .delta-drive { display:grid; grid-template-columns:clamp(70px,8cqw,104px) minmax(0,1fr); align-items:center; gap:8px; font-size:var(--dt-meta); color:var(--delta-muted); }
-#${ROOT_ID} .delta-drive i { height:5px; border-radius:3px; background:var(--dial); overflow:hidden; }
-#${ROOT_ID} .delta-drive b { display:block; height:100%; background:var(--trust, var(--delta-accent)); }
+#${ROOT_ID} .delta-drives { display:grid; gap:6px; }
+#${ROOT_ID} .delta-drive { display:grid; grid-template-columns:clamp(70px,8cqw,104px) minmax(0,1fr) clamp(44px,6cqw,56px); align-items:center; gap:2px 8px; font-size:var(--dt-meta); color:var(--delta-muted); }
+#${ROOT_ID} .delta-drive i { position:relative; height:5px; border-radius:3px; background:var(--dial); }
+#${ROOT_ID} .delta-drive i::before { content:""; position:absolute; left:50%; top:-3px; width:1px; height:11px; background:var(--delta-line); }
+#${ROOT_ID} .delta-drive b { position:absolute; top:0; bottom:0; border-radius:3px; background:var(--trust, var(--delta-accent)); }
+#${ROOT_ID} .delta-drive b.high { left:50%; width:50%; }
+#${ROOT_ID} .delta-drive b.low { right:50%; width:25%; }
+#${ROOT_ID} .delta-drive b.off { right:50%; width:50%; }
+#${ROOT_ID} .delta-drive b.normal { left:calc(50% - 2px); width:4px; }
+#${ROOT_ID} .delta-drive-word { font-weight:700; text-align:right; }
+#${ROOT_ID} .delta-drive[data-level="high"] .delta-drive-word { color:var(--trust, var(--delta-accent)); }
+#${ROOT_ID} .delta-drive[data-level="low"] .delta-drive-word, #${ROOT_ID} .delta-drive[data-level="off"] .delta-drive-word { font-style:italic; }
+#${ROOT_ID} .delta-drive-note { grid-column:2 / 4; margin-top:-2px; font-size:var(--dt-kick); overflow-wrap:anywhere; }
+#${ROOT_ID} .delta-drive-key { display:block; margin-top:6px; font-size:var(--dt-kick); }
 #${ROOT_ID} .delta-rel-gate { margin:0; color:var(--delta-danger); font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-profile .delta-continuity-source { display:block; margin-top:2px; font-size:var(--dt-kick); color:var(--delta-muted); }
 

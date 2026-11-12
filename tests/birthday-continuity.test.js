@@ -12,7 +12,9 @@ import {
     normalizeCalendarConfig,
     normalizeNpcRecord,
     normalizeScanNpc,
+    refreshCalendarAges,
     setActiveCalendarConfig,
+    setStoryClockSource,
 } from '../core.js';
 
 const CUSTOM_CALENDAR = Object.freeze({
@@ -33,7 +35,7 @@ const CUSTOM_CALENDAR_WITH_CLOCK = Object.freeze({
 
 const WORLD_STATE_821 = '<World_State>Time | **CR821, Redleaf 16** | 7:42 pm\nLocation | Rimecross</World_State>';
 
-test.afterEach(() => setActiveCalendarConfig(null));
+test.afterEach(() => { setStoryClockSource(null); setActiveCalendarConfig(null); });
 
 test('legacy numeric birthday fallback remains deterministic before custom calendar setup', () => {
     setActiveCalendarConfig(null);
@@ -399,4 +401,20 @@ test('custom calendar date validation rejects unknown months and impossible days
     assert.deepEqual(normalizeBirthDate('Sunwane 4'), { era: '', year: null, month: 'Sunwane', day: 4 });
     assert.equal(normalizeBirthDate('Moonfall 4'), null);
     assert.equal(normalizeBirthDate('Redleaf 31'), null);
+});
+
+test('a live read re-derives calendarAge a scan left null (no hosted date then), as a reload does', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const sdCalendar = { months: CUSTOM_CALENDAR.months.map(month => ({ ...month })) };
+    setStoryClockSource(() => null);   // hosted, but the story clock gave no date at scan time
+    const existing = { id: 'npc_mira', name: 'Mira', age: '21', birthDate: { era: 'CR', year: 800, month: 'Frostwane', day: 4 }, birthDateSource: 'established', birthDateYearSource: 'established' };
+    const merged = mergeScanResult({ turn: 1, npcs: [existing], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] } },
+        { npcs: [{ id: 'npc_mira', name: 'Mira' }] }, { sourceMessageId: 3 });
+    const live = merged.state.npcs.find(npc => npc.id === 'npc_mira');
+    assert.equal(live.calendarAge, null, 'stored null: the scan had no date');
+    setStoryClockSource(() => ({ minutes: (821 * 91 + 15) * 1440, calendar: sdCalendar }));   // the clock now has one
+    const read = refreshCalendarAges(merged.state.npcs).find(npc => npc.id === 'npc_mira');
+    assert.equal(read.calendarAge, 20, 'live read is no longer null');
+    assert.equal(read.calendarAge, normalizeNpcRecord(live).calendarAge, 'and equals the reload derivation');
+    assert.equal(refreshCalendarAges([]).length, 0);
 });

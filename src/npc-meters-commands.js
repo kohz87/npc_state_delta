@@ -6,6 +6,8 @@ import { normalizeCast } from './cast-dossier.js';
 import { normalizeApproachKind } from '../npc-meters-gate.js';
 import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, isReplyId, readLeaf, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
+import { growDrives, DRIVE_RULE } from './npc-notes-drives.js';
+import { mergeRefreshTastes } from './npc-notes-tastes.js';
 import { runKind, noteLine, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
 import { applyEvents, applyWord, moodFromWord, moodNumbers, restMood, restingMood } from '../npc-mood.js';
 import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence, asStored, writeMood } from './npc-meters-slice.js';
@@ -210,6 +212,22 @@ export function createNpcCommands({
             return cue ? { ...done, summary: sentence([cue]), narrate: true } : done;
         },
         /**
+         * npc.taste { name, tastes: [{ sign, item, from }], reply? }: the tastes Delta's own Refresh read from the scenes (feature notes). They merge into the
+         * person's taste leaf like `~ taste` lines (npc-notes-tastes.js mergeRefreshTastes: a taste already there is kept, a full sign takes nothing more) and are
+         * written in this command's op on the reply that ran the Refresh, so a swipe, a delete or a rebuild equals live. Refused when nothing is new.
+         */
+        'npc.taste'(ctx, payload = {}) {
+            if (!ownOrModule(ctx, 'npc.taste', payload)) ctx.fail('REFUSED', 'Tastes from a Refresh come only from NPC State Delta\'s own scan.');
+            if (!featureOn(FEATURE_NOTES, ctx)) ctx.fail('FEATURE_OFF', 'Dossier notes are turned off.');
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            const slice = ctx.read(NPC_DOMAIN);
+            const who = identify(slice?.npcs ?? {}, payload?.name);
+            if (!who) ctx.fail('INVALID', 'It names no one.');
+            const out = mergeRefreshTastes(slice?.npcs?.[who.key]?.tastes, payload?.tastes, { name: who.name, day: clockDay(at) ?? 0, r: commandReply(ctx, at) });
+            if (!out.added) ctx.fail('REFUSED', 'No new taste to record.');
+            return run(ctx, { label: payload?.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, leaf: { field: 'tastes', text: out.text } });
+        },
+        /**
          * npc.meet { name, personality?, about?, reply? }: Delta's own scan admitted a person the slice has no record for (or one with no mood
          * and drives yet). They get an entry the way a cast meeting gives one: the dossier's numbers as the first meters, a resting
          * mood from their temperament (feature mood-pull) and their drives (feature notes). Recorded on the reply like any change, so a
@@ -267,6 +285,28 @@ export function createNpcCommands({
             writeMood(ctx, key, record, { prev, mood, day: minutes, n: at, s: isReplyId(reply) ? reply : null, date: clockDay(at) === null ? '' : call(hooks.startDate, '', at) });
             const side = (label, value) => `${label} ${value > 0 ? '+' : ''}${value}`;
             return { ...out, summary: sentence([`${record.name}: mood ${word} ${target ? `(${side('feeling', mood.v)}, ${side('energy', mood.a)}, ${side('control', mood.d)})` : '(not rated: numbers unchanged)'}`, out.data.created ? out.summary : '']) };
+        },
+        /**
+         * npc.drives { name, texts: [plain strings], ignore?: role text, reply, rule }: what Delta's scan newly recorded for one person (new memories, behavior and
+         * mannerism lines, the relationship reason), read for drive cues (npc-notes-drives.js growDrives, rule 1: a drive steps one level when
+         * its cues show in 2 different replies since its last change). The leaf is written whole on the reply, so a swipe, a delete, a Re-read
+         * and a rebuild give the drives live had. Only rule 1 is understood, so a reply that never carried it replays as it was.
+         */
+        'npc.drives'(ctx, payload = {}) {
+            if (!ownOrModule(ctx, 'npc.drives', payload)) ctx.fail('REFUSED', 'Drive growth is noted only by NPC State Delta\'s own scan.');
+            if (!featureOn(FEATURE_NOTES, ctx)) ctx.fail('FEATURE_OFF', 'Dossier notes are turned off.');
+            if (payload?.rule !== DRIVE_RULE) ctx.fail('INVALID', 'It names no drive rule this version knows.');
+            const slice = ctx.read(NPC_DOMAIN);
+            const who = identify(slice?.npcs ?? {}, payload?.name);
+            const have = who ? slice?.npcs?.[who.key] : null;
+            if (!have) ctx.fail('REFUSED', 'No one by that name has an entry.');
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : headReply();
+            const texts = (Array.isArray(payload?.texts) ? payload.texts : []).map(item => clean(item, 200)).filter(Boolean).slice(0, 12);
+            const grown = growDrives(have.drives, texts, commandReply(ctx, at), `${have.name} ${clean(payload?.ignore, 120)}`);   // the person's name and role are no evidence
+            if (!grown) ctx.fail('REFUSED', 'Nothing to update.');
+            const moved = grown.steps.map(step => `${step.label} ${step.to > step.from ? 'grew' : 'eased'} (${step.cue})`);
+            const done = run(ctx, { label: payload.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, leaf: { field: 'drives', text: grown.leaf } });
+            return moved.length ? { ...done, summary: sentence([`${have.name}: ${moved.join(', ')}`]) } : done;
         },
         /**
          * npc.milestone { name, add?: [words], remove?: [words or keys] }: the reader's own milestones
