@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **Fix: a body written into the clothes field now shows and saves as Look.** Build, height, hair and the like move to Look in their own words (display for old records, stored on the next write); body phrases Look already states leave Wearing, so a trait is never shown twice. A Refresh fill keeps the stored apparent age and asks for plain wording and the stored height. Prompt change (flagged): the import and fill prompts say plainly body = Look, clothes = Wearing (import prompt +93 characters; Stage 9 baseline re-recorded).
+
 ## 1.17.0
 
 Update Story Block, Story Director, NPC State Delta (and Story Studio for pack authors) together. Save format 2: a chat saved by 1.17.0 cannot be opened by older NPC State Delta builds (they refuse it safely) — update every device. If an older version shows this chat's dossier as unreadable, update the extension; do not use Detach Broken Sidecar (it would start a fresh empty dossier for the chat). Replies already written replay and Re-read as before; start a new chat to see the new dossier (mood numbers and reasons, Mood section, ties types and fading, drives) behaviour.

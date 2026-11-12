@@ -12,7 +12,7 @@ import {
     isSafeUnmarkedDurableReplacement,
 } from './core-mechanics.js';
 import { APPEARANCE_FORM_LIMIT, APPEARANCE_MODEL_VERSION, appearanceText, clean, formKey, formState, hasOwn, sameAppearance, stripOverallPrefix } from './appearance-text.js';
-import { appendedLooks, attemptsExtension, withSplitLook } from './appearance-fill.js';
+import { agreeWithStoredAge, appendedLooks, attemptsExtension, withSplitLook } from './appearance-fill.js';
 import { filledGuess, guessedTraits, mergeRefinement, physicalTraitSwaps, settledGuess, preserveOmittedPhysicalTraits, withoutSharedPieces, withoutTraitSwaps } from './appearance-physical.js';
 import { groundedTraitEvent } from './core-durable-grounding.js';
 import { completeFormWithShared, normalizeAppearanceForms, normalizeAppearanceModel, resolveNpcAppearance } from './appearance-model.js';
@@ -93,7 +93,7 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                 ? [narration, next.appearance, next.unclassifiedAppearance, ...next.appearanceForms.map(form => form.appearance)].filter(Boolean).join(' ')
                 : '';
             // fillBlank (the Refresh of a new person, appearance-fill.js): this BLANK slot takes a fitted look without quoted support.
-            if (fillBlank || !seedSupport || durableSeedGrounded(incoming, seedSupport)) next.overallAppearance = incoming;
+            if (fillBlank || !seedSupport || durableSeedGrounded(incoming, seedSupport)) next.overallAppearance = fillBlank ? agreeWithStoredAge(incoming, record) : incoming;
         } else if (fillBlank && attemptsExtension(next.overallAppearance, incoming)) {
             // A fill call (appearance-fill.js): the written text survives word for word and only a missing hair/eyes/build is added;
             // an extension that does not pass (clash, over the limit, a changed word) leaves the record as it is.

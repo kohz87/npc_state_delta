@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildBackfillPrompt, buildDossierImportPrompt, buildProfileRefreshPrompt, buildScannerPrompt, createNpcRecord, DURABLE_PROFILE_LIMITS, mergeScanResult } from '../core.js';
 import { dossierDetailProjection } from '../dossier-ui.js';
-import { appendedLooks, blankLookFields, describedFeatures, fillLooksLine, fillWanted, missingFeatures, partialLookGaps, splitLook, withSplitLook } from '../appearance-fill.js';
+import { agreeWithStoredAge, appendedLooks, blankLookFields, describedFeatures, fillLooksLine, fillWanted, missingFeatures, partialLookGaps, splitLook, withSplitLook } from '../appearance-fill.js';
 
 const NONE = { relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } };
 const story = 'Tamsin, the ferry keeper from the salt marsh, tied the boat and asked the stranger for the toll. The tide was out.';
@@ -327,4 +327,48 @@ test('the capture and Refresh prompts say plainly: overallAppearance = body, app
     const line = fillLooksLine(person({ appearance: OWNER_WEARING }));
     assert.match(line, /overallAppearance is the body \(kind, age look, build, eyes, hair, marks\); appearance is clothes and their state/);
     assert.match(buildDossierImportPrompt({ dossierText: 'Name: Tamsin', targetName: 'Tamsin', existingNpc: person() }), /overallAppearance \(body only: kind, age look, build, height, hair, eyes, marks\)\+appearance \(clothes and their state/);
+});
+
+// Owner payload after a manual Refresh (12 Nov ~20:55): Look written, the body still repeated in Wearing, the age contradicting the stored one.
+const LOOK2 = 'Human woman of apparent mid-twenties, very petite build no taller than a boy of twelve, dark hair slipping loose from a wooden bodkin, dark tearful eyes, and an extraordinarily heavy, round bust.';
+const WEAR2 = 'barely five feet tall; coarse wool smock straining across extraordinarily heavy, round breasts resting against the wooden counter.';
+
+test('addendum (a): body phrases already in Look leave Wearing; the same trait is never shown in both (owner texts)', () => {
+    const split = splitLook(person({ overallAppearance: LOOK2, appearance: `${LOOK2}; ${WEAR2}` }));
+    assert.equal(split.moved, true);
+    assert.equal(split.overall, LOOK2, 'Look unchanged: nothing appended, so no "boy of twelve" next to "five feet tall"');
+    assert.doesNotMatch(split.appearance.replace(LOOK2, ''), /five feet|breasts/);
+    assert.match(split.appearance, /coarse wool smock/);
+    const shown = dossierDetailProjection(person({ overallAppearance: LOOK2, appearance: `${LOOK2}; ${WEAR2}` }));
+    assert.equal(shown.currentPresentation, 'coarse wool smock.');
+});
+
+test('addendum (a): a body phrase Look lacks is moved, never lost', () => {
+    const split = splitLook(person({ overallAppearance: 'Human woman, dark hair', appearance: 'Human woman, dark hair; barely five feet tall; coarse wool smock.' }));
+    assert.equal(split.overall, 'Human woman, dark hair; barely five feet tall');
+    assert.equal(split.appearance.includes('five feet'), true);
+    assert.match(split.appearance, /coarse wool smock\.$/);
+});
+
+test('addendum (b): a fill never contradicts the stored apparentAge (~20, not mid-twenties); a matching age is kept', () => {
+    const npc = person({ apparentAge: '~20' });
+    assert.equal(agreeWithStoredAge(LOOK2, npc), 'Human woman, very petite build no taller than a boy of twelve, dark hair slipping loose from a wooden bodkin, dark tearful eyes, and an extraordinarily heavy, round bust.');
+    assert.equal(agreeWithStoredAge('Young woman in her early twenties, dark hair.', npc), 'Young woman in her early twenties, dark hair.');
+    assert.equal(agreeWithStoredAge(LOOK2, person()), LOOK2, 'nothing stored: unchanged');
+    const saved = run(npc, { overallAppearance: LOOK2, appearance: WEAR2 }, story, FILL);
+    assert.doesNotMatch(saved.overallAppearance, /mid-twenties/);
+    assert.match(saved.overallAppearance, /^Human woman, very petite build/);
+});
+
+test('addendum (b)+(c): the fill line carries the stored facts and asks for plain wording with the stored height, no comparisons', () => {
+    const line = fillLooksLine(person({ apparentAge: '~20', gender: 'female', overallAppearance: 'Human woman' }));
+    assert.match(line, /Stored facts to keep exactly[^.]*apparent age ~20/);
+    assert.match(line, /plain descriptive wording: a height as a height \(the stored or story one\), never a comparison to a child or another person/);
+});
+
+test('mixed clauses: no ".;" and no stray stop when body pieces move out of a sentence', () => {
+    const split = splitLook(person({ appearance: 'Tall, lean, wearing a coat, boots. Her hair is braided, a wet cloak.' }));
+    assert.equal(split.overall, 'Tall, lean; her hair is braided');
+    assert.doesNotMatch(split.appearance, /\.;|;\s*;/);
+    assert.match(split.appearance, /wearing a coat, boots; a wet cloak\.$/);
 });
