@@ -6,7 +6,7 @@
 import { getContext } from '../../../extensions.js';
 import { extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { replyScanned } from './scan-context.js';
-import { cleanMessage, recentTranscript } from './src/transcript.js';
+import { cleanMessage, recentTranscript, storyDayAt } from './src/transcript.js';
 import { buildInjection, npcNamedInText, isTerminalNpcDeath, buildNarrationCaptureParts } from './core.js';
 import { defersArea, storyBlockIsV2 } from './suite-handshake.js';
 import { injectDepthOf, getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
@@ -66,7 +66,7 @@ export function createInjectionPart(rt, deps) {
         const sceneDeferred = defersArea('scene', settings.sourceOfTruth) && !storyBlockIsV2();
         const awayNotes = keyReturnNotes(state);
         const gearLines = castGearLines(state);
-        return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: effectiveCustomFieldNames(settings), sceneDeferred, ...(awayNotes ? { awayNotes } : {}), ...(gearLines ? { gearLines } : {}) });
+        return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: effectiveCustomFieldNames(settings), sceneDeferred, ...(awayNotes ? { awayNotes } : {}), ...(gearLines ? { gearLines } : {}), storyDay: storyDayAt() });
     }
 
     function updateInjection() {
