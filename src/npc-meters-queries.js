@@ -164,7 +164,7 @@ export function createNpcQueries({
             return Object.keys(npcs).sort().map(view);
         },
         /**
-         * npc.cast() → [{ key, name, present, bars, still, rank?, next?, locked, opened }], present
+         * npc.cast() → [{ key, name, present, bars, still, rank?, next?, notesOn?, locked, opened }], present
          * first. `bars`: [{ id, label, value, min, max, stage, text, tone, ceiling?, floor?, ticks?,
          * delta? }] (ss.meter's props; `delta` is the change of the entry's latest reply window),
          * `still`: the same without `delta`. `locked`: the hidden notes still locked, as teasers with no

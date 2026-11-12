@@ -22,6 +22,8 @@ import { normalizeEntry } from '../src/cast-dossier.js';
 import { bondToneOf } from '../relationship-map-focus.js';
 import { resolveMapBonds } from '../relationship-map-core.js';
 import { tieTone } from '../dossier-ui-bond-tone.js';
+import { projectDossierState } from '../dossier-ui-catalog.js';
+import { dossierProfileHtml } from '../dossier-ui-profile.js';
 
 const said = "I didn't sell a spell.";
 
@@ -653,4 +655,25 @@ test('notes host: npc.taste records a Refresh\'s tastes on its reply; the narrat
     s.host.store.rebuild();
     assert.equal(JSON.stringify(s.host.head().domains.npc), swiped, 'rebuild equals live after the swipe');
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+});
+
+test('notes host: the Profile placeholders (Tastes, Drives) reach the real dossier chain only with notes ON (adapter.dossierMeters → projectDossierState → Profile)', async () => {
+    const profile = async features => {
+        const s = await suite({ allowance: null, features });
+        await s.setDay(1);
+        await s.say(['~ npc Oren | trust: +1']);
+        const npcs = [{ id: 'npc_oren', name: 'Oren' }];
+        const meterViews = s.adapter.dossierMeters(npcs);
+        const projected = projectDossierState({ npcs, meterViews }).npcs[0];
+        return { view: meterViews.npc_oren, html: dossierProfileHtml(projected, { layout: 'phone' }) };
+    };
+    const on = await profile(ON);
+    assert.equal(on.view.notesOn, true, 'the adapter keeps the flag');
+    assert.match(on.html, /<h3>Tastes<\/h3>/);
+    assert.match(on.html, /No tastes yet/);
+    assert.match(on.html, /<h3>Drives<\/h3>/);
+    assert.match(on.html, /All normal so far/);
+    const off = await profile({ [FEATURE_NOTES]: false });
+    assert.equal(off.view.notesOn, undefined);
+    assert.doesNotMatch(off.html, /Tastes|Drives|No tastes yet|All normal so far/);
 });
