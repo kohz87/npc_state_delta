@@ -241,8 +241,8 @@ export function createScanPart(rt, deps) {
                 npc.present = false;
                 if (!compactWorldStateTurn) npc.worldActive = false;
             }
-            // (memory facts) Standalone only: hosted, the slice applies the move (its allowance, tier cut and gates), which this scan cannot see.
-            const factOpt = hostedMeters() ? null : scanMemoryFacts(state, settings, currentLineage, targetMessageId, ctx.name1);
+            // (memory facts) Hosted, the slice applies the move (its allowance, tier cut and gates), so only the first meeting is derived here.
+            const factOpt = scanMemoryFacts(state, settings, currentLineage, targetMessageId, ctx.name1, { hosted: hostedMeters() });
             const merged = mergeScanResult(mergeBaseState, parsedForMerge, {
                 maxNpcs: settings.maxNpcs,
                 excludeNames: [...currentExclusions(), ...(state.dismissed || [])],

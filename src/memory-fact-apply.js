@@ -2,7 +2,7 @@
 // mergeImportantMemories untouched (old chats and the no-fact path stay byte-identical); anything else goes through the identity-aware store.
 import { mergeImportantMemories } from '../core-record-merge.js';
 import { mergeFactMemories } from './memory-fact-store.js';
-import { moveFact } from './memory-fact-events.js';
+import { metFact, moveFact } from './memory-fact-events.js';
 
 // Sets target.memories (and, on the fact path, manualMemories and memoryFacts) from `existing` plus the model's ordinary memories and code-derived candidates.
 export function applyNpcMemories(target, existing, incoming, { limit = 3, sameReply = {}, locked = false, candidates = [] } = {}) {
@@ -24,7 +24,16 @@ export function applyNpcMemories(target, existing, incoming, { limit = 3, sameRe
 
 // A standalone scan's own accepted relationship movement (the appliedDelta of this very merge, never an ask) as candidates for the reply R.
 export function scanFactCandidates(existing, relationshipUpdate, { facts, R, player } = {}) {
-    if (!facts?.source || !Number.isInteger(R)) return [];
+    if (!facts?.source || !Number.isInteger(R) || facts.hosted) return [];   // hosted, the slice owns the movement (its allowance, tier cut and gates)
     const move = moveFact({ applied: relationshipUpdate?.appliedDelta, tier: relationshipUpdate?.impact, R, ns: 'scan', source: facts.source, opId: `${existing?.id ?? ''}:${facts.source}`, player });
     return move ? [move] : [];
+}
+
+// The first meeting of a person with the player: the merged record is present (not archived) on this marked live reply and was never present
+// before (`seenCount` moves only on presence, a manual add or a cast dossier made earlier has 0). Created, promoted, seeded and cast alike; a
+// person only mentioned is never present, and an older dossier that was present before carries a count, so it never gets "first met".
+export function firstMeetingCandidates(existing, merged, { facts, R, player } = {}) {
+    if (!facts?.source || !merged?.present || merged.archived || Number(existing?.seenCount) > 0) return [];
+    const fact = metFact({ npcId: merged.id, R, source: facts.source, player, place: merged.location });
+    return fact ? [fact] : [];
 }

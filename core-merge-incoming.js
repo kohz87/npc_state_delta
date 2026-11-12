@@ -6,7 +6,7 @@ import { developmentScaleReady } from './core-development.js';
 import { cleanText, normalizeName } from './core-text.js';
 import { identityLabelsRelated, inferNpcIdentityKind, isInterimNpcLabel } from './core-identity.js';
 import { durableTextAccepted, incomingCustomFields, incomingKeyRelationships, mergeLists } from './core-record.js';
-import { applyNpcMemories, scanFactCandidates } from './src/memory-fact-apply.js';
+import { applyNpcMemories, firstMeetingCandidates, scanFactCandidates } from './src/memory-fact-apply.js';
 import { TEXT_FIELDS } from './src/fields/registry.js';
 import { durableRefinementCandidateGrounded, filterSafeMannerismRefinements, groundedAppearanceChange, groundedAppearanceCorrection, isExplicitRecurringMannerism, isSafeIdentityTextRefinement, isSafeSpeechRefinement, isSafeUnmarkedDurableFieldReplacement, isSafeUnmarkedDurableRefinement, mergeDurableTextRefinement, normalizeMannerisms, presentationContinuationEvidence, speechSeedVetoed, speechSupportContext } from './core-durable.js';
 import { groundedBehaviorProfile, mergeBehaviorProfileRefinements, reconcileBehaviorProfileWithPersonality } from './core-behavior.js';
@@ -409,6 +409,7 @@ export function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAU
     merged.portrait = existing.portrait || null;
     merged.manualProfileFields = [...manualFields];
     // Code-derived memory facts of this reply (src/memory-fact-store.js); none without the rule, a mark or an applied movement.
+    factCandidates = [...factCandidates, ...firstMeetingCandidates(existing, merged, { facts: lifecycleOptions.memoryFacts, R: sourceMessageId, player: lifecycleOptions.memoryFacts?.player })];
     if (factCandidates.length) applyNpcMemories(merged, merged, {}, { candidates: factCandidates, locked: manualFields.has('memories') });
     return merged;
 }

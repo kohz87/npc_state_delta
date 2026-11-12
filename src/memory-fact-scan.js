@@ -13,11 +13,12 @@ export function scanMemoryParagraph(state, settings, windowIds, chat) {
     return memoryParagraph(selectHandles(state?.npcs, windowIds, fingerprintAt(chat)), state?.npcs);
 }
 
-// { source, player } for the merge, or null: the setting is on and this exact reply (lineage key) carries a live-eligibility mark.
-export function scanMemoryFacts(state, settings, lineage, messageId, player) {
+// { source, player, hosted } for the merge, or null: the setting is on and this exact reply (lineage key) carries a live-eligibility mark.
+// `hosted` (the host's meter slice owns the relationship movement) keeps the movement fact out; the first meeting is NSD's own, hosted or not.
+export function scanMemoryFacts(state, settings, lineage, messageId, player, { hosted = false } = {}) {
     if (!memoryFactsOn(settings) || !Number.isInteger(messageId)) return null;
     const source = lineageCheckpointKey(lineage, messageId);
-    return isMarked(state, source) ? { source, player: String(player ?? '') } : null;
+    return isMarked(state, source) ? { source, player: String(player ?? ''), ...(hosted ? { hosted: true } : {}) } : null;
 }
 
 export function phraseMerged(mergedState, handles, parsed, chat) {

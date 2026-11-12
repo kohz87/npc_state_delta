@@ -105,14 +105,14 @@ test('memory facts live: a new live reply is marked, an applied major move leave
         await h.turn('Guards!', 'Yunyun saves Kazuma from the guards, mark-2.');
         const npc = h.yunyun();
         h.check(h.state().memoryFactMarks?.keys?.length === 2, 'both live replies are marked');
-        h.check(npc.memories.length === 1 && /^My trust in .+ (rose|grew)\.$/.test(npc.memories[0]), `the fallback memory exists: ${JSON.stringify(npc.memories)}`);
-        const entry = Object.values(npc.memoryFacts.entries)[0];
+        h.check(npc.memories.filter(text => !/first met/.test(text)).length === 1 && /^My trust in .+ (rose|grew)\.$/.test(npc.memories.filter(text => !/first met/.test(text))[0]), `the fallback memory exists (beside the first meeting): ${JSON.stringify(npc.memories)}`);
+        const entry = Object.values(npc.memoryFacts.entries).find(item => item.k === 'move');
         h.check(entry.r === 3 && entry.c === 'A' && entry.pend === 1, 'one pending class-A fact of reply 3');
-        h.check(npc.memoryStamps[Object.keys(npc.memoryStamps)[0]].m === 3, 'stamped with its reply');
+        h.check(npc.memoryStamps[Object.keys(npc.memoryStamps).find(key => !/first met/.test(key))].m === 3, 'stamped with its reply');
         h.check(h.mockState.prompts.every(prompt => !prompt.includes('MEMORY FACTS')), 'no paragraph while no pending fact is inside a call window');
         await h.turn('On.', 'Yunyun walks on, mark-3.');
         h.check(yunyunMemories(h).length === 1, 'a later quiet reply adds nothing');
-        function yunyunMemories(hh) { return hh.yunyun().memories; }
+        function yunyunMemories(hh) { return hh.yunyun().memories.filter(text => !/first met/.test(text)); }
     });
 });
 
@@ -123,20 +123,25 @@ test('memory facts live: a manual scan whose window holds the fact reply carries
         await h.turn('Guards!', 'Yunyun saves Kazuma from the guards, mark-2.');
         h.mockState.moveOn = null;
         const before = h.yunyun();
-        const stampBefore = JSON.stringify(Object.values(before.memoryStamps)[0]);
+        const moveKey = obj => Object.keys(obj.memoryStamps).find(key => !/first met/.test(key));
+        const stampBefore = JSON.stringify(before.memoryStamps[moveKey(before)]);
         h.mockState.phrase = prompt => {
-            const line = prompt.split('\n').find(item => item.startsWith('h1: '));
-            const forms = JSON.parse(`[${line.slice(4).split(' | ').join(',')}]`);
-            return { h1: forms[forms.length - 1] };
+            // Every handle in the paragraph (the first meeting and the move) takes its last allowed sentence.
+            const out = {};
+            for (const line of prompt.split('\n').filter(item => /^h\d+: /.test(item))) {
+                const forms = JSON.parse(`[${line.slice(line.indexOf(': ') + 2).split(' | ').join(',')}]`);
+                out[line.slice(0, line.indexOf(':'))] = forms[forms.length - 1];
+            }
+            return out;
         };
         await h.runtime.scan();
         await h.sleep(200);
         const prompts = h.mockState.prompts.filter(prompt => prompt.includes('MEMORY FACTS'));
         h.check(prompts.length >= 1, 'the manual scan window held the reply, so the paragraph was sent');
         const npc = h.yunyun();
-        h.check(npc.memories.length === 1 && /grew\.$/.test(npc.memories[0]), `the second allowed sentence was taken: ${JSON.stringify(npc.memories)}`);
-        h.check(JSON.stringify(Object.values(npc.memoryStamps)[0]) === stampBefore, 'the stamp moved with the text');
-        h.check(!Object.values(npc.memoryFacts.entries)[0].pend, 'phrased: no longer pending');
+        h.check(npc.memories.filter(text => !/first met/.test(text)).length === 1 && /grew\.$/.test(npc.memories.filter(text => !/first met/.test(text))[0]), `the second allowed sentence was taken: ${JSON.stringify(npc.memories)}`);
+        h.check(JSON.stringify(npc.memoryStamps[moveKey(npc)]) === stampBefore, 'the stamp moved with the text');
+        h.check(!Object.values(npc.memoryFacts.entries).find(item => item.k === 'move').pend, 'phrased: no longer pending');
     });
 });
 
@@ -147,11 +152,11 @@ test('memory facts live: the focused relationship pass (where most real moves ar
         await h.turn('Guards!', 'Yunyun saves Kazuma from the guards, mark-2.');
         const npc = h.yunyun();
         h.check(npc.relationship.trust > 0, 'the focused decision applied');
-        h.check(npc.memories.length === 1 && /^My trust in .+ (rose|grew)\.$/.test(npc.memories[0]), `the focused move left the fallback: ${JSON.stringify(npc.memories)}`);
-        h.check(Object.values(npc.memoryFacts.entries)[0].r === 3 && npc.memoryStamps[Object.keys(npc.memoryStamps)[0]].m === 3, 'bound to its reply');
+        h.check(npc.memories.filter(text => !/first met/.test(text)).length === 1 && /^My trust in .+ (rose|grew)\.$/.test(npc.memories.filter(text => !/first met/.test(text))[0]), `the focused move left the fallback: ${JSON.stringify(npc.memories)}`);
+        h.check(Object.values(npc.memoryFacts.entries).find(item => item.k === 'move').r === 3 && npc.memoryStamps[Object.keys(npc.memoryStamps).find(key => !/first met/.test(key))].m === 3, 'bound to its reply');
         h.mockState.focusedOn = null;
         await h.turn('On.', 'Yunyun walks on, mark-3.');
-        h.check(h.yunyun().memories.length === 1, 'nothing repeated');
+        h.check(h.yunyun().memories.filter(text => !/first met/.test(text)).length === 1, 'nothing repeated');
     });
 });
 
@@ -163,7 +168,7 @@ test('memory facts live: parity - a rebuild from the chat gives the same memorie
         h.mockState.focusedOn = null;
         await h.turn('On.', 'Yunyun walks on, mark-3.');
         const live = h.facts();
-        h.check(h.yunyun().memories.length === 1, 'the live run made the fact');
+        h.check(h.yunyun().memories.filter(text => !/first met/.test(text)).length === 1 && h.yunyun().memories.length === 2, 'the live run made the move fact beside the first meeting');
         const marks = JSON.stringify(h.state().memoryFactMarks.keys);
         const catchUp = h.controller();
         h.mockState.focusedOn = 'mark-2';

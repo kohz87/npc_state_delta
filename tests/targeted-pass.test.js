@@ -58,7 +58,8 @@ test('targeted passes through the synthetic host: rewrite tolerance, memory limi
         const refreshed = runtime.getNpc(yunyunId);
         assert.equal(refreshed.background, 'Grew up in the Crimson Demon village.');
         // I-14: the Refresh prompt asks for at most three new memories.
-        assert.equal(refreshed.memories.length, 3, `Refresh adds at most three memories (${refreshed.memories.length})`);
+        // (first meeting) The live reply that admitted her also left her one code-made "I first met" fact; the Refresh's own additions stay at three.
+        assert.equal(refreshed.memories.filter(text => !/first met/.test(text)).length, 3, `Refresh adds at most three memories (${refreshed.memories.length})`);
         // I-17: the other dossier is untouched by the targeted pass.
         const miraAfter = runtime.getNpc(npc('Mira').id);
         const unrelated = record => Object.fromEntries(Object.entries(record).filter(([key]) => !['keyRelationships', 'updatedAt', 'fieldChanges', 'fieldChangeMessages', 'fieldChangeDays'].includes(key)));
