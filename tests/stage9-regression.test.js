@@ -127,7 +127,7 @@ test('the new hosted features off: the npc static line is the one from before th
     const lineOf = on => { const part = createNpcPart({ settings: () => ({}), present: () => [], feature: () => on }); return `${part.kinds.npc.grammar}\n${part.kinds.milestone.grammar}\n${part.context.static()}`; };
     const off = lineOf(false);
     assert.doesNotMatch(off, /via:/, 'features off: no gate wording in the static part');
-    assert.equal(off.length, 420, 'the static part is the pre-batch size (measure:prompts v2-npc-meters-builtIns) plus the milestone line\'s when-and-example (78 chars, flash-rare-lines)');
+    assert.equal(off.length, 447, 'the static part is the pre-batch size (measure:prompts v2-npc-meters-builtIns) plus the milestone line\'s when-and-example (78 chars, flash-rare-lines) plus " Add | why: what caused it." (27 chars, meter-line-reason)');
     assert.equal(lineOf(true).replace(/ Add \| via:[^.]*\./, ''), off, 'on differs only by the gated sentence');
 });
 

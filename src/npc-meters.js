@@ -74,7 +74,7 @@ import { createNpcCommands } from './npc-meters-commands.js';
 import { createNpcQueries } from './npc-meters-queries.js';
 import { createNpcPrompt } from './npc-meters-prompt.js';
 import { normalizeAllowance, pacedTier, spendFlatEvent } from './relationship-pacing.js';
-import { askedOf, cutToTier, nextEvent, pacingNote } from './npc-meters-pacing.js';
+import { askedOf, cutToTier, nextEvent, pacingNote, withEvidence } from './npc-meters-pacing.js';
 import { gateStoryLine } from '../npc-meters-gate.js';
 import { noteKinds } from './npc-notes-kinds.js';
 export { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, BUILT_IN_RANGE, CUSTOM_RANGE, MAX_CUSTOM_METERS, MAX_NPCS, MAX_METERS_PER_NPC, MAX_STAGES_PER_METER, MAX_SECRETS, MAX_GENERATED_SECRETS, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, MAX_TRACKS, MAX_BANDS, MAX_NEEDS, DEFAULT_CHANGE_CAP, MAX_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, SECRET_WHEN_MAX, NOTE_SOURCES, MILESTONE_MAX, DESCRIBE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, FEATURES, replyKey, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, parseBands, bandWord, parseNeeds, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
@@ -319,7 +319,7 @@ export function createNpcPart(hooks = {}) {
     }
 
     // `milestone`: { add: [{ key, name }], remove: [key] } (the reader's or a story line's).
-    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false, scanTier = null, scanWhy = '', via = null, reason = '', leaf = null }) {
+    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false, scanTier = null, scanWhy = '', via = null, reason = '', leaf = null, evidence = null }) {
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         if (!changes.length && disposition === undefined && !allowEmpty) {
@@ -338,6 +338,9 @@ export function createNpcPart(hooks = {}) {
         // Delta's scan of a reply whose story line already moved a meter leaves that meter to the line (one move, not two).
         const left = yieldToStory && limit && record.turn && sameReply(record.turn, reply) && Array.isArray(record.turn.story) ? record.turn.story : [];
         let mine = left.length ? changes.filter(change => !left.includes(change.meter)) : changes;
+        // That scan's one-pass evidence is the reason of the line's event that gave none (a Re-read of an older read keeps none); nothing else: refused, unwritten.
+        const stamped = evidence && left.length ? withEvidence(record.lastEvent, replyKey(reply, reply), reasonKept(ctx, who.key, evidence)) : null;
+        if (stamped) record.lastEvent = stamped; else if (evidence && !changes.length) ctx.fail('REFUSED', 'Nothing to update.');
         // Pacing (relationship-pacing.js): one event per line or scanner change, counted once whatever number of meters it names.
         // A story line (`impact`) and a forwarded scanner change (`scanTier`) share the record's count; a change with neither is not paced.
         const asked = impact?.tier ?? pacedTier(scanTier);

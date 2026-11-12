@@ -260,14 +260,14 @@ export function createHostedPart(rt, deps) {
     // taken when the scan started): when the reader swiped, or a reply was added or deleted, since
     // then, nothing is sent; the changes belonged to a reply that is no longer the one Story Block
     // would write them on, and the reply now shown gets its own scan.
-    function forwardRelationshipChangesToHost(before, after, messageId, head = null, updates = [], rows = []) {
+    function forwardRelationshipChangesToHost(before, after, messageId, head = null, updates = [], rows = [], onePass = false) {
         if (replayScope()) return;   // Story Block already holds these changes in its own per-reply records
         const adapter = storySuiteV2Meters();
         if (!adapter) return;
         const dropped = () => console.info('[NPC State Delta] the chat moved on during the scan (a swipe or a new or deleted reply); its relationship changes were not sent to Story Suite.');
         if (!chatHeadUnchanged(head)) return dropped();
         const prior = new Map((before || []).map(npc => [npc?.id, npc]));
-        const changes = relationshipChanges(prior, after, normalizeRelationshipBaseline(getSettings().relationshipBaseline), messageId);
+        const changes = relationshipChanges(prior, after, normalizeRelationshipBaseline(getSettings().relationshipBaseline), messageId, onePass ? rows : null);
         // A person's look set for the first time by this scan: its day and reply are stamped (the notes feature's locked look).
         const looks = (after || []).filter(npc => npc?.id && !npc.archived && String(npc.overallAppearance ?? '').trim() && !String(prior.get(npc.id)?.overallAppearance ?? '').trim());
         const refused = refusedLooks(prior, after, updates);
