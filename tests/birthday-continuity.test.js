@@ -481,3 +481,72 @@ test('non-twin siblings keep their own generated birthdays', () => {
     assert.deepEqual(list[0].birthDate, deterministicBirthday('npc_a'));
     assert.deepEqual(list[1].birthDate, deterministicBirthday('npc_b'));
 });
+
+test('"twin" that qualifies someone else, or is negated, links nobody (the review phrases)', () => {
+    setActiveCalendarConfig(null);
+    for (const relation of ['twin son', 'twin daughter', 'daughter, one of the twins', 'one of the twins', 'father of the twins', 'mother of the twins', 'twin flame', 'not her twin', 'sibling of the twins']) {
+        const list = twinState([
+            twinNpc('npc_a', 'Arin', { keyRelationships: [`Mira — ${relation}`] }),
+            twinNpc('npc_m', 'Mira', { keyRelationships: [`Arin — ${relation}`] }),
+        ]);
+        assert.deepEqual(list[0].birthDate, deterministicBirthday('npc_a'), relation);
+        assert.deepEqual(list[1].birthDate, deterministicBirthday('npc_m'), relation);
+    }
+    const roles = twinState([
+        twinNpc('npc_z', 'Zed', { castFrom: { key: 'k' }, role: "Ana's twin son" }),
+        twinNpc('npc_y', 'Yan', { castFrom: { key: 'k' }, role: 'Mother of the twin sister of Ana' }),
+        twinNpc('npc_c', 'Ana'),
+    ]);
+    assert.deepEqual(roles[0].birthDate, deterministicBirthday('npc_z'));
+    assert.deepEqual(roles[1].birthDate, deterministicBirthday('npc_y'));
+});
+
+test('the forms that mean "is the twin of" still link', () => {
+    setActiveCalendarConfig(null);
+    for (const relation of ['twin', 'twin sister', 'twin brother', 'twin sibling', 'her twin', 'older twin brother']) {
+        const list = twinState([
+            twinNpc('npc_a', 'Arin', { keyRelationships: [`Brin — ${relation}`] }),
+            twinNpc('npc_b', 'Brin'),
+        ]);
+        assert.deepEqual(list[0].birthDate, list[1].birthDate, relation);
+    }
+});
+
+test('twins with different stored ages keep their own ages and years through a dated merge', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const clock = { sourceMessageId: 1, calendarSource: WORLD_STATE_821 };
+    const state = { turn: 1, npcs: [{ id: 'npc_a', name: 'Arin', age: '19' }, { id: 'npc_m', name: 'Mira', age: '45' }], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] } };
+    const first = mergeScanResult(state, { npcs: [
+        { id: 'npc_m', name: 'Mira', keyRelationships: ['Arin — twin son'] }, { id: 'npc_a', name: 'Arin' }] }, clock);
+    const second = mergeScanResult(first.state, { npcs: [{ id: 'npc_x', name: 'Xan' }] }, { ...clock, sourceMessageId: 2 });
+    for (const result of [first, second]) {
+        assert.equal(result.state.npcs.find(n => n.id === 'npc_m').age, '45');
+        assert.equal(result.state.npcs.find(n => n.id === 'npc_a').age, '19');
+    }
+    const mira = second.state.npcs.find(n => n.id === 'npc_m');
+    assert.equal(mira.calendarAge, 45);
+    assert.equal(mira.fieldChanges?.age, undefined, 'no age change is stamped');
+    assert.equal(mira.fieldChanges?.birthDate, first.state.npcs.find(n => n.id === 'npc_m').fieldChanges?.birthDate, 'a later merge stamps no new birthday change');
+    // real twins with different ages: still their own ages, and a later merge stamps nothing
+    const twins = { turn: 1, npcs: [{ id: 'npc_a', name: 'Arin', age: '19', keyRelationships: ['Brin — twin brother'] }, { id: 'npc_b', name: 'Brin', age: '20', keyRelationships: ['Arin — twin brother'] }], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] } };
+    const t1 = mergeScanResult(twins, { npcs: [{ id: 'npc_a', name: 'Arin' }] }, clock);
+    const t2 = mergeScanResult(t1.state, { npcs: [{ id: 'npc_x', name: 'Xan' }] }, { ...clock, sourceMessageId: 2 });
+    assert.equal(t2.state.npcs.find(n => n.id === 'npc_a').age, '19');
+    assert.equal(t2.state.npcs.find(n => n.id === 'npc_b').age, '20');
+    for (const n of t2.state.npcs.filter(o => o.name !== 'Xan')) {
+        assert.equal(n.fieldChanges?.age, undefined, `${n.id} no age change stamped`);
+        assert.equal(n.fieldChanges?.birthDate, t1.state.npcs.find(o => o.id === n.id).fieldChanges?.birthDate, `${n.id} no new birthday change`);
+    }
+});
+
+test('twins copy month and day only: the receiver keeps its own year, and a stored age is never moved', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR_WITH_CLOCK);
+    const est = { birthDate: { era: 'CR', year: 790, month: 'Sunwane', day: 9 }, birthDateSource: 'established' };
+    const list = twinState([
+        twinNpc('npc_a', 'Arin', { keyRelationships: ['Brin — twin'], age: '19' }),
+        twinNpc('npc_b', 'Brin', { keyRelationships: ['Arin — twin'], ...est }),
+    ]);
+    assert.equal(list[1].birthDate.year, 790);
+    assert.notEqual(list[0].birthDate.year, 790, 'the year is not copied');
+    assert.equal(list[0].age, '19');
+});
