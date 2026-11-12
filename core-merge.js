@@ -6,7 +6,7 @@ import { cleanText, normalizeName } from './core-text.js';
 import { DEFAULT_RELATIONSHIP, DEFAULT_RELATIONSHIP_CAPS, normalizeRelationshipBaseline, normalizeRelationshipCaps } from './core-relationship.js';
 import { findInterimIdentityPromotionIndex, inferNpcIdentityKind, isDescriptivePhrase, normalizeGender } from './core-identity.js';
 import { applySheetLevels, withoutSheetLevels, candidateMatches, createNpcRecord, IMPORTANT_MEMORY_LIMIT, makeNpcCandidate, mergeLists, normalizeCustomFieldNames, normalizeNpcAdmissionMode, normalizeNpcCandidate, normalizeNpcRecord, normalizeScanNpc, NPC_CANDIDATE_LIMIT, NPC_CANDIDATE_TTL_TURNS, scanLabelsMatch, shouldCreateDossierImmediately, shouldPromoteCandidate } from './core-record.js';
-import { applyKeyRelationshipEdges } from './core-keyrel.js';
+import { applyKeyRelationshipEdges, recordTieMentions, tieRoster } from './core-keyrel.js';
 import { canonicalizeNpcKeyRelationships, reconcileSocialState } from './social.js';
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
 import { applyIncoming } from './core-merge-incoming.js';
@@ -247,8 +247,15 @@ export function mergeScanResult(state, scanResult, options = {}) {
 
     // Final canonicalization is a hard guard against append-only drift from either
     // normal NPC deltas or the independent profile/social channels.
+    const before = new Map((Array.isArray(state?.npcs) ? state.npcs : []).map(npc => [npc.id, npc]));
+    const tieNames = tieRoster(next.npcs);
     next.npcs = next.npcs.map(npc => {
         const current = { ...npc };
+        // Ties' last mention (story day of the reply, reply prose, and ties this scan added or changed), so replay and swipes restore it with the NPC.
+        const prior = before.get(current.id)?.keyRelationships || [];
+        const seen = recordTieMentions(current, { day: Number.isInteger(options.tieDay) ? options.tieDay : (Number.isInteger(options.storyDay) ? options.storyDay : null), roster: tieNames, text: options.calendarSource,
+            named: (current.keyRelationships || []).filter(entry => !prior.includes(entry)) });
+        if (seen) current.tieSeen = seen;
         return normalizeNpcRecord(current);
     });
 

@@ -52,15 +52,17 @@ export function createNpcPrompt({
     // One short cue, with the notes feature on (whoever is in the scene): the block is written, just before <Blocks>, even when <Blocks> is empty.
     // Sent as a kept line ({ text, keep: true }): the host's tail budget (the run used 550 tokens) drops this module's optional lines first,
     // and its section is last, so as an optional line the cue never reached a prompt. The host counts kept lines in tail order against one
-    // shared cap (120 tokens): Story Director's pulse, [Earlier days] and Initiative lines come before this section and win; when they leave
-    // no room the cue is an ordinary line (the first of this section's lines dropped). Needs Story Block 2.31.1+ (older hosts drop object lines).
+    // shared cap (120 tokens): Story Director's pulse and Initiative lines (counted first) and its pinned hook cues ([Earlier days], [Names]) and
+    // Story Block's own cues are never displaced, this section comes after them. The cue comes first, what the cap leaves goes to Pull and Mood; a kept
+    // line that no longer fits is an ordinary line (the first of this section's lines dropped). Needs Story Block 2.31.1+ (older hosts drop object lines).
     const CHANGES_CUE = 'Whenever anything changed, write the <Changes> block (just before <Blocks>, which still ends the reply), even if <Blocks> is empty; a lie, secret, taste, tie or turning point gets its own line.';
     const HIDDEN_LINE = new RegExp(`^(.+?)(?:, ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}| \\(hidden\\)): .*$`, 'gm');
 
     // Mood and pull for present people (feature mood-pull): "Mood: Mira alarmed, cornered; Tomas wary." and
-    // "Pull: Mira wants closure (the stolen letter, 3 days)". At most PULL_PEOPLE people each; sent as optional lines so the
-    // host's budget drops them first. A mood of all zeros says nothing.
+    // "Pull: Mira wants closure (the stolen letter, 3 days)". At most PULL_PEOPLE people each; sent as kept lines (see tail()). A mood of all zeros says nothing.
     const PULL_PEOPLE = 3;
+    // What Pull and Mood may take of the shared kept cap (120) after the pulse (about 24), Initiative (about 19) and the cue (49): about 28 tokens.
+    const FELT_KEPT_TOKENS = 28;
     const PULL_WORDS = { belonging: 'belonging', closure: 'closure', awe: 'awe' };
     function moodPullLines(npcs, here) {
         const moods = [];
@@ -79,7 +81,18 @@ export function createNpcPrompt({
                 pulls.push(`${record.name}: ${PULL_WORDS[pull.kind]} (${clean(pull.cause, 60)}${days > 0 ? `, ${days} ${days === 1 ? 'day' : 'days'}` : ''})`);
             }
         }
-        return [...(moods.length ? [`Mood: ${moods.join('; ')}.`] : []), ...(pulls.length ? [`Pull: ${pulls.join('; ')}.`] : [])];
+        // Kept: the first person's Pull, then Mood, while they fit FELT_KEPT_TOKENS together; every other person, and any line over it, is optional.
+        const keptLines = [];
+        const rest = [];
+        let used = 0;
+        for (const [label, list] of [['Pull', pulls], ['Mood', moods]]) {
+            if (!list.length) continue;
+            const first = `${label}: ${list[0]}.`;
+            const size = Math.ceil(first.length / 4);
+            if (used + size <= FELT_KEPT_TOKENS) { keptLines.push(first); used += size; } else rest.push(first);
+            if (list.length > 1) rest.push(`${label}: ${list.slice(1).join('; ')}.`);
+        }
+        return { kept: keptLines, rest };
     }
 
     /**
@@ -140,8 +153,7 @@ export function createNpcPrompt({
         hidden.sort((a, b) => a.distance - b.distance || a.order - b.order);
         // The wording rides on the nearest note (the host drops the farthest first, so it stays while any note does).
         const optional = [...cues, ...hidden.map((item, i) => (i ? item.short : `${HIDDEN_ONCE}\n${item.short}`))];
-        if (featureOn(FEATURE_MOOD_PULL)) optional.push(...moodPullLines(npcs, here));
-        // Notes (npc-notes-kinds.js): at most two lines a person and four in all, after the meters, opened notes and mood (optional).
+        // Notes (npc-notes-kinds.js): at most two lines a person and four in all, after the meters and opened notes (optional).
         if (featureOn(FEATURE_NOTES)) {
             const noted = notesTail(npcs, { present: Object.keys(npcs).sort().filter(key => here.has(key)) });
             // A secret note line (a lie told) with no locked meter note before it carries the (hidden) wording itself.
@@ -149,10 +161,17 @@ export function createNpcPrompt({
             if (first >= 0) noted[first] = `${HIDDEN_ONCE}\n${noted[first]}`;
             optional.push(...noted);
         }
-        // The last required line (the host writes this section's optional lines after it): the model drifts into ending on an empty
-        // <Blocks> and drops <Changes> (the data of the live runs).
+        // The last required lines (the host writes this section's optional lines after them), in this order: the cue, then Pull, then Mood.
+        // The cue goes first so it keeps the shared kept cap exactly as before (it is a reminder of the reply's form: the model drifts into ending
+        // on an empty <Blocks> and dropping <Changes>, which loses state). Pull and Mood take what the cap leaves, the first person's only (about 28
+        // tokens); the other people's, and a line that does not fit that, are optional lines (after the notes), never required ones.
+        // As optional lines of this last-sorted section the host's tail budget cut Pull and Mood from every prompt of run 3. Kept lines share the
+        // host's one cap after Story Director's and Story Block's own, which come earlier in tail order and keep theirs; over the cap a line is
+        // an ordinary one, so these lines never displace another module's kept or pinned line.
+        const felt = featureOn(FEATURE_MOOD_PULL) ? moodPullLines(npcs, here) : { kept: [], rest: [] };
         const cue = featureOn(FEATURE_NOTES) ? [{ text: CHANGES_CUE, keep: true }] : [];
-        return { lines: [...lines, ...notes, ...cue], optional };
+        optional.push(...felt.rest);
+        return { lines: [...lines, ...notes, ...cue, ...felt.kept.map(text => ({ text, keep: true }))], optional };
     }
 
     /**

@@ -4,7 +4,7 @@
 import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { isScannerRoutingError } from './scanner-routing.js';
 import { readAheadOf, settleScan, storyTextsForAdmission } from './scan-context.js';
-import { recentTranscript, recentUserDevelopmentContext, currentExchangeUserDevelopmentContext, currentExchangeTranscript, skippedExchangesWindow, recentReplyIds, activeReplyIds, activeChat, currentExchangeProse, storyDayAt, currentExclusions, refreshMessageGate } from './src/transcript.js';
+import { recentTranscript, recentUserDevelopmentContext, currentExchangeUserDevelopmentContext, currentExchangeTranscript, skippedExchangesWindow, recentReplyIds, activeReplyIds, activeChat, currentExchangeProse, storyDayAt, tieDayAt, currentExclusions, refreshMessageGate } from './src/transcript.js';
 import { FULL_SCAN_RESPONSE_LENGTH, SCAN_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { applyFocusedRelationshipDecisions, runFocusedRelationshipPass, suppressPrimaryRelationshipForFocusedDecisions } from './src/relationship-pass.js';
 import { prepareFullWindowRelationshipPayload, buildScannerPrompt, mergeScanResult, tagScanEvidence, resolveInterimIdentityPromotions, hasCompactMeguminWorldState, extractExplicitKeyRelationshipEdges } from './core.js';
@@ -237,6 +237,7 @@ export function createScanPart(rt, deps) {
                 scenePresent: scenePresentAt(targetMessageId),
                 calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
                 storyDay: storyDayAt(targetMessageId),
+                tieDay: tieDayAt(targetMessageId),
                 customFieldNames: effectiveCustomFieldNames(settings),
                 relationshipBaseline: settings.relationshipBaseline,
                 relationshipCaps: settings.relationshipCaps,

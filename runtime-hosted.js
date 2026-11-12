@@ -3,8 +3,9 @@
    relationship changes, secret events and hidden-note options Delta sends back, and the words for why no one shows as present. Built by index.js once per module instance with the shared
    runtime state and the controller functions it calls. Bodies are moved from index.js without change. */
 
-import { chatContext as getContext, refusedLooks, relationshipChanges, replayScope, scanMoodNumbers, scopedAdapter } from './runtime-scan-helpers.js';
+import { chatContext as getContext, refusedLooks, worth, relationshipChanges, replayScope, scanMoodNumbers, scopedAdapter } from './runtime-scan-helpers.js';
 import { replyScanned } from './scan-context.js';
+import { tieDayAt } from './src/transcript.js';
 import { normalizeRelationshipBaseline, isTerminalNpcDeath, npcMatchesLabel, storyMinuteText } from './core.js';
 import { defersArea, resolveDossierTarget } from './suite-handshake.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
@@ -16,9 +17,8 @@ import { stage1Refresh } from './dossier-tools-core.js';
 export function createHostedPart(rt, deps) {
     const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex } = deps;
     // Meetings the host did not keep, `${chatKey}|${npcId}`: sent again with that person's next scan (forwardRelationshipChangesToHost).
-    const meetOwed = new Set();
-    const meetTried = new Set();   // the entry-missing repeat is tried once a session: a host that never makes the entry is not asked at every scan
-    const moodTried = new Set();   // the catch-up of a person's mood numbers is tried once a session (a mood word kept from before the numbers existed)
+    // meetTried / moodTried: the entry-missing repeat and the catch-up of a mood word kept from before the numbers existed are each tried once a session.
+    const meetOwed = new Set(), meetTried = new Set(), moodTried = new Set();
     setRpgProbe(() => (storyBlockV2Hosted() && rt.storySuiteV2?.hosted?.() ? rt.storySuiteV2.rpgOn?.() === true : false));
 
     // Set by src/storysuite-v2.js while Delta is registered with a Story Block v2 host.
@@ -46,6 +46,9 @@ export function createHostedPart(rt, deps) {
     // The story's date after reply `index` as the dossier writes it ("Icewane 27"), '' with no host clock (calendar.js setStoryDateAtSource).
     function hostedStoryDateAt(index) {
         try { return String(storySuiteV2Meters()?.storyDateText?.(index) ?? ''); } catch { return ''; }
+    }
+    function hostedStoryDayAt(index) {
+        try { const day = storySuiteV2Meters()?.storyDayNumber?.(index); return Number.isInteger(day) ? day : null; } catch { return null; }
     }
     function hostedStoryClock() {
         const adapter = storySuiteV2Meters();
@@ -200,7 +203,8 @@ export function createHostedPart(rt, deps) {
         const keyViews = dossierKeyViews(state);
         const castViews = dossierCastViews(state);
         const sheetLevels = dossierSheetLevels(state);
-        return { meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}), ...(sheetLevels ? { sheetLevels } : {}) };
+        const storyDay = tieDayAt();   // the story day now: older ties fade by it (core-keyrel.js)
+        return { meterViews, ...(Number.isInteger(storyDay) ? { storyDay } : {}), ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}), ...(sheetLevels ? { sheetLevels } : {}) };
     }
     // (perf) The dossiers as the views read them: a copy, except that a portrait's picture (its data URL, an immutable string of up to
     // a few hundred KB) is shared rather than copied; the portrait record itself is still a copy.
@@ -266,15 +270,11 @@ export function createHostedPart(rt, deps) {
         const changes = relationshipChanges(prior, after, normalizeRelationshipBaseline(getSettings().relationshipBaseline), messageId);
         // A person's look set for the first time by this scan: its day and reply are stamped (the notes feature's locked look).
         const looks = (after || []).filter(npc => npc?.id && !npc.archived && String(npc.overallAppearance ?? '').trim() && !String(prior.get(npc.id)?.overallAppearance ?? '').trim());
-        // A durable look the scan refused (the story did not explain a change): a Problem and a next-reply cue, never a silent change.
         const refused = refusedLooks(prior, after, updates);
         // (scan-admitted people) A dossier the scan made (an id the sidecar did not have) gets a slice entry the way a cast meeting gives one;
-        // an adjust below has made it first when the scan moved its meters, and the meeting then only adds the mood and drives. Not the dead
-        // and not incidental extras: the slice holds 80 people, and a long chat must not fill it with people who never matter.
-        const worth = npc => !['dead', 'deceased'].includes(String(npc.lifeState ?? '').toLowerCase()) && npc.dossierSignal !== 'incidental';
-        // A meeting the host refused ("waiting: a native change is finishing", run 3: Pell, Harek, Theobald) is owed and sent again with the next
-        // scan of that person; so is a person this scan touched whose slice entry is still missing (a meeting lost with the page). Only a person a
-        // scan returns: dossiers no scan touches are left as they are.
+        // an adjust below has made it first when the scan moved its meters, and the meeting then only adds the mood and drives (`worth`: not the dead or incidental).
+        // A meeting the host refused ("waiting: a native change is finishing", run 3) is owed and sent again with the next scan of that person; so is a
+        // person this scan touched whose slice entry is still missing (a meeting lost with the page). Only people a scan returns; the rest are left as they are.
         const entries = typeof adapter.meterEntries === 'function' ? adapter.meterEntries() : null;
         const hasEntry = npc => !Array.isArray(entries) || Boolean(adapter.meters?.(npc.name));
         const touched = npc => prior.get(npc.id)?.updatedAt !== npc.updatedAt;
@@ -446,5 +446,5 @@ export function createHostedPart(rt, deps) {
         return { text: 'The latest scan found no NPC in the scene.', scan: true };
     }
 
-    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedStoryDateAt, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, forwardTastesToHost, attachGeneratedSecrets, castEmptyReason };
+    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedStoryDateAt, hostedStoryDayAt, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, forwardTastesToHost, attachGeneratedSecrets, castEmptyReason };
 }

@@ -107,7 +107,7 @@ export function createNpcCommands({
             // Present by the reply's own scene (reply-pinned like every other read here), else the host's present list (the dossiers' own flags).
             present: new Set((Array.isArray(scene) && scene.length ? scene : presentNames()).map(name => labelKey(typeof name === 'string' ? name : name?.name)).filter(Boolean)),
             threads: (Array.isArray(rows) ? rows : []).filter(row => typeof row?.id === 'string' && row.status === 'active').map(row => ({
-                id: row.id, title: clean(row.key, 60), names: [labelKey(row.key), ...names(row.fields?.giver), ...names(row.fields?.people)].filter(Boolean),
+                id: row.id, title: clean(row.key, 60), opened: isInt(row.track?.created?.time) ? Math.floor(row.track.created.time / DAY_MINUTES) : null, names: [labelKey(row.key), ...names(row.fields?.giver), ...names(row.fields?.people)].filter(Boolean),
             })),
         };
     }

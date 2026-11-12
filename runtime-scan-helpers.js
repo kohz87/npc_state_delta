@@ -184,3 +184,6 @@ export function scanMoodNumbers(rows, npc, moodOf) {
     const row = (Array.isArray(rows) ? rows : []).find(item => item && ((item.id && item.id === npc.id) || (item.name && npcMatchesLabel(npc, item.name))));
     return moodOf(row) ? moodNumbers(row) : null;
 }
+
+// A person worth a slice entry: not the dead and not incidental extras (the slice holds 80 people; a long chat must not fill it with people who never matter).
+export const worth = npc => !['dead', 'deceased'].includes(String(npc.lifeState ?? '').toLowerCase()) && npc.dossierSignal !== 'incidental';
