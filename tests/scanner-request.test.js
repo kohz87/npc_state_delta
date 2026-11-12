@@ -90,3 +90,14 @@ test('rule NSDFOLLOW-1: a reply the parser read before is read the same, with no
     const out = await generateParsedNpcJson(ctx, { systemPrompt: 'S', prompt: 'P', responseLength: SCAN_RESPONSE_LENGTH, label: 'scan', requestScope: scope });
     assert.deepEqual(out, { parsed: { npcs: [{ name: 'Mira' }] }, raw: '{"npcs":[{"name":"Mira", }]}', retried: false });
 });
+
+// Scan row keys are normalised (owner play bug, 1840: {" name":"Sieke"} built no dossier).
+test('scan rows: a padded or re-cased key reads as the clean key; a clean key wins; collisions stay; edges and updates too', () => {
+    const p = parseScanJson('{"npcs":[{" name":"Sieke","Role":"healer","home_base":"Hut"},{"name":"A"," name":"B"},{" name":"X","Name":"Y"}],"profileUpdates":[{" id":"npc_s","Speech":"calm"}],"keyRelationshipEdges":[{" aId":"1","a":"Sieke","b ":"Temiwa","aToB":"mentor"}]}');
+    assert.deepEqual(p.npcs[0], { name: 'Sieke', role: 'healer', homeBase: 'Hut' });
+    assert.deepEqual(p.npcs[1], { name: 'A', ' name': 'B' }, 'the clean key is kept, the variant is not merged');
+    assert.deepEqual(p.npcs[2], { ' name': 'X', Name: 'Y' }, 'two variants of one key are ambiguous: left as sent');
+    assert.deepEqual(p.profileUpdates[0], { id: 'npc_s', speech: 'calm' });
+    assert.deepEqual(p.keyRelationshipEdges[0], { aId: '1', a: 'Sieke', b: 'Temiwa', aToB: 'mentor' });
+    assert.deepEqual(parseScanJson('{"npcs":[{"name":"Mira","aliases":["x"]}]}').npcs, [{ name: 'Mira', aliases: ['x'] }], 'clean rows are unchanged');
+});
