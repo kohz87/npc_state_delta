@@ -232,11 +232,8 @@ function mergeScanResultHeld(state, scanResult, rawOptions = {}) {
         }
         const finalNpc = withAppearanceDerivedApparentAge(npc, ordinaryUpdate?.appearance || rawNpc.appearance);
         const changeBase = rawSources[0] ? normalizeNpcRecord(rawSources[0]) : null;
-        const stamped = stampFieldChanges(changeBase, finalNpc, Math.trunc(Number(result.state?.turn ?? sourceState?.turn)), options.storyDay,
+        return stampFieldChanges(changeBase, finalNpc, Math.trunc(Number(result.state?.turn ?? sourceState?.turn)), options.storyDay,
             Number.isInteger(options.sourceMessageId) ? options.sourceMessageId : null);
-        // calendarAge is derived: when the scan's reference date left it null, derive it live as a reload does (story clock date).
-        if (Number.isInteger(stamped.calendarAge)) return stamped;
-        return { ...stamped, calendarAge: normalizeNpcBirthday(stamped, calendar).calendarAge };
     });
     if (reference.extracted) {
         result.report = {
