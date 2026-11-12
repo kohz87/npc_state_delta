@@ -2,6 +2,7 @@
 // needs why:), the deterministic mirror check (a taste that echoes the user's last message is kept and marked, never refused) and the
 // wording of the Problem, the next-reply cue and the optional tail line. Pure; never imports npc-meters.js.
 import { clean, slug } from './npc-meters-config.js';
+import { stripMessageCitations } from '../core-text.js';
 
 export const TASTE_LIMITS = Object.freeze({ likes: 6, dislikes: 4, item: 60, from: 60, why: 120, text: 4000, reply: 80 });
 const LIKE = '+';
@@ -11,6 +12,9 @@ const STOP_WORDS = new Set([
     'our', 'she', 'he', 'they', 'the', 'their', 'this', 'that', 'to', 'was', 'we', 'were', 'with', 'you', 'your', 'his', 'her',
 ]);
 
+// A taste's words never carry the scanner's message citations ("[m2]"): dropped when a taste is written and when a stored one is read
+// (the stored text is not changed), so an old row shows clean too.
+const tidy = (value, max) => clean(stripMessageCitations(clean(value, Infinity)), max);
 const isSign = sign => sign === LIKE || sign === DISLIKE;
 const verb = sign => (sign === LIKE ? 'likes' : 'dislikes');
 const noun = sign => (sign === LIKE ? 'liking' : 'dislike');
@@ -30,12 +34,12 @@ export function contentWords(text) {
 // One stored row, or null when it is not a valid taste.
 function readRow(entry) {
     if (!entry || typeof entry !== 'object' || !isSign(entry.sign)) return null;
-    const item = clean(entry.item, TASTE_LIMITS.item);
+    const item = tidy(entry.item, TASTE_LIMITS.item);
     if (!tasteKey(item)) return null;
     const day = Number(entry.day);
     if (!Number.isInteger(day) || day < 0) return null;
     const row = { sign: entry.sign, item };
-    const from = clean(entry.from, TASTE_LIMITS.from);
+    const from = tidy(entry.from, TASTE_LIMITS.from);
     if (from) row.from = from;
     row.day = day;
     row.r = replyTag(entry.r);
@@ -121,17 +125,18 @@ const outcome = (tastes, status, problem = '', cue = '', entry = null) => ({ tas
  */
 export function addTaste(current, { name = '', sign, item, from = '', why = '', day = 0, r = null, userText = '' } = {}) {
     const list = readTastes(current);
-    const text = clean(item, TASTE_LIMITS.item);
+    const text = tidy(item, TASTE_LIMITS.item);
     const key = tasteKey(text);
     const who = clean(name, 60) || 'The NPC';
     if (!isSign(sign) || !key) return outcome(list, 'refused', 'A taste line needs a likes: or dislikes: item.');
     const same = list.find(row => tasteKey(row.item) === key);
     if (same?.sign === sign) return outcome(list, 'same');
-    if (same && !clean(why, TASTE_LIMITS.why)) {
+    const whyText = tidy(why, TASTE_LIMITS.why);
+    if (same && !whyText) {
         return outcome(list, 'refused', `${who} already ${verb(same.sign)} ${same.item}; a change needs a why: reason.`);
     }
-    const fromText = clean(from, TASTE_LIMITS.from);
-    const mirror = mirrorCheck({ userText, item: text, from: fromText, why, existing: list });
+    const fromText = tidy(from, TASTE_LIMITS.from);
+    const mirror = mirrorCheck({ userText, item: text, from: fromText, why: whyText, existing: list });
     const entry = {
         sign,
         item: text,
