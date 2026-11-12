@@ -249,7 +249,7 @@ export function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
     // here the same way: added to the stored ones, deduplicated, capped, never replacing them.
     if ((incoming.memories || []).length && !manualFields.has('memories')) {
         const before = JSON.stringify(npc.memories || []);
-        npc.memories = mergeImportantMemories(npc.memories, incoming.memories, incoming.memoryRetention, options.memoryInputLimit || 3, npc.manualMemories);
+        npc.memories = mergeImportantMemories(npc.memories, incoming.memories, incoming.memoryRetention, options.memoryInputLimit || 3, npc.manualMemories, { stamps: npc.memoryStamps, message: options.sourceMessageId });
         if (JSON.stringify(npc.memories) !== before) changed = true;
     }
 

@@ -3,6 +3,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildBackfillPrompt, createNpcRecord, mergeScanResult } from '../core.js';
+import { normalizeName } from '../core-text.js';
+import { durableSemanticSimilarity } from '../core-relationship.js';
+import { sameReplyRetelling } from '../core-record-merge.js';
 import { fillAllowed, fillLooksLine, isReadersOwn, FILL_MERGE_OPTION } from '../appearance-fill.js';
 import { runEditorHostScenario } from './editor-host.mjs';
 
@@ -38,7 +41,7 @@ test('catch-up then backfill for one person leaves one consistent description; r
     const first = merge(person(), { overallAppearance: 'Fox-eared woman, russet hair, amber eyes.' }, FILL);
     assert.equal(fillAllowed(first, 'Kazuma'), true, 'only the build is still missing: the second call may add just that');
     assert.match(fillLooksLine(first), /build/);
-    assert.doesNotMatch(fillLooksLine(first), /hair/);
+    assert.doesNotMatch(fillLooksLine(first), /describe this person's [^.]*hair|addition for [^.]*hair/, 'hair is quoted, never asked for');
     const second = merge(first, { overallAppearance: 'Fox-eared woman, russet hair, amber eyes. Broad-shouldered.' }, FILL);
     assert.equal(second.overallAppearance, 'Fox-eared woman, russet hair, amber eyes. Broad-shouldered.');
     const clash = merge(first, { overallAppearance: 'Fox-eared woman, russet hair, amber eyes. Black hair, green eyes.' }, FILL);
@@ -102,4 +105,23 @@ test('through the synthetic host: a person met on a non-catch-up reply is filled
         assert.ok(repair.length >= 1, 'a missed-participant repair for Tamsin ran');
         assert.ok(repair.every(text => !text.includes('FILL LOOKS')), 'an established person, repaired as a missed participant, never fills');
     });
+});
+
+// Owner payload (nsd-fill-looks-1815): the new person's backfill re-told the one-pass memory of the same reply in other words; the pair is
+// far below the similarity rule, so it was stored twice. A memory stamped at the reply being re-read is matched by shared distinct words.
+const ONE_PASS = 'Registered Astra at the Bluewatch Guild desk as her bodice button snapped and exposed her chest, leaving her mortified as she threw two culling contracts at him.';
+const BACKFILL = "Took Astra's registration fee, but suffered a mortifying wardrobe malfunction when her bodice burst open, prompting her to furiously thrust culling contracts at him.";
+const OTHER = 'Promised to send word to the marsh warden before the spring floods.';
+const recorded = () => person({ memories: [ONE_PASS], memoryStamps: { [normalizeName(ONE_PASS)]: { m: 12 } } });
+
+test('a backfill memory re-telling the same reply\'s one-pass memory is not stored twice; other memories still are', () => {
+    console.log(`one-pass vs backfill similarity ${durableSemanticSimilarity(ONE_PASS, BACKFILL).toFixed(2)} (dedupe needs 0.58)`);
+    assert.ok(durableSemanticSimilarity(ONE_PASS, BACKFILL) < 0.58, 'the similarity rule alone does not catch the pair');
+    assert.deepEqual(merge(recorded(), { memories: [BACKFILL, OTHER] }).memories, [ONE_PASS, OTHER]);
+    const viaUpdate = mergeScanResult({ npcs: [recorded()], candidates: [], dismissed: [], socialGraph: { version: 1, edges: [], unresolved: [] }, turn: 4 },
+        { npcs: [], profileUpdates: [{ id: recorded().id, memories: [BACKFILL] }], keyRelationshipEdges: [] },
+        { turn: 5, sourceMessageId: 12, developmentContext: story, skipRelationshipUpdate: true, allowTargetedDurableSeed: true, preservePresence: true }).state.npcs[0];
+    assert.deepEqual(viaUpdate.memories, [ONE_PASS], 'the profileUpdates channel too');
+    assert.equal(sameReplyRetelling(BACKFILL, [ONE_PASS], { [normalizeName(ONE_PASS)]: { m: 11 } }, 12), false, 'another reply\'s memory: ordinary rule');
+    assert.deepEqual(merge(recorded(), { memories: [BACKFILL] }, { sourceMessageId: 13 }).memories, [ONE_PASS, BACKFILL], 'a later reply is a new event');
 });

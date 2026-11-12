@@ -2,7 +2,7 @@
    acceptance shared by scan and profile updates. Split from core-record.js without change; core-record.js re-exports
    every name it exported before. */
 import { ageSpecificity, isInterimNpcLabel, isRoleDescriptionLabel, normalizeGender } from './core-identity.js';
-import { DURABLE_PROFILE_LIMITS, durableSeedGrounded, durableSemanticSimilarity, semanticDedupeItems } from './core-relationship.js';
+import { DURABLE_PROFILE_LIMITS, durableRefinementTokens, durableSeedGrounded, durableSemanticSimilarity, semanticDedupeItems } from './core-relationship.js';
 import { cleanList, normalizeName } from './core-text.js';
 import { identityConflict, partialNamePair, placesOverlap } from './core-merge-names.js';
 
@@ -49,10 +49,23 @@ export function mergeLists(oldList, newList, limit = 8) {
     return result;
 }
 
+// A second pass over a reply already recorded (a new person's backfill or fill reads the reply the one-pass scan just stored) re-tells
+// that reply's memory in other words, too far apart for the similarity rule ("Registered Astra ... bodice button snapped ... culling
+// contracts" against "Took Astra's registration fee ... bodice burst open ... culling contracts", about 0.2 against 0.58). A new memory
+// sharing three or more distinctive words (4+ letters) with a stored memory stamped at that same reply is that event again: not stored.
+const distinctWords = text => new Set(durableRefinementTokens(text).filter(token => token.length >= 4 && !/^\d+$/.test(token)));
+export function sameReplyRetelling(item, oldList = [], stamps = {}, message = null) {
+    if (!Number.isInteger(message)) return false;
+    const words = distinctWords(item);
+    return (Array.isArray(oldList) ? oldList : []).some(old => stamps?.[normalizeName(old)]?.m === message
+        && [...distinctWords(old)].filter(word => words.has(word)).length >= 3);
+}
+
 // (cleanup step 6) Memories the reader entered by hand (`pinned`, the record's manualMemories) are
-// never evicted: new ones take only the slots the reader's own leave free.
-export function mergeImportantMemories(oldList, newList, retentionList = [], incomingLimit = 3, pinned = []) {
-    const merged = mergeUnpinnedMemories(oldList, newList, retentionList, incomingLimit);
+// never evicted: new ones take only the slots the reader's own leave free. `sameReply` ({ stamps, message }) drops re-tellings (above).
+export function mergeImportantMemories(oldList, newList, retentionList = [], incomingLimit = 3, pinned = [], sameReply = {}) {
+    const fresh = (Array.isArray(newList) ? newList : []).filter(item => !sameReplyRetelling(item, oldList, sameReply.stamps, sameReply.message));
+    const merged = mergeUnpinnedMemories(oldList, fresh, retentionList, incomingLimit);
     const keep = (Array.isArray(pinned) ? pinned : []).map(normalizeName).filter(Boolean);
     if (!keep.length) return merged;
     const isPinned = item => keep.includes(normalizeName(item));

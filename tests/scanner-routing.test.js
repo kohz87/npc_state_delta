@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { parseScanJson } from '../core-text.js';
 import {
     cancelScannerRequests, dispatchScannerRequest, scannerRoutingMetrics,
     selectedScannerProfileId, scannerProfileOptions,
@@ -132,6 +133,15 @@ test('safe provider status classification exposes authorization failures without
     });
 });
 
+
+test('a profile reply whose content arrives as a JSON object (proxy log shape) is accepted as its JSON text', async () => {
+    const { ctx } = fixture('fast');
+    const reply = { npcs: [{ name: 'Roelof', memories: ['Took the toll.'] }] };
+    ctx.ConnectionManagerRequestService.sendRequest = async () => ({ content: reply, reasoning: '' });
+    const raw = await dispatchScannerRequest(ctx, payload);
+    assert.equal(typeof raw, 'string');
+    assert.deepEqual(parseScanJson(raw), reply);
+});
 
 for (const value of [null, {}, { content: {} }, () => {}]) test(`invalid profile response ${typeof value} does not coerce to fake JSON`, async () => {
     const { ctx } = fixture('fast');
