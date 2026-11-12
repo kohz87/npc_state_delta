@@ -8,6 +8,7 @@ import { savePortraitFile } from './storage.js';
 import { portraitHasImage } from './src/portrait-file.js';
 import { applyCastEntry, applyCastPortrait, castPortraitWanted, dossierFor, findCastPerson, metWithEntry } from './src/cast-dossier.js';
 import { getSettings } from './runtime-settings.js';
+import { normalizeSourceOfTruth } from './suite-handshake.js';
 
 export function createCastSyncPart(rt, deps) {
     const { castList, chatHeadMark, chatHeadUnchanged, chatHydrationStatus, commitBranchCheckpoint, ensureFreshMutationBoundary, getChatKey, getChatState, latestMessageId, persistCritical, renderDossier, requestHeaders, setChatState, storySuiteV2Meters, updateInjection } = deps;
@@ -157,7 +158,7 @@ export function createCastSyncPart(rt, deps) {
             if (added.report.status !== 'added') continue;
             const base = added.state.npcs.find(npc => npc.id === added.report.npcId);
             const portrait = portraits.get(person.key) ?? null;
-            const filled = base ? applyCastEntry(base, person, { packName: names[person.pack] ?? '', portrait }) : null;
+            const filled = base ? applyCastEntry(base, person, { packName: names[person.pack] ?? '', portrait, calendarOwn: normalizeSourceOfTruth(settings.sourceOfTruth).calendar === 'mine' }) : null;
             if (!filled) continue;
             const record = normalizeNpcRecord(filled);
             if (portraitHasImage(record.portrait)) {

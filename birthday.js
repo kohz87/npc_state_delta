@@ -196,6 +196,9 @@ export function reanchorDerivedBirthYearFromAge(npc = {}, config = undefined, re
     }, calendar, current);
 }
 
+/** The stored reason of a birthday a pack's writer gave (src/cast-dossier.js). It marks the date as a starting date, not yet the story's: the story replaces it. */
+export const PACK_BIRTHDAY_REASON = 'From the story pack.';
+
 export function applyNpcBirthdayUpdate(npc = {}, rawUpdate = null, options = {}) {
     const calendar = options.calendarConfig ?? getActiveCalendarConfig();
     const referenceDate = groundedReferenceDate(calendar, options.referenceDate);
@@ -207,7 +210,8 @@ export function applyNpcBirthdayUpdate(npc = {}, rawUpdate = null, options = {})
     const state = normalizeBirthDateState(rawUpdate);
     if (state !== 'establish' && state !== 'correct') return next;
     const reason = String(rawUpdate.birthDateReason ?? rawUpdate.birth_date_reason ?? '').trim().slice(0, 500);
-    const currentEstablished = next.birthDateSource === 'established';
+    const fromPack = next.birthDateReason === PACK_BIRTHDAY_REASON;   // a pack date is canon only until the story states one
+    const currentEstablished = next.birthDateSource === 'established' && !fromPack;
 
     let incomingYearSource = incoming.year === null ? '' : 'established';
     if (incoming.year === null && referenceDate && exactAge(npc.age) !== null) {
@@ -239,7 +243,7 @@ export function applyNpcBirthdayUpdate(npc = {}, rawUpdate = null, options = {})
         birthDatePrecision: incoming.year === null ? 'month-day' : 'full',
         birthDateYearSource: incomingYearSource,
         birthDateCalendarFingerprint: calendarFingerprint(calendar),
-        birthDateReason: reason || (exactMatch ? next.birthDateReason : ''),
+        birthDateReason: reason || (exactMatch && !fromPack ? next.birthDateReason : ''),
         birthDateSourceMessageId: Number.isInteger(options.sourceMessageId)
             ? options.sourceMessageId
             : next.birthDateSourceMessageId,

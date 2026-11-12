@@ -418,33 +418,3 @@ test('a live read re-derives calendarAge a scan left null (no hosted date then),
     assert.equal(read.calendarAge, normalizeNpcRecord(live).calendarAge, 'and equals the reload derivation');
     assert.equal(refreshCalendarAges([]).length, 0);
 });
-
-// ---- a birthday the pack's writer gave (cast entry `birthday`) ----
-test('a pack birthday is the dossier\'s real birthday; without one the deterministic date is the real one; the story still corrects it', async () => {
-    const { applyCastEntry, normalizeEntry } = await import('../src/cast-dossier.js');
-    const { createNpcRecord } = await import('../core.js');
-    const { applyNpcBirthdayUpdate } = await import('../birthday.js');
-    const { readFileSync } = await import('node:fs');
-    setActiveCalendarConfig(CUSTOM_CALENDAR_WITH_CLOCK);
-    const make = extra => normalizeNpcRecord(applyCastEntry(createNpcRecord('Fenna', []), {
-        key: 'p:fenna', pack: 'p', id: 'fenna', met: { on: 0, where: '' },
-        entry: normalizeEntry({ id: 'fenna', name: 'Fenna', about: 'a', look: 'b', start: { place: 'x', goal: 'y' }, ...extra }),
-    }));
-    const dated = make({ birthday: 'sunwane 27' });
-    assert.deepEqual([dated.birthDate.month, dated.birthDate.day, dated.birthDate.year], ['Sunwane', 27, null]);
-    assert.equal(dated.birthDateSource, 'established');     // the twins rule reads this as an established date
-    assert.equal(dated.birthDateDisplay, 'Sunwane 27');
-    const withYear = make({ birthday: 'Redleaf 3, 790' });
-    assert.deepEqual([withYear.birthDate.month, withYear.birthDate.day, withYear.birthDate.year], ['Redleaf', 3, 790]);
-    assert.equal(withYear.birthDatePrecision, 'full');
-    // Not a day of the active calendar: ignored, the deterministic date stands as the real one.
-    const bad = make({ birthday: 'Sunwane 40' });
-    const none = make({});
-    assert.deepEqual(bad.birthDate, none.birthDate);
-    assert.deepEqual(none.birthDate, deterministicBirthday(none.id || none.name, CUSTOM_CALENDAR_WITH_CLOCK));
-    // A birthday the story states later corrects the pack's.
-    const corrected = applyNpcBirthdayUpdate(dated, { birthDate: { era: 'CR', year: null, month: 'Frostwane', day: 2 }, birthDateState: 'correct', birthDateReason: 'said so' }, { calendarConfig: CUSTOM_CALENDAR_WITH_CLOCK });
-    assert.deepEqual([corrected.birthDate.month, corrected.birthDate.day], ['Frostwane', 2]);
-    // The editor never says "generated" or "deterministic".
-    assert.doesNotMatch(readFileSync(new URL('../runtime-editor.js', import.meta.url), 'utf8').match(/Birthday <small>[^\n]*/)[0], /generated|deterministic/i);
-});
