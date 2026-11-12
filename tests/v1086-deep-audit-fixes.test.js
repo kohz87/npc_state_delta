@@ -260,7 +260,7 @@ async function deepAuditRuntimeChecks(mockState, eventSource, manualAddNpc, slee
     await open('deep-absent', ['I enter the records office.', 'Tavi Deep sorts files at the counter.']);
     await manualAddNpc('Tavi Deep');
     await runtime.flush();
-    mockState.quietResponder = async (...args) => (JSON.stringify(args).includes('targeted dossier backfill extractor')
+    mockState.quietResponder = async (...args) => (JSON.stringify(args).includes('isolated dossier backfill scanner')
         ? JSON.stringify({ npcs: [{ name: 'Tavi Deep', present: true, location: 'records office' }] })
         : '{"npcs":[]}');
     mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Where is Tavi Deep?' });

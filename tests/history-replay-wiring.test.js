@@ -447,7 +447,7 @@ test('parity: a captured one-pass reply (memory, tie string, edge) replays to th
         const scanner = mockState.quietResponder;
         // An accepted admission fill: the backfill answers for the person asked, with a look.
         mockState.quietResponder = async (args = {}) => {
-            const asked = String(args.prompt || '').match(/^Requested NPC: (.+)$/m)?.[1];
+            const asked = (/backfill scanner/i.test(String(args.systemPrompt || '')) ? String(args.prompt || '').match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] : undefined);
             return asked ? JSON.stringify({ npcs: [{ name: asked, present: true, overallAppearance: 'Human woman. Dark hair, wide brown eyes.', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : scanner(args);
         };
         const row = { name: 'Sieke', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'clerk', directInteraction: true, present: true, role: 'Clerk', species: 'Human', gender: 'female',
