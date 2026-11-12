@@ -18,6 +18,7 @@ import {
 } from './calendar.js';
 import {
     applyNpcBirthdayUpdate,
+    applyTwinBirthdays,
     birthdayCaptureRule,
     birthdayEvidenceInText,
     birthdayPromptRule,
@@ -155,6 +156,7 @@ export function refreshCalendarAges(npcs) {
             const age = normalizeNpcBirthday(npc).calendarAge;
             if (age !== npc.calendarAge && (age !== undefined || npc.calendarAge !== undefined)) npc.calendarAge = age;
         }
+        applyTwinBirthdays(npcs);
     });
     return npcs;
 }
@@ -169,7 +171,7 @@ export function setNpcArchived(npc, archived, options = {}) {
 
 export function applyNpcStateCommand(state, command, options = {}) {
     const result = continuity.applyNpcStateCommand(state, command, options);
-    result.state.npcs = withStoryDateMemo(() => (result.state.npcs || []).map(npc => normalizeNpcBirthday(npc)));
+    result.state.npcs = withStoryDateMemo(() => applyTwinBirthdays((result.state.npcs || []).map(npc => normalizeNpcBirthday(npc))));
     return result;
 }
 
@@ -260,6 +262,7 @@ function mergeScanResultHeld(state, scanResult, rawOptions = {}) {
         return stampFieldChanges(changeBase, finalNpc, Math.trunc(Number(result.state?.turn ?? sourceState?.turn)), options.storyDay,
             Number.isInteger(options.sourceMessageId) ? options.sourceMessageId : null);
     });
+    applyTwinBirthdays(result.state.npcs, calendar, referenceDate);
     if (reference.extracted) {
         result.report = {
             ...(result.report || {}),

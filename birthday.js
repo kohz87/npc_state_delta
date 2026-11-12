@@ -11,6 +11,8 @@ import {
     normalizeCalendarDate,
     storyCurrentDate,
 } from './calendar.js';
+import { keyRelationshipSubject } from './core-keyrel.js';
+import { normalizeName } from './core-text.js';
 
 const BIRTH_DATE_SOURCES = Object.freeze(['generated', 'established']);
 const BIRTH_YEAR_SOURCES = Object.freeze(['', 'derived', 'established']);
@@ -292,4 +294,76 @@ export function birthdayCaptureRule(config = undefined) {
         : '"MM-DD|YYYY-MM-DD"';
     const names = normalized.calendarValid ? ' Keep stated era/month names.' : '';
     return `\nBIRTHDAY: grounded evidence only: birthDate:${shape}+birthDateState:"establish|correct"+birthDateReason; never invented or derived from apparentAge/species/lifespan.${names}`;
+}
+
+// ---- Twins share a birthday (cast-wide pass; nothing is stored beyond the date a generated birthday already is) ----
+// Two people marked as twins (a key-relationship tie whose relation says "twin", or a pack cast dossier whose role says
+// "twin ... of <name>" / "<name>'s twin") get one birthday. An ESTABLISHED (story/player-set) date always wins and is never replaced; a
+// GENERATED date takes the established twin's date (lowest id among established ones), or, when none is established, the generated date
+// of the twin with the lowest id. The pass is derived on every load/merge from the current ties, so replay equals live and a later story
+// date (made established by applyNpcBirthdayUpdate) simply ends the sharing for that person. No model call.
+const TWIN_WORD = /\btwins?\b/i;
+
+function twinLabels(npc) {
+    return [npc?.name, ...(Array.isArray(npc?.aliases) ? npc.aliases : [])].map(normalizeName).filter(Boolean);
+}
+
+function twinPairs(npcs) {
+    const byLabel = new Map();
+    npcs.forEach((npc, index) => twinLabels(npc).forEach(label => { if (!byLabel.has(label)) byLabel.set(label, index); }));
+    const pairs = [];
+    const link = (from, name) => {
+        const to = byLabel.get(normalizeName(name));
+        if (to !== undefined && to !== from) pairs.push([from, to]);
+    };
+    npcs.forEach((npc, index) => {
+        for (const tie of Array.isArray(npc?.keyRelationships) ? npc.keyRelationships : []) {
+            const text = String(tie ?? '');
+            const cut = text.match(/^(.+?)(?:\s+[\u2014\u2013-]\s+|\s*\|\s*|\s*:\s+)([\s\S]*)$/);
+            if (cut && TWIN_WORD.test(cut[2].split('|')[0])) link(index, keyRelationshipSubject(text));
+        }
+        if (npc?.castFrom) {
+            const role = String(npc.role ?? '');
+            const of = role.match(/\b[Tt]win(?:\s+(?:[Ss]ister|[Bb]rother|[Ss]ibling|sister|brother|sibling))?\s+of\s+(\p{Lu}[\p{L}\p{M}'\u2019-]*(?:\s+\p{Lu}[\p{L}\p{M}'\u2019-]*){0,2})/u);
+            if (of) link(index, of[1]);
+            for (const m of role.matchAll(/(\p{Lu}[\p{L}\p{M}-]*(?:\s+\p{Lu}[\p{L}\p{M}-]*){0,2})['\u2019]s\s+[Tt]win\b/gu)) link(index, m[1]);
+        }
+    });
+    return pairs;
+}
+
+export function applyTwinBirthdays(npcs, config = undefined, referenceDate = null) {
+    if (!Array.isArray(npcs) || npcs.length < 2) return npcs;
+    const calendar = activeOrProvided(config);
+    const pairs = twinPairs(npcs);
+    if (!pairs.length) return npcs;
+    const parent = npcs.map((_, i) => i);
+    const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    for (const [a, b] of pairs) parent[find(a)] = find(b);
+    const groups = new Map();
+    npcs.forEach((npc, i) => { if (npc && typeof npc === 'object') { const r = find(i); groups.set(r, [...(groups.get(r) || []), i]); } });
+    const byId = (a, b) => (birthdaySeed(npcs[a]) < birthdaySeed(npcs[b]) ? -1 : (birthdaySeed(npcs[a]) > birthdaySeed(npcs[b]) ? 1 : 0));
+    for (const members of groups.values()) {
+        if (members.length < 2) continue;
+        const normalized = new Map(members.map(i => [i, normalizeNpcBirthday(npcs[i], calendar, referenceDate)]));
+        const sorted = [...members].sort(byId);
+        const established = sorted.filter(i => normalized.get(i).birthDateSource === 'established' && normalized.get(i).birthDate);
+        const donor = established.length ? normalized.get(established[0]) : normalized.get(sorted[0]);
+        if (!donor.birthDate) continue;
+        for (const i of members) {
+            const own = normalized.get(i);
+            if (own.birthDateSource !== 'generated' || i === sorted[0] && !established.length) continue;
+            if (sameDate(own.birthDate, donor.birthDate, calendar)) continue;
+            const full = donor.birthDate.year !== null;
+            Object.assign(npcs[i], normalizeNpcBirthday({
+                ...npcs[i],
+                birthDate: donor.birthDate,
+                birthDateSource: 'generated',
+                birthDatePrecision: full ? 'full' : 'month-day',
+                birthDateYearSource: full ? 'derived' : '',
+                birthDateCalendarFingerprint: calendarFingerprint(calendar),
+            }, calendar, referenceDate));
+        }
+    }
+    return npcs;
 }

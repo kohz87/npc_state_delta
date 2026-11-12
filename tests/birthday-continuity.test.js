@@ -418,3 +418,66 @@ test('a live read re-derives calendarAge a scan left null (no hosted date then),
     assert.equal(read.calendarAge, normalizeNpcRecord(live).calendarAge, 'and equals the reload derivation');
     assert.equal(refreshCalendarAges([]).length, 0);
 });
+
+// ---- twins share a birthday ----
+const twinNpc = (id, name, extra = {}) => normalizeNpcRecord({ id, name, ...extra });
+const twinState = npcs => refreshCalendarAges(npcs);
+
+test('twins by key relationship share one generated birthday, order-independent', () => {
+    setActiveCalendarConfig(null);
+    const mk = () => [
+        twinNpc('npc_b', 'Brin', { keyRelationships: ['Arin — twin brother'] }),
+        twinNpc('npc_a', 'Arin', { keyRelationships: ['Brin — twin brother'] }),
+    ];
+    const one = twinState(mk());
+    const two = twinState(mk().reverse());
+    const get = (list, id) => list.find(n => n.id === id).birthDate;
+    assert.deepEqual(get(one, 'npc_a'), get(one, 'npc_b'));
+    assert.deepEqual(get(one, 'npc_a'), deterministicBirthday('npc_a'));
+    assert.deepEqual(get(two, 'npc_b'), get(one, 'npc_b'));
+});
+
+test('twins by pack cast entry share a birthday', () => {
+    setActiveCalendarConfig(null);
+    const list = twinState([
+        twinNpc('npc_z', 'Zed', { castFrom: { key: 'k' }, role: 'Twin sister of Ana' }),
+        twinNpc('npc_c', 'Ana'),
+    ]);
+    assert.deepEqual(list[0].birthDate, list[1].birthDate);
+    assert.deepEqual(list[0].birthDate, deterministicBirthday('npc_c'));
+});
+
+test('an established twin birthday wins and is never replaced', () => {
+    setActiveCalendarConfig(null);
+    const est = { birthDate: { era: '', year: null, month: '03', day: 9 }, birthDateSource: 'established' };
+    const list = twinState([
+        twinNpc('npc_a', 'Arin', { keyRelationships: ['Brin — twin'] }),
+        twinNpc('npc_b', 'Brin', { keyRelationships: ['Arin — twin'], ...est }),
+    ]);
+    assert.equal(list[1].birthDateSource, 'established');
+    assert.deepEqual(list[0].birthDate, list[1].birthDate);
+    assert.equal(list[0].birthDateSource, 'generated');
+});
+
+test('the story giving twins different dates wins', () => {
+    setActiveCalendarConfig(null);
+    const a = { birthDate: { era: '', year: null, month: '01', day: 5 }, birthDateSource: 'established' };
+    const b = { birthDate: { era: '', year: null, month: '02', day: 6 }, birthDateSource: 'established' };
+    const list = twinState([
+        twinNpc('npc_a', 'Arin', { keyRelationships: ['Brin — twin'], ...a }),
+        twinNpc('npc_b', 'Brin', { keyRelationships: ['Arin — twin'], ...b }),
+    ]);
+    assert.notDeepEqual(list[0].birthDate, list[1].birthDate);
+    assert.equal(list[0].birthDate.day, 5);
+    assert.equal(list[1].birthDate.day, 6);
+});
+
+test('non-twin siblings keep their own generated birthdays', () => {
+    setActiveCalendarConfig(null);
+    const list = twinState([
+        twinNpc('npc_a', 'Arin', { keyRelationships: ['Brin — sister'] }),
+        twinNpc('npc_b', 'Brin', { keyRelationships: ['Arin — sister'] }),
+    ]);
+    assert.deepEqual(list[0].birthDate, deterministicBirthday('npc_a'));
+    assert.deepEqual(list[1].birthDate, deterministicBirthday('npc_b'));
+});
