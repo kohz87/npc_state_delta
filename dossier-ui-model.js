@@ -2,6 +2,7 @@
 import { appearanceFingerprint, currentPresentationText, normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
 import { formatBirthDate } from './birthday.js';
 import { escapeHtml } from './src/util/html.js';
+import { normalizeMemoryStamps } from './core-record-shared.js';
 import { portraitSrc } from './src/portrait-file.js';
 
 function plain(value, fallback = '') {
@@ -191,6 +192,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
         mannerisms: stringList(npc?.mannerisms, 10),
         background: plain(npc?.background),
         memories: stringList(npc?.memories, 8),
+        memoryStamps: normalizeMemoryStamps(npc?.memoryStamps, npc?.memories) ?? {},
         keyRelationships: stringList(npc?.keyRelationships, 12),
         customFields: shownCustomFields(npc, customFieldNames),
         relationshipSummary: plain(npc?.relationshipSummary),

@@ -4,7 +4,7 @@
 
 import { replayScope } from './runtime-scan-helpers.js';
 import { normalizeAutomaticBackfillRequest } from './scan-context.js';
-import { normalizeNpcRecord, normalizeNpcCandidate, normalizeFormPortraitAssets, withStoryDateMemo } from './core.js';
+import { normalizeNpcRecord, normalizeNpcCandidate, normalizeFormPortraitAssets, refreshCalendarAges, storyDateKey, withStoryDateMemo } from './core.js';
 import { BRANCH_LINEAGE_VERSION, ROLLBACK_JOURNAL_VERSION, normalizeUserDismissedGroups } from './branch.js';
 import { normalizeSocialGraph, reconcileSocialState } from './social.js';
 import { undurableNpcStateSnapshot } from './storage.js';
@@ -123,7 +123,22 @@ export function installHydrationState(api, rt, deps) {
         if (replayScope()?.key === key) return replayScope().state;   // a history replay works on its private copy
         if (!chatStateCache.has(key)) chatStateCache.set(key, freshChatState());
         touchChatCache(key);
-        return chatStateCache.get(key);
+        const state = chatStateCache.get(key);
+        if (key === getChatKey()) refreshAgesWhenDue(key, state);
+        return state;
+    }
+
+    // The stored calendarAge is fixed at scan time; a live read matches a reload (clock as it is now). The dossiers are
+    // re-derived only when the story date, the dossier set or the chat's state version moved since the last pass.
+    const agePasses = new WeakMap();
+    function refreshAgesWhenDue(key, state) {
+        const npcs = state.npcs;
+        if (!Array.isArray(npcs) || !npcs.length) return;
+        const stamp = `${storyDateKey()}|${Number(stateVersions.get(key) || 0)}|${npcs.length}`;
+        const last = agePasses.get(npcs);
+        if (last === stamp) return;
+        refreshCalendarAges(npcs);
+        agePasses.set(npcs, stamp);
     }
 
     function setChatState(key, state, { markLoaded = false } = {}) {

@@ -1,12 +1,13 @@
 /* NPC State Delta dossier surface: the five section screens (Right now, With {{user}}, Ties, Past, Secrets) and their header with arrows and dots. Escaped markup only; reads the existing dossier projection, no new data. */
 import { escapeHtml } from './src/util/html.js';
+import { normalizeName } from './core-text.js';
 import { changeStamp, plain, relationshipValue, RELATIONSHIP_AXES, wholeNumber } from './dossier-ui-model.js';
 import { recentChangeRowHtml } from './dossier-ui-relationship.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
 import { castFromHtml, keyAwayHtml } from './dossier-ui-catalog.js';
-import { bondTone, boardTone, moodDescriptors, moodTile, pullTile } from './dossier-ui-view-model.js';
+import { moodDescriptors, moodTile, pullTile } from './dossier-ui-view-model.js';
 import { barsHtml, moodBarList3 } from './dossier-ui-board.js';
-import { tieTone } from './dossier-ui-bond-tone.js';
+import { noteTieTags, readTieRows, TIE_TYPE_LABELS } from './core-keyrel.js';
 import { SECTION_KEYS } from './dossier-ui-screens.js';
 
 // The five sections in the order the arrows, a sideways swipe and the dots walk them.
@@ -123,16 +124,17 @@ export function withSectionHtml(npc = {}) {
     </div>`;
 }
 
-// One important bond: the relation word (toned: green kin and friends, red rivals and enemies, gold debts and duties),
-// the other person, and the dynamic. A tie tag from the notes (ally / rival / owes, "owed by" the other way) takes the word and the tone.
-// An entry that does not parse is shown as written, in the plain tone.
-function tieHtml(entry, tie = null) {
-    const parsed = parseKeyRelationshipEntry(entry);
-    if (!parsed) return `<div class="delta-bond" data-tone="grey"><p>${escapeHtml(plain(entry))}</p></div>`;
-    const tags = tie?.tags ?? [];
-    const word = tags.includes('owes') ? 'owes' : (tie?.owedBy && !tags.length ? 'owed by' : (tags[0] || parsed.relation));
-    const tone = tags.length ? boardTone(tieTone(tags)) : (tie?.owedBy ? 'gold' : bondTone(parsed.relation));
-    return `<div class="delta-bond" data-tone="${escapeHtml(tone)}"><span class="delta-bond-word">${escapeHtml(word)}</span><b>${escapeHtml(parsed.subject)}</b>${parsed.dynamic ? `<p>${escapeHtml(parsed.dynamic)}</p>` : ''}</div>`;
+// One tie, stacked: its type (Ally, Rival, Owes, Interest, Passing: small heading, toned), the other person, and the description (the
+// relation as written, then the dynamic). Older ties add why they are there (died, left, not mentioned for N days). Own divider each.
+const TIE_TONES = { ally: 'good', rival: 'bad', owes: 'gold', interest: 'rose', passing: 'grey' };
+function tieHtml(row) {
+    const parsed = parseKeyRelationshipEntry(row.entry);
+    if (!parsed) return `<div class="delta-bond" data-tone="grey"><p>${escapeHtml(plain(row.entry))}</p></div>`;
+    // The relation as written goes into the description (not repeated when it is just the type word).
+    const description = [String(parsed.relation).toLowerCase() === row.type ? '' : parsed.relation, parsed.dynamic].map(value => plain(value)).filter(Boolean).join(' — ');
+    const why = row.state === 'died' ? ' · † died' : (row.state === 'left' ? ' · left' : '');
+    const quiet = row.state === 'faded' && Number.isInteger(row.quiet) ? `${description ? ' · ' : ''}not mentioned for ${row.quiet} days` : '';
+    return `<div class="delta-bond" data-tone="${TIE_TONES[row.type] ?? 'grey'}" data-tie-type="${escapeHtml(row.type)}"><span class="delta-bond-word">${escapeHtml(TIE_TYPE_LABELS[row.type] ?? 'Passing')}</span><b>${escapeHtml(parsed.subject)}${why ? `<span class="delta-bond-why">${why}</span>` : ''}</b>${description || quiet ? `<p>${escapeHtml(description)}${quiet}</p>` : ''}</div>`;
 }
 
 const dayText = day => (Number.isInteger(day) ? `day ${day}` : '');
@@ -153,21 +155,30 @@ export function knowsHtml(knows = []) {
 }
 
 export function tiesSectionHtml(npc = {}) {
-    const entries = Array.isArray(npc.keyRelationships) ? npc.keyRelationships : [];
-    const notes = npc.v2Meters?.notes;
-    const byName = new Map((notes?.ties ?? []).map(row => [row.name.toLowerCase(), row]));
-    const extra = lieAndKnow(notes);
-    if (!entries.length && !extra) return '<p class="delta-muted">No important ties recorded yet.</p>';
-    return `<div class="delta-sheet delta-ties">${entries.map(entry => tieHtml(entry, byName.get(String(parseKeyRelationshipEntry(entry)?.subject ?? '').toLowerCase()))).join('')}${extra}</div>`;
+    const rows = Array.isArray(npc.tieRows) ? npc.tieRows : readTieRows(npc, { tags: noteTieTags(npc.v2Meters?.notes?.ties) });
+    const extra = lieAndKnow(npc.v2Meters?.notes);
+    if (!rows.length && !extra) return '<p class="delta-muted">No important ties recorded yet.</p>';
+    const current = rows.filter(row => row.state === 'active');
+    const older = rows.filter(row => row.state !== 'active');
+    // Older ties: not mentioned for their tier's days, the other person left, or died. Collapsed, last in the section.
+    const fold = older.length ? `<details class="delta-older-ties"><summary>Older ties · ${older.length}</summary>${older.map(tieHtml).join('')}</details>` : '';
+    return `<div class="delta-sheet delta-ties">${current.map(tieHtml).join('')}${fold}${extra}</div>`;
 }
 
 const lieAndKnow = notes => (notes ? liesHtml(notes.lies) + knowsHtml(notes.knows) : '');
 
-// Past: the remembered events as written on a timeline of dots (the projection carries no timestamps for them).
+// Past: the remembered events as written on a timeline of dots. A memory recorded with a stamp (npc.memoryStamps: the reply and the story date
+// of that reply) carries "Icewane 27 · #12" as a small label; one recorded before stamps existed has no label (never a guessed date).
+const memoryWhen = (npc, memory) => {
+    const stamp = npc.memoryStamps?.[normalizeName(memory)];
+    const reply = wholeNumber(stamp?.m);
+    const label = [typeof stamp?.d === 'string' ? plain(stamp.d) : '', reply === null ? '' : `#${reply}`].filter(Boolean).join(' · ');
+    return label ? `<span class="delta-mem-when">${escapeHtml(label)}</span>` : '';
+};
 export function pastSectionHtml(npc = {}) {
     const memories = (Array.isArray(npc.memories) ? npc.memories : []).map(plain).filter(Boolean);
     if (!memories.length) return '<p class="delta-muted">Nothing remembered yet.</p>';
-    return `<ol class="delta-sheet delta-past delta-timeline">${memories.map(memory => `<li><i class="delta-dot-mem" aria-hidden="true"></i>${escapeHtml(memory)}</li>`).join('')}</ol>`;
+    return `<ol class="delta-sheet delta-past delta-timeline">${memories.map(memory => `<li><i class="delta-dot-mem" aria-hidden="true"></i>${memoryWhen(npc, memory)}<span>${escapeHtml(memory)}</span></li>`).join('')}</ol>`;
 }
 
 // Secrets: the hosted meters' notes (npc.v2Meters.secrets). An open note shows its title and text; a hidden note shows

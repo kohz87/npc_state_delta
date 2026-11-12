@@ -5,6 +5,7 @@
 
 import { chatContext as getContext, replayScope, scopedAdapter } from './runtime-scan-helpers.js';
 import { replyScanned } from './scan-context.js';
+import { tieDayAt } from './src/transcript.js';
 import { normalizeRelationshipBaseline, isTerminalNpcDeath, npcMatchesLabel, storyMinuteText } from './core.js';
 import { defersArea, resolveDossierTarget } from './suite-handshake.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
@@ -40,6 +41,13 @@ export function createHostedPart(rt, deps) {
     }
     // (v2) Story Director's clock while hosted ({ minutes, calendar }), for calendar.js; null otherwise (and
     // while the reader keeps the calendar here: the adapter's calendarOwn).
+    // The story's date after reply `index` as the dossier writes it ("Icewane 27"), '' with no host clock (calendar.js setStoryDateAtSource).
+    function hostedStoryDateAt(index) {
+        try { return String(storySuiteV2Meters()?.storyDateText?.(index) ?? ''); } catch { return ''; }
+    }
+    function hostedStoryDayAt(index) {
+        try { const day = storySuiteV2Meters()?.storyDayNumber?.(index); return Number.isInteger(day) ? day : null; } catch { return null; }
+    }
     function hostedStoryClock() {
         const adapter = storySuiteV2Meters();
         if (!adapter) return null;
@@ -193,7 +201,8 @@ export function createHostedPart(rt, deps) {
         const keyViews = dossierKeyViews(state);
         const castViews = dossierCastViews(state);
         const sheetLevels = dossierSheetLevels(state);
-        return { meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}), ...(sheetLevels ? { sheetLevels } : {}) };
+        const storyDay = tieDayAt();   // the story day now: older ties fade by it (core-keyrel.js)
+        return { meterViews, ...(Number.isInteger(storyDay) ? { storyDay } : {}), ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}), ...(sheetLevels ? { sheetLevels } : {}) };
     }
     // (perf) The dossiers as the views read them: a copy, except that a portrait's picture (its data URL, an immutable string of up to
     // a few hundred KB) is shared rather than copied; the portrait record itself is still a copy.
@@ -288,7 +297,10 @@ export function createHostedPart(rt, deps) {
         // and not incidental extras: the slice holds 80 people, and a long chat must not fill it with people who never matter.
         const worth = npc => !['dead', 'deceased'].includes(String(npc.lifeState ?? '').toLowerCase()) && npc.dossierSignal !== 'incidental';
         const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && !prior.has(npc.id) && worth(npc)) : [];
-        if (!changes.length && !looks.length && !refused.length && !met.length) return;
+        // (drive growth) The before and after of a person who already had a dossier: the adapter reads what is new in them (memories, behavior,
+        // mannerisms, the relationship reason) and the slice reads it for drive cues; a person the scan only just made has no earlier reply to count against.
+        const grown = typeof adapter.drives === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && prior.has(npc.id)).map(npc => ({ name: npc.name, before: prior.get(npc.id), after: npc })) : [];
+        if (!changes.length && !looks.length && !refused.length && !met.length && !grown.length) return;
         void (async () => {
             // The slice entry comes first (adjust, else meet): a look flag never makes one, so a new person's look lock needs it.
             for (const change of changes) {
@@ -300,6 +312,11 @@ export function createHostedPart(rt, deps) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId });
                 stage1Refresh();
+            }
+            for (const item of grown) {
+                if (!chatHeadUnchanged(head)) return dropped();
+                await adapter.drives({ name: item.name, before: item.before, after: item.after, reply: messageId });
+                stage1Refresh();   // an open dossier draws again when a drive stepped
             }
             for (const npc of looks) {
                 if (!chatHeadUnchanged(head)) return dropped();
@@ -334,17 +351,33 @@ export function createHostedPart(rt, deps) {
     // (v2 hidden notes) What a targeted pass (backfill, Refresh) is asked about hidden notes: { layered, watch } or null when
     // nothing is asked (not hosted, or no setting and no event note to look for). `layered`: this dossier is new (a backfill
     // queued at admission) and has no notes yet. `watch`: this one person's locked event notes, when they are present.
-    function hostedTargetNotes(npc, { newDossier = false, messageId = null } = {}) {
+    // `tastes` (Refresh only): the pass also asks for this person's tastes (the notes feature on) and forwards them (forwardTastesToHost).
+    function hostedTargetNotes(npc, { newDossier = false, messageId = null, tastes = false } = {}) {
         const adapter = storySuiteV2Meters();
         if (!adapter || !npc) return null;
         const layered = newDossier && getSettings().layeredSecrets !== false && !(Array.isArray(npc.secrets) && npc.secrets.length);
         const watch = hostedEventWatch({ npcs: [npc] }, messageId);
-        return layered || watch.length ? { layered, watch } : null;
+        const asked = tastes === true && adapter.asksTastes?.() === true;
+        return layered || watch.length || asked ? { layered, watch, ...(asked ? { tastes: true } : {}) } : null;
     }
     const targetNoteOptions = notes => ({
         ...(notes?.layered ? { layeredSecrets: true } : {}),
         ...(notes?.watch?.length ? { eventWatch: notes.watch } : {}),
+        ...(notes?.tastes ? { askTastes: true } : {}),
     });
+
+    // A Refresh's answered tastes (the target's row of `rows`: { tastes: [{ sign, item, from }] }) → npc.taste on the head reply the Refresh read, once the
+    // chat is known not to have moved (as forwardSecretEventsToHost). Nothing while replaying.
+    function forwardTastesToHost(npc, rows, head = null) {
+        if (replayScope()) return;
+        const adapter = storySuiteV2Meters();
+        const list = Array.isArray(rows) ? rows : [];
+        const row = list.find(item => String(item?.id || '') === npc?.id || (item?.name && npcMatchesLabel(npc, String(item.name)))) || (list.length === 1 ? list[0] : null);
+        if (!adapter || !npc || !Array.isArray(row?.tastes) || !row.tastes.length) return;
+        if (!chatHeadUnchanged(head)) return;
+        const reply = latestMessageId(true);
+        void adapter.tastes({ name: npc.name, tastes: row.tastes, ...(reply >= 0 ? { reply } : {}) });
+    }
 
     // A committed scan's `secretEvents` (the keys of the watched story events the current exchange showed) open those notes
     // as npc.open (cause ui, recorded on the head reply, so a swipe takes them back). Nothing is sent when the chat moved
@@ -418,5 +451,5 @@ export function createHostedPart(rt, deps) {
         return { text: 'The latest scan found no NPC in the scene.', scan: true };
     }
 
-    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
+    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedStoryDateAt, hostedStoryDayAt, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, forwardTastesToHost, attachGeneratedSecrets, castEmptyReason };
 }

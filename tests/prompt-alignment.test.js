@@ -164,3 +164,14 @@ test('step 13: the targeted shapes are written from the registry and leave out w
     assert.match(returnShape('backfill'), /present:true\|false,worldActive:true\|false/);
     assert.ok(buildProfileRefreshPrompt({ transcript, targetNpc: rich() }).includes(refresh));
 });
+
+test('Refresh tastes: the schema line is asked only when askTastes is set; without it the prompt is byte-identical', () => {
+    const plain = buildProfileRefreshPrompt({ transcript, targetNpc: rich() });
+    assert.equal(buildProfileRefreshPrompt({ transcript, targetNpc: rich(), askTastes: false }), plain, 'off = byte-identical');
+    assert.doesNotMatch(plain, /tastes/);
+    const asked = buildProfileRefreshPrompt({ transcript, targetNpc: rich(), askTastes: true });
+    assert.match(asked, /,memories:\[\],memoryRetention:\[\],tastes:\[\{sign:\+ likes, values or collects\|- dislikes,item,from:short source from the scenes\}\]\}\],"profileUpdates"/);
+    assert.equal(asked.length - plain.length, ',tastes:[{sign:+ likes, values or collects|- dislikes,item,from:short source from the scenes}]'.length, 'only the schema line is added');
+    assert.ok(asked.length - plain.length <= 120);
+    assert.equal(returnShape('backfill'), returnShape('backfill', {}, []), 'backfill and import shapes are untouched');
+});

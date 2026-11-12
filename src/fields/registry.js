@@ -64,6 +64,8 @@ export const FIELDS = Object.freeze({
     memories: { kind: 'list', tracked: 17, editorLock: 20, lock: [21, ['memories', 'manualMemories']], revertList: 0, refreshChanged: 20, snapshot: [20, 'list'], v2: 18 },
     // The memories the reader entered by hand: a later scan never evicts them (core-mechanics mergeImportantMemories).
     manualMemories: { kind: 'part', userMeta: 6 },
+    // Where and when each memory was recorded: { normalized text: { m: reply, d: story date } }, beside the list (core-record-shared.js stampMemories).
+    memoryStamps: { kind: 'part' },
     keyRelationships: { kind: 'list', tracked: 16, editorLock: 12, lock: [13, ['keyRelationships']], revertList: 3, refreshChanged: 12, snapshot: [22, 'list'], v2: 19 },
     relationshipSummary: { kind: 'text', text: 10, tracked: 14, editorLock: 15, lock: [16, ['relationshipSummary']], terminalFrozen: 9, aliasMerge: 8, refreshChanged: 13, snapshot: [14, 'text'], v2: 20 },
     relationship: {
@@ -146,6 +148,8 @@ export const RETURN_KEYS = Object.freeze({
     status: { states: 'keep|clear' },
     agenda: { key: 'goal' },
     lifeState: { value: 'unknown|alive|deceased' }, lifeStateCertainty: { value: 'explicit|inferred|""' }, lifeStateReason: {},
+    // Refresh's optional tastes (asked only while hosted with the notes feature on): the stored taste shape (src/npc-notes-tastes.js).
+    tastes: { value: '[{sign:+ likes, values or collects|- dislikes,item,from:short source from the scenes}]' },
     memories: { value: '[]' }, memoryRetention: { value: '[]' },
     present: { value: 'true|false' }, worldActive: { value: 'true|false' },
     // Refresh's profile channel, with the Stage 4 form keys.

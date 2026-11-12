@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { adapterRig, BATCH, clone, crash, rig } from './helpers/participant-rig.js';
 import { runHostScenario } from './helpers/host-scenario.js';
+import { fileVault, memoryVault } from '../src/storysuite-participant/vault.js';
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
@@ -222,4 +223,77 @@ test('in Delta\'s runtime a reply\'s scan, a branch reconcile and a generation\'
         mockState.barrier.pending = false;
         assert.equal(await waitFor(() => reconciled() > before, 5000), true, 'it ran once the barrier was down');
     });
+});
+
+// ---- checkpoint files across a long story: the file vault (packed files) and the plain memory vault end every step on the same state ------
+
+/** A fake SillyTavern user-files server (upload / verify / delete / read) for the file vault. */
+function filesServer() {
+    const files = new Map();
+    const fetchFn = async (url, options = {}) => {
+        const name = url.split('/').pop();
+        if (url === '/api/files/upload') { const body = JSON.parse(options.body); files.set(body.name, Buffer.from(body.data, 'base64').toString()); return { ok: true, status: 200 }; }
+        if (url === '/api/files/verify') { const body = JSON.parse(options.body); return { ok: true, status: 200, json: async () => Object.fromEntries(body.urls.map(u => [u, files.has(u.split('/').pop())])) }; }
+        if (url === '/api/files/delete') { const had = files.delete(JSON.parse(options.body).path.split('/').pop()); return { ok: had, status: had ? 200 : 404, text: async () => '' }; }
+        return files.has(name) ? { ok: true, status: 200, text: async () => files.get(name) } : { ok: false, status: 404, text: async () => '' };
+    };
+    return { files, fetchFn };
+}
+
+const REPLIES = Number(process.env.CKPT_REPLIES) || 60;
+/** One long play: REPLIES replies with three published changes each (Delta's own history grows with every one), then a delete, a swipe and back, a restore to the first save point and a reload. */
+async function longStory(t, vault) {
+    const r = await adapterRig(t, { vault });
+    const { host } = r;
+    const edit = (n, k) => state => {
+        const npc = state.npcs[0];
+        npc.trust = (n * 3 + k) % 10;
+        npc.memories = [...(npc.memories ?? []), `memory ${n}.${k}`];
+        state.checkpoints = [...(state.checkpoints ?? []), { messageId: n, fingerprint: `fp${n}.${k}`, lineageKey: `L${n}.${k}`, snapshot: { turn: n, npcs: structuredClone(state.npcs) } }];
+    };
+    const seen = [];
+    const mark = label => { const { timeline, ...rest } = r.live.state; seen.push([label, JSON.stringify(rest)]); };
+    await host.send('Hello.', 'One.');
+    const point = (await host.sdk.timeline.make({ kind: 'manual', name: 'Start' })).snapshot;
+    for (let n = 1; n <= REPLIES; n += 1) {
+        if (n > 1) await host.send(`Turn ${n}.`, `Reply ${n}.`);
+        for (let k = 0; k < 3; k += 1) await r.published(edit(n, k));
+        if (n % 10 === 0) mark(`reply ${n}`);
+    }
+    await dropReply(r);
+    await followed(r, (REPLIES * 3 - 1) % 10);
+    mark('after delete');
+    await host.send('Again.', 'Again reply.');
+    await r.published(edit(REPLIES + 1, 0));
+    await host.swipe('Another.');
+    await followed(r, (REPLIES * 3 - 1) % 10);
+    mark('after swipe');
+    await host.st.swipeTo(host.ctx.chat.length - 1, 0);
+    await followed(r, ((REPLIES + 1) * 3) % 10);
+    mark('after swipe back');
+    assert.equal((await host.sdk.command('tl.seal', { id: BATCH.id })).ok, true);
+    const head = await host.sdk.timeline.head();
+    const prepared = await host.timeline.host.prepare({ snapshot: point.id, deathEvents: ['ev_death001'], batchResult: BATCH, expectedHead: head.headHash });
+    assert.equal(prepared.ok, true, prepared.message);
+    assert.equal((await host.timeline.host.activate({ prepared: prepared.prepared, expectedHead: head.headHash })).status, 'complete');
+    mark('after restore to the first save point');
+    const again = await r.reload();
+    assert.equal(await again.api.gate.settled(), true);
+    assert.equal(again.live.state.npcs[0].trust, 3, 'the reload stands on the first save point');
+    mark('after reload');
+    return seen;
+}
+
+test(`${REPLIES} replies on the file vault: delete, swipe, swipe back, a restore to the first save point and a reload end on the same states as the plain vault; one file per save, a fraction of the bytes`, { timeout: 600000 }, async t => {
+    const server = filesServer();
+    const onFiles = await longStory(t, fileVault({ fetchFn: server.fetchFn }));
+    const plain = memoryVault();
+    const onMemory = await longStory(t, plain);
+    assert.deepEqual(onFiles, onMemory);
+    const names = [...server.files.keys()].filter(name => name.startsWith('npc-state-delta-checkpoint-nk_'));
+    const plainBytes = [...plain.docs.values()].reduce((sum, text) => sum + text.length, 0);
+    const fileBytes = names.reduce((sum, name) => sum + server.files.get(name).length, 0);
+    assert.equal(names.length, plain.docs.size, 'a file for every checkpoint the plain vault kept: none lost, none added');
+    assert.ok(fileBytes * 2.5 < plainBytes, `${names.length} files, ${fileBytes} bytes against ${plainBytes} plain`);
+    t.diagnostic(`${names.length} files, ${fileBytes} bytes on the file vault; ${plainBytes} plain`);
 });

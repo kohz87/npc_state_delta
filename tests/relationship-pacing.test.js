@@ -7,12 +7,12 @@ import { DEFAULT_RELATIONSHIP_CAPS, normalizeNpcRecord } from '../core.js';
 import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
 import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent, spendFlatEvent } from '../src/relationship-pacing.js';
-import { cutToTier, eventSummary, pacingNote, readEvent } from '../src/npc-meters-pacing.js';
+import { cutToTier, eventSummary, nextEvent, pacingNote, readEvent } from '../src/npc-meters-pacing.js';
 import { FEATURE_GATE, FEATURE_MOOD_PULL, CONTEXT_BUDGET, readLeaf } from '../src/npc-meters-config.js';
 import { gateApproach, readApproachRing } from '../npc-meters-gate.js';
 import { createNpcPart } from '../src/npc-meters.js';
 import { applyEvents, easeAxis, eventsFromMoves, moodBars, moodWord, restMood, restingMood } from '../npc-mood.js';
-import { stepPull } from '../npc-instincts.js';
+import { stepPull, samePlace } from '../npc-instincts.js';
 import { diff } from './vendor/story-block/src/v2/ops/diff.js';
 import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-suite.js';
 
@@ -736,6 +736,113 @@ test('pull: awe at the first arrival at a place they were not at before (the fir
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });
 
+test('pull trace (run 3): a place under a fuller or shorter name is the same place, so no false arrival', async () => {
+    assert.equal(samePlace("Ram's Head Inn", "Ram's Head"), true);
+    assert.equal(samePlace('Market District', 'Market District, Highmark Capital'), true);
+    assert.equal(samePlace('Bluewatch Village / Guild Office', 'Bluewatch Village'), true);
+    assert.equal(samePlace('Guild Hall', 'Guild Yard'), false);
+    assert.equal(samePlace('River wall', ''), false);
+    const s = await moodSuite();
+    await s.setDay(1);
+    await s.say(["~ place Ram's Head Inn | inn | Highmark", '~ npc Oren | trust: +1']);
+    await s.say(["~ place Ram's Head | inn | Highmark"]);
+    assert.equal(recordOf(s).pull, undefined, 'the same inn under a shorter name is no arrival');
+    assert.deepEqual(recordOf(s).track.places, ["Ram's Head Inn"]);
+    await s.say(['~ place Old Tannery | dungeon | Highmark']);
+    assert.equal(recordOf(s).pull?.kind, 'awe', 'a different place still is');
+});
+
+test('pull trace (run 3): a hook names its giver, and the thread counts its own days from when the host opened it, not from when this person was first read', async () => {
+    const s = await moodSuite();
+    await s.setDay(4);
+    await world(s, { threads: [{ id: 'th_bbbbbbbb', key: 'Dockside Recruitment', status: 'active', fields: { giver: 'Oren', goal: 'confront Garvan' }, track: { created: { turn: 3, time: 1 * DAY } } }] });
+    await s.say(['~ npc Oren | trust: +1']);
+    assert.deepEqual(recordOf(s).pull, { kind: 'closure', cause: 'Dockside Recruitment', since: 1 });
+    assert.equal(stepPull({}, { day: 4, party: false, threads: [{ id: 'x', title: 't' }] }).track.threads.x, 4, 'a host that gives no opening day: the day first read, as before');
+});
+
+test('pull trace (run 3): Pull and Mood reach the prompt as kept lines (after the Changes cue), and survive a tight tail budget', async () => {
+    const { assemble } = await import('./vendor/story-block/src/v2/prompt.js');
+    const s = await moodSuite();
+    await s.setDay(1);
+    await s.say(['~ place Market | street | Dunmere', '~ npc Oren | trust: +1']);
+    await s.say(['~ place Harbor | docks | Dunmere', '~ npc Oren | trust: -3 | impact: major | reason: a broken oath']);
+    const tail = s.host.registry.module(MODULE_ID).context.tail({ state: s.host.head(), chat: { length: s.host.ctx.chat.length } });
+    const kept = tail.lines.filter(line => typeof line === 'object' && line.keep === true).map(line => line.text);
+    assert.match(kept[0], /^Whenever anything changed/, 'the cue is first of the kept lines (as on main); Pull and Mood take what the cap leaves');
+    assert.match(kept[1], /^Pull: Oren: awe \(first time at Harbor\)\.$/);
+    assert.match(kept[2], /^Mood: Oren /);
+    assert.ok(!tail.optional.some(line => /^(Pull|Mood): /.test(line)), 'not optional lines: the host drops those first');
+    const view = { state: s.host.head(), query: () => null, settings: {}, chat: { length: s.host.ctx.chat.length } };
+    const built = assemble({ registry: s.host.registry, view, settings: { tailBudget: 60 } });
+    assert.match(built.tailText, /^Pull: Oren: awe/m, built.tailText);
+    assert.match(built.tailText, /^Mood: Oren /m);
+});
+
+test('pull + mood + cue + another module\'s kept line, tailBudget 550: all reach the prompt, the other module\'s kept line stays, the tail is under budget; a spent cap keeps the cue and gives up Pull and Mood first', async () => {
+    const { assemble, estimateTokens } = await import('./vendor/story-block/src/v2/prompt.js');
+    async function run(keptTokens) {
+        const s = await moodSuite();
+        await s.setDay(1);
+        await s.say(['~ place Market | street | Dunmere', '~ npc Oren | trust: +1']);
+        await s.say(['~ place Harbor | docks | Dunmere', '~ npc Oren | trust: -3 | impact: major | reason: a broken oath']);
+        const initiative = 'Initiative: Mira acts first, then the guards, then Oren.';
+        const filler = Array.from({ length: 11 }, (_, i) => `Scene note ${i + 1}: ${'the harbour street holds its breath '.repeat(5)}`.trim());
+        s.host.registry.register({ id: 'aa-crowd', name: 'Crowd', context: { tail: () => ({ lines: [{ text: initiative, keep: true }, ...filler] }) } });
+        const view = { state: s.host.head(), query: () => null, settings: {}, chat: { length: s.host.ctx.chat.length } };
+        return { built: assemble({ registry: s.host.registry, view, settings: { tailBudget: 550 }, keptTokens }), initiative };
+    }
+    const roomy = await run(32);
+    assert.ok(roomy.built.tailText.includes(roomy.initiative), 'the other module\'s kept line stays');
+    assert.match(roomy.built.tailText, /^Pull: Oren: awe/m);
+    assert.match(roomy.built.tailText, /^Mood: Oren /m);
+    assert.match(roomy.built.tailText, /Whenever anything changed/);
+    const at = text => roomy.built.tailText.indexOf(text);
+    assert.ok(at('Whenever anything changed') < at('Pull: Oren') && at('Pull: Oren') < at('Mood: Oren'), 'the cue, then Pull, then Mood');
+    assert.ok(estimateTokens(roomy.built.tailText) <= 550, `tail ${estimateTokens(roomy.built.tailText)} tokens`);
+    const tight = await run(100);
+    assert.ok(tight.built.tailText.includes(tight.initiative), 'a spent cap never costs the other module\'s kept line');
+    assert.ok(estimateTokens(tight.built.tailText) <= 550, `tail ${estimateTokens(tight.built.tailText)} tokens`);
+    assert.ok(!/Whenever anything changed/.test(tight.built.tailText), 'only 20 tokens left of the cap: the 49-token cue does not fit, as on main (#315); Pull and Mood do not change that');
+});
+
+test('run-3 shape, tailBudget 550, 1/2/3 present people with a Pull: the cue and the first Pull reach the prompt, another module\'s kept line stays, a line over the felt cap is optional', async () => {
+    const { assemble, estimateTokens } = await import('./vendor/story-block/src/v2/prompt.js');
+    const record = (name, extra) => ({ name, meters: { trust: 5, affection: 0, desire: 0, tension: 0 }, stages: {}, unlocked: [], turn: { reply: 0, from: {} }, day: 5, ...extra });
+    const awe = 'first time at River wall, Highmark Capital';
+    const shapes = {
+        1: { oren: record('Oren', { mood: { v: -2, a: 2, d: -2, day: 5, cause: 'x' }, pull: { kind: 'awe', cause: 'first time at Harbor', since: 5 } }) },
+        2: { marda: record('Marda', { pull: { kind: 'awe', cause: awe, since: 5 } }), pell: record('Pell', { pull: { kind: 'awe', cause: awe, since: 5 } }) },
+        3: {
+            mira: record('Mira', { mood: { v: -2, a: 2, d: -2, day: 5, cause: 'x' }, pull: { kind: 'closure', cause: 'Dockside Recruitment and the missing ledger of Garvan', since: 1 } }),
+            oren: record('Oren', { mood: { v: 2, a: 0, d: 0, day: 5, cause: '' }, pull: { kind: 'closure', cause: 'The Stolen Letter from the Harbourmaster Office', since: 2 } }),
+            tomas: record('Tomas', { mood: { v: -3, a: 3, d: 0, day: 5, cause: 'x' }, pull: { kind: 'awe', cause: awe, since: 5 } }),
+        },
+    };
+    const filler = Array.from({ length: 11 }, (_, i) => `Scene note ${i + 1}: ${'the harbour street holds its breath '.repeat(5)}`.trim());
+    const initiative = 'Initiative: Pell acts first, then Marda, then the dock guards, then Corran.';
+    for (const [count, npcs] of Object.entries(shapes)) {
+        const names = Object.values(npcs).map(r => r.name);
+        const part = createNpcPart({ settings: () => ({}), present: () => names, feature: () => undefined });
+        const nsd = { moduleId: 'npc-state-delta', name: 'NPC State Delta', domains: ['npc'], kinds: [], static: () => '', tail: part.context.tail, budget: part.context.budget };
+        const dir = { moduleId: 'story-director', name: 'Story Director', domains: ['director'], kinds: [], tail: () => ({ lines: [{ text: initiative, keep: true }, ...filler], optional: ['Director optional line.'] }) };
+        const view = { state: { domains: { npc: { problems: [], npcs } } }, chat: { length: 1 } };
+        const built = assemble({ registry: { contexts: () => [nsd, dir] }, view, settings: { tailBudget: 550 }, keptTokens: 24 });
+        const t = built.tailText;
+        const first = Object.values(npcs)[0].name;
+        assert.ok(t.includes(initiative), `${count}: the other module's kept line stays`);
+        assert.match(t, /Whenever anything changed/, `${count} present: the cue reaches the prompt`);
+        assert.match(t, new RegExp(`^Pull: ${first}: `, 'm'), `${count} present: the first person's Pull reaches the prompt\n${t}`);
+        assert.ok(estimateTokens(t) <= 550, `${count}: tail ${estimateTokens(t)} tokens`);
+        const raw = part.context.tail(view);
+        const keptTokens = raw.lines.filter(l => typeof l === 'object' && l.keep).reduce((n, l) => n + estimateTokens(l.text), 0);
+        assert.ok(keptTokens <= 120 - 24 - 19, `${count}: NSD's kept lines (${keptTokens}) fit what pulse and Initiative leave`);
+        assert.ok(raw.lines.every(l => typeof l === 'object' || !/^(Pull|Mood): /.test(l)), 'no Pull or Mood line is a required plain line');
+        if (count === '3') assert.ok(raw.optional.some(l => /^Pull: Oren/.test(l)), 'the other people\'s Pull is optional');
+        console.log(`TAIL ${count}\n${t.split('\n').filter(l => !/^Scene note/.test(l)).join('\n')}\n--- ${estimateTokens(t)} tokens`);
+    }
+});
+
 test('pull: a person away (key people) feels left behind; a failing or missing query is no signal', async () => {
     const s = await moodSuite();
     await s.setDay(3);
@@ -776,11 +883,18 @@ test('the tail tells mood and pull for present people only; feature off: the tai
     const on = make(true);
     assert.equal(on.context.static(), off.context.static(), 'the static prompt never changes');
     const told = on.context.tail(view);
-    assert.deepEqual(told.lines, base.lines, 'the meter lines are untouched');
-    assert.deepEqual(noCue(told.optional), ['Mood: Mira alarmed, cornered; Oren content.', 'Pull: Mira: closure (the stolen letter, 3 days).'], 'present people only: Tomas is not here');
+    // The cue stays where it was among the lines; Pull and Mood come after it (they take what the kept cap leaves).
+    const cueAt = base.lines.length - 1;
+    assert.deepEqual(told.lines.slice(0, cueAt + 1), base.lines.slice(0, cueAt + 1), 'the meter lines and the cue are untouched');
+    // Kept lines (run 3: as optional lines the host's tail budget cut them): the first person's Pull, then Mood; the others are optional.
+    const feltLines = told.lines.slice(cueAt + 1);
+    const felt = feltLines.map(line => line.text);
+    assert.ok(feltLines.every(line => line.keep === true));
+    assert.deepEqual(felt, ['Pull: Mira: closure (the stolen letter, 3 days).', 'Mood: Mira alarmed, cornered.'], 'present people only: Tomas is not here');
+    assert.deepEqual(noCue(told.optional), ['Mood: Oren content.'], 'the second person is an optional line, never a required one');
     const tokens = text => Math.ceil(text.length / 4);
-    assert.ok(tokens(noCue(told.optional).join('\n')) <= 30, `the two lines stay small (${tokens(noCue(told.optional).join('\n'))} tokens, budget ${CONTEXT_BUDGET})`);
-    assert.ok(noCue(told.optional).every(line => !/[<>]/.test(line)));
+    assert.ok(tokens(felt.join('\n')) <= 28, `the two lines stay small (${tokens(felt.join('\n'))} tokens, budget ${CONTEXT_BUDGET})`);
+    assert.ok(felt.every(line => !/[<>]/.test(line)));
 });
 
 test('mood and pull: replay equals rebuild through swipes, a Re-read, a middle delete and a cold reload; the slice validates; a feature-off chat gets no new field', async t => {
@@ -957,4 +1071,27 @@ test('an old 1.16.0 chat (object leaves, per-field ops): a Re-read of a middle r
         assert.equal(JSON.stringify(s.host.head().domains.npc), head, 'replay equals live');
         assert.deepEqual(s.host.store.problems(), []);
     }
+});
+
+test('a fifth event on one reply is recorded: a spent one after four held ones is not hidden', () => {
+    const base = { reply: 'r1', date: '', src: 'story', tier: 'ordinary', note: 'held today' };
+    let text = null;
+    for (let at = 0; at < 4; at += 1) text = nextEvent(text, { ...base, ask: { trust: 1 }, held: true });
+    assert.equal(readEvent(text).events.length, 4);
+    text = nextEvent(text, { ...base, src: 'scan', ask: { trust: 1 }, held: false, tier: 'meaningful' });
+    const kept = readEvent(text);
+    assert.equal(kept.events.length, 4, 'still at most four');
+    assert.equal(eventSummary(kept).held, false, 'the card no longer says nothing moved');
+    // An unfilled list just grows.
+    assert.equal(readEvent(nextEvent(null, { ...base, ask: { trust: 1 }, held: true })).events.length, 1);
+});
+
+test('a fifth event keeps the gate event: the next prompt\'s gate cue reads it', () => {
+    const base = { reply: 'r1', date: '', src: 'story', tier: 'ordinary', note: 'x', ask: { trust: 1 } };
+    let text = nextEvent(null, { ...base, held: false, via: 'flirt', gate: { mode: 'less', n: 1, span: 3 } });
+    for (let at = 0; at < 3; at += 1) text = nextEvent(text, { ...base, held: true });
+    text = nextEvent(text, { ...base, src: 'scan', held: false });
+    const kept = readEvent(text);
+    assert.equal(kept.events.length, 4);
+    assert.ok(kept.events.some(item => item.gate), 'the gate event is not the one dropped');
 });

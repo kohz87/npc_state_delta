@@ -437,7 +437,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
       knows: [{ about: 'X', how: 'saw', day: 2, secret: true, hidden: true, text: 'a secret about X · hidden' }, { about: 'Y', how: 'heard', day: 3, text: 'Y owes a debt', secret: false, hidden: false }],
       tastes: [{ sign: '+', item: 'toffee', from: 'barge crews' }, { sign: '-', item: 'paperwork', mirrored: true }],
       ties: [{ name: 'Temiwa', tags: ['ally'] }, { name: 'Vane', tags: ['owes'] }, { name: 'Bregje', tags: [], owedBy: true }],
-      drives: [{ label: 'Conflict', strength: 3, word: 'high' }], look: { day: 3 },
+      drives: [{ label: 'Conflict', strength: 3, word: 'high', note: 'from their description' }, { label: 'Closure', strength: 2, word: 'normal', note: 'ignored when normal' }, { label: 'Belonging', strength: 1, word: 'low', note: 'eased over 2 story moments (alone)' }, { label: 'Honesty', strength: 0, word: 'off', note: '' }], look: { day: 3 },
     },
   });
   const npc = {
@@ -454,13 +454,19 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.doesNotMatch(boardHtml(npc, { userName: 'Astra' }), /Reply #3/, 'no stamp line under the change');
   assert.match(boardHtml(npc, { userName: 'Astra' }), /tap the portrait for (?:her|his|their) profile/);
   const ties = sectionScreenHtml('ties', npc);
-  assert.match(ties, />ally</); assert.match(ties, />owes</); assert.match(ties, />owed by</);
+  assert.match(ties, />Ally</); assert.match(ties, />Owes</); assert.equal(ties.match(/data-tie-type="owes"/g).length, 2, 'a person who owes her is a debt tie too: Owes');
   assert.match(ties, /a lie you have not caught/);
   assert.doesNotMatch(ties, /SECRET WORDS|a secret about/);
   assert.match(ties, /I sold nothing/); assert.match(ties, /Y owes a debt/);
   assert.match(sectionScreenHtml('now', npc), /trust dropped: Astra lied/);
   const profile = dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: meters }, { layout: 'phone' });
-  assert.match(profile, /toffee/); assert.match(profile, /Conflict/); assert.match(profile, /look was set on day 3/);
+  assert.match(profile, /toffee/); assert.match(profile, /Conflict/);
+  assert.match(profile, /class="delta-drive" data-level="high"[^]*?<b class="high"><\/b>[^]*?delta-drive-word">high<[^]*?from their description/, 'a high drive: word, right-reaching bar, source note');
+  assert.match(profile, /data-level="low"[^]*?<b class="low"><\/b>[^]*?eased over 2 story moments \(alone\)/);
+  assert.match(profile, /data-level="off"[^]*?<b class="off"><\/b>/);
+  assert.match(profile, /data-level="normal"[^]*?<b class="normal"><\/b>/);
+  assert.doesNotMatch(profile, /ignored when normal/, 'a normal drive shows no source note');
+  assert.match(profile, /The middle of each bar is normal/); assert.match(profile, /look was set on day 3/);
   const bare = { ...npc, v2Meters: v2MetersProjection({ bars: [], secrets: [] }) };
   const none = boardTiles(boardModel(bare), { userName: 'Astra' });
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
@@ -547,7 +553,7 @@ test('round 2 fix 2-4: Right now in groups with three bars and Pull last, Recent
   assert.match(withHtml, /Recent changes[\s\S]*delta-chg-when">Goldwane 21<br><small>#3<\/small>[\s\S]*data-good="no">Tension \+2[\s\S]*via praise: it backfired[\s\S]*Desire/);
   assert.doesNotMatch(withHtml, /Last relationship change/);
   const ties = sectionScreenHtml('ties', base, {});
-  assert.match(ties, /data-tone="bad"><span class="delta-bond-word">rival<\/span>/);
+  assert.match(ties, /data-tone="bad" data-tie-type="rival"><span class="delta-bond-word">Rival<\/span>/);
   assert.match(ties, /a lie you have not caught/, 'an uncaught lie never shows its words');
   const css = await builtCss();
   assert.doesNotMatch(css.match(/\.delta-bond-word \{[^}]*\}/g)?.join(' ') || '', /border:1px/, 'the relation word is plain coloured text, no pill');
@@ -655,4 +661,38 @@ test('the section "‹ Dossier" pill is hidden only where the board tiles are be
   const css = fs.readFileSync(new URL('../dossier-ui-styles-sections.js', import.meta.url), 'utf8');
   assert.match(css, /@container dsr \(min-width: \$\{THREE_PANE_MIN\}px\) \{ #\$\{ROOT_ID\} \.delta-section-back \{ display:none; \} \}/);
   assert.doesNotMatch(css, /@media[^{]*\{[^}]*delta-section-back/);
+});
+
+test('Ties: each tie is three stacked lines (type label, name, description); a long type wraps; spacing between lines and ties is in the container styles', async () => {
+  const { SECTIONS_STYLES } = await import('../dossier-ui-styles-sections.js');
+  const ties = sectionScreenHtml('ties', { keyRelationships: ['Sister Temiwa — novice companion present at the counter | shares the cramped office and covered Sieke with an altar-cloth', 'Bregje — rival | clashes at the annex'] }, {});
+  const rows = ties.match(/<div class="delta-bond"[\s\S]*?<\/div>/g) || [];
+  assert.equal(rows.length, 2);
+  assert.match(rows[0], /<span class="delta-bond-word">Ally<\/span><b>Sister Temiwa<\/b><p>novice companion present at the counter — shares the cramped office/, 'tie type, then name, then description (relation as written, then dynamic), in that order');
+  const css = SECTIONS_STYLES.replace(/\$\{ROOT_ID\}/g, '#r');
+  const rule = selector => css.split('\n').filter(line => line.includes(selector)).join('\n');
+  assert.doesNotMatch(rule('.delta-bond { grid-template-columns'), /auto minmax/, 'the type no longer sits beside the name');
+  assert.match(rule('.delta-bond { grid-template-columns'), /grid-template-columns:minmax\(0,1fr\)[^}]*gap:clamp\([^}]*cqw[^}]*\)[^}]*padding:clamp\([^}]*cqw/, 'space between the lines and between ties follows the container');
+  assert.match(rule('.delta-bond-word {'), /display:block[^}]*overflow-wrap:anywhere/);
+  assert.match(rule('.delta-bond > b'), /grid-row:2/);
+  assert.match(rule('.delta-bond > p'), /grid-row:3/);
+  assert.doesNotMatch(css, /\.delta-bond[^{]*\{[^}]*\b\d+px\s+(?:device|screen)|@media[^{]*\.delta-bond/, 'no device widths');
+  assert.match(css, /\.delta-bond \{[^}]*\} *\n[^\n]*\.delta-bond:first-child/, 'a hairline (border-top) stays between ties; the first has none');
+});
+
+test('Past: a stamped memory shows its story date and reply as a small label; an older memory shows none; the text is untouched', async () => {
+  const { SECTIONS_STYLES } = await import('../dossier-ui-styles-sections.js');
+  const memories = ['Met Astra at the counter', 'Spilled the ink'];
+  const stamps = { 'met astra at the counter': { m: 4, d: 'Icewane 27' }, 'spilled the ink': { m: 9 } };
+  const old = sectionScreenHtml('past', { memories: [...memories, 'An old memory'], memoryStamps: stamps }, {});
+  assert.match(old, /<span class="delta-mem-when">Icewane 27 · #4<\/span><span>Met Astra at the counter<\/span>/);
+  assert.match(old, /<span class="delta-mem-when">#9<\/span><span>Spilled the ink<\/span>/, 'no clock: the reply number alone');
+  assert.match(old, /<\/i><span>An old memory<\/span>/, 'a memory recorded before stamps has no label');
+  assert.equal((old.match(/delta-mem-when/g) || []).length, 2);
+  assert.doesNotMatch(sectionScreenHtml('past', { memories }, {}), /delta-mem-when/);
+  assert.match(sectionScreenHtml('past', { memories: ['<b>x</b>'], memoryStamps: { 'b x b': { m: 1, d: '<i>' } } }, {}), /&lt;i&gt;/, 'the date is escaped');
+  const cssAll = SECTIONS_STYLES.replace(/\$\{ROOT_ID\}/g, '#r');
+  assert.match(cssAll, /\.delta-timeline li, #\S+ \.delta-timeline li:first-child \{ display:grid[^}]*padding-bottom:clamp\(8px/, 'the first Past item has the same gap as the others');
+  const projected = dossierDetailProjection({ id: 'r', name: 'R', memories, memoryStamps: { ...stamps, 'gone one': { m: 1 } } });
+  assert.deepEqual(Object.keys(projected.memoryStamps), ['met astra at the counter', 'spilled the ink'], 'the projection keeps stamps of stored memories only');
 });

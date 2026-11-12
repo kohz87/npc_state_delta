@@ -4,7 +4,7 @@
 
 import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { REFRESH_CHANGED_FIELDS } from './src/fields/registry.js';
-import { storyDayAt, currentExclusions, refreshMessageGate, activeChat } from './src/transcript.js';
+import { storyDayAt, tieDayAt, currentExclusions, refreshMessageGate, activeChat } from './src/transcript.js';
 import { BACKFILL_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { buildDossierImportPrompt, mergeScanResult, protectTerminalNpc } from './core.js';
 import { chatLineage } from './branch.js';
@@ -15,7 +15,7 @@ import { createTargetedRefreshPart } from './runtime-targeted-refresh.js';
 import { createTargetedBackfillPart } from './runtime-targeted-backfill.js';
 
 export function createTargetedPart(rt, deps) {
-    const { attachGeneratedSecrets, BACKFILL_MAX_ATTEMPTS, beginScanOperation, chatHydrationStatus, commitBranchCheckpoint, editorIsMounted, endScanOperation, ensureChatStateLoaded, ensureHydratedStateFresh, findMeguminDossierSources, flushStateFile, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeterView, hostedTargetNotes, isHostSwipeActive, isScanBusy, noteScanFailure, partyLevelList, persist, recordInlineCardsInState, recordScanDiagnostics, removeNpcInlineCardAtMessage, renderDossier, requireReadyChatMutation, runTargetedDossierPass, saveNpcEditor, scanCanonicalBaseCurrent, scanOperationCurrent, scenePresentAt, setChatState, settleStateFileWrite, staleHostActive, targetNoteOptions, updateInjection } = deps;
+    const { attachGeneratedSecrets, BACKFILL_MAX_ATTEMPTS, beginScanOperation, chatHydrationStatus, commitBranchCheckpoint, editorIsMounted, endScanOperation, ensureChatStateLoaded, ensureHydratedStateFresh, findMeguminDossierSources, flushStateFile, forwardRelationshipChangesToHost, forwardSecretEventsToHost, forwardTastesToHost, getChatKey, getChatState, hostedMeterView, hostedTargetNotes, isHostSwipeActive, isScanBusy, noteScanFailure, partyLevelList, persist, recordInlineCardsInState, recordScanDiagnostics, removeNpcInlineCardAtMessage, renderDossier, requireReadyChatMutation, runTargetedDossierPass, saveNpcEditor, scanCanonicalBaseCurrent, scanOperationCurrent, scenePresentAt, setChatState, settleStateFileWrite, staleHostActive, targetNoteOptions, updateInjection } = deps;
     const { stateVersions, runningTargetedPasses } = rt;
     const { backfillScanMatchesTarget, rowContradictsTarget, soleRowMayBeTarget, scopeProfileUpdatesToTarget, edgeTouchesResolvedTarget } = createTargetedScopePart();
 
@@ -112,6 +112,8 @@ export function createTargetedPart(rt, deps) {
             if (job.notes?.watch?.length) forwardSecretEventsToHost(job.notes.watch, parsed?.secretEvents, operation.chatHead);
             const latest = getChatState(chatKey);
             const liveBefore = latest.npcs.find(npc => npc.id === id) || null;
+            // A Refresh's tastes for this person: recorded on the head reply, like a `~ taste` line.
+            if (job.notes?.tastes && liveBefore) forwardTastesToHost(liveBefore, parsed?.npcs, operation.chatHead);
             const scoped = job.scope(parsed, { latest, liveBefore });
             if (!scoped.ok) {
                 if (scoped.noChange) {
@@ -131,6 +133,7 @@ export function createTargetedPart(rt, deps) {
                 scenePresent: scenePresentAt(targetMessageId),
                 calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
                 storyDay: storyDayAt(targetMessageId),
+                tieDay: tieDayAt(targetMessageId),
                 customFieldNames: effectiveCustomFieldNames(settings),
                 relationshipBaseline: settings.relationshipBaseline,
                 relationshipCaps: settings.relationshipCaps,
