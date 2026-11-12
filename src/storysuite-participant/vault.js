@@ -2,7 +2,9 @@
 // evidence/identity map"): immutable checkpoints by id, and one small index per lineage (the restores in flight, the acknowledged deaths, the checkpoint
 // the story stands on). Two kinds of vault, one interface (all asynchronous):
 //
-//   put(id, doc)         keeps a checkpoint; the same id again is the same bytes (the id is derived from the hash)
+//   put(id, doc)         keeps a checkpoint; the same id again is the same bytes (the id is derived from the hash). The file vault writes it packed (checkpoint.js)
+//                        and `get` unpacks it, so callers never see the form. Every file stands alone: reading one never needs another file, so the
+//                        Storage clean-up's `remove` (the only deletion) can never make a remaining file unreadable.
 //   get(id)              the checkpoint, or null when its bytes are gone
 //   getIndex(lineage)    the lineage's index or null; putIndex(lineage, index) replaces it (a lineage id is in the chat's state, not its key)
 //   list()               { files: [{ id, size, modifiedAt }], complete } for the clean-up report (vault-sweep.js). SillyTavern has no call that lists
@@ -20,7 +22,7 @@
 // A first write (a new checkpoint, a new lineage's index) asks SillyTavern whether the file exists (storage.js `dataFileExists`) before it
 // reads it, so a file that is not there yet makes no 404 request (a red line in the browser's console); a server that cannot say is read as before.
 import { dataFileExists, deleteNpcStateDataFile } from '../../storage.js';
-import { CHECKPOINT_ID } from './checkpoint.js';
+import { CHECKPOINT_ID, packForFile, unpackFromFile } from './checkpoint.js';
 
 const REGISTRY_NAME = 'npc-state-delta-checkpoint-registry.json';
 
@@ -173,13 +175,13 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
         kind: 'file',
         async put(id, doc) {
             const name = nameOf(id);
-            const json = JSON.stringify(doc);
             if (!(await absent(name)) && await read(name)) {
                 // Already kept: a new reference may follow, so a registered (or found) file counts as written now. An unknown one stays unknown.
                 if (found.has(id)) found.get(id).modifiedAt = now();
                 try { await changeRegistry(files => { if (!files[id]) return false; files[id][1] = now(); }); } catch { /* the file itself is kept */ }
                 return;
             }
+            const json = JSON.stringify(packForFile(doc));
             await upload(name, json);
             // The registry is only a list for the clean-up, written after the checkpoint and not waited for: the checkpoint's own write path is
             // unchanged, and a failure to record only means the (young) file is not offered. Re-registering below waits, because it is the proof of age.
@@ -195,7 +197,7 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
             if (removed) { try { await changeRegistry(files => { if (!files[id]) return false; delete files[id]; }); } catch { /* a stale entry only fails to remove later */ } }
             return removed;
         },
-        get: id => read(nameOf(id)),
+        get: async id => unpackFromFile(await read(nameOf(id))),
         async getIndex(lineage) {
             const name = indexName(lineage);
             return (await absent(name)) ? null : read(name);
