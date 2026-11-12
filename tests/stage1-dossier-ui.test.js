@@ -281,7 +281,10 @@ test('profile polish: empty sections keep a heading and a muted line; one Age fi
   for (const html of [off, standalone]) assert.doesNotMatch(html, /Tastes|Drives|No tastes yet|All normal so far/, 'notes off or no host: no placeholders');
   for (const title of ['Appearance', 'Character', 'Tastes', 'Drives', 'Background']) assert.match(bare, new RegExp(`<h3>${title}</h3>`), `${title} keeps its heading`);
   assert.match(bare, /No tastes yet: they appear when the story shows a like or dislike/);
-  assert.match(bare, /All normal so far/);
+  assert.doesNotMatch(bare, /All normal so far/, 'no record: the full list, not a line');
+  assert.equal((bare.match(/class="delta-drive" data-level="normal"/g) || []).length, 7, 'seven normal rows');
+  for (const label of ['Belonging', 'Closure', 'Awe', 'Preservation', 'Comfort', 'Conflict', 'Honesty']) assert.match(bare, new RegExp(`<span>${label}</span>`));
+  assert.match(bare, /The middle of each bar is normal/, 'footer line');
   assert.equal(bare.match(/Nothing known yet/g).length, 2, 'Character and Background');
   assert.match(bare, /No appearance established yet/, 'Appearance keeps main\'s own wording');
   assert.doesNotMatch(bare, /Looks/);
@@ -523,7 +526,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
   assert.doesNotMatch(sectionScreenHtml('ties', bare), /Lies told|Knows about/);
   assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /look was set/);
-  assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: { ...bare.v2Meters, notesOn: true } }, { layout: 'phone' }), /No tastes yet[\s\S]*All normal so far/, 'no data: the headings stay with a placeholder line');
+  assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: { ...bare.v2Meters, notesOn: true } }, { layout: 'phone' }), /No tastes yet[\s\S]*<span>Belonging<\/span>[\s\S]*<span>Honesty<\/span>/, 'no data: Tastes keeps its line, Drives the full list');
 });
 
 // The dossier's stylesheets as the page gets them (the template numbers filled in), plus the source for the pins that read it.
@@ -767,7 +770,7 @@ test('profile: every section keeps its heading and a muted one-line placeholder 
   const html = dossierProfileHtml({ id: 'r', name: 'Rika', v2Meters: { notesOn: true } }, { layout: 'desktop' });
   for (const key of ['appearance', 'character', 'tastes', 'drives', 'background']) assert.match(html, new RegExp(`data-delta-profile="${key}"`), key);
   assert.match(html, /No tastes yet: they appear when the story shows a like or dislike/);
-  assert.match(html, /All normal so far/);
+  assert.match(html, /<span>Belonging<\/span>[\s\S]*<span>Honesty<\/span>/, 'Drives: the full list even with no record');
   assert.equal((html.match(/Nothing known yet/g) || []).length, 2, 'Character and Background');
   const css = await builtCss();
   assert.match(css, /\.delta-profile-block \{ border-top:1px solid var\(--delta-line\)/);
