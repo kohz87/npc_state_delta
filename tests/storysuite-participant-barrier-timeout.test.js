@@ -102,3 +102,42 @@ test('a reconcile after a deleted message and the injection of a generation wait
         assert.equal(await api.scanIdle(5000), true);
     });
 });
+
+// (owner, 12 Nov: delete the last reply, regenerate, Refresh Sieke) A Refresh kept while the barrier is up was built from the chat and the dossiers
+// as they were when it was asked for; when either moved meanwhile it is given up, never run later on the new story. One on an unmoved chat runs.
+test('a Refresh kept while the barrier is up is given up when the chat moved meanwhile; one on an unmoved chat runs', () => {
+    runHostScenario('barrier-timeout-refresh', prelude, async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.equal(await waitFor(() => mockState.sdk.registered.length === 1), true);
+        assert.equal(await waitFor(() => api.stateReady()), true);
+        api.useMessageGate({ refresh: async () => null, settled: async () => !mockState.gate.pending });
+        const chat = mockState.context.chat;
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Sieke, the guild clerk, keeps the ledger and still owes Kazuma a drink from a lost bet.', swipe_id: 0 });
+        mockState.quietResponder = async () => '{"npcs":[]}';
+        await manualAddNpc('Sieke');
+        await api.flush();
+        assert.equal(await api.scanIdle(5000), true);
+        const id = api.getState().npcs.find(npc => npc.name === 'Sieke').id;
+        const record = () => JSON.stringify(api.getState().npcs.find(npc => npc.id === id));
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ id, name: 'Sieke', role: 'quay clerk', mood: 'stale' }] });
+        // 1. Asked while the barrier is up; the last reply is deleted and regenerated before it comes down.
+        mockState.gate.pending = true;
+        const calls = mockState.rawCalls.length;
+        const before = record();
+        assert.equal(await api.refreshFromChat(id), false, 'kept, not run');
+        chat.pop();
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Sieke slams the ledger shut and refuses to say anything about any bet at all.', swipe_id: 0 });
+        mockState.gate.pending = false;
+        await sleep(900);
+        assert.equal(mockState.rawCalls.length, calls, 'the stale Refresh made no model call');
+        assert.equal(record(), before, 'her dossier is byte-identical');
+        assert.equal(await api.scanIdle(5000), true);
+        // 2. Asked while the barrier is up on a chat that does not move: it runs once the barrier is down.
+        mockState.gate.pending = true;
+        assert.equal(await api.refreshFromChat(id), false);
+        mockState.gate.pending = false;
+        assert.equal(await waitFor(() => api.getState().npcs.find(npc => npc.id === id).role === 'quay clerk', 8000), true, 'the kept Refresh ran');
+        assert.equal(await api.scanIdle(5000), true);
+        mockState.quietResponder = null;
+    });
+});
