@@ -10,10 +10,9 @@ import { safeImageUrl } from './queries-dossier.js';
 const PORTRAIT_QUERY = 'packs.portrait';
 // Story Block 2.18.0's query for a pack cast member's signature gear line (read only): packs.castGear({ name }) → { name, line: "Gear: A, B", items } or null.
 const CAST_GEAR_QUERY = 'packs.castGear';
-const KEY_PEOPLE_FEATURE = 'story-director.key-people';
 
 export function createDirectorQueriesPart(session, deps, { hostFeature }) {
-    const { KEY_PIN_COMMAND, WORLD_FEATURE } = deps;
+    const { WORLD_FEATURE } = deps;
 
     // Whether Story Director's World screen shows the present cast (its feature on); a host without the
     // Features API: whether Story Director is registered.
@@ -111,17 +110,6 @@ export function createDirectorQueriesPart(session, deps, { hostFeature }) {
             return typeof line === 'string' ? line.replace(/\s+/g, ' ').trim() : '';
         } catch { return ''; }
     }
-    // Whether Story Director offers the reader's pin (`keypeople.pin`, registered by a ready module, its feature not switched off).
-    // Delta only ever asks; Story Director's own command writes its own state.
-    function keyPinOffered() {
-        if (!session.hosted || typeof session.sdkRef?.modules !== 'function') return false;
-        try {
-            const offered = (session.sdkRef.modules() ?? []).some(module => module?.status === 'ready' && Array.isArray(module.commands) && module.commands.includes(KEY_PIN_COMMAND));
-            return offered && hostFeature(KEY_PEOPLE_FEATURE) !== false;
-        } catch {
-            return false;
-        }
-    }
     // Story Director's calendar (`director.calendar`: { era, months, leapYears }), or null when it has none to give; Story Director's
     // key people carry their dates as story minutes, which index.js writes on it (calendar.js storyMinuteText).
     function directorCalendar() {
@@ -148,5 +136,5 @@ export function createDirectorQueriesPart(session, deps, { hostFeature }) {
         return answer ? normalizeKeyPeople(answer) : null;
     }
 
-    return { worldShown, partyLevelsAnswer, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople };
+    return { worldShown, partyLevelsAnswer, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, directorCalendar, keyPeople };
 }
