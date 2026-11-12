@@ -6,22 +6,12 @@ import { PARTICIPANT_SCHEMA } from '../checkpoint.js';
 import { isTerminalNpcDeath } from '../../../terminal-lifecycle.js';
 import { hashJson } from '../hash.js';
 import { restoredState, storedTimeline, timelineOf } from '../timeline.js';
-import { fail, indexCheckpointIds, isRecord, plain, preparedId } from './support.js';
+import { fail, isRecord, plain, preparedId } from './support.js';
 
 export function createParticipantHandlers({
     abort, bounded, boundedCheckpoint, busy, confirmedDeath, getAnnounced, getHandle, getLast, hand, hostExclusive,
     hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, verifyOnly, vault,
 }) {
-    /**
-     * A save point that is thrown away (Delta changed while it was made) removes its file again, but ONLY a file this very call created: one
-     * that existed before may be named by the host's journal or an index. The lineage index and the handed checkpoints are checked as well, and
-     * a failure (or a crash before this point) leaves the file for the Storage clean-up: removing is never needed for the save to be right.
-     */
-    async function discard(built, session) {
-        if (built.created !== true) return;
-        try { await vault.remove(built.id, { referenced: indexCheckpointIds(session.index) }); } catch { /* left for the clean-up */ }
-    }
-
     return {
         participant: {
             schema: PARTICIPANT_SCHEMA,
@@ -48,10 +38,7 @@ export function createParticipantHandlers({
                         return fail('STALE', 'NPC State Delta has a change the story has not recorded yet; save again in a moment.');
                     }
                     const built = await made({ cursor, headHash }, guard);
-                    if (busy() || hashJson(port.readState()) !== at) {
-                        await discard(built, s);
-                        continue;
-                    }
+                    if (busy() || hashJson(port.readState()) !== at) continue;
                     guard.enter('saving the participant index');
                     const base = { checkpoint: built.id, hash: built.hash, stateHash: at };
                     try {

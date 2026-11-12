@@ -137,10 +137,9 @@ export function createSessionOps({
         guard?.enter('building the native checkpoint');
         const built = buildCheckpoint({ lineage: s.lineage, state, cursor, headHash });
         guard?.enter('saving the native checkpoint');
-        // `created`: this call made the file (nobody can have named it yet), so a save that is thrown away may remove it again.
-        const created = await vault.put(built.id, built.doc) === true;
+        await vault.put(built.id, built.doc);
         guard?.check();
-        return { ...built, created };
+        return built;
     }
 
     /**

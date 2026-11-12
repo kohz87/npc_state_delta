@@ -79,7 +79,7 @@ test('file vault never calls Data Maid; it lists what it registered, says the li
     const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
     server.files.set('npc-state-delta-checkpoint-nk_bbbbbbb1.json', '{"pre-release":true}'); // written before the registry: never named
     await vault.put('nk_bbbbbbb2', { lineage: 'lg_a' });
-    await vault.put('nk_bbbbbbb3', { lineage: 'lg_b' }); // another story line: not a patch against nk_bbbbbbb2, so the sweep may take that one
+    await vault.put('nk_bbbbbbb3', { lineage: 'lg_a' });
     const listed = await vault.list();
     assert.equal(listed.complete, false);
     assert.deepEqual(listed.files.map(f => f.id).sort(), ['nk_bbbbbbb2', 'nk_bbbbbbb3']);
@@ -391,28 +391,4 @@ test('found old files keep the rules: a chat that cannot be read turns removal o
     await settle();
     assert.match(doc.slot.textContent, /The older files could not be listed\. Nothing was changed\./);
     assert.equal(server.files.size, 1);
-});
-
-// A file built on another (a patch) keeps that file, and the file it is built on, whatever the registry still says: the chain is read from the files.
-test('the clean-up keeps every base of a file that stays, even when the registry lost the record of the dependency', async () => {
-    let t = 100 * DAY;
-    const server = fakeServer(() => t);
-    const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
-    const put = (id, body, age) => { const name = `npc-state-delta-checkpoint-${id}.json`; server.files.set(name, JSON.stringify(body)); server.times.set(name, t - age * DAY); };
-    put('nk_ppppppp1', { lineage: 'lg_a' }, 60);
-    put('nk_ppppppp2', { schema: 1, kind: 'npc-state-delta-native-delta', lineage: 'lg_a', base: 'nk_ppppppp1', depth: 1, patch: [] }, 60);
-    put('nk_ppppppp3', { schema: 1, kind: 'npc-state-delta-native-delta', lineage: 'lg_a', base: 'nk_ppppppp2', depth: 2, patch: [] }, 2);
-    put('nk_ppppppp4', { lineage: 'lg_a' }, 60);
-    await vault.putIndex('lg_a', { v: 2, acks: {}, prepared: {}, returns: {}, selected: null, base: null });
-    const doc = fakeDoc();
-    const row = createStorageRow({ exclusive: queue().exclusive, doc, vault, now: () => t, live, ask: async () => proof([]) });
-    row.mount(doc);
-    await settle();
-    doc.slot.button('Find older files').listeners.click();
-    await settle();
-    assert.deepEqual(row.state().plan.candidates.map(f => f.id), ['nk_ppppppp4'], 'the old files a young file is built on are not offered; the unrelated old one is');
-    doc.slot.all().find(n => n.textContent.startsWith('Clean up 1 file (')).listeners.click();
-    doc.slot.button('Remove 1 file').listeners.click();
-    await settle();
-    assert.deepEqual([1, 2, 3, 4].map(n => server.files.has(`npc-state-delta-checkpoint-nk_ppppppp${n}.json`)), [true, true, true, false]);
 });

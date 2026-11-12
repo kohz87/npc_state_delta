@@ -2,10 +2,9 @@
 // evidence/identity map"): immutable checkpoints by id, and one small index per lineage (the restores in flight, the acknowledged deaths, the checkpoint
 // the story stands on). Two kinds of vault, one interface (all asynchronous):
 //
-//   put(id, doc)         keeps a checkpoint; the same id again is the same bytes (the id is derived from the hash). Answers true when it
-//                        CREATED the file, false when the id was already kept (the participant removes only what it created itself).
-//                        The file vault writes it packed, or as a patch against the file it wrote before (checkpoint.js), and `get` rebuilds the
-//                        plain document, so callers never see either form. `describe(id)` (file vault) names a file's story line and the file it is a patch against, without rebuilding it.
+//   put(id, doc)         keeps a checkpoint; the same id again is the same bytes (the id is derived from the hash). The file vault writes it packed,
+//                        or as a patch against the file it wrote before (checkpoint.js), and `get` rebuilds the plain document, so callers never see
+//                        either form. This change never deletes a file: the only deletion is the Storage clean-up's own `remove`, as before.
 //   get(id)              the checkpoint, or null when its bytes are gone
 //   getIndex(lineage)    the lineage's index or null; putIndex(lineage, index) replaces it (a lineage id is in the chat's state, not its key)
 //   list()               { files: [{ id, size, modifiedAt }], complete } for the clean-up report (vault-sweep.js). SillyTavern has no call that lists
@@ -15,8 +14,7 @@
 //   findOlder()          file vault only, and only when the user presses "Find older files": asks SillyTavern's Data Maid report for loose files named like
 //                        a dossier checkpoint and adds them (name, size, time) to what list() returns for this session; it replaces any Data Maid
 //                        report the user has open, so nothing else ever calls it. Returns how many checkpoint files the report named.
-//   remove(id, { referenced })  deletes one checkpoint; false (and nothing deleted) when `id` is in `referenced` (a Set or list), is not there, or
-//                        (file vault) is the base another registered file is a patch against
+//   remove(id, { referenced })  deletes one checkpoint; false (and nothing deleted) when `id` is in `referenced` (a Set or list) or is not there
 //
 
 // `memoryVault` is for tests (with `lose(id)` to forget bytes, `fail` to make a write throw). `fileVault` writes SillyTavern's user files
@@ -24,7 +22,7 @@
 // A first write (a new checkpoint, a new lineage's index) asks SillyTavern whether the file exists (storage.js `dataFileExists`) before it
 // reads it, so a file that is not there yet makes no 404 request (a red line in the browser's console); a server that cannot say is read as before.
 import { dataFileExists, deleteNpcStateDataFile } from '../../storage.js';
-import { CHECKPOINT_ID, KIND_DELTA, DELTA_MAX_DEPTH, baseOfFile, deltaForFile, lineageOfFile, packForFile, rebuildFromDelta, unpackFromFile } from './checkpoint.js';
+import { CHECKPOINT_ID, KIND_DELTA, DELTA_MAX_DEPTH, deltaForFile, lineageOfFile, packForFile, rebuildFromDelta, sameJson, unpackFromFile } from './checkpoint.js';
 
 const REGISTRY_NAME = 'npc-state-delta-checkpoint-registry.json';
 
@@ -52,10 +50,9 @@ export function memoryVault({ now = () => Date.now() } = {}) {
         async put(id, doc) {
             if (this.fail.has('put')) throw new Error('The vault could not write (test).');
             // The same id again is the same bytes but a new reference may follow: it counts as written now, so it is never "old".
-            if (docs.has(id)) { meta.get(id).modifiedAt = now(); return false; }
+            if (docs.has(id)) { meta.get(id).modifiedAt = now(); return; }
             docs.set(id, JSON.stringify(doc));
             meta.set(id, { size: docs.get(id).length, modifiedAt: now() });
-            return true;
         },
         async list() {
             return { files: [...meta].map(([id, entry]) => ({ id, ...entry })), complete: true };
@@ -86,7 +83,7 @@ export function memoryVault({ now = () => Date.now() } = {}) {
     };
 }
 
-export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/user/files', timeoutMs = 15000, now = () => Date.now() } = {}) {
+export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/user/files', timeoutMs = 15000, now = () => Date.now(), onFallback = null } = {}) {
     // `headers` may be a function: SillyTavern's request headers (a token) are read when a request is made, not when the vault is.
     const headersNow = () => (typeof headers === 'function' ? headers() : headers) ?? {};
     const nameOf = id => `npc-state-delta-checkpoint-${id}.json`;
@@ -178,6 +175,43 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
     }
     /** True only when the server says the file is not there; false when it is, or when it cannot say (the caller then reads it). */
     const absent = async name => (await dataFileExists(`${base}/${name}`, { fetchFn: request, headers: headersNow() })) === false;
+    // The plain document of `id` through its chain of bases, or null when any link is missing, unreadable as a checkpoint, cyclic or too long:
+    // never a document rebuilt from part of a chain.
+    async function chainDocument(id, depth = 0) {
+        const raw = await read(nameOf(id));
+        if (!raw || raw.kind !== KIND_DELTA) return unpackFromFile(raw);
+        if (depth > DELTA_MAX_DEPTH || typeof raw.base !== 'string' || raw.base === id || !CHECKPOINT_ID.test(raw.base)) return null;
+        const baseDoc = await chainDocument(raw.base, depth + 1);
+        return baseDoc ? rebuildFromDelta(raw, baseDoc) : null;
+    }
+    const confirmedDelta = async (doc, prior) => {
+        try {
+            const back = await chainDocument(prior.id);
+            return back && sameJson(back, prior.doc) ? deltaForFile(doc, prior) : null;
+        } catch { return null; }
+    };
+    /** The newest full (packed or plain) file of `lineage` that reads, or null. */
+    async function newestFull(lineage) {
+        const { files } = await listCheckpoints();
+        for (const file of files.filter(item => Number.isFinite(item.modifiedAt)).sort((a, b) => b.modifiedAt - a.modifiedAt).slice(0, 64)) {
+            const raw = await read(nameOf(file.id));
+            if (raw && raw.kind !== KIND_DELTA && lineageOfFile(raw) === lineage) { const doc = unpackFromFile(raw); if (doc) return { id: file.id, doc }; }
+        }
+        return null;
+    }
+    // A file whose chain cannot be resolved (a base the Storage clean-up took, a damaged link) reads as the newest full file of its story line, and
+    // that is reported (console and onFallback); the caller's hash check refuses it when it is not the checkpoint that was asked for.
+    async function getDocument(id) {
+        const raw = await read(nameOf(id));
+        if (!raw || raw.kind !== KIND_DELTA) return unpackFromFile(raw);
+        const doc = await chainDocument(id);
+        if (doc) return doc;
+        let found = null;
+        try { found = await newestFull(lineageOfFile(raw)); } catch { /* no fallback */ }
+        const report = { id, base: raw.base ?? null, fallback: found?.id ?? null };
+        try { console.warn('[npc-state-delta] checkpoint chain cannot be resolved; using the newest full file of its story line', report); onFallback?.(report); } catch { /* reporting only */ }
+        return found ? found.doc : null;
+    }
     return {
         kind: 'file',
         async put(id, doc) {
@@ -186,52 +220,29 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
                 // Already kept: a new reference may follow, so a registered (or found) file counts as written now. An unknown one stays unknown.
                 if (found.has(id)) found.get(id).modifiedAt = now();
                 try { await changeRegistry(files => { if (!files[id]) return false; files[id][1] = now(); }); } catch { /* the file itself is kept */ }
-                return false;
+                return;
             }
-            // A patch against the file written before it when that is clearly smaller; its dependency is recorded in the registry BEFORE the file
-            // exists (a failed record writes a packed anchor instead; a failed upload takes the record back), so remove() can never take the base away.
-            let delta = written.has(doc?.lineage) ? deltaForFile(doc, written.get(doc.lineage)) : null;
-            let json = JSON.stringify(delta ?? packForFile(doc));
-            if (delta) {
-                const entry = [new TextEncoder().encode(json).length, now(), delta.base];
-                try { await changeRegistry(files => { files[id] = entry; }); } catch { delta = null; json = JSON.stringify(packForFile(doc)); }
-            }
-            try { await upload(name, json); } catch (error) {
-                if (delta) { try { await changeRegistry(files => { delete files[id]; }); } catch { /* a stale record only keeps its base */ } }
-                throw error;
-            }
+            // A patch against the file this session wrote before it, only when that base is read back now and rebuilds to exactly the document it
+            // was written from (a base that is gone or unreadable means a full packed file instead). Nothing here records or removes anything.
+            const delta = written.has(doc?.lineage) ? await confirmedDelta(doc, written.get(doc.lineage)) : null;
+            const json = JSON.stringify(delta ?? packForFile(doc));
+            await upload(name, json);
             if (typeof doc?.lineage === 'string') rememberWritten(doc.lineage, { id, doc, depth: delta ? delta.depth : 0 });
-            if (delta) return true;
             // The registry is only a list for the clean-up, written after the checkpoint and not waited for: the checkpoint's own write path is
             // unchanged, and a failure to record only means the (young) file is not offered. Re-registering below waits, because it is the proof of age.
             const entry = [new TextEncoder().encode(json).length, now()];
             void changeRegistry(files => { files[id] = entry; }).catch(() => {});
-            return true;
         },
         list: listCheckpoints,
         findOlder,
         async remove(id, { referenced } = {}) {
             if (!CHECKPOINT_ID.test(String(id)) || isReferenced(referenced, id)) return false;
-            // A file that another registered file is a patch against stays (an unreadable registry cannot say, so it stays too).
-            try {
-                const files = await registryChain.then(readRegistry);
-                if (Object.entries(files).some(([other, entry]) => other !== id && Array.isArray(entry) && entry[2] === id)) return false;
-            } catch { return false; }
-            for (const [lineage, entry] of written) if (entry.id === id) written.delete(lineage);
             const removed = await deleteNpcStateDataFile({ path: `${base}/${nameOf(id)}` }, { fetchFn: request, headers: headersNow() });
             if (removed) found.delete(id);
             if (removed) { try { await changeRegistry(files => { if (!files[id]) return false; delete files[id]; }); } catch { /* a stale entry only fails to remove later */ } }
             return removed;
         },
-        get: async function get(id, depth = 0) {
-            const raw = await read(nameOf(id));
-            if (!raw || raw.kind !== KIND_DELTA) return unpackFromFile(raw);
-            // Follow the base (a missing, cyclic or too long chain is a file that is not there); the caller's hash check proves what comes out.
-            if (depth > DELTA_MAX_DEPTH + 8 || typeof raw.base !== 'string' || raw.base === id || !CHECKPOINT_ID.test(raw.base)) return null;
-            const base = await get(raw.base, depth + 1);
-            return base ? rebuildFromDelta(raw, base) : null;
-        },
-        async describe(id) { const raw = await read(nameOf(id)); return { lineage: lineageOfFile(raw), base: baseOfFile(raw) }; },
+        get: id => getDocument(id),
         async getIndex(lineage) {
             const name = indexName(lineage);
             return (await absent(name)) ? null : read(name);

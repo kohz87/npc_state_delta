@@ -632,8 +632,8 @@ test('a checkpoint file is written packed and read back as the very document tha
     const server = filesServer();
     const vault = fileVault({ fetchFn: server.fetchFn });
     const built = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: { ...stateAt(40), timeline: { v: 1, lineage: 'lg_aaaaaaaa' } }, cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) });
-    assert.equal(await vault.put(built.id, built.doc), true, 'put says it created the file');
-    assert.equal(await vault.put(built.id, built.doc), false, 'the same id again is not a new file');
+    await vault.put(built.id, built.doc);
+    await vault.put(built.id, built.doc);
     const stored = JSON.parse(server.files.get(`npc-state-delta-checkpoint-${built.id}.json`));
     assert.equal(stored.kind, 'npc-state-delta-native-packed');
     assert.equal(stored.packing.scheme, 'chain-rfc6902');
@@ -694,47 +694,13 @@ test('60 replies on the file vault: the same restores as the plain memory vault,
     assert.ok(packedBytes * 5 < plainBytes, `packed ${packedBytes} bytes against ${plainBytes} plain`);
 });
 
-test('a save that is thrown away removes the file it made, and only that; a failed removal changes nothing', async () => {
-    const run = setup({ vault: memoryVault() });
-    await run.hydrate();
-    const baseId = [...run.vault.docs.keys()][0];
-    const removed = [];
-    const remove = run.vault.remove.bind(run.vault);
-    run.vault.remove = async (id, options) => { removed.push(id); return remove(id, options); };
-    // The state Delta holds changes after the checkpoint was made (the scan started): the first try is thrown away, the second stands.
-    let busyOnce = true;
-    run.port.busy = () => { const now = busyOnce; busyOnce = false; return now; };
-    const before = run.vault.docs.size;
-    const saved = await run.participant.checkpoint({ cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) });
-    assert.equal(saved.ok, true);
-    assert.equal(removed.length, 1, 'the thrown-away try was removed');
-    assert.equal(run.vault.docs.size, before + 1, 'and the one that stands is kept');
-    assert.ok(run.vault.docs.has(saved.checkpoint));
-    // The baseline checkpoint of the same state (same id, made earlier, named by the index) is never removed by a thrown-away save of it.
-    let again = true;
-    run.port.busy = () => { const now = again; again = false; return now; };
-    removed.length = 0;
-    const same = await run.participant.checkpoint({});
-    assert.equal(same.ok, true);
-    assert.equal(removed.length, 0, 'an id that existed before is not removed');
-    assert.ok(run.vault.docs.has(baseId));
-    // A removal that fails (or a crash before it) leaves the file and the save is still right.
-    run.vault.remove = async () => { throw new Error('the server went away'); };
-    let third = true;
-    run.port.busy = () => { const now = third; third = false; return now; };
-    run.live.state.npcs[0].trust = 8;
-    const kept = await run.participant.checkpoint({ cursor: { sid: 'sr_9' }, headHash: 'e'.repeat(64) });
-    assert.equal(kept.ok, true);
-    assert.ok(run.vault.docs.has(kept.checkpoint));
-});
-
 const lined = turn => ({ ...stateAt(turn), timeline: { v: 1, lineage: 'lg_aaaaaaaa' } });
 const fileOf = (server, id) => JSON.parse(server.files.get(`npc-state-delta-checkpoint-${id}.json`));
 async function saveRun(vault, from, to) {
     const out = [];
     for (let turn = from; turn <= to; turn += 1) {
         const built = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: lined(turn), cursor: { sid: `sr_${turn}` }, headHash: hashJson({ turn }) });
-        assert.equal(await vault.put(built.id, built.doc), true);
+        await vault.put(built.id, built.doc);
         out.push(built);
     }
     return out;
@@ -757,64 +723,6 @@ test('each file is a patch against the one written before it, with a packed anch
     const next = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: lined(41), cursor: { sid: 'sr_41' }, headHash: hashJson({ turn: 41 }) });
     await reloaded.put(next.id, next.doc);
     assert.equal(fileOf(server, next.id).kind, 'npc-state-delta-native-packed');
-    assert.equal((await reloaded.describe(built[10].id)).lineage, 'lg_aaaaaaaa');
-    assert.equal((await reloaded.describe(next.id)).lineage, 'lg_aaaaaaaa');
-    assert.equal((await reloaded.describe(next.id)).base, null, 'an anchor is built on nothing');
-    assert.equal((await reloaded.describe(built[10].id)).base, fileOf(server, built[10].id).base ?? null);
-});
-
-test('a base is never removed while a file is a patch against it; the sweep takes both once both are old and unused; a missing base is a file that is not there', async () => {
-    let t = 1000 * 86400000;
-    const server = filesServer();
-    const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
-    const [first, second, third] = await saveRun(vault, 20, 22);
-    assert.equal(fileOf(server, second.id).base, first.id);
-    assert.equal(fileOf(server, third.id).base, second.id);
-    assert.equal(await vault.remove(first.id), false, 'the root of a chain stays');
-    assert.equal(await vault.remove(second.id), false, 'so does a middle link');
-    assert.equal(server.files.has(`npc-state-delta-checkpoint-${first.id}.json`), true);
-    // The Storage sweep: all three old and unused, the oldest first: the retry pass takes the whole chain.
-    t += 60 * 86400000;
-    const sweep = createVaultSweep({ vault, now: () => t });
-    const plan = await sweep.plan({ complete: true, referenced: [] });
-    assert.equal(plan.candidates.length, 3);
-    const done = await sweep.sweep();
-    assert.deepEqual([done.ok, done.count, done.skipped], [true, 3, []]);
-    assert.deepEqual(server.checkpointNames(), []);
-    // A chain whose base file vanished (not by this build) reads as a file that is not there, and a restore says so.
-    const again = fileVault({ fetchFn: server.fetchFn });
-    const [a, b] = await saveRun(again, 24, 25);
-    server.files.delete(`npc-state-delta-checkpoint-${a.id}.json`);
-    assert.equal(await again.get(b.id), null);
-    const { participant, hydrate } = setup({ vault: again });
-    await hydrate();
-    assert.equal((await participant.prepare({ return: 'rt_gone', checkpoint: b.id, hash: b.hash })).code, 'SNAPSHOT_UNAVAILABLE');
-});
-
-test('the dependency is recorded before the file; when it cannot be recorded or the file cannot be written, nothing is left to break', async () => {
-    const server = filesServer();
-    const vault = fileVault({ fetchFn: server.fetchFn });
-    const [first] = await saveRun(vault, 30, 30);
-    // The registry cannot be written: the next file is a self-contained anchor, not a patch.
-    const plainFetch = server.fetchFn;
-    let blockRegistry = true;
-    const flaky = fileVault({ fetchFn: async (url, options = {}) => (blockRegistry && url === '/api/files/upload' && JSON.parse(options.body).name.includes('registry') ? { ok: false, status: 500 } : plainFetch(url, options)) });
-    const [x] = await saveRun(flaky, 40, 40);
-    const [y] = await saveRun(flaky, 41, 41);
-    assert.notEqual(fileOf(server, y.id).kind, 'npc-state-delta-native-delta', 'no recorded dependency, no patch');
-    assert.deepEqual(await flaky.get(y.id), y.doc);
-    assert.deepEqual(await flaky.get(x.id), x.doc);
-    // The file cannot be uploaded: the record that named its base is taken back, so the base can go.
-    blockRegistry = false;
-    let failUpload = false;
-    const dying = fileVault({ fetchFn: async (url, options = {}) => (failUpload && url === '/api/files/upload' && JSON.parse(options.body).name.includes('checkpoint-nk_') ? { ok: false, status: 500 } : plainFetch(url, options)) });
-    const [base] = await saveRun(dying, 50, 50);
-    failUpload = true;
-    const next = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: lined(51), cursor: { sid: 'sr_51' }, headHash: hashJson({ turn: 51 }) });
-    await assert.rejects(dying.put(next.id, next.doc));
-    failUpload = false;
-    assert.equal(await dying.remove(base.id), true, 'nothing depends on the base any more');
-    assert.ok(first.id);
 });
 
 test('an old chat with many plain files: they stay readable and untouched next to the new forms, and a new session never patches against a file it did not write', async () => {
@@ -831,26 +739,91 @@ test('an old chat with many plain files: they stay readable and untouched next t
     assert.deepEqual(await vault.get(later.id), later.doc);
 });
 
-test('a thrown-away save whose removal fails leaves an ordinary unused file that the Storage clean-up removes later', async () => {
-    let t = 1000 * 86400000;
+test('this change never deletes a checkpoint file: a long run, a thrown-away save and a reload send no delete and leave every file', async () => {
     const server = filesServer();
-    const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
-    const guarded = { ...vault, remove: async () => { throw new Error('crash before the cleanup'); }, put: (...args) => vault.put(...args) };
-    const run = setup({ vault: guarded });
+    const sent = [];
+    const spy = async (url, options = {}) => { if (/delete/.test(url)) sent.push(url); return server.fetchFn(url, options); };
+    const vault = fileVault({ fetchFn: spy });
+    const built = await saveRun(vault, 1, 40);
+    const run = setup({ vault });
     await run.hydrate();
     let once = true;
     run.port.busy = () => { const now = once; once = false; return now; };
     run.live.state.npcs[0].trust = 6;
-    const saved = await run.participant.checkpoint({ cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) });
-    assert.equal(saved.ok, true);
-    await new Promise(resolve => setTimeout(resolve, 10));
-    const listed = (await vault.list()).files.map(file => file.id);
-    assert.ok(listed.includes(saved.checkpoint));
-    assert.ok(listed.length >= 2, 'the baseline, the save that stands and the thrown-away one (or its twin)');
-    t += 60 * 86400000;
-    const sweep = createVaultSweep({ vault, now: () => t });
-    const index = run.vault.indexes?.size;
-    const plan = await sweep.plan({ complete: true, referenced: [saved.checkpoint] });
-    assert.ok(plan.candidates.every(file => file.id !== saved.checkpoint), 'what stands is never offered');
-    assert.ok(index === undefined || index >= 0);
+    assert.equal((await run.participant.checkpoint({ cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) })).ok, true);
+    assert.deepEqual(sent, [], 'no delete request');
+    assert.ok(server.checkpointNames().length >= 41, 'every file written is still there, the thrown-away one included');
+    for (const item of built) assert.deepEqual(await vault.get(item.id), item.doc);
+});
+
+test('a patch is written only when its base is read back and rebuilds to the document it was written from; otherwise a full packed file', async () => {
+    const server = filesServer();
+    const vault = fileVault({ fetchFn: server.fetchFn });
+    const [first] = await saveRun(vault, 60, 60);
+    const nameOf = id => `npc-state-delta-checkpoint-${id}.json`;
+    // The base vanished after it was written (another tab's clean-up): the next file stands alone.
+    server.files.delete(nameOf(first.id));
+    const [second] = await saveRun(vault, 61, 61);
+    assert.equal(fileOf(server, second.id).kind, 'npc-state-delta-native-packed');
+    // The base is there but damaged: also a full file.
+    server.files.set(nameOf(second.id), '{"kind":"npc-state-delta-native-packed","doc":{}}');
+    const [third] = await saveRun(vault, 62, 62);
+    assert.equal(fileOf(server, third.id).kind, 'npc-state-delta-native-packed');
+    // A base that cannot be read at all (the server errors): a full file, and the save still succeeds.
+    const [fourth] = await saveRun(vault, 63, 63);
+    assert.equal(fileOf(server, fourth.id).base, third.id, 'a confirmed base gives a patch again');
+    let down = true;
+    const flaky = fileVault({ fetchFn: async (url, options = {}) => (down && !String(url).includes('/api/files/upload') && String(url).includes('checkpoint-nk_') ? { ok: false, status: 500, text: async () => '' } : server.fetchFn(url, options)) });
+    const [x] = await saveRun(flaky, 70, 70);
+    const [y] = await saveRun(flaky, 71, 71);
+    down = false;
+    assert.equal(fileOf(server, y.id).kind, 'npc-state-delta-native-packed');
+    assert.deepEqual(await flaky.get(y.id), y.doc);
+    assert.ok(x.id);
+});
+
+test('a crash between the writes leaves only whole files; two tabs writing at once never need each other; a missing base falls back to the newest full file and says so', async () => {
+    const server = filesServer();
+    const reports = [];
+    const warn = console.warn; console.warn = () => {};
+    try {
+        const tabA = fileVault({ fetchFn: server.fetchFn, onFallback: report => reports.push(report) });
+        const tabB = fileVault({ fetchFn: server.fetchFn });
+        const [a1] = await saveRun(tabA, 1, 1);
+        const [b1] = await saveRun(tabB, 1, 1); // same state, the same file: already kept, nothing changes
+        assert.equal(a1.id, b1.id);
+        const [a2, a3] = await saveRun(tabA, 2, 3);
+        const [b2] = await saveRun(tabB, 2, 2);
+        assert.equal(b2.id, a2.id);
+        const [b4] = await saveRun(tabB, 4, 4);
+        const [a5] = await saveRun(tabA, 5, 5);
+        for (const item of [a1, a2, a3, b4, a5]) assert.deepEqual(await tabA.get(item.id), item.doc, 'each tab\'s files read whole through either tab');
+        for (const item of [a1, a2, a3, b4, a5]) assert.deepEqual(await tabB.get(item.id), item.doc);
+        // A crash after a file was written and before anything else: a restarted vault reads every file and writes the next as a full file.
+        const restarted = fileVault({ fetchFn: server.fetchFn });
+        const [r6] = await saveRun(restarted, 6, 6);
+        assert.equal(fileOf(server, r6.id).kind, 'npc-state-delta-native-packed');
+        for (const item of [a1, a2, a3, b4, a5, r6]) assert.deepEqual(await restarted.get(item.id), item.doc);
+        // A missing base: the chain is never rebuilt from part of it; the newest full file of the story line comes back, and it is reported.
+        const chain = await saveRun(tabA, 10, 12);
+        const leaf = chain[chain.length - 1];
+        const baseOfLeaf = fileOf(server, leaf.id).base;
+        assert.ok(baseOfLeaf, 'the last file is a patch');
+        server.files.delete(`npc-state-delta-checkpoint-${baseOfLeaf}.json`);
+        const got = await tabA.get(leaf.id);
+        assert.notDeepEqual(got, leaf.doc, 'not the document the patch stood for');
+        assert.equal(got.lineage, 'lg_aaaaaaaa');
+        assert.equal(reports.length, 1);
+        assert.deepEqual([reports[0].id, reports[0].base], [leaf.id, baseOfLeaf]);
+        assert.ok(reports[0].fallback && fileOf(server, reports[0].fallback).kind !== 'npc-state-delta-native-delta', 'the fallback is a full file');
+        // The participant's hash check then refuses it instead of installing it.
+        const { participant, hydrate } = setup({ vault: tabA });
+        await hydrate();
+        const refused = await participant.prepare({ return: 'rt_gone', checkpoint: leaf.id, hash: leaf.hash });
+        assert.equal(refused.ok, false);
+        // Nothing to fall back to: null, reported with no fallback.
+        for (const name of server.checkpointNames()) if (!name.includes(leaf.id)) server.files.delete(name);
+        assert.equal(await tabA.get(leaf.id), null);
+        assert.equal(reports.at(-1).fallback, null);
+    } finally { console.warn = warn; }
 });

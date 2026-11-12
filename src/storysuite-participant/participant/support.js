@@ -36,10 +36,3 @@ export function cleanIndex(raw) {
     if (isRecord(raw.base) && typeof raw.base.checkpoint === 'string' && HASH.test(String(raw.base.hash)) && typeof raw.base.stateHash === 'string') index.base = { checkpoint: raw.base.checkpoint, hash: raw.base.hash, stateHash: raw.base.stateHash };
     return index;
 }
-
-/** Every checkpoint id a lineage index names (base, prepared, returns, acks, selected): a file in this set is never removed. */
-export function indexCheckpointIds(index, out = new Set(), depth = 0) {
-    if (typeof index === 'string') { if (/^nk_[0-9a-z]{8}$/.test(index.trim())) out.add(index.trim()); }
-    else if (index && typeof index === 'object' && depth < 8) for (const entry of Object.values(index)) indexCheckpointIds(entry, out, depth + 1);
-    return out;
-}

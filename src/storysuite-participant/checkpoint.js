@@ -132,11 +132,6 @@ export function rebuildFromDelta(wrapper, baseDoc) {
     } catch { return null; }
 }
 
-/** The id a stored delta file is a patch against; null for any other file. */
-export function baseOfFile(raw) {
-    return isRecord(raw) && raw.kind === KIND_DELTA && typeof raw.base === 'string' && CHECKPOINT_ID.test(raw.base) ? raw.base : null;
-}
-
 /** The story line a stored file belongs to (a plain, packed or delta file), without rebuilding it; null when it names none. */
 export function lineageOfFile(raw) {
     const line = isRecord(raw) ? (raw.kind === KIND_PACKED ? raw.doc?.lineage : raw.lineage) : null;

@@ -98,8 +98,6 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         return Promise.race([operation, timeout]).finally(() => cancel(timer));
     }
     vault = Object.fromEntries(['put', 'get', 'getIndex', 'putIndex'].map(method => [method, (...args) => vaultCall(method, args)]));
-    // Only for a vault that can delete (a stand-in without `remove` keeps what it is given).
-    vault.remove = typeof backend.remove === 'function' ? (...args) => vaultCall('remove', args) : async () => false;
     /**
      * Whether Delta has loaded the open chat's state, loading it first when it has not. Before the load `readState()` is an empty state with
      * no story line: a lineage read from it would be minted anew and written over the real one, and the vault's index of the real one (the

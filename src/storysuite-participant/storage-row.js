@@ -41,7 +41,6 @@ async function indexProtected(vault, candidates) {
     const named = new Set();
     let unknown = false;
     const lineages = new Set();
-    const bases = new Map();   // file -> the file it is a patch against (read from the file, not from the registry)
     try {
         const raw = await vault.list();
         const files = Array.isArray(raw) ? raw : Array.isArray(raw?.files) ? raw.files : [];
@@ -49,9 +48,7 @@ async function indexProtected(vault, candidates) {
         for (const id of ids) {
             const isCandidate = candidates.some(file => file.id === id);
             try {
-                const meta = typeof vault.describe === 'function' ? await vault.describe(id) : { lineage: (await vault.get(id))?.lineage, base: null };
-                const lineage = meta?.lineage;
-                if (meta?.base) bases.set(id, meta.base);
+                const lineage = (await vault.get(id))?.lineage;
                 if (typeof lineage === 'string' && lineage) lineages.add(lineage);
                 else if (isCandidate) keep.add(id);
             } catch { if (isCandidate) keep.add(id); unknown = true; }
@@ -65,12 +62,6 @@ async function indexProtected(vault, candidates) {
         } catch { unknown = true; }
     }
     for (const { id } of candidates) if (named.has(id)) keep.add(id);
-    // A file that stays keeps its whole chain of bases, whatever the registry says (a second tab can lose a registry update).
-    const candidateIds = new Set(candidates.map(file => file.id));
-    for (const start of [...new Set([...bases.keys(), ...keep])].filter(id => !candidateIds.has(id) || keep.has(id))) {
-        let at = bases.get(start);
-        for (let steps = 0; at && steps < 64; steps += 1) { if (candidateIds.has(at)) keep.add(at); at = bases.get(at); }
-    }
     return { keep, unknown };
 }
 
