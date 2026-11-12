@@ -155,5 +155,7 @@ export function createPublicApiReadPart(deps) {
     },
     clearDiagnostics: () => diagnosticStore.clear(getChatKey()),
     getState: () => structuredClone(getChatState()),
+    // The fingerprints of the open chat's messages now (the timeline participant asks it of a head selection that would install an older state).
+    chatLineage: () => chatLineage(getContext().chat || []),
     };
 }

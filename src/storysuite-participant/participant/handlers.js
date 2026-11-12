@@ -5,12 +5,12 @@
 import { PARTICIPANT_SCHEMA } from '../checkpoint.js';
 import { isTerminalNpcDeath } from '../../../terminal-lifecycle.js';
 import { hashJson } from '../hash.js';
-import { restoredState, storedTimeline, timelineOf } from '../timeline.js';
+import { restoredState, selectionBehind, storedTimeline, timelineOf } from '../timeline.js';
 import { fail, isRecord, plain, preparedId } from './support.js';
 
 export function createParticipantHandlers({
     abort, bounded, boundedCheckpoint, busy, confirmedDeath, getAnnounced, getHandle, getLast, hand, hostExclusive,
-    hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, verifyOnly, vault,
+    hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, verifyOnly, vault, warn,
 }) {
     return {
         participant: {
@@ -116,6 +116,19 @@ export function createParticipantHandlers({
                     install = false;
                     schedulePublish(0);
                 }
+                // A head selection (the host's `hs_`) that would install a state far behind where the story and the dossiers part is not what a swipe or
+                // a delete asked for (it can only reach the replies it touched): it keeps the dossiers as they are, says so, and is answered as done, so the
+                // story goes on. The dossiers are published next, on the baseline they have. A reader's restore and a save point are exact and not asked.
+                const behind = install && String(input.return).startsWith('hs_') ? selectionBehind({ saved: got.doc.state?.lineage, live: live?.lineage, chat: port.chatLineage?.() }) : null;
+                if (behind) {
+                    warn(`NPC State Delta kept its dossiers: the selected state is ${behind.behind} messages behind the change at message ${behind.at}, which is older than that change can reach.`);
+                    entry.kept = true;
+                    schedulePublish(0);
+                    preparedAt.delete(input.prepared);
+                    idx.returns[input.return] = { ...ret, status: 'active' };
+                    await save();
+                    return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash };
+                }
                 if (install) {
                     // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).
                     await port.installState(restoredState(got.doc.state, live));
@@ -148,7 +161,7 @@ export function createParticipantHandlers({
                 // The host's recovery asks this to learn whether the participant switched already, and skips the activation when it says active. It
                 // says so only while the live state is the bytes of that checkpoint; otherwise (a write that never reached the file, bytes that are
                 // gone) it says prepared, and the activation is asked for again, which installs them or refuses.
-                if (ret.status === 'active') {
+                if (ret.status === 'active' && s.index.prepared[ret.prepared]?.kept !== true) {
                     const got = await verified(ret.checkpoint, ret.hash);
                     if (!got.ok || !standsOnBytes(got.doc)) return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: 'prepared' };
                 }

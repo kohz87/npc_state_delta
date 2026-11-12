@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { LINEAGE_ID, NP_ID, buildCheckpoint, checkpointIdOf, checkpointProblem, createParticipant, hydrateIdentity, memoryVault, resolveIdentity, restoredState, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
+import { LINEAGE_ID, NP_ID, buildCheckpoint, checkpointIdOf, checkpointProblem, createParticipant, hydrateIdentity, memoryVault, resolveIdentity, restoredState, selectionBehind, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
 import { hashJson, sha256 } from '../src/storysuite-participant/hash.js';
 import { fileVault } from '../src/storysuite-participant/vault.js';
 import { isTerminalNpcDeath } from '../terminal-lifecycle.js';
@@ -598,4 +598,85 @@ test('opening a chat, a reply or a scan hydrates nothing and writes nothing; the
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.match(full.timeline().lineage, LINEAGE_ID);
     assert.equal(full.queries['npc.identity'](null, { name: 'Mira' }).nativeKey, 'npc_mira');
+});
+
+// A head selection that would install a state far older than the change can reach (run 3: a swipe of the latest reply installed the first reply's
+// state and the dossier progress of five replies was lost) keeps the dossiers, says so, and is answered as done; exact restores are not asked.
+const names = (count, from = 0) => Array.from({ length: count }, (_, at) => `m${from + at}`);
+async function behindSetup(extra = {}) {
+    const told = [];
+    const chat = [...names(12).slice(0, 11), 'swiped-12'];
+    const made = setup({ extra: { warn: text => told.push(text), chatLineage: () => chat, ...extra } });
+    await made.hydrate();
+    const keep = async length => {
+        made.live.state.lineage = names(length);
+        await made.hydrate();
+        return made.participant.checkpoint({ cursor: { sid: `sr_${length}` }, headHash: String(length % 10).repeat(64) });
+    };
+    const first = await keep(3);
+    const parent = await keep(11);
+    made.live.state.npcs.push(npc('npc_late', 'Late progress'));
+    made.live.state.lineage = names(12);
+    await made.hydrate();
+    return { ...made, told, first, parent };
+}
+
+test('selectionBehind: the swiped reply and its turn are reachable, a state many messages behind where the dossiers and the chat part is not', () => {
+    const live = names(13);
+    const chat = [...names(12), 'swiped'];
+    assert.equal(selectionBehind({ saved: names(11), live, chat }), null, 'the exact parent (the reader\'s turn is not in it)');
+    assert.equal(selectionBehind({ saved: names(9), live, chat }), null, 'one exchange further back');
+    assert.deepEqual(selectionBehind({ saved: names(3), live, chat }), { behind: 9, at: 12 });
+    assert.deepEqual(selectionBehind({ saved: names(3), live: names(13), chat: names(8) }), { behind: 5, at: 8 }, 'a chat shortened by a delete: it ends where the chat does');
+    for (const missing of [{ live: [] }, { chat: [] }, { saved: null }, { chat: null }]) assert.equal(selectionBehind({ saved: names(3), live, chat, ...missing }), null, 'too little known to say');
+});
+
+test('a head selection far behind the swipe is refused: the dossiers stay, it says so, it is answered as done and stays done', async () => {
+    const { participant, live, told, first } = await behindSetup();
+    const prepared = await participant.prepare({ return: 'hs_00000001', checkpoint: first.checkpoint, hash: first.hash });
+    assert.equal(prepared.ok, true);
+    const answer = await participant.activate({ return: 'hs_00000001', prepared: prepared.prepared });
+    assert.deepEqual(answer, { ok: true, checkpoint: first.checkpoint, hash: first.hash });
+    assert.equal(live.installs, 0, 'nothing installed');
+    assert.equal(live.state.npcs.some(item => item.id === 'npc_late'), true, 'the progress is still there');
+    assert.equal(told.length, 1);
+    assert.match(told[0], /kept its dossiers/);
+    assert.equal((await participant.status({ return: 'hs_00000001' })).status, 'active', 'a recovery asked again does not install it either');
+    assert.equal(live.installs, 0);
+});
+
+test('a head selection at the exact parent installs; a reader\'s restore far back installs; a port that cannot read the chat installs', async () => {
+    const parentCase = await behindSetup();
+    const prepared = await parentCase.participant.prepare({ return: 'hs_00000002', checkpoint: parentCase.parent.checkpoint, hash: parentCase.parent.hash });
+    assert.equal((await parentCase.participant.activate({ return: 'hs_00000002', prepared: prepared.prepared })).ok, true);
+    assert.deepEqual([parentCase.live.installs, parentCase.live.state.npcs.some(item => item.id === 'npc_late'), parentCase.told], [1, false, []]);
+
+    const restoreCase = await behindSetup();
+    const restore = await restoreCase.participant.prepare({ return: 'rt_00000001', checkpoint: restoreCase.first.checkpoint, hash: restoreCase.first.hash });
+    assert.equal((await restoreCase.participant.activate({ return: 'rt_00000001', prepared: restore.prepared })).ok, true);
+    assert.deepEqual([restoreCase.live.installs, restoreCase.told], [1, []], 'a save point is exact and chosen by the reader');
+
+    const blind = await behindSetup({ chatLineage: undefined });
+    const head = await blind.participant.prepare({ return: 'hs_00000003', checkpoint: blind.first.checkpoint, hash: blind.first.hash });
+    assert.equal((await blind.participant.activate({ return: 'hs_00000003', prepared: head.prepared })).ok, true);
+    assert.equal(blind.live.installs, 1, 'without the chat nothing is judged');
+});
+
+test('the run data: the first reply\'s checkpoint is refused for the swipe of the sixth reply, the fifth reply\'s is not (when the run data is here)', async t => {
+    const { readFile } = await import('node:fs/promises');
+    const { chatLineage } = await import('../branch.js');
+    const dir = '/home/raven/story_suite/scratch/batch/SMALL/night/swipechk_files';
+    let chat; let first; let fifth; let live;
+    try {
+        chat = (await readFile(`${dir}/chat.jsonl`, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).slice(1);
+        const doc = async id => JSON.parse(await readFile(`${dir}/npc-state-delta-checkpoint-${id}.json`, 'utf8'));
+        [first, fifth, live] = [await doc('nk_tqmebnch'), await doc('nk_835f94jp'), await doc('nk_nlfx09ia')];
+    } catch { t.skip('the run data is not here'); return; }
+    // (the chat in the file is the one after the swipe and the replies that followed: its first 12 messages are the ones before the swiped reply)
+    const now = chatLineage(chat.slice(0, 13));
+    const dossiers = [...now.slice(0, 12), 'the swiped reply as it was'];
+    assert.equal(selectionBehind({ saved: first.state.lineage, live: dossiers, chat: now })?.behind > 4, true);
+    assert.equal(selectionBehind({ saved: fifth.state.lineage, live: dossiers, chat: now }), null);
+    assert.equal(first.state.lineage.every((entry, at) => entry === now[at]), true, 'the stored fingerprints are the chat\'s own, so the comparison reads real lineage');
+    assert.ok(live.state.lineage.length > 11);
 });
