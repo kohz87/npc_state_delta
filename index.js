@@ -18,6 +18,7 @@ import {
     normalizeRelationshipCaps,
     normalizeName,
     setStoryClockSource,
+    setStoryDateAtSource,
 } from './core.js';
 import {
     createScanOperationRegistry,
@@ -333,7 +334,7 @@ const { queueStateFileWrite, flushStateFile, settleStateFileWrite, persist, pers
 
 const { commitBranchCheckpoint, seedBranchTracking, hostSwipeState, isHostSwipeActive, hostChatComplete, maybeInheritKnownBranch, branchInheritancePending, noteAdoptedDossier, staleHostActive, staleHostPrefix } = createBranchPart(rt, { ensureChatStateLoaded, evictDormantChatStates, freshChatState, getChatKey, getChatState, isCanonicalChatKey, queueStateFileWrite, requestHeaders, setChatState });
 
-const { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason } = createHostedPart(rt, { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex });
+const { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedStoryDateAt, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason } = createHostedPart(rt, { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex });
 
 const { liveInjectionText, updateInjection, holdCaptureRules, keepCaptureRules, clearLegacyPromptKeys, injectionPreview, scannerPromptOptions } = createInjectionPart(rt, { CAPTURE_PROMPT_DEPTH, CAPTURE_PROMPT_KEY, CAPTURE_RULES_KEY, chatHydrationStatus, getChatKey, getChatState, hostedMeterView, hostedNotePromptOptions, keyReturnNotes, LEGACY_PROMPT_KEYS, PROMPT_KEY, scenePresenceView, storySuiteV2Meters });
 
@@ -392,7 +393,7 @@ const registerEvents = createEventRegistration(rt, { getContext, extension_promp
 // What a character card may recommend (Story Block 2.21.0 card settings, src/card-settings.js). Each save is the one the
 // settings panel itself makes: the prompt format through "Save prompt settings", Scan every as its box does.
 const nsdCardSettings = createCardSettingsPart({ rt, createCardSettingsDefinition, SCAN_EVERY_RANGE, portraitSettingsSnapshot, getSettings, savePortraitSettingsDraft, portraitSettingsDraftFromUi, writePortraitSettingsDraftToUi, updatePortraitSettingsSaveUi, persistSettings });
-const { init, safeInit } = createStartup(rt, { getSettings, clearLegacyPromptKeys, connectStorySuite, SUITE_API, UI_ID, NPC_STATE_VERSION, latestReplyIndex, castSync, castPortraitDue, normalizeSourceOfTruth, nsdCardSettings, setStoryClockSource, hostedStoryClock, bindUi, installUiCaptureBridge, registerEvents, startInlineWatchdog, flushCurrentChatOnPageHide, refreshCurrentChatFromServer, scheduleSettingsMountRetries, getChatKey, isCanonicalChatKey, ensureChatStateLoaded, maybeInheritKnownBranch, seedBranchTracking, getChatState, renderDossier, updateInjection, evictDormantChatStates });
+const { init, safeInit } = createStartup(rt, { getSettings, clearLegacyPromptKeys, connectStorySuite, SUITE_API, UI_ID, NPC_STATE_VERSION, latestReplyIndex, castSync, castPortraitDue, normalizeSourceOfTruth, nsdCardSettings, setStoryClockSource, setStoryDateAtSource, hostedStoryClock, hostedStoryDateAt, bindUi, installUiCaptureBridge, registerEvents, startInlineWatchdog, flushCurrentChatOnPageHide, refreshCurrentChatFromServer, scheduleSettingsMountRetries, getChatKey, isCanonicalChatKey, ensureChatStateLoaded, maybeInheritKnownBranch, seedBranchTracking, getChatState, renderDossier, updateInjection, evictDormantChatStates });
 $(safeInit);
 
 // Some SillyTavern builds finish extension discovery after DOM ready. Re-running the

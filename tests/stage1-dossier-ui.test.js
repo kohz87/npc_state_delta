@@ -673,3 +673,17 @@ test('Ties: each tie is three stacked lines (type label, name, description); a l
   assert.doesNotMatch(css, /\.delta-bond[^{]*\{[^}]*\b\d+px\s+(?:device|screen)|@media[^{]*\.delta-bond/, 'no device widths');
   assert.match(css, /\.delta-bond \{[^}]*\} *\n[^\n]*\.delta-bond:first-child/, 'a hairline (border-top) stays between ties; the first has none');
 });
+
+test('Past: a stamped memory shows its story date and reply as a small label; an older memory shows none; the text is untouched', () => {
+  const memories = ['Met Astra at the counter', 'Spilled the ink'];
+  const stamps = { 'met astra at the counter': { m: 4, d: 'Icewane 27' }, 'spilled the ink': { m: 9 } };
+  const old = sectionScreenHtml('past', { memories: [...memories, 'An old memory'], memoryStamps: stamps }, {});
+  assert.match(old, /<span class="delta-mem-when">Icewane 27 · #4<\/span><span>Met Astra at the counter<\/span>/);
+  assert.match(old, /<span class="delta-mem-when">#9<\/span><span>Spilled the ink<\/span>/, 'no clock: the reply number alone');
+  assert.match(old, /<\/i><span>An old memory<\/span>/, 'a memory recorded before stamps has no label');
+  assert.equal((old.match(/delta-mem-when/g) || []).length, 2);
+  assert.doesNotMatch(sectionScreenHtml('past', { memories }, {}), /delta-mem-when/);
+  assert.match(sectionScreenHtml('past', { memories: ['<b>x</b>'], memoryStamps: { 'b x b': { m: 1, d: '<i>' } } }, {}), /&lt;i&gt;/, 'the date is escaped');
+  const projected = dossierDetailProjection({ id: 'r', name: 'R', memories, memoryStamps: { ...stamps, 'gone one': { m: 1 } } });
+  assert.deepEqual(Object.keys(projected.memoryStamps), ['met astra at the counter', 'spilled the ink'], 'the projection keeps stamps of stored memories only');
+});

@@ -204,7 +204,7 @@ export function createStorySuiteV2Adapter({
     const editorPart = createEditorPart(session, deps);
     Object.assign(deps, editorPart);
     const { watchers, pinKeyPerson, pageApi, offerPage } = castUiPart;
-    const { dossierOf, part, sliceEntries, entryFor, partyLevelsAnswer, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView } = queriesPart;
+    const { storyDateText, dossierOf, part, sliceEntries, entryFor, partyLevelsAnswer, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView } = queriesPart;
     const { ownPrompt, storyClock, calendarLink, definition, scenePresentNames } = timelinePart;
     const { poll, unhost, check } = connectPart;
     const { editorHtml, readEditor, dossierMeters, eventWatch } = editorPart;
@@ -253,6 +253,8 @@ export function createStorySuiteV2Adapter({
         keyPeople,
         /** While hosted: Story Director's calendar (`director.calendar`), or null. */
         directorCalendar,
+        /** While hosted: the story's date after reply `index` ("Icewane 27"), '' without a clock; dates a memory when it is recorded. */
+        storyDateText,
         /** While hosted: whether Story Director offers `keypeople.pin` (the "Pin as Key people" button shows only then). */
         keyPinOffered,
         /** While hosted: the reader pins a person as a key person (`keypeople.pin`, cause ui) → { ok, message }. */

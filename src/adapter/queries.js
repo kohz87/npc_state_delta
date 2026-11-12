@@ -332,8 +332,19 @@ export function createQueriesPart(session, deps) {
         return changed ? out : npcs;
     }
 
+    // The story's date after reply `index` (the reply a memory was recorded in), "Icewane 27"; '' without a clock. A replay's scoped
+    // adapter forces asOf to the replayed reply, which is this same index, so live and replay agree.
+    function storyDateText(index) {
+        if (!Number.isInteger(index) || index < 0) return '';
+        try {
+            const time = session.sdkRef?.query?.('director.time', { asOf: index });
+            const minutes = Number.isInteger(time) ? time : time?.minutes;
+            return Number.isInteger(minutes) ? storyMinuteText(minutes, director.directorCalendar()) : '';
+        } catch { return ''; }
+    }
+
     return {
-        warn, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
+        warn, storyDateText, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
         entryFor, queries, ...director, send, sliceView,
     };
 }
