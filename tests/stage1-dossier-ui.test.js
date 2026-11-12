@@ -656,3 +656,20 @@ test('the section "‹ Dossier" pill is hidden only where the board tiles are be
   assert.match(css, /@container dsr \(min-width: \$\{THREE_PANE_MIN\}px\) \{ #\$\{ROOT_ID\} \.delta-section-back \{ display:none; \} \}/);
   assert.doesNotMatch(css, /@media[^{]*\{[^}]*delta-section-back/);
 });
+
+test('Ties: each tie is three stacked lines (type label, name, description); a long type wraps; spacing between lines and ties is in the container styles', async () => {
+  const { SECTIONS_STYLES } = await import('../dossier-ui-styles-sections.js');
+  const ties = sectionScreenHtml('ties', { keyRelationships: ['Sister Temiwa — novice companion present at the counter | shares the cramped office and covered Sieke with an altar-cloth', 'Bregje — rival | clashes at the annex'] }, {});
+  const rows = ties.match(/<div class="delta-bond"[\s\S]*?<\/div>/g) || [];
+  assert.equal(rows.length, 2);
+  assert.match(rows[0], /<span class="delta-bond-word">novice companion present at the counter<\/span><b>Sister Temiwa<\/b><p>shares the cramped office/, 'type, then name, then description, in that order');
+  const css = SECTIONS_STYLES.replace(/\$\{ROOT_ID\}/g, '#r');
+  const rule = selector => css.split('\n').filter(line => line.includes(selector)).join('\n');
+  assert.doesNotMatch(rule('.delta-bond { grid-template-columns'), /auto minmax/, 'the type no longer sits beside the name');
+  assert.match(rule('.delta-bond { grid-template-columns'), /grid-template-columns:minmax\(0,1fr\)[^}]*gap:clamp\([^}]*cqw[^}]*\)[^}]*padding:clamp\([^}]*cqw/, 'space between the lines and between ties follows the container');
+  assert.match(rule('.delta-bond-word {'), /display:block[^}]*overflow-wrap:anywhere/);
+  assert.match(rule('.delta-bond > b'), /grid-row:2/);
+  assert.match(rule('.delta-bond > p'), /grid-row:3/);
+  assert.doesNotMatch(css, /\.delta-bond[^{]*\{[^}]*\b\d+px\s+(?:device|screen)|@media[^{]*\.delta-bond/, 'no device widths');
+  assert.match(css, /\.delta-bond \{[^}]*\} *\n[^\n]*\.delta-bond:first-child/, 'a hairline (border-top) stays between ties; the first has none');
+});
