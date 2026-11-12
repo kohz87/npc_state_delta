@@ -662,3 +662,37 @@ test('the section "‹ Dossier" pill is hidden only where the board tiles are be
   assert.match(css, /@container dsr \(min-width: \$\{THREE_PANE_MIN\}px\) \{ #\$\{ROOT_ID\} \.delta-section-back \{ display:none; \} \}/);
   assert.doesNotMatch(css, /@media[^{]*\{[^}]*delta-section-back/);
 });
+
+test('Ties: each tie is three stacked lines (type label, name, description); a long type wraps; spacing between lines and ties is in the container styles', async () => {
+  const { SECTIONS_STYLES } = await import('../dossier-ui-styles-sections.js');
+  const ties = sectionScreenHtml('ties', { keyRelationships: ['Sister Temiwa — novice companion present at the counter | shares the cramped office and covered Sieke with an altar-cloth', 'Bregje — rival | clashes at the annex'] }, {});
+  const rows = ties.match(/<div class="delta-bond"[\s\S]*?<\/div>/g) || [];
+  assert.equal(rows.length, 2);
+  assert.match(rows[0], /<span class="delta-bond-word">novice companion present at the counter<\/span><b>Sister Temiwa<\/b><p>shares the cramped office/, 'type, then name, then description, in that order');
+  const css = SECTIONS_STYLES.replace(/\$\{ROOT_ID\}/g, '#r');
+  const rule = selector => css.split('\n').filter(line => line.includes(selector)).join('\n');
+  assert.doesNotMatch(rule('.delta-bond { grid-template-columns'), /auto minmax/, 'the type no longer sits beside the name');
+  assert.match(rule('.delta-bond { grid-template-columns'), /grid-template-columns:minmax\(0,1fr\)[^}]*gap:clamp\([^}]*cqw[^}]*\)[^}]*padding:clamp\([^}]*cqw/, 'space between the lines and between ties follows the container');
+  assert.match(rule('.delta-bond-word {'), /display:block[^}]*overflow-wrap:anywhere/);
+  assert.match(rule('.delta-bond > b'), /grid-row:2/);
+  assert.match(rule('.delta-bond > p'), /grid-row:3/);
+  assert.doesNotMatch(css, /\.delta-bond[^{]*\{[^}]*\b\d+px\s+(?:device|screen)|@media[^{]*\.delta-bond/, 'no device widths');
+  assert.match(css, /\.delta-bond \{[^}]*\} *\n[^\n]*\.delta-bond:first-child/, 'a hairline (border-top) stays between ties; the first has none');
+});
+
+test('Past: a stamped memory shows its story date and reply as a small label; an older memory shows none; the text is untouched', async () => {
+  const { SECTIONS_STYLES } = await import('../dossier-ui-styles-sections.js');
+  const memories = ['Met Astra at the counter', 'Spilled the ink'];
+  const stamps = { 'met astra at the counter': { m: 4, d: 'Icewane 27' }, 'spilled the ink': { m: 9 } };
+  const old = sectionScreenHtml('past', { memories: [...memories, 'An old memory'], memoryStamps: stamps }, {});
+  assert.match(old, /<span class="delta-mem-when">Icewane 27 · #4<\/span><span>Met Astra at the counter<\/span>/);
+  assert.match(old, /<span class="delta-mem-when">#9<\/span><span>Spilled the ink<\/span>/, 'no clock: the reply number alone');
+  assert.match(old, /<\/i><span>An old memory<\/span>/, 'a memory recorded before stamps has no label');
+  assert.equal((old.match(/delta-mem-when/g) || []).length, 2);
+  assert.doesNotMatch(sectionScreenHtml('past', { memories }, {}), /delta-mem-when/);
+  assert.match(sectionScreenHtml('past', { memories: ['<b>x</b>'], memoryStamps: { 'b x b': { m: 1, d: '<i>' } } }, {}), /&lt;i&gt;/, 'the date is escaped');
+  const cssAll = SECTIONS_STYLES.replace(/\$\{ROOT_ID\}/g, '#r');
+  assert.match(cssAll, /\.delta-timeline li, #\S+ \.delta-timeline li:first-child \{ display:grid[^}]*padding-bottom:clamp\(8px/, 'the first Past item has the same gap as the others');
+  const projected = dossierDetailProjection({ id: 'r', name: 'R', memories, memoryStamps: { ...stamps, 'gone one': { m: 1 } } });
+  assert.deepEqual(Object.keys(projected.memoryStamps), ['met astra at the counter', 'spilled the ink'], 'the projection keeps stamps of stored memories only');
+});

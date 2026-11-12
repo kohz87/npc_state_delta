@@ -7,6 +7,7 @@ import { normalizeApproachKind } from '../npc-meters-gate.js';
 import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, readLeaf, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
 import { growDrives, DRIVE_RULE } from './npc-notes-drives.js';
+import { mergeRefreshTastes } from './npc-notes-tastes.js';
 import { runKind, noteLine, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
 import { applyEvents, restMood, restingMood } from '../npc-mood.js';
 import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence, asStored } from './npc-meters-slice.js';
@@ -209,6 +210,22 @@ export function createNpcCommands({
             if (!fresh && !stamp) ctx.fail('REFUSED', 'Nothing to flag.');
             const done = run(ctx, { label: payload?.name, changes: [], problems: fresh ? [text] : [], limit: false, reply: null, allowEmpty: true, leaf: stamp ? { field: 'lookLockedAt', text: stamp } : null });
             return cue ? { ...done, summary: sentence([cue]), narrate: true } : done;
+        },
+        /**
+         * npc.taste { name, tastes: [{ sign, item, from }], reply? }: the tastes Delta's own Refresh read from the scenes (feature notes). They merge into the
+         * person's taste leaf like `~ taste` lines (npc-notes-tastes.js mergeRefreshTastes: a taste already there is kept, a full sign takes nothing more) and are
+         * written in this command's op on the reply that ran the Refresh, so a swipe, a delete or a rebuild equals live. Refused when nothing is new.
+         */
+        'npc.taste'(ctx, payload = {}) {
+            if (!ownOrModule(ctx, 'npc.taste', payload)) ctx.fail('REFUSED', 'Tastes from a Refresh come only from NPC State Delta\'s own scan.');
+            if (!featureOn(FEATURE_NOTES, ctx)) ctx.fail('FEATURE_OFF', 'Dossier notes are turned off.');
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            const slice = ctx.read(NPC_DOMAIN);
+            const who = identify(slice?.npcs ?? {}, payload?.name);
+            if (!who) ctx.fail('INVALID', 'It names no one.');
+            const out = mergeRefreshTastes(slice?.npcs?.[who.key]?.tastes, payload?.tastes, { name: who.name, day: clockDay(at) ?? 0, r: commandReply(ctx, at) });
+            if (!out.added) ctx.fail('REFUSED', 'No new taste to record.');
+            return run(ctx, { label: payload?.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, leaf: { field: 'tastes', text: out.text } });
         },
         /**
          * npc.meet { name, personality?, about?, reply? }: Delta's own scan admitted a person the slice has no record for (or one with no mood
