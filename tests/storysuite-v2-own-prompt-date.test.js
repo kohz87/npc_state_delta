@@ -217,3 +217,39 @@ test('end to end: hosted with Story Director, Delta\'s age arithmetic reads the 
     clock.minutes = fantasyMinutes(611, 2, 9);
     assert.equal(effectiveChronologicalAge(npc), '20');
 });
+
+test('storyDateText: the story date after a given reply, the same asked live and through a replay\'s scoped read; moving the clock later changes nothing for an earlier reply', async t => {
+    // A stand-in for Story Director whose time is part of the host's state, so `asOf` reads the time after that reply.
+    const clock = {
+        id: 'zz-clock', name: 'Clock',
+        domains: { director: { initial: () => ({ time: { minutes: 0 } }) } },
+        commands: { 'zz.clock': (ctx, { minutes }) => { ctx.draft('director').time.minutes = minutes; return { summary: 'time passes' }; } },
+        queries: {
+            'director.time': state => ({ minutes: state?.domains?.director?.time?.minutes ?? null }),
+            'director.calendar': () => structuredClone(SD_GREGORIAN),
+        },
+    };
+    const { host, adapter } = await suite(t, { modules: [clock] });
+    await host.sdk.command('zz.clock', { minutes: gregorianMinutes(611, 3, 15) });
+    await host.send('Hello.', 'Mira looks up.');
+    const first = host.store.headIndex();
+    await host.send('Go on.', 'Mira nods.');
+    const second = host.store.headIndex();
+    await host.sdk.command('zz.clock', { minutes: gregorianMinutes(611, 3, 19) });   // a command lands on the head reply: the later one
+    assert.notEqual(first, second);
+    assert.equal(adapter.storyDateText(first), 'March 15');
+    assert.equal(adapter.storyDateText(second), 'March 19');
+    // A replay's scoped adapter forces asOf to the replayed reply: the same answer as live for that reply.
+    assert.equal(adapter.at(first, () => adapter.storyDateText(first)), 'March 15');
+    assert.equal(adapter.at(second, () => adapter.storyDateText(second)), 'March 19');
+    // Not a reply index, or not hosted: no date, no error.
+    assert.equal(adapter.storyDateText(-1), '');
+    assert.equal(adapter.storyDateText(null), '');
+    adapter.stop();
+    assert.equal(adapter.storyDateText(first), '');
+});
+test('storyDateText: no date while the reader keeps the calendar in Delta', async t => {
+    const mine = await suite(t, { modules: [director({ minutes: gregorianMinutes(611, 3, 15), calendar: SD_GREGORIAN })], calendarOwn: () => true });
+    await mine.host.send('Hello.', 'Mira looks up.');
+    assert.equal(mine.adapter.storyDateText(mine.host.store.headIndex()), '');
+});
