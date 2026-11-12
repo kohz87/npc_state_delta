@@ -5,12 +5,12 @@
 import { PARTICIPANT_SCHEMA } from '../checkpoint.js';
 import { isTerminalNpcDeath } from '../../../terminal-lifecycle.js';
 import { hashJson } from '../hash.js';
-import { restoredState, storedTimeline, timelineOf } from '../timeline.js';
+import { restoredState, selectionBehind, selectionMaxBehind, storedTimeline, timelineOf } from '../timeline.js';
 import { fail, isRecord, plain, preparedId } from './support.js';
 
 export function createParticipantHandlers({
     abort, bounded, boundedCheckpoint, busy, confirmedDeath, getAnnounced, getHandle, getLast, hand, hostExclusive,
-    hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, verifyOnly, vault,
+    hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, verifyOnly, vault, warn,
 }) {
     return {
         participant: {
@@ -80,7 +80,7 @@ export function createParticipantHandlers({
                 const got = await verified(input.checkpoint, input.hash);
                 if (!got.ok) return got;
                 const prepared = preparedId({ return: input.return, checkpoint: input.checkpoint, hash: input.hash, lineage: s.lineage, again: held ? 1 : 0 });
-                idx.prepared[prepared] = { checkpoint: input.checkpoint, hash: input.hash, return: input.return, inPlace: false, stateHash: null };
+                idx.prepared[prepared] = { checkpoint: input.checkpoint, hash: input.hash, return: input.return, inPlace: false, stateHash: null, ...(input.fallback === true ? { fallback: true } : {}) };
                 idx.returns[input.return] = { prepared, checkpoint: input.checkpoint, hash: input.hash, status: 'prepared' };
                 await save();
                 return { ok: true, prepared, hash: input.hash };
@@ -116,6 +116,11 @@ export function createParticipantHandlers({
                     install = false;
                     schedulePublish(0);
                 }
+                // A head selection (the host's `hs_`) chosen outright (not walked back to, `fallback`) that installs a state far behind where the story and
+                // the dossiers part is installed all the same (after a quiet stretch it is the right one; a refusal would keep a swiped reply's facts), and
+                // said: `older`, which the host records as a Problem, so that a wrong selection that comes back is seen, not hidden.
+                const behind = install && entry.fallback !== true && String(input.return).startsWith('hs_') ? selectionBehind({ saved: got.doc.state?.lineage, live: live?.lineage, chat: port.chatLineage?.(), max: selectionMaxBehind(port.scanEvery?.()) }) : null;
+                const older = behind ? `Restored an older dossier state than expected: ${behind.behind} messages back from the change at message ${behind.at}.` : '';
                 if (install) {
                     // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).
                     await port.installState(restoredState(got.doc.state, live));
@@ -136,7 +141,8 @@ export function createParticipantHandlers({
                 entry.return = input.return;
                 idx.returns[input.return] = { ...ret, status: 'active' };
                 await save();
-                return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash };
+                if (older) warn(older);
+                return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash, ...(older ? { older } : {}) };
             }),
 
             abort,
