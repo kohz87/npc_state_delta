@@ -8,6 +8,7 @@ import { castFromHtml, keyAwayHtml } from './dossier-ui-catalog.js';
 import { MOOD_AXES, moodDescriptors, moodTile, possessiveWord, pullTile } from './dossier-ui-view-model.js';
 import { meterRowHtml, moodRowsHtml, pullRowHtml, signedText } from './dossier-ui-board.js';
 import { noteTieTags, readTieRows, TIE_TYPE_LABELS } from './core-keyrel.js';
+import { storyDayText } from './calendar.js';
 import { SECTION_KEYS } from './dossier-ui-screens.js';
 
 // The six sections in the order the arrows, a sideways swipe and the dots walk them.
@@ -175,7 +176,7 @@ function tieHtml(row) {
     return `<div class="delta-bond" data-tone="${TIE_TONES[row.type] ?? 'grey'}" data-tie-type="${escapeHtml(row.type)}"><span class="delta-bond-word">${escapeHtml(TIE_TYPE_LABELS[row.type] ?? 'Passing')}</span><b>${escapeHtml(parsed.subject)}${why ? `<span class="delta-bond-why">${why}</span>` : ''}</b>${description || quiet ? `<p>${escapeHtml(description)}${quiet}</p>` : ''}</div>`;
 }
 
-const dayText = day => (Number.isInteger(day) ? `day ${day}` : '');
+const dayText = day => storyDayText(day);   // the story's calendar date; '' without one (never the raw day counter)
 const part = (label, kind, body) => (body ? `<section class="delta-notes-block" data-notes="${kind}">${subhead(label)}${body}</section>` : '');
 
 // Lies told (in With {{user}}, after the dynamic): a caught lie in its words; lies not caught only as a count (never the words). Hidden when there are none.

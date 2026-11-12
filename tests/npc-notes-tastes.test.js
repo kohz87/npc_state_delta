@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-    TASTE_LIMITS, addTaste, contentWords, mirrorCheck, mirrorWording, readTastes, tasteKey, tasteTail, tastesText,
+    TASTE_LIMITS, addTaste, contentWords, mirrorCheck, mirrorWording, mergeRefreshTastes, readTastes, tasteKey, tasteTail, tastesText,
 } from '../src/npc-notes-tastes.js';
 
 const row = (sign, item, extra = {}) => ({ sign, item, day: 1, r: 'r1', ...extra });
@@ -201,4 +201,27 @@ test('tastesText round-trips through readTastes', () => {
 test('the module does not import npc-meters.js', () => {
     const source = fs.readFileSync(fileURLToPath(new URL('../src/npc-notes-tastes.js', import.meta.url)), 'utf8');
     assert.doesNotMatch(source, /from\s+['"]\.\/npc-meters\.js['"]/);
+});
+
+test('a "[m2]" citation never stays in a taste: new rows are written clean, stored ones read clean and are not rewritten', () => {
+    const out = addTaste([], { sign: '+', item: 'burnt sugar [m2]', from: 'asked for more [m1, m2]', why: 'ignored [m3]', day: 1, r: 'r1' });
+    assert.deepEqual(out.tastes.map(({ item, from }) => ({ item, from })), [{ item: 'burnt sugar', from: 'asked for more' }]);
+    const stored = JSON.stringify([row('-', 'paperwork [m4]', { from: 'sighs at it [message 12]' })]);
+    assert.deepEqual(readTastes(stored).map(({ item, from }) => ({ item, from })), [{ item: 'paperwork', from: 'sighs at it' }]);
+    assert.ok(stored.includes('[m4]'));
+    // the cited and plain item are one taste; a citation-only item is no taste
+    assert.equal(addTaste(out.tastes, { sign: '+', item: 'Burnt Sugar [m9]' }).status, 'same');
+    assert.equal(addTaste([], { sign: '+', item: '[m2]' }).status, 'refused');
+});
+
+test('a Refresh\'s tastes merge without citations', () => {
+    const { text, added } = mergeRefreshTastes('[]', [{ sign: 'like', item: 'tea [m2]', from: 'every morning [m1]' }, { sign: 'dislike', item: 'loud music [m5]' }], { day: 1, r: 'r1' });
+    assert.equal(added, 2);
+    assert.deepEqual(readTastes(text).map(({ item, from }) => ({ item, from })), [{ item: 'tea', from: 'every morning' }, { item: 'loud music', from: undefined }]);
+    assert.doesNotMatch(text, /\[m\d/);
+});
+
+test('a citation-only why: counts as a reason exactly as before (a sign change is allowed)', () => {
+    const list = addTaste([], { sign: '+', item: 'tea', day: 1, r: 'r1' }).tastes;
+    assert.equal(addTaste(list, { sign: '-', item: 'tea', why: '[m3]', day: 2, r: 'r2' }).status, 'changed');
 });

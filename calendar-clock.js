@@ -110,6 +110,17 @@ export function storyMinuteText(minutes, calendar = null) {
 }
 
 /**
+ * A whole story day number (minutes / 1440, as notes store it) as the dossier writes a date ("Goldwane 12") on the Story Director calendar,
+ * or '' when no host clock or calendar is known (the caller then says nothing or "when first seen"; the raw counter is never shown).
+ */
+export function storyDayText(day) {
+    if (!storyClockSource || !Number.isSafeInteger(day) || day < 0) return '';
+    let clock = null;
+    try { clock = readStoryClock(); } catch { return ''; }
+    return Array.isArray(clock?.calendar?.months) ? storyMinuteText(day * STORY_DAY_MINUTES, clock.calendar) : '';
+}
+
+/**
  * The date Story Director's clock (`{ minutes, calendar }`) is on Delta's calendar `config`, or null when
  * Delta cannot write it there. Delta keeps its own calendar (its prompts' birthday shape and era are
  * unchanged), so the clock is used only where both calendars agree:

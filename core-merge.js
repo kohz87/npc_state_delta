@@ -205,6 +205,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
     const profileUpdateOptions = {
         developmentContext: options.developmentContext || '',
         memoryInputLimit,
+        sourceMessageId,
         targeted: options.allowTargetedDurableSeed === true || options.developmentSingleTarget === true,
         customFieldNames: options.customFieldNames,
     };

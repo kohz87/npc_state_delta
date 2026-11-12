@@ -196,7 +196,7 @@ export function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAU
     }
     merged.memories = manualFields.has('memories')
         ? [...(existing.memories || [])]
-        : mergeImportantMemories(existing.memories, incoming.memories, incoming.memoryRetention, lifecycleOptions.memoryInputLimit || 3, existing.manualMemories);
+        : mergeImportantMemories(existing.memories, incoming.memories, incoming.memoryRetention, lifecycleOptions.memoryInputLimit || 3, existing.manualMemories, { stamps: existing.memoryStamps, message: sourceMessageId });
     if (manualFields.has('mannerisms')) {
         merged.mannerisms = [...(existing.mannerisms || [])];
     } else if ((existing.mannerisms || []).length) {

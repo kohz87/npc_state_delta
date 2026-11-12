@@ -227,7 +227,47 @@ test('the partial fill is deterministic (replay == live) and a new person with p
     const norm = x => JSON.stringify({ ...x, id: 0, lastScannedAt: 0, createdAt: 0, updatedAt: 0 });
     assert.equal(norm(a), norm(b));
     assert.equal(fillWanted(partial()), true, 'the Refresh asks for the fill on a person whose looks are only partly written');
-    assert.equal(buildProfileRefreshPrompt({ transcript: story, targetNpc: partial(), fillLooks: true }).includes('FILL LOOKS: overallAppearance does not yet describe'), true);
+    assert.equal(buildProfileRefreshPrompt({ transcript: story, targetNpc: partial(), fillLooks: true }).includes(`FILL LOOKS: overallAppearance is exactly ${JSON.stringify(PARTIAL)} and does not yet describe`), true);
     assert.equal(buildProfileRefreshPrompt({ transcript: story, targetNpc: partial() }).includes('FILL LOOKS'), false, 'a normal call is unchanged');
     console.log(`partial fill line adds ${fillLooksLine(partial()).length} chars (hair, eyes, build missing, appearance written)`);
+});
+
+// Owner payload (nsd-fill-looks-1815): the dossier shows Sieke's look as ONE string "<overall>; <clothes>", so the model spent ~10k reasoning
+// tokens on what "the existing text" was. The line now quotes the exact overallAppearance the code checks and the clothes apart.
+const SIEKE_LOOK = 'Human woman, ~20, short and petite, mousy brown hair pinned in a loose bun, a tear-blotched face';
+const SIEKE_CLOTHES = 'An ink-stained linen bodice with strained laces, a frayed grey wool skirt, and scuffed leather slippers.';
+const SIEKE_ANSWER = `${SIEKE_LOOK}, watery blue eyes.`;
+const sieke = (overallAppearance = `${SIEKE_LOOK}.`) => ({ ...createNpcRecord('Sieke'), role: 'guild clerk', species: 'human', overallAppearance, appearance: `${SIEKE_LOOK}; ${SIEKE_CLOTHES}` });
+
+test('the fill line quotes the exact overallAppearance and, apart, the clothes text, and asks only for the eyes', () => {
+    const line = fillLooksLine(sieke());
+    assert.deepEqual(partialLookGaps(sieke()), ['eyes']);
+    assert.ok(line.includes(`overallAppearance is exactly ${JSON.stringify(`${SIEKE_LOOK}.`)} and does not yet describe this person's eyes.`), line);
+    assert.ok(line.includes(`Return overallAppearance as that quoted text, unchanged, followed by a short addition for eyes only`));
+    assert.ok(line.includes(`The current-presentation text ${JSON.stringify(SIEKE_CLOTHES)} is appearance, never part of overallAppearance.`), line);
+    assert.ok(buildBackfillPrompt({ transcript: story, targetName: 'Sieke', existingNpc: sieke(), fillLooks: true }).includes(line));
+    console.log(`Sieke fill line: ${line.length} chars (quoted look ${SIEKE_LOOK.length + 1}, clothes ${SIEKE_CLOTHES.length})`);
+});
+
+test('the payload answer cut at ";" is accepted when the stored overallAppearance is the part before ";" (with or without its full stop)', () => {
+    for (const stored of [`${SIEKE_LOOK}.`, SIEKE_LOOK]) {
+        assert.equal(appendedLooks(stored, SIEKE_ANSWER), SIEKE_ANSWER, stored);
+        const saved = run(sieke(stored), { overallAppearance: SIEKE_ANSWER, overallAppearanceState: 'refine' }, story, FILL);
+        assert.equal(saved.overallAppearance, SIEKE_ANSWER, stored);
+        assert.match(saved.appearance, /ink-stained linen bodice/, 'the clothes stay');
+    }
+    assert.equal(appendedLooks(`${SIEKE_LOOK}.`, `${SIEKE_LOOK} watery blue eyes.`), null, 'a dropped full stop needs the addition\'s own comma');
+    assert.equal(appendedLooks(`${SIEKE_LOOK}.`, `${SIEKE_LOOK}, brown hair, blue eyes.`), null, 'still no second hair');
+});
+
+test('when the stored overallAppearance is the combined string, the line quotes all of it and a cut answer loses no clothes', () => {
+    const combined = `${SIEKE_LOOK}; ${SIEKE_CLOTHES}`;
+    const npc = sieke(combined);
+    assert.ok(fillLooksLine(npc).includes(`overallAppearance is exactly ${JSON.stringify(combined)}`));
+    assert.equal(appendedLooks(combined, SIEKE_ANSWER), null, 'cut at ";": not an extension of the stored text');
+    const cut = run(npc, { overallAppearance: SIEKE_ANSWER, overallAppearanceState: 'refine' }, story, FILL);
+    assert.match(cut.overallAppearance, /ink-stained linen bodice/, 'nothing written is dropped');
+    const whole = combined.replace(/\.$/, ', watery blue eyes.');
+    assert.equal(appendedLooks(combined, whole), whole, 'the quoted text plus the eyes is accepted');
+    assert.equal(run(npc, { overallAppearance: whole, overallAppearanceState: 'refine' }, story, FILL).overallAppearance, whole);
 });
