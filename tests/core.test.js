@@ -3812,6 +3812,8 @@ test('a descriptive phrase is not admitted as a person; names, role labels and u
     assert.equal(isDescriptivePhrase('the innkeeper'), false);
     assert.equal(isDescriptivePhrase('old man'), false);
     assert.equal(isDescriptivePhrase('woman with the scar'), true);
+    assert.equal(isDescriptivePhrase('Leader in the gambeson'), true, 'a sentence-cased start');
+    for (const name of ['Lady of the Lake', 'Sister Callow', 'Old Garvan of the Seven Stones']) assert.equal(isDescriptivePhrase(name), false, name);
     assert.equal(isDescriptivePhrase('ライラ の 友人 で'), false);
     // A dossier that already exists (made before this rule) keeps updating.
     const had = { npcs: [createNpcRecord('leader in the gambeson', [])], candidates: [], turn: 1 };
