@@ -507,13 +507,21 @@ test('notes grammar: each kind says plainly when to write it and carries one exa
         const stored = await s.say([example]);
         assert.ok(stored !== undefined, kind);
     }
-    const o = oren(s);
-    assert.ok(s.host.head().domains.npc.npcs.pell && JSON.parse(s.host.head().domains.npc.npcs.pell.lies).length === 1, 'the lie example wrote a lie leaf');
+    const o = Object.values(s.host.head().domains.npc.npcs).find(npc => npc.name === 'Person A');
+    assert.ok(o, 'the examples name a generic person');
+    assert.equal(JSON.parse(o.lies).length, 1, 'the lie example wrote a lie leaf');
     assert.equal(JSON.parse(o.knows).length, 1);
     assert.ok(o.tastes && o.ties, 'the taste and tie examples wrote their leaves');
     const { createNpcPart } = await import('../src/npc-meters.js');
     const milestone = createNpcPart({ settings: () => ({}), present: () => [], feature: () => true }).kinds.milestone.grammar;
-    assert.match(milestone, /when a bond changes for good; e\.g\. \+ milestone Mira — saved her brother at the bridge\)$/);
+    assert.match(milestone, /when a bond changes for good; e\.g\. \+ milestone Person A — a promise was kept\)$/);
+});
+
+test('notes grammar: the example lines use generic placeholder people and facts, never a name or fact of any world', () => {
+    const all = Object.values(noteKinds(() => {})).map(kind => exampleOf(kind.grammar)).join('\n');
+    for (const name of ['Pell', 'Temiwa', 'Astra', 'Oren', 'Mira', 'Ersveil', 'Rika', 'Tomas']) assert.ok(!all.includes(name), name);
+    assert.ok(!/\bill\b/.test(all));
+    assert.ok((all.match(/Person [AB]/g) ?? []).length >= 4);
 });
 
 test('notes grammar: the static text is the same bytes every time and the added text stays small', async () => {
@@ -521,7 +529,7 @@ test('notes grammar: the static text is the same bytes every time and the added 
     assert.equal(JSON.stringify(noteKinds(() => {})), once);
     const bare = 88 + 107 + 54 + 70; // the four lines as they were (lie, know, taste, tie)
     const added = Object.values(noteKinds(() => {})).reduce((sum, kind) => sum + kind.grammar.length, 0) - bare;
-    assert.ok(added > 0 && added < 480, `added ${added} chars`);
+    assert.ok(added > 0 && added < 500, `added ${added} chars`);
 });
 
 test('notes tail: the Changes cue is the last optional line while someone is present, and absent with the notes feature off or nobody here', async () => {
@@ -529,7 +537,7 @@ test('notes tail: the Changes cue is the last optional line while someone is pre
     await on.setDay(1);
     await on.say(['~ npc Oren | trust: +1']);
     const lines = optional(on);
-    assert.match(lines.at(-1), /^End the reply with the <Changes> block whenever anything changed, even if <Blocks> is empty/);
+    assert.match(lines.at(-1), /^Whenever anything changed, write the <Changes> block \(just before <Blocks>, which still ends the reply\), even if <Blocks> is empty/);
     assert.equal(lines.filter(line => /<Changes>/.test(line)).length, 1);
     const off = await suite({ allowance: null, features: { [FEATURE_NOTES]: false } });
     await off.setDay(1);

@@ -20,7 +20,7 @@ import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-sui
 // (3 ordinary, 1 meaningful, 1 major, 1 extreme). An event over its allowance counts as the next tier down; the count is on the
 // slice record (`impactDay`), so it replays. Story Director's clock is stood in for by a small module with `director.time`.
 
-const noCue = lines => lines.filter(line => !/^End the reply with the <Changes> block/.test(line)); // the flash-rare-lines cue: pinned in npc-notes-kinds.test.js
+const noCue = lines => lines.filter(line => !/^Whenever anything changed, write the <Changes> block/.test(line)); // the flash-rare-lines cue: pinned in npc-notes-kinds.test.js
 test('the allowance setting: a blank field is no limit (null), a missing one is the default, 0 is none, 0..99 whole numbers', () => {
     assert.deepEqual(normalizeAllowance(undefined), { ordinary: 3, meaningful: 1, major: 1, extreme: 1 });
     assert.deepEqual(normalizeAllowance({ ordinary: null, meaningful: '', major: 0, extreme: 250 }), { ordinary: null, meaningful: null, major: 0, extreme: 99 });

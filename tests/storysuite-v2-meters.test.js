@@ -175,7 +175,7 @@ const STAGES = [
 
 // ---- the definition ----
 
-const noCue = lines => lines.filter(line => !/^End the reply with the <Changes> block/.test(line)); // the flash-rare-lines cue: pinned in npc-notes-kinds.test.js
+const noCue = lines => lines.filter(line => !/^Whenever anything changed, write the <Changes> block/.test(line)); // the flash-rare-lines cue: pinned in npc-notes-kinds.test.js
 test('the real registry accepts the definition: npc domain, npc kind, commands, queries, the NPC card screen', async () => {
     const h = await host();
     assert.equal(h.registry.domainOwner('npc'), MODULE_ID);
