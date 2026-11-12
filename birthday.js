@@ -302,10 +302,10 @@ export function birthdayCaptureRule(config = undefined) {
 // one of the twins, the twins' mother, twin flame) and negated wordings link nobody: when in doubt, nothing happens. An ESTABLISHED
 // (story/player-set) date always wins and is never replaced; a GENERATED date takes the month/day of the established twin (lowest id
 // among established ones), or, when none is established, of the generated twin with the lowest id. Only month and day are copied: the
-// receiver keeps its own year, era and stored age (a year is never copied; if the move would change its calendar age, it is skipped).
+// receiver keeps its own year, era and stored age (a year is never copied; if the move would change its calendar age, it is skipped). Run by scan merges only, never by a live read or an editor command (the date a pass sees must not matter).
 // The result is written into the record, so it stays if the tie is later removed. Deterministic from the stored state: replay equals
 // live. No model call.
-const TWIN_REL = /^(?:(?:her|his|their|my|the|a)\s+)?(?:(?:older|younger|elder|identical|fraternal|big|little)\s+)*twin(?:\s+(?:sister|brother|sibling))?$/;
+const TWIN_REL = /^(?:(?:her|his|their|my)\s+)?(?:(?:older|younger|elder|identical|fraternal|big|little)\s+)*twin(?:\s+(?:sister|brother|sibling))?$/;
 const TWIN_NEGATION = /\b(?:not|never|no|non|isn'?t|wasn'?t|false|fake|half|ex|former|late|dead|deceased)\b/;
 const TWIN_END = '(?=\\s*(?:$|[,.;:)!\\u2014\\u2013-])|\\s+(?:and|who|whose|but)\\b)';
 
@@ -318,8 +318,11 @@ function twinLabels(npc) {
     return [npc?.name, ...(Array.isArray(npc?.aliases) ? npc.aliases : [])].map(normalizeName).filter(Boolean);
 }
 
-const ROLE_OF = new RegExp(`(?<!\\bof\\s)(?<!\\bof the\\s)\\b[Tt]win(?:\\s+(?:[Ss]ister|[Bb]rother|[Ss]ibling))?\\s+of\\s+(\\p{Lu}[\\p{L}\\p{M}'\\u2019-]*(?:\\s+\\p{Lu}[\\p{L}\\p{M}'\\u2019-]*){0,2})(?!['\\u2019]s\\b)`, 'u');
-const ROLE_POSSESSIVE = new RegExp(`(\\p{Lu}[\\p{L}\\p{M}-]*(?:\\s+\\p{Lu}[\\p{L}\\p{M}-]*){0,2})['\\u2019]s\\s+(?:(?:older|younger|elder|identical|fraternal)\\s+)?[Tt]win(?:\\s+(?:[Ss]ister|[Bb]rother|[Ss]ibling))?${TWIN_END}`, 'gu');
+// A role links only when the twin wording OPENS a clause (start of the role, or right after ; , | or a dash, optional "the"): any word in
+// front ("Wife of Ana's twin brother", "Married to Ana's twin") means the twin is someone else.
+const ROLE_OF = new RegExp(`^[Tt]win(?:\\s+(?:[Ss]ister|[Bb]rother|[Ss]ibling))?\\s+of\\s+(\\p{Lu}[\\p{L}\\p{M}'\\u2019-]*(?:\\s+\\p{Lu}[\\p{L}\\p{M}'\\u2019-]*){0,2})(?!['\\u2019]s\\b)`, 'u');
+const ROLE_POSSESSIVE = new RegExp(`^(\\p{Lu}[\\p{L}\\p{M}-]*(?:\\s+\\p{Lu}[\\p{L}\\p{M}-]*){0,2})['\\u2019]s\\s+(?:(?:older|younger|elder|identical|fraternal)\\s+)?[Tt]win(?:\\s+(?:[Ss]ister|[Bb]rother|[Ss]ibling))?${TWIN_END}`, 'u');
+const ROLE_CLAUSES = /[;,|\u2014\u2013]|\s-\s/;
 
 function twinPairs(npcs) {
     const byLabel = new Map();
@@ -337,9 +340,11 @@ function twinPairs(npcs) {
         if (npc?.castFrom) {
             const role = String(npc.role ?? '');
             if (TWIN_NEGATION.test(role.toLowerCase())) return;
-            const of = role.match(ROLE_OF);
-            if (of) link(index, of[1]);
-            for (const m of role.matchAll(ROLE_POSSESSIVE)) link(index, m[1]);
+            for (const part of role.split(ROLE_CLAUSES)) {
+                const clause = part.trim().replace(/^the\s+/i, '');
+                const m = clause.match(ROLE_OF) || clause.match(ROLE_POSSESSIVE);
+                if (m) link(index, m[1]);
+            }
         }
     });
     return pairs;

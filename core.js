@@ -156,7 +156,6 @@ export function refreshCalendarAges(npcs) {
             const age = normalizeNpcBirthday(npc).calendarAge;
             if (age !== npc.calendarAge && (age !== undefined || npc.calendarAge !== undefined)) npc.calendarAge = age;
         }
-        applyTwinBirthdays(npcs);
     });
     return npcs;
 }
@@ -171,7 +170,7 @@ export function setNpcArchived(npc, archived, options = {}) {
 
 export function applyNpcStateCommand(state, command, options = {}) {
     const result = continuity.applyNpcStateCommand(state, command, options);
-    result.state.npcs = withStoryDateMemo(() => applyTwinBirthdays((result.state.npcs || []).map(npc => normalizeNpcBirthday(npc))));
+    result.state.npcs = withStoryDateMemo(() => (result.state.npcs || []).map(npc => normalizeNpcBirthday(npc)));
     return result;
 }
 

@@ -16,6 +16,7 @@ import {
     setActiveCalendarConfig,
     setStoryClockSource,
 } from '../core.js';
+import { applyTwinBirthdays } from '../birthday.js';
 
 const CUSTOM_CALENDAR = Object.freeze({
     era: 'CR',
@@ -421,7 +422,7 @@ test('a live read re-derives calendarAge a scan left null (no hosted date then),
 
 // ---- twins share a birthday ----
 const twinNpc = (id, name, extra = {}) => normalizeNpcRecord({ id, name, ...extra });
-const twinState = npcs => refreshCalendarAges(npcs);
+const twinState = npcs => applyTwinBirthdays(npcs);
 
 test('twins by key relationship share one generated birthday, order-independent', () => {
     setActiveCalendarConfig(null);
@@ -549,4 +550,39 @@ test('twins copy month and day only: the receiver keeps its own year, and a stor
     assert.equal(list[1].birthDate.year, 790);
     assert.notEqual(list[0].birthDate.year, 790, 'the year is not copied');
     assert.equal(list[0].age, '19');
+});
+
+test('a role where "twin" describes someone else links nobody (the round-3 review phrases)', () => {
+    setActiveCalendarConfig(null);
+    for (const role of ["Wife of Ana's twin brother", "Married to Ana's twin", "Lover of Ana's twin", "Nurse to Ana's twin, devoted", 'Guardian to the twin of Ana', 'Raised the twin sister of Ana', "Ana's twin son", 'Mother of the twin sister of Ana']) {
+        const list = twinState([twinNpc('npc_z', 'Zed', { castFrom: { key: 'k' }, role }), twinNpc('npc_c', 'Ana')]);
+        assert.deepEqual(list[0].birthDate, deterministicBirthday('npc_z'), role);
+        assert.deepEqual(list[1].birthDate, deterministicBirthday('npc_c'), role);
+    }
+    const kael = twinState([twinNpc('npc_k', 'Kael', { keyRelationships: ['Mira — a twin'] }), twinNpc('npc_m', 'Mira')]);
+    assert.deepEqual(kael[0].birthDate, deterministicBirthday('npc_k'), '"a twin" links nobody');
+});
+
+test('a role that opens with the twin wording still links (start, or after a separator)', () => {
+    setActiveCalendarConfig(null);
+    for (const role of ['Twin sister of Ana', "Ana's twin brother", 'Blacksmith; Ana\'s twin brother', 'Smith, the twin of Ana', "Blacksmith | Ana's older twin"]) {
+        const list = twinState([twinNpc('npc_z', 'Zed', { castFrom: { key: 'k' }, role }), twinNpc('npc_c', 'Ana')]);
+        assert.deepEqual(list[0].birthDate, list[1].birthDate, role);
+    }
+});
+
+test('a live read never runs the twin pass: stored ages stay equal to the replay (merge, read at a later date, merge)', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR_WITH_CLOCK);
+    const twins = { turn: 1, npcs: [{ id: 'npc_a', name: 'Arin', age: '19', keyRelationships: ['Brin — twin brother'] }, { id: 'npc_b', name: 'Brin', age: '20', keyRelationships: ['Arin — twin brother'] }], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] } };
+    const clock = { sourceMessageId: 1, calendarSource: WORLD_STATE_821 };
+    const run = withRead => {
+        const one = mergeScanResult(twins, { npcs: [{ id: 'npc_a', name: 'Arin' }] }, clock);
+        if (withRead) refreshCalendarAges(one.state.npcs);
+        return mergeScanResult(one.state, { npcs: [{ id: 'npc_a', name: 'Arin' }] }, { ...clock, sourceMessageId: 2 }).state.npcs;
+    };
+    const read = run(true);
+    const plain = run(false);
+    assert.deepEqual(read.map(n => [n.id, n.age, n.birthDate]), plain.map(n => [n.id, n.age, n.birthDate]));
+    assert.equal(read.find(n => n.id === 'npc_a').age, '19');
+    assert.equal(read.find(n => n.id === 'npc_b').age, '20');
 });
