@@ -10,6 +10,9 @@ import { isBehaviorLever, normalizeBehaviorProfile } from './core-behavior.js';
 
 import { IMPORTANT_MEMORY_LIMIT, normalizeAppearanceCanon, normalizeNpcAdmissionMode, normalizeLifeStateCertainty, stripRecordCitations } from './core-record-shared.js';
 import { normalizeCustomFields } from './core-record-custom-fields.js';
+// (ONEPASSCAP-2) keyRelationships sent as one string instead of a list: each non-empty line is one "Name — role | dynamic" entry (the
+// prompt's entry form); a list is read as before.
+const tieList = value => (typeof value === 'string' ? value.split(/\r?\n/).map(line => line.trim()).filter(Boolean) : value);
 export function normalizeScanNpc(rawInput = {}, options = {}) {
     const raw = stripRecordCitations(rawInput);
     const memoryInputLimit = Math.max(1, Math.min(IMPORTANT_MEMORY_LIMIT, Math.round(Number(options.memoryInputLimit) || 3)));
@@ -80,7 +83,7 @@ export function normalizeScanNpc(rawInput = {}, options = {}) {
         })(),
         speechReason: cleanText(raw.speechReason ?? raw.speech_reason, 500),
         background: compactDurableText(raw.background, DURABLE_PROFILE_LIMITS.background, 8),
-        keyRelationships: mergeKeyRelationshipUpdates([], raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family),
+        keyRelationships: mergeKeyRelationshipUpdates([], tieList(raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family)),
         keyRelationshipsProvided: Object.prototype.hasOwnProperty.call(raw, 'keyRelationships') || Object.prototype.hasOwnProperty.call(raw, 'key_relationships') || Object.prototype.hasOwnProperty.call(raw, 'innerCircle') || Object.prototype.hasOwnProperty.call(raw, 'inner_circle') || Object.prototype.hasOwnProperty.call(raw, 'family'),
         keyRelationshipsState: (() => {
             const state = String(raw.keyRelationshipsState ?? raw.key_relationships_state ?? raw.innerCircleState ?? raw.inner_circle_state ?? (normalizeBoolean(raw.evolveKeyRelationships ?? raw.evolve_key_relationships) ? 'evolve' : '')).trim().toLowerCase();

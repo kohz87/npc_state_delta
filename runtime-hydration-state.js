@@ -215,17 +215,34 @@ export function installHydrationState(api, rt, deps) {
         announceNativeChange(key);
     }
 
+    // (ONEPASSCAP-1) A participant write holds back announcements for its chat while it waits for its save. Its own change is made in its first,
+    // synchronous step (`ownStep`); a change Delta saves later in that window (a one-pass scan or a backfill committing) is owed and announced once
+    // the chat's last participant write ends. Unannounced, it was never published and the host's next activate installed the older checkpoint.
+    const owedAnnouncements = new Set();
+    let ownStep = false;
     function announceNativeChange(key) {
-        if ((participantWrites.get(key) || 0) > 0 || key !== getChatKey()) return;
+        if (key !== getChatKey()) return;
+        if ((participantWrites.get(key) || 0) > 0) {
+            if (!ownStep) owedAnnouncements.add(key);
+            return;
+        }
         for (const listener of nativeChangeListeners) {
             try { listener({ key }); } catch (error) { console.debug('[NPC State Delta] a native-change listener failed', error); }
         }
     }
     async function quietly(key, task) {
         participantWrites.set(key, (participantWrites.get(key) || 0) + 1);
-        try { return await task(); } finally {
+        const was = ownStep;
+        let running;
+        ownStep = true;
+        try { running = task(); } finally { ownStep = was; }
+        try { return await running; } finally {
             const left = (participantWrites.get(key) || 1) - 1;
-            if (left > 0) participantWrites.set(key, left); else participantWrites.delete(key);
+            if (left > 0) participantWrites.set(key, left);
+            else {
+                participantWrites.delete(key);
+                if (owedAnnouncements.delete(key)) announceNativeChange(key);
+            }
         }
     }
 

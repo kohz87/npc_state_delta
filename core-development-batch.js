@@ -6,6 +6,7 @@ import { cleanText, normalizeName } from './core-text.js';
 import { mergeLists, normalizeScanNpc, npcMatchesLabel } from './core-record.js';
 import { findInterimIdentityPromotionIndex, inferNpcIdentityKind } from './core-identity.js';
 import { applyDurableProfileUpdate } from './core-development-update.js';
+import { resolveNpcId } from './social.js';
 
 export function applyDurableProfileUpdates(state, scanResult, excludeNames, report, options = {}) {
     const rawUpdates = Array.isArray(scanResult?.profileUpdates) ? scanResult.profileUpdates
@@ -16,7 +17,10 @@ export function applyDurableProfileUpdates(state, scanResult, excludeNames, repo
         if (!raw || typeof raw !== 'object') continue;
         const id = cleanText(raw.id, 100);
         const name = cleanText(raw.name, 120);
-        let index = id ? state.npcs.findIndex(npc => String(npc.id || '') === id) : -1;
+        // (ONEPASSCAP-3) The exact id, else the one dossier whose id matches with '-', '_' and case folded (a block keys a person it admits
+        // in the same reply by the id the model guessed: "npc_sister_temiwa" for npc_sister-temiwa), then the name as before.
+        const byId = id ? resolveNpcId(state.npcs, id) : null;
+        let index = byId ? state.npcs.indexOf(byId) : -1;
         if (index < 0 && name) index = state.npcs.findIndex(npc => npcMatchesLabel(npc, name));
         if (index < 0) continue;
         const npc = state.npcs[index];

@@ -6,7 +6,7 @@ import {
 } from './social-primitives.js';
 import { socialRelationFamily, inverseSocialRelation } from './social-relations.js';
 import { parseKeyRelationshipEntry, compactSocialKeyRelationship } from './social-bonds.js';
-import { resolveNpcReference, normalizeSocialGraph, addEdge } from './social-graph.js';
+import { resolveNpcId, resolveNpcReference, normalizeSocialGraph, addEdge } from './social-graph.js';
 import {
     canonicalizeNpcKeyRelationships, alignGraphWithCanonicalRelationships,
     parseScanEdges, edgeFromKeyRelationship,
@@ -60,7 +60,7 @@ export {
     SOCIAL_GRAPH_SUPPRESSED_LIMIT, SOCIAL_KEY_RELATIONSHIP_MAX_CHARS, SOCIAL_DYNAMIC_MAX_CHARS,
     socialRelationFamily, inverseSocialRelation,
     parseKeyRelationshipEntry, compactSocialKeyRelationship,
-    resolveNpcReference, normalizeSocialGraph,
+    resolveNpcId, resolveNpcReference, normalizeSocialGraph,
     canonicalizeNpcKeyRelationships, extractUnresolvedSocialFacts,
     remapSocialGraphNpcIds, remapSocialGraphNpcId,
     purgeNpcStructuredReferences, removeNpcFromSocialGraph, socialGraphLabelsForNpc,
