@@ -8,6 +8,7 @@ import { identityConflict, partialNamePair, placesOverlap } from './core-merge-n
 
 import { keyRelationshipSubject, mergeKeyRelationshipUpdates, tiesTracked } from './core-keyrel.js';
 import { isSafeUnmarkedDurableReplacement } from './core-durable.js';
+import { groundedTraitEvent } from './core-durable-grounding.js';
 
 import { IMPORTANT_MEMORY_LIMIT } from './core-record-shared.js';
 import { mergeCustomFieldValues } from './core-record-custom-fields.js';
@@ -160,13 +161,11 @@ export function durableTextAccepted(field, existing, incoming, value, options = 
         return !(prior && prior !== value && (incoming.genderState !== 'correct' || !String(incoming.genderReason || '').trim()));
     }
     if (field === 'role') {
-        // (card traits win) An established role (a pack cast role too) is keep-by-default like the home base: it changes only with
-        // roleState:"update" + roleReason + grounding in the story (a promotion, a new job, a revealed identity). A first role fills.
+        // (card traits win) The source event itself supplies the reason for a bare role; an
+        // explicit reason, when supplied, must describe that same target-specific event.
         const prior = String(existing.role || '').trim();
         if (!prior || normalizeName(prior) === normalizeName(value)) return true;
-        if (incoming.roleState !== 'update' || !String(incoming.roleReason || '').trim()) return false;
-        const context = String(options.developmentContext || '').trim();
-        return !context || durableSeedGrounded(value, context);
+        return groundedTraitEvent(existing, value, incoming.roleReason, options.developmentContext, 'role');
     }
     if (field === 'homeBase') {
         const prior = String(existing.homeBase || '').trim();

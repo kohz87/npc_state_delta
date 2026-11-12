@@ -10,7 +10,8 @@ import { TEXT_FIELDS } from './src/fields/registry.js';
 import { durableRefinementCandidateGrounded, filterSafeMannerismRefinements, groundedAppearanceChange, groundedAppearanceCorrection, isExplicitRecurringMannerism, isSafeIdentityTextRefinement, isSafeSpeechRefinement, isSafeUnmarkedDurableFieldReplacement, isSafeUnmarkedDurableRefinement, mergeDurableTextRefinement, normalizeMannerisms, presentationContinuationEvidence, speechSeedVetoed, speechSupportContext } from './core-durable.js';
 import { groundedBehaviorProfile, mergeBehaviorProfileRefinements, reconcileBehaviorProfileWithPersonality } from './core-behavior.js';
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
-import { cardLook, withoutTraitSwaps } from './appearance-physical.js';
+import { guessedTraits, physicalTraitSwaps, withoutTraitSwaps } from './appearance-physical.js';
+import { groundedTraitEvent } from './core-durable-grounding.js';
 
 export function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELATIONSHIP_CAPS, sourceMessageId = null, lifecycleOptions = {}) {
     const merged = { ...existing };
@@ -100,10 +101,12 @@ export function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAU
             // A clearly additive unmarked description is accepted as a recovery path so a manual
             // baseline does not behave like a hidden lock when the scanner forgets the marker.
             const mode = String(incoming.appearanceState || 'keep');
-            // (card traits win) Short of a grounded `change`, the held value of a trait the card names stays; nothing when it cannot.
-            if (mode !== 'change') value = withoutTraitSwaps(existing.appearance, value, cardLook(existing)).text;
+            // (card traits win) Every established trait stays short of a target-specific event.
+            const swaps = physicalTraitSwaps(existing.appearance, value, guessedTraits(existing));
+            if (mode !== 'change') value = withoutTraitSwaps(existing.appearance, value, guessedTraits(existing)).text;
             if (!value) continue;
             if (mode === 'change') {
+                if (swaps.length && !groundedTraitEvent(existing, swaps.map(swap => swap.said).join(' '), incoming.appearanceReason, lifecycleOptions.developmentContext)) continue;
                 const directPresentationChange = groundedAppearanceChange(
                     existing.appearance,
                     value,

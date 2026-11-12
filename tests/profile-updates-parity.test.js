@@ -7,7 +7,7 @@ import { mergeScanResult, normalizeNpcRecord } from '../core.js';
 // gender, ages, custom fields and Key Relationships. Each case runs once per channel and compares.
 
 const context = [
-    'Myla Venn, now a former royal archivist, says she lives in rooms above the bakery on Mill Street.',
+    'The guild made Myla Venn a former royal archivist. Myla Venn, now a former royal archivist, says she lives in rooms above the bakery on Mill Street.',
     'She served ten years as a royal archivist. She passed the guild trial: Level 4.',
     'Tobin Ash, her courier, brings her letters. She is thirty-five now; her birthday was yesterday.',
 ].join(' ');
@@ -31,10 +31,11 @@ function run(channel, fields, extra = {}) {
 const cases = [
     // [label, field read back, fields sent, expected (null = unchanged), dossier extra]
     // (card traits win) An established role is keep-by-default like the home base; a first role still fills.
-    ['role rewrite without roleState is kept', 'role', { role: 'Former royal archivist' }, null],
-    ['role update with state, reason and grounding', 'role', { role: 'Former royal archivist', roleState: 'update', roleReason: 'She is now a former royal archivist.' }, 'Former royal archivist'],
-    ['role update without a reason is kept', 'role', { role: 'Former royal archivist', roleState: 'update' }, null],
-    ['role update not in the story is kept', 'role', { role: 'Queen of the river quarter', roleState: 'update', roleReason: 'Crowned.' }, null],
+    ['a bare role the story names as an event is taken (no unrequested key needed)', 'role', { role: 'Former royal archivist' }, 'Former royal archivist'],
+    ['a role the story does not name is kept', 'role', { role: 'Court cartographer' }, null],
+    ['a role with an explicit matching reason is taken', 'role', { role: 'Former royal archivist', roleState: 'update', roleReason: 'The guild made her a former royal archivist.' }, 'Former royal archivist'],
+    ['a role whose reason is not the story\'s event is kept', 'role', { role: 'Former royal archivist', roleState: 'update', roleReason: 'Needed a fresh title.' }, null],
+    ['a role only another person holds is kept', 'role', { role: 'Courier' }, null],
     ['a first role fills', 'role', { role: 'Former royal archivist' }, 'Former royal archivist', { role: '' }],
     ['species replaced', 'species', { species: 'Half-elf' }, 'Half-elf'],
     ['background replaced', 'background', { background: 'Raised in the river quarter; served ten years as a royal archivist.' }, 'Raised in the river quarter; served ten years as a royal archivist.'],

@@ -26,7 +26,7 @@
 //   prompt        'never' when the field must never reach a model-facing text; 'tail' when it reaches one only through
 //                 the v2 module's tail (the hidden notes: opened ones as known, locked ones as hidden)
 
-const APPEARANCE_PARTS = Object.freeze(['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion', 'lookLockedAt']);
+const APPEARANCE_PARTS = Object.freeze(['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion', 'lookGuess', 'lookLockedAt']);
 
 export const FIELDS = Object.freeze({
     id: { kind: 'identity', snapshot: [0, 'raw'], v2: 0 },

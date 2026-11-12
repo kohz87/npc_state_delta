@@ -11,13 +11,15 @@ import { durableTextAccepted, incomingCustomFields, incomingKeyRelationships, me
 import { PROFILE_EVIDENCE_FIELDS } from './src/fields/registry.js';
 import { durableProfileCollectionCandidateGrounded, durableProfileCollectionEquivalent, groundedBehaviorProfile, mergeBehaviorProfileRefinements, normalizeBehaviorProfile, reconcileBehaviorProfileWithPersonality, recoverBehaviorProfileKeepAdditions } from './core-behavior.js';
 import { developmentScaleReady } from './core-development-episode.js';
-import { cardLook, withoutTraitSwaps } from './appearance-physical.js';
+import { guessedTraits, physicalTraitSwaps, withSettledGuess, withoutTraitSwaps } from './appearance-physical.js';
+import { groundedTraitEvent } from './core-durable-grounding.js';
 
 function normalizeProfileUpdateEvidence(raw = {}) {
     return normalizeProfileEvidence(raw.evidence ?? raw.profileEvidence ?? raw.profile_evidence ?? raw.observations ?? {});
 }
 
 export function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
+    const lookBefore = { overallAppearance: npc.overallAppearance, appearance: npc.appearance };
     const incoming = normalizeScanNpc(raw);
     const manualFields = new Set(Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : []);
     const beforeEvidence = normalizeProfileEvidence(npc.profileEvidence);
@@ -96,6 +98,8 @@ export function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         };
         if (state === evolveState) {
             if (!String(incoming[reasonField] || '').trim()) return;
+            const swaps = field === 'appearance' ? physicalTraitSwaps(current, value, guessedTraits(npc)) : [];
+            if (swaps.length && !groundedTraitEvent(npc, swaps.map(swap => swap.said).join(' '), incoming[reasonField], options.developmentContext)) return;
             const directAppearanceChange = field === 'appearance' && groundedAppearanceChange(
                 current,
                 value,
@@ -113,8 +117,8 @@ export function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             evidence[field] = [];
             return;
         }
-        // (card traits win) Short of the grounded change above, an Appearance refine keeps the held value of a trait the card names.
-        if (field === 'appearance') value = withoutTraitSwaps(current, value, cardLook(npc)).text;
+        // (card traits win) Short of the grounded change above, every established trait stays.
+        if (field === 'appearance') value = withoutTraitSwaps(current, value, guessedTraits(npc)).text;
         if (!value) return;
         const safeRefinement = field === 'personality'
             ? isSafeIdentityTextRefinement(current, value, options.developmentContext, fieldEvidence, binding)
@@ -257,6 +261,7 @@ export function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         if (JSON.stringify(npc.memories) !== before) changed = true;
     }
 
+    if (guessedTraits(npc).size) npc.lookGuess = withSettledGuess(lookBefore, npc).lookGuess;
     const evidenceChanged = JSON.stringify(beforeEvidence) !== JSON.stringify(evidence);
     npc.profileEvidence = evidence;
     if (changed || evidenceChanged) npc.updatedAt = Date.now();

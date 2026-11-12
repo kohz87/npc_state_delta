@@ -8,6 +8,7 @@ import { storyDayAt } from './src/transcript.js';
 import { stampNpcChanges } from './src/relationship-pass.js';
 import { normalizeName, normalizeRelationshipBaseline, npcMatchesLabel } from './core.js';
 import { rejectedOverallLook } from './appearance-update.js';
+import { physicalTraitSwaps } from './appearance-physical.js';
 import { moodNumbers } from './npc-mood.js';
 import { chatLineage, firstLineageDivergence, lineageCheckpointKey, clearUserDismissedGroupsFor } from './branch.js';
 import { getSettings } from './runtime-settings.js';
@@ -188,24 +189,39 @@ function onePassEvidence(rows, npc) {
     return Object.keys(why).length ? why : null;
 }
 
-// A durable look the scan refused (the story did not explain a change): one entry per person, for a Problem and a next-reply cue;
-// `swaps` when the rest of the look was taken but a swapped trait was kept (card traits win). (card traits win) A role rewrite the
-// scan refused (no roleState "update" + reason + grounding), from the profile updates or the npcs rows: one { id, name, text }
-// per person, a Problem only (no cue, so nothing the story is told changes).
+// (card traits win) Report refused looks and roles from both row channels, using the same id/name
+// matching as the merge. A look is reported once per NPC even when the row repeats it in two slots.
 export function refusedLooks(prior, after, updates = [], rows = []) {
     const refused = [];
     const afterBy = new Map((after || []).map(npc => [npc?.id, npc]));
-    for (const row of Array.isArray(updates) ? updates : []) {
-        const was = prior.get(row?.id);
-        const now = afterBy.get(row?.id);
+    const matching = row => prior.get(row?.id) || [...prior.values()].find(npc =>
+        (row?.name && npcMatchesLabel(npc, row.name)) || (Array.isArray(row?.aliases) && row.aliases.some(alias => npcMatchesLabel(npc, alias))));
+    const allRows = [...(Array.isArray(updates) ? updates : []), ...(Array.isArray(rows) ? rows : [])];
+    for (const row of allRows) {
+        const was = matching(row);
+        const now = afterBy.get(was?.id);
         if (!was || !now || now.archived) continue;
-        const rejected = rejectedOverallLook(was.overallAppearance, now.overallAppearance, row);
-        if (rejected && !refused.some(item => item.id === now.id)) refused.push({ id: now.id, name: now.name, before: was.overallAppearance, incoming: rejected.incoming, ...(rejected.swaps ? { swaps: rejected.swaps } : {}) });
+        const candidates = [[was.overallAppearance, now.overallAppearance, row?.overallAppearance ?? row?.overall_appearance, true],
+            [was.appearance, now.appearance, row?.appearance, false]];
+        const forms = row?.appearanceForms ?? row?.appearance_forms;
+        for (const form of Array.isArray(forms) ? forms : []) {
+            const key = normalizeName(form?.name);
+            const beforeForm = (was.appearanceForms || []).find(item => normalizeName(item.name) === key);
+            const afterForm = (now.appearanceForms || []).find(item => normalizeName(item.name) === key);
+            if (beforeForm && afterForm) candidates.push([beforeForm.appearance, afterForm.appearance, form.appearance, false]);
+        }
+        for (const [before, current, incoming, overall] of candidates) {
+            if (!before || !incoming) continue;
+            const stillRefused = physicalTraitSwaps(current, incoming).filter(swap => physicalTraitSwaps(before, incoming).some(old => old.trait === swap.trait));
+            const rejected = overall ? rejectedOverallLook(before, current, { overallAppearance: incoming }) : null;
+            if (!stillRefused.length && !rejected) continue;
+            if (!refused.some(item => item.id === now.id)) refused.push({ id: now.id, name: now.name, before, incoming, ...(stillRefused.length ? { swaps: stillRefused } : {}) });
+        }
     }
     const roles = new Set();
-    for (const row of [...(Array.isArray(updates) ? updates : []), ...(Array.isArray(rows) ? rows : [])]) {
-        const was = prior.get(row?.id);
-        const now = afterBy.get(row?.id);
+    for (const row of allRows) {
+        const was = matching(row);
+        const now = afterBy.get(was?.id);
         const held = String(was?.role ?? '').trim();
         const said = typeof row?.role === 'string' ? row.role.replace(/\s+/g, ' ').trim() : '';
         if (!now || now.archived || roles.has(now.id) || (Array.isArray(was?.manualProfileFields) && was.manualProfileFields.includes('role')) || !held || !said || normalizeName(said) === normalizeName(held) || normalizeName(now.role) !== normalizeName(held)) continue;

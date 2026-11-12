@@ -745,7 +745,7 @@ test('hosted forward: an open dossier panel draws again when each delayed npc.ad
         const root = fileURLToPath(new URL('..', import.meta.url));
         fs.cpSync(root, temp, { recursive: true, filter: from => !/[\\/](tests|docs|scripts|\.git|node_modules|dist)([\\/]|$)/.test(path.relative(root, from)) });
         fs.writeFileSync(path.join(temp, 'runtime-scan-helpers.js'), [
-            "import { normalizeName, normalizeRelationshipBaseline, npcMatchesLabel } from './core.js'; import { rejectedOverallLook } from './appearance-update.js'; import { moodNumbers } from './npc-mood.js';",
+            "import { normalizeName, normalizeRelationshipBaseline, npcMatchesLabel } from './core.js'; import { rejectedOverallLook } from './appearance-update.js'; import { physicalTraitSwaps } from './appearance-physical.js'; import { moodNumbers } from './npc-mood.js';",
             'export const chatContext = () => ({ chat: [] }); export const markStands = () => true; export const replayScope = () => null; export const scopedAdapter = a => a;',
             fs.readFileSync(path.join(root, 'runtime-scan-helpers.js'), 'utf8').split('// What a committed scan tells the slice')[1],   // the real pure readers moved out of runtime-hosted.js
         ].map((part, index) => (index === 2 ? '//' + part : part)).join('\n'));
@@ -998,7 +998,7 @@ async function hostedForwardParts() {
     try {
         fs.cpSync(root, temp, { recursive: true, filter: from => !/[\\/](tests|docs|scripts|\.git|node_modules|dist)([\\/]|$)/.test(path.relative(root, from)) });
         fs.writeFileSync(path.join(temp, 'runtime-scan-helpers.js'), [
-            "import { normalizeName, normalizeRelationshipBaseline, npcMatchesLabel } from './core.js'; import { rejectedOverallLook } from './appearance-update.js'; import { moodNumbers } from './npc-mood.js';",
+            "import { normalizeName, normalizeRelationshipBaseline, npcMatchesLabel } from './core.js'; import { rejectedOverallLook } from './appearance-update.js'; import { physicalTraitSwaps } from './appearance-physical.js'; import { moodNumbers } from './npc-mood.js';",
             'export const chatContext = () => ({ chat: [] }); export const markStands = () => true; export const replayScope = () => null; export const scopedAdapter = a => a;',
             fs.readFileSync(path.join(root, 'runtime-scan-helpers.js'), 'utf8').split('// What a committed scan tells the slice')[1],
         ].map((part, index) => (index === 2 ? '//' + part : part)).join('\n'));
@@ -1124,4 +1124,22 @@ test('refusedLooks: a kept card trait and a refused role rewrite are reported on
     assert.deepEqual(forwardParts.refusedLooks(new Map([[was.id, was]]), [{ ...now, role: 'Lay Sealer' }], [], [{ id: was.id, role: 'Lay Sealer' }]), [], 'an accepted role');
     assert.deepEqual(forwardParts.refusedLooks(new Map([[was.id, { ...was, role: '' }]]), [{ ...was, role: '' }], [], [{ id: was.id, role: 'Lay Sealer' }]), [], 'no role held');
     assert.deepEqual(forwardParts.refusedLooks(new Map([[was.id, { ...was, manualProfileFields: ['role'] }]]), [was], [], [{ id: was.id, role: 'Lay Sealer' }]), [], 'a locked role is the reader\'s');
+});
+
+// (card traits win, round 2) A refusal is reported from either row channel, from the flat appearance, a named form and the overall look,
+// and a row without an id is matched by name or alias the way the merge matches it.
+test('refusedLooks: flat and named-form swaps, a name-only row and an ordinary npcs row are reported once', async () => {
+    forwardParts ??= await hostedForwardParts();
+    const was = { id: 'npc_sister-temiwa', name: 'Sister Temiwa', aliases: ['Temiwa'], role: 'Church novice', overallAppearance: '', appearance: 'Brown eyes, a grey habit',
+        appearanceForms: [{ name: 'Rite', appearance: 'Black hair, a white stole' }] };
+    const prior = new Map([[was.id, was]]);
+    const flat = forwardParts.refusedLooks(prior, [was], [], [{ name: 'Temiwa', appearance: 'Pale eyes, a grey habit' }]);
+    assert.deepEqual(flat.map(item => [item.id, item.swaps]), [[was.id, [{ trait: 'eyes', said: 'pale', kept: 'brown' }]]], 'name-only ordinary npcs row, flat appearance');
+    const formed = forwardParts.refusedLooks(prior, [was], [{ name: 'Sister Temiwa', appearanceForms: [{ name: 'Rite', appearance: 'Red hair, a white stole' }] }], []);
+    assert.deepEqual(formed.map(item => [item.id, item.swaps?.[0]?.trait]), [[was.id, 'hair']], 'profile row by name, named form');
+    const twice = forwardParts.refusedLooks(prior, [was], [{ id: was.id, appearance: 'Pale eyes, a grey habit' }], [{ id: was.id, appearance: 'Pale eyes, a grey habit' }]);
+    assert.equal(twice.length, 1, 'the same person in both channels is reported once');
+    assert.deepEqual(forwardParts.refusedLooks(prior, [{ ...was, appearance: 'Pale eyes, a grey habit' }], [], [{ id: was.id, appearance: 'Pale eyes, a grey habit' }]), [], 'an accepted look is not reported');
+    const role = forwardParts.refusedLooks(prior, [was], [], [{ name: 'Temiwa', role: 'Prioress' }]);
+    assert.equal(role.length, 1, 'a role rewrite sent by name only is reported');
 });

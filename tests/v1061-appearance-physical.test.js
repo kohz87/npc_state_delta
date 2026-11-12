@@ -12,7 +12,7 @@ function outfitScan(npc, appearance, narration) {
         npcs: [{ id: npc.id, name: npc.name, present: true }],
         profileUpdates: [{ id: npc.id, name: npc.name, appearanceState: 'change', appearance, appearanceReason: narration, evidence: { appearance: [narration] } }],
     };
-    return mergeScanResult({ npcs: [npc], turn: 5 }, scan, { transcript: `[m4] Assistant: ${narration}`, sourceMessageId: 4 })
+    return mergeScanResult({ npcs: [npc], turn: 5 }, scan, { transcript: `[m4] Assistant: ${narration}`, sourceMessageId: 4, developmentContext: narration })
         .state.npcs.find(item => item.id === npc.id);
 }
 function npcWith(appearance, name = 'Myla') {

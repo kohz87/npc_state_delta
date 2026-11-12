@@ -222,19 +222,16 @@ export function withoutSharedPieces(value, shared) {
     return changed ? appearanceText(clauses.join('; ')) : text;
 }
 
-// (card traits win) A refine may add detail to a cast dossier's look, never swap a physical value the pack card names: the card's
-// "Brown eyes" stays brown when the narrator writes "her pale eyes". Each trait has a few value axes; a word may stand on more than
-// one pole (teal is blue and green). Two texts swap a trait when both name poles on one axis and share none of them. Tone words
-// (pale, dark) count only against a hue they cannot be (pale brown, dark blonde) or the opposite tone. Only a grounded `change`
-// (an injury, magic, dye, a disguise) may swap such a trait; a value for a trait the record does not name is a fill. Looks that
-// are not the card's (story-given, or a fill guess) keep the refine rule: a later story line replaces a guess (owner, 9-10 Nov).
+// (card traits win) Every established physical value is protected, regardless of where it came from.
+// A missing value may be filled; a contradictory value needs a grounded change event.
 const HUES = Object.freeze({
     black: ['black', 'raven', 'ebony', 'jet', 'inky', 'sable', 'coal', 'onyx'],
     brown: ['brown', 'chestnut', 'umber', 'mahogany', 'chocolate', 'coffee', 'walnut', 'russet', 'tawny', 'brunette', 'bronze'],
     hazel: ['hazel'],
     gold: ['gold', 'golden', 'amber', 'honey', 'blonde', 'blond', 'flaxen', 'yellow', 'straw', 'sandy'],
     red: ['red', 'crimson', 'scarlet', 'ruby', 'auburn', 'copper', 'ginger', 'rust', 'vermilion', 'strawberry'],
-    white: ['white', 'snowy', 'ivory', 'cream', 'platinum', 'silver', 'silvery', 'grey', 'gray', 'greying', 'graying', 'ashen', 'ash', 'steel', 'slate', 'pewter', 'iron', 'porcelain'],
+    white: ['white', 'snowy', 'ivory', 'cream', 'platinum', 'porcelain'],
+    grey: ['silver', 'silvery', 'grey', 'gray', 'greying', 'graying', 'ashen', 'ash', 'steel', 'slate', 'pewter', 'iron'],
     blue: ['blue', 'azure', 'sapphire', 'cerulean', 'cobalt', 'navy', 'icy', 'teal', 'turquoise', 'aquamarine', 'cyan'],
     green: ['green', 'emerald', 'jade', 'olive', 'moss', 'teal', 'turquoise', 'verdant'],
     violet: ['violet', 'purple', 'lilac', 'lavender', 'amethyst', 'indigo', 'plum', 'mauve'],
@@ -253,10 +250,14 @@ const AXES = Object.freeze({
         heavy: ['stocky', 'curvy', 'burly', 'brawny', 'muscular', 'plump', 'heavyset', 'stout', 'full', 'broad', 'voluptuous', 'buxom', 'hulking', 'portly', 'rotund'],
     },
     height: { tall: ['tall', 'towering', 'statuesque'], short: ['short', 'diminutive', 'tiny', 'small', 'petite'] },
+    shape: { narrow: ['narrow', 'thin', 'slender'], broad: ['broad', 'wide'], pointed: ['pointed', 'sharp'], rounded: ['rounded', 'round', 'blunt'], straight: ['straight'], crooked: ['crooked', 'bent'] },
+    position: { left: ['left'], right: ['right'], upper: ['upper'], lower: ['lower'] },
 });
 const TRAIT_AXES = Object.freeze({
-    hair: ['color', 'length', 'texture'], eyes: ['color'], skin: ['color'], fur: ['color'], scales: ['color'], ears: ['color'],
-    tail: ['color'], horns: ['color'], wings: ['color'], build: ['build'], height: ['height'],
+    hair: ['color', 'length', 'texture'], eyes: ['color', 'shape'], skin: ['color'], fur: ['color'], scales: ['color'], ears: ['color', 'shape', 'length'],
+    tail: ['color', 'shape', 'length'], horns: ['color', 'shape', 'length'], wings: ['color', 'shape'], build: ['build'], height: ['height'],
+    face: ['color', 'shape'], scar: ['position', 'shape', 'length'], tattoo: ['position', 'shape'], birthmark: ['position', 'shape'],
+    fangs: ['shape', 'length'], claws: ['shape', 'length'], antlers: ['shape'], tusks: ['shape', 'length'],
 });
 const traitWords = text => String(text || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
 const polesOf = (words, poles) => new Set(Object.entries(poles).filter(([, list]) => list.some(word => words.includes(word))).map(([pole]) => pole));
@@ -268,7 +269,10 @@ function toneClash(tones, hues) {
 }
 function colorSwapped(current, incoming) {
     const [nowHues, newHues] = [polesOf(current, HUES), polesOf(incoming, HUES)];
-    if (nowHues.size && newHues.size) return disjoint(nowHues, newHues);
+    if (nowHues.size && newHues.size) return disjoint(nowHues, newHues)
+        || (current.filter(word => Object.values(HUES).some(list => list.includes(word))).length > 1
+            && incoming.filter(word => Object.values(HUES).some(list => list.includes(word))).length > 1
+            && [...nowHues].some(hue => !newHues.has(hue)) && [...newHues].some(hue => !nowHues.has(hue)));
     const [nowTones, newTones] = [current, incoming].map(words => new Set(words.filter(word => LIGHT_TONES.has(word) || DARK_TONES.has(word))));
     if (nowHues.size) return toneClash(newTones, nowHues);
     if (newHues.size) return toneClash(nowTones, newHues);
@@ -276,12 +280,21 @@ function colorSwapped(current, incoming) {
     const dark = tones => tones.size > 0 && [...tones].every(tone => DARK_TONES.has(tone));
     return (light(nowTones) && dark(newTones)) || (dark(nowTones) && light(newTones));
 }
+// A piece that speaks of a wrap, sash or other garment on a body part ("tail in a grey linen wrap") is clothing, not the part's colour.
+const OUTFIT_WORDS = /\b(?:wrap|wrapped|wrapping|linen|sash|veil|bandages?|bandaged|binding|bound|ribbons?|silk|cloth|leather|lace|gauze|fabric|collar|band)\b/i;
+// "Brown eyes with a pale ring" is one claim, but "Long black hair with violet eyes" holds two: split at "with" only when both halves name a trait.
+function withParts(text) {
+    const parts = text.split(/\s+with\s+/i).map(part => clean(part, 400)).filter(Boolean);
+    return parts.length > 1 && parts.every(part => physicalTraitKeys(part).length) ? parts : [text];
+}
 // The trait pieces of a look: { text, keys } for every piece that describes an enduring trait (not clothing, not a hidden mention).
 function traitPieces(value) {
     return presentationSegments(value)
         .filter(segment => !CONCEALED_MENTION.test(segment))
         .flatMap(physicalPieces)
         .flatMap(traitParts)
+        .flatMap(withParts)
+        .filter(text => !OUTFIT_WORDS.test(text))
         .map(text => ({ text, keys: addressedTraitKeys(text).filter(key => TRAIT_AXES[key]) }))
         .filter(piece => piece.keys.length);
 }
@@ -298,15 +311,21 @@ function axisWords(axis, words) {
  * The physical traits `incoming` swaps against `current` (card traits win): [{ trait, said, kept }] in trait order, where `said`
  * is what the incoming text calls it and `kept` what the record holds ("eyes", "pale", "brown"); [] when nothing is swapped.
  */
-export function physicalTraitSwaps(current, incoming) {
+export function physicalTraitSwaps(current, incoming, replaceable = null) {
     const before = traitPieces(current);
     const after = traitPieces(incoming);
     if (!before.length || !after.length) return [];
     const swaps = [];
     for (const [trait, axes] of Object.entries(TRAIT_AXES)) {
+        if (replaceable?.has(trait)) continue;   // a fill guess (record.lookGuess) is replaceable by a later story line
         const now = valueWords(before, trait);
         const next = valueWords(after, trait);
         if (!now.length || !next.length) continue;
+        // A jaw is not a nose: compare facial shapes only when the same feature is named.
+        if (trait === 'face') {
+            const features = ['face', 'facial', 'jaw', 'jawline', 'cheekbones', 'nose', 'lips', 'beard', 'mustache', 'moustache', 'stubble'];
+            if (!features.some(feature => now.includes(feature) && next.includes(feature))) continue;
+        }
         const axis = axes.find(name => axisSwapped(name, now, next));
         if (!axis) continue;
         const said = axisWords(axis, next).filter(word => !now.includes(word));
@@ -316,37 +335,34 @@ export function physicalTraitSwaps(current, incoming) {
     return swaps;
 }
 /** True when `incoming` swaps a named physical value of `current`; with `traits` (a Set of trait keys), only one of those. */
-export function physicalTraitSwapped(current, incoming, traits = null) {
-    return physicalTraitSwaps(current, incoming).some(swap => !traits || traits.has(swap.trait));
+export function physicalTraitSwapped(current, incoming, traits = null, replaceable = null) {
+    return physicalTraitSwaps(current, incoming, replaceable).some(swap => !traits || traits.has(swap.trait));
 }
-/** The pack card's look of a cast dossier (castFrom.first.overallAppearance, the pack's words as first written); '' for anyone else. */
-export function cardLook(npc) {
-    const first = npc?.castFrom && typeof npc.castFrom === 'object' ? npc.castFrom.first : null;
-    return first && typeof first === 'object' && typeof first.overallAppearance === 'string' ? first.overallAppearance : '';
-}
-/**
- * A refine without its swaps of the card's traits (`card`: cardLook): every incoming clause that swaps a trait the card names gives
- * way to the record's own clause(s) for that trait; the rest of the incoming text stays as written. → { text, swaps }; `text` is
- * `incoming` itself when nothing the card names is swapped (always without a card), and '' when the swap cannot be taken out
- * (the repaired text still swaps, or adds nothing to the record).
- */
-export function withoutTraitSwaps(current, incoming, card = '') {
-    const named = card ? new Set(traitPieces(card).flatMap(piece => piece.keys)) : null;
-    const swaps = named?.size ? physicalTraitSwaps(current, incoming).filter(swap => named.has(swap.trait)) : [];
+/** (card traits win) Repair only separable conflicting claims; refuse an ambiguous shared clause. */
+export function withoutTraitSwaps(current, incoming, replaceable = null) {
+    const swaps = physicalTraitSwaps(current, incoming, replaceable);
     if (!swaps.length) return { text: incoming, swaps };
     const text = appearanceText(incoming);
     const swapped = new Set(swaps.map(swap => swap.trait));
-    const held = presentationSegments(current).filter(segment => traitPieces(segment).some(piece => piece.keys.some(key => swapped.has(key))));
+    const held = traitPieces(current);
     const used = new Set();
     const parts = text.split(/(\s*;\s*|(?<=[.!?])\s+|\s*,\s*)/);
     for (let index = 0; index < parts.length; index += 2) {
-        const keys = traitPieces(parts[index]).flatMap(piece => piece.keys);
-        if (!keys.some(key => swapped.has(key))) continue;
-        const own = held.filter(segment => !used.has(segment)
-            && traitPieces(segment).some(piece => piece.keys.some(key => swapped.has(key) && keys.includes(key))));
-        own.forEach(segment => used.add(segment));
-        const tail = parts[index].match(/[.!?]+$/)?.[0] || '';
-        parts[index] = own.length ? `${own.join(', ')}${tail}` : '';
+        const pieces = parts[index].split(/\s+and\s+/i);
+        const separable = pieces.length > 1 && pieces.slice(0, -1).every(piece => addressedTraitKeys(piece).length);
+        const candidates = separable ? pieces : [parts[index]];
+        for (let part = 0; part < candidates.length; part += 1) {
+            const conflicts = physicalTraitSwaps(current, candidates[part], replaceable);
+            if (!conflicts.length) continue;
+            const keys = traitPieces(candidates[part]).flatMap(piece => piece.keys);
+            if (keys.some(key => !conflicts.some(swap => swap.trait === key)) || (!separable && /\s+(?:and|with)\s+/i.test(candidates[part]))) return { text: '', swaps };
+            const own = held.filter(piece => !used.has(piece.text) && piece.keys.some(key => conflicts.some(swap => swap.trait === key)));
+            if (!own.length) return { text: '', swaps };
+            own.forEach(piece => used.add(piece.text));
+            const tail = candidates[part].match(/[.!?]+$/)?.[0] || '';
+            candidates[part] = `${own.map(piece => piece.text).join(', ')}${tail}`;
+        }
+        parts[index] = candidates.join(' and ');
     }
     // Rejoin with each kept clause's own separator; a clause given way to without a held one is dropped with it.
     let joined = '';
@@ -354,7 +370,31 @@ export function withoutTraitSwaps(current, incoming, card = '') {
         if (parts[index].trim()) joined += (joined ? (parts[index - 1] ?? ' ') : '') + parts[index];
     }
     const repaired = appearanceText(joined);
-    const usable = repaired && !physicalTraitSwapped(current, repaired, swapped) && !sameAppearance(current, repaired)
+    const usable = repaired && !physicalTraitSwapped(current, repaired, swapped, replaceable) && !sameAppearance(current, repaired)
         && normalizeName(repaired) !== normalizeName(current);
     return { text: usable ? repaired : '', swaps };
+}
+
+// ---- Provenance of a fill guess (appearance-fill.js). The fill call's invented hair / eyes / build are the only physical values a later
+// story line may replace (owner, DECISIONS 90 and 113); `record.lookGuess` lists those trait keys. A record without the list (every
+// card trait, every story-given or hand-written value, and any guess filled before this list existed) is fully protected.
+export const guessedTraits = record => new Set((Array.isArray(record?.lookGuess) ? record.lookGuess : []).filter(key => TRAIT_AXES[key]));
+const traitKeysOf = text => new Set(traitPieces(text).flatMap(piece => piece.keys));
+/** The guess list after a fill call wrote `after` over `before`: the traits it newly names are guesses. */
+export function filledGuess(record, before, after) {
+    const had = traitKeysOf(before);
+    return [...new Set([...guessedTraits(record), ...[...traitKeysOf(after)].filter(key => !had.has(key))])];
+}
+/** The guess list after an accepted text: a trait the text swapped is now the story's (established), no longer a guess. */
+export function settledGuess(record, before, after) {
+    const swapped = new Set(physicalTraitSwaps(before, after).map(swap => swap.trait));
+    return [...guessedTraits(record)].filter(key => !swapped.has(key));
+}
+const lookOf = record => [record?.overallAppearance, record?.appearance].filter(Boolean).join('; ');
+/** `after` with its guess list settled against what changed since `before` (a merge path that wrote the look without applyAppearanceUpdate). */
+export function withSettledGuess(before, after) {
+    const held = guessedTraits(after);
+    if (!held.size) return after;
+    const next = settledGuess(after, lookOf(before), lookOf(after));
+    return next.length === held.size ? after : { ...after, lookGuess: next };
 }

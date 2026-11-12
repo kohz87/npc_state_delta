@@ -49,8 +49,7 @@ test('editor locks through the synthetic host: a second Save, a later scan, a sw
     runEditorHostScenario('locks', async () => {
         const runtime = globalThis.NPCStateDelta;
         let role = 'adventurer';
-        let roleMark = {};
-        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role, ...roleMark, mood: 'calm', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named companion', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } }] });
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role, mood: 'calm', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named companion', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } }] });
         const reply = async (user, text) => {
             mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: user });
             mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
@@ -132,8 +131,7 @@ test('editor locks through the synthetic host: a second Save, a later scan, a sw
         await editNpc(id, { lock_profile: { checked: false } });
         assert.deepEqual(yunyun().manualProfileFields, []);
         role = 'wandering adventurer';
-        roleMark = { roleState: 'update', roleReason: 'She is a wandering adventurer again.' };
-        await reply('Where to?', 'Yunyun, a wandering adventurer again, points north.');
+        await reply('Where to?', 'Yunyun became a wandering adventurer again, and points north.');
         assert.equal(yunyun().role, 'wandering adventurer', 'an unlocked role follows the story again');
     });
 });
