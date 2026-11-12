@@ -138,6 +138,7 @@ function mergeAliasLinkedNpcPair(a, b) {
     else delete merged.customFields;
     merged.memories = normalizeStoredMemories([...(a.memories || []), ...(b.memories || [])]);
     merged.manualMemories = [...(a.manualMemories || []), ...(b.manualMemories || [])];
+    merged.memoryStamps = { ...(b.memoryStamps || {}), ...(a.memoryStamps || {}) };
     const mannerismLock = lockedSourceFor('mannerisms');
     const behaviorLock = lockedSourceFor('behaviorProfile');
     const relationshipLock = lockedSourceFor('keyRelationships');

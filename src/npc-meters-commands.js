@@ -6,6 +6,7 @@ import { normalizeCast } from './cast-dossier.js';
 import { normalizeApproachKind } from '../npc-meters-gate.js';
 import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, readLeaf, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
+import { growDrives, DRIVE_RULE } from './npc-notes-drives.js';
 import { mergeRefreshTastes } from './npc-notes-tastes.js';
 import { runKind, noteLine, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
 import { applyEvents, restMood, restingMood } from '../npc-mood.js';
@@ -255,6 +256,28 @@ export function createNpcCommands({
             }
             if (needsDrives) Object.assign(record, seedNotes({ personality: payload?.personality, about: payload?.about }));
             return out;
+        },
+        /**
+         * npc.drives { name, texts: [plain strings], ignore?: role text, reply, rule }: what Delta's scan newly recorded for one person (new memories, behavior and
+         * mannerism lines, the relationship reason), read for drive cues (npc-notes-drives.js growDrives, rule 1: a drive steps one level when
+         * its cues show in 2 different replies since its last change). The leaf is written whole on the reply, so a swipe, a delete, a Re-read
+         * and a rebuild give the drives live had. Only rule 1 is understood, so a reply that never carried it replays as it was.
+         */
+        'npc.drives'(ctx, payload = {}) {
+            if (!ownOrModule(ctx, 'npc.drives', payload)) ctx.fail('REFUSED', 'Drive growth is noted only by NPC State Delta\'s own scan.');
+            if (!featureOn(FEATURE_NOTES, ctx)) ctx.fail('FEATURE_OFF', 'Dossier notes are turned off.');
+            if (payload?.rule !== DRIVE_RULE) ctx.fail('INVALID', 'It names no drive rule this version knows.');
+            const slice = ctx.read(NPC_DOMAIN);
+            const who = identify(slice?.npcs ?? {}, payload?.name);
+            const have = who ? slice?.npcs?.[who.key] : null;
+            if (!have) ctx.fail('REFUSED', 'No one by that name has an entry.');
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : headReply();
+            const texts = (Array.isArray(payload?.texts) ? payload.texts : []).map(item => clean(item, 200)).filter(Boolean).slice(0, 12);
+            const grown = growDrives(have.drives, texts, commandReply(ctx, at), `${have.name} ${clean(payload?.ignore, 120)}`);   // the person's name and role are no evidence
+            if (!grown) ctx.fail('REFUSED', 'Nothing to update.');
+            const moved = grown.steps.map(step => `${step.label} ${step.to > step.from ? 'grew' : 'eased'} (${step.cue})`);
+            const done = run(ctx, { label: payload.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, leaf: { field: 'drives', text: grown.leaf } });
+            return moved.length ? { ...done, summary: sentence([`${have.name}: ${moved.join(', ')}`]) } : done;
         },
         /**
          * npc.milestone { name, add?: [words], remove?: [words or keys] }: the reader's own milestones

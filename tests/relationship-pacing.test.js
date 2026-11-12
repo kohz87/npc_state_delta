@@ -7,7 +7,7 @@ import { DEFAULT_RELATIONSHIP_CAPS, normalizeNpcRecord } from '../core.js';
 import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
 import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent, spendFlatEvent } from '../src/relationship-pacing.js';
-import { cutToTier, eventSummary, pacingNote, readEvent } from '../src/npc-meters-pacing.js';
+import { cutToTier, eventSummary, nextEvent, pacingNote, readEvent } from '../src/npc-meters-pacing.js';
 import { FEATURE_GATE, FEATURE_MOOD_PULL, CONTEXT_BUDGET, readLeaf } from '../src/npc-meters-config.js';
 import { gateApproach, readApproachRing } from '../npc-meters-gate.js';
 import { createNpcPart } from '../src/npc-meters.js';
@@ -1071,4 +1071,27 @@ test('an old 1.16.0 chat (object leaves, per-field ops): a Re-read of a middle r
         assert.equal(JSON.stringify(s.host.head().domains.npc), head, 'replay equals live');
         assert.deepEqual(s.host.store.problems(), []);
     }
+});
+
+test('a fifth event on one reply is recorded: a spent one after four held ones is not hidden', () => {
+    const base = { reply: 'r1', date: '', src: 'story', tier: 'ordinary', note: 'held today' };
+    let text = null;
+    for (let at = 0; at < 4; at += 1) text = nextEvent(text, { ...base, ask: { trust: 1 }, held: true });
+    assert.equal(readEvent(text).events.length, 4);
+    text = nextEvent(text, { ...base, src: 'scan', ask: { trust: 1 }, held: false, tier: 'meaningful' });
+    const kept = readEvent(text);
+    assert.equal(kept.events.length, 4, 'still at most four');
+    assert.equal(eventSummary(kept).held, false, 'the card no longer says nothing moved');
+    // An unfilled list just grows.
+    assert.equal(readEvent(nextEvent(null, { ...base, ask: { trust: 1 }, held: true })).events.length, 1);
+});
+
+test('a fifth event keeps the gate event: the next prompt\'s gate cue reads it', () => {
+    const base = { reply: 'r1', date: '', src: 'story', tier: 'ordinary', note: 'x', ask: { trust: 1 } };
+    let text = nextEvent(null, { ...base, held: false, via: 'flirt', gate: { mode: 'less', n: 1, span: 3 } });
+    for (let at = 0; at < 3; at += 1) text = nextEvent(text, { ...base, held: true });
+    text = nextEvent(text, { ...base, src: 'scan', held: false });
+    const kept = readEvent(text);
+    assert.equal(kept.events.length, 4);
+    assert.ok(kept.events.some(item => item.gate), 'the gate event is not the one dropped');
 });

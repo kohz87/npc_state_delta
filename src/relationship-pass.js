@@ -209,7 +209,7 @@ export function suppressPrimaryRelationshipForFocusedDecisions(parsed, decisions
 // Copies the "changed at" stamps for whatever differs between `before` and the record (`npc`) onto it.
 export function stampNpcChanges(npc, before, { turn, message = null, storyDay = null } = {}) {
     const stamped = stampChangedFields(before, npc, { turn, message, storyDay });
-    for (const key of ['fieldChanges', 'fieldChangeDays', 'fieldChangeMessages']) {
+    for (const key of ['fieldChanges', 'fieldChangeDays', 'fieldChangeMessages', 'memoryStamps']) {
         if (stamped[key] === undefined) delete npc[key];
         else npc[key] = stamped[key];
     }

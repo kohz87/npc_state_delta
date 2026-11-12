@@ -1,7 +1,7 @@
 /* NPC State Delta injection block rendering: truncation, fair field sharing, identity/agency/state
    blocks, optional continuity and mentioned/deceased references. Split unchanged from
    core-injection.js; these helpers are module-internal rather than public core exports. */
-import { calibrateRelationshipSummary, DEFAULT_RELATIONSHIP, normalizeRelationshipBaseline, relationshipSummaryConsistent } from './core-relationship.js';
+import { calibrateRelationshipSummary, DEFAULT_RELATIONSHIP, DURABLE_PROFILE_LIMITS, normalizeRelationshipBaseline, relationshipSummaryConsistent } from './core-relationship.js';
 import { cleanList, cleanText, normalizeName } from './core-text.js';
 import { npcNamedInText } from './core-merge.js';
 import { KEY_RELATIONSHIP_LIMIT } from './core-keyrel.js';
@@ -191,7 +191,7 @@ export function clauseBoundedInjection(text, room) {
 }
 
 export function injectionOptionalFields(npc, includeAppearance = false, sceneDeferred = false) {
-    const importantMemories = cleanList(npc.memories, IMPORTANT_MEMORY_LIMIT, 220);
+    const importantMemories = cleanList(npc.memories, IMPORTANT_MEMORY_LIMIT, DURABLE_PROFILE_LIMITS.memory);
     const appearanceVariants = includeAppearance ? injectionAppearanceVariants(npc, sceneDeferred) : [];
     return [
         appearanceVariants.length && appearanceVariants,
