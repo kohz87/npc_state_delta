@@ -251,3 +251,16 @@ export function settleScan({ marker = null, readAhead = [], readIds = [], target
     const waiting = unread ? replies.filter(id => id > next && !read.has(id)).length : 0;
     return { marker: next, readAhead: rest.slice(-READ_AHEAD_MAX), deferred: unread, waiting };
 }
+
+/**
+ * The story's own texts for admitting a new person: every message except the opening greeting (chat[0] when the character
+ * wrote it), which carries the card's World State roster, and except system notes. A name only the greeting holds is
+ * background, not a person met in the story.
+ */
+export function storyTextsForAdmission(chat) {
+    const list = Array.isArray(chat) ? chat : [];
+    return list
+        .filter((message, index) => message && !message.is_system && !(index === 0 && !message.is_user))
+        .map(message => String(message.mes || ''))
+        .filter(Boolean);
+}

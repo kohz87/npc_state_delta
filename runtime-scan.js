@@ -3,7 +3,7 @@
    parts are split beside this file, and this factory keeps the public scan part. Built by index.js once per module instance. */
 import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { isScannerRoutingError } from './scanner-routing.js';
-import { readAheadOf, settleScan } from './scan-context.js';
+import { readAheadOf, settleScan, storyTextsForAdmission } from './scan-context.js';
 import { recentTranscript, recentUserDevelopmentContext, currentExchangeUserDevelopmentContext, currentExchangeTranscript, skippedExchangesWindow, recentReplyIds, activeReplyIds, currentExchangeProse, storyDayAt, currentExclusions, refreshMessageGate } from './src/transcript.js';
 import { FULL_SCAN_RESPONSE_LENGTH, SCAN_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { applyFocusedRelationshipDecisions, runFocusedRelationshipPass, suppressPrimaryRelationshipForFocusedDecisions } from './src/relationship-pass.js';
@@ -243,6 +243,7 @@ export function createScanPart(rt, deps) {
                 autoArchiveDeaths: settings.autoArchiveDeaths !== false,
                 autoReactivateArchived: settings.autoReactivateArchived !== false,
                 admissionMode: settings.admissionMode,
+                storyTexts: storyTextsForAdmission(getContext().chat),
                 preserveWorldActive: compactWorldStateTurn,
                 developmentContext: transcript,
                 userDevelopmentContext,

@@ -195,7 +195,7 @@ test('in Delta\'s runtime a reply\'s scan, a branch reconcile and a generation\'
             return JSON.stringify({ npcs: [{ name: 'Vale', present: true, role: 'wanderer', species: 'Human', age: '30', appearance: 'Vale wears a grey cloak.', personality: 'quiet', speech: 'brief', relationshipImpact: 'ordinary' }] });
         };
         // The head moved and the host is still bringing Delta to the selected checkpoint (its barrier is up): a reply arrives.
-        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Vale, a wanderer in a grey cloak, nods to the party at the gate and says nothing more for a while.', swipe_id: 0 });
+        mockState.context.chat.length || mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'The greeting opens the story.', swipe_id: 0 }); mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Vale, a wanderer in a grey cloak, nods to the party at the gate and says nothing more for a while.', swipe_id: 0 });
         const promptsBefore = mockState.prompts.length;
         const callsBefore = mockState.rawCalls.length;
         eventSource.emit('message_received', mockState.context.chat.length - 1);
