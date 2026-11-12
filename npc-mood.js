@@ -251,20 +251,52 @@ export const MOOD_LEXICON = Object.freeze({
     defiant: L(-1, 2, 3), scornful: L(-2, 1, 2), stern: L(-1, 0, 2), grim: L(-2, 0, 1), bitter: L(-2, 0, 1), shy: L(-1, 0, -2), hesitant: L(-1, 0, -2),
     sad: L(-2, -1, -1), gloomy: L(-2, -1, -1), miserable: L(-3, -1, -2), hurt: L(-2, 0, -2), lonely: L(-2, -1, -2), tired: L(-1, -2, -1), exhausted: L(-2, -2, -2), bored: L(-1, -2, 0), resigned: L(-2, -2, -2),
     weary: L(-1, -2, -1), disappointed: L(-2, -1, -1), guilty: L(-2, 0, -2), helpless: L(-3, 0, -3), hopeless: L(-3, -1, -3), despairing: L(-3, 0, -3), heartbroken: L(-3, 0, -3), flat: L(-1, -1, 0), numb: L(-1, -2, -1), dazed: L(-1, -1, -2),
+    // The words the scanner really wrote in the 11-12 Nov live runs (liverun2, liverun3), and their near neighbours.
+    desperate: L(-3, 3, -2), winded: L(-1, 2, -1), mechanical: L(-1, -1, 1), transactional: L(0, 0, 2), shrewd: L(0, 1, 2), brisk: L(0, 2, 2), dry: L(0, -1, 1), wry: L(1, 0, 2), indifferent: L(-1, -1, 1),
+    withdrawn: L(-1, -2, -1), cynical: L(-1, 0, 1), spiteful: L(-2, 2, 1), irritable: L(-2, 2, 1), stubborn: L(-1, 1, 2), fed: L(-2, 2, 0), gruff: L(-1, 1, 2), pragmatic: L(0, 0, 2), hurried: L(-1, 2, 0),
+    curt: L(-1, 1, 2), vigilant: L(0, 2, 2), stressed: L(-2, 2, -1), urgent: L(-1, 3, 0), cautious: L(-1, 1, 0), calculating: L(0, 1, 2), watchful: L(0, 1, 1), impatient: L(-1, 2, 1), bureaucratic: L(0, -1, 2),
+    sharp: L(-1, 2, 2), observant: L(0, 1, 1), measured: L(0, -1, 2), shock: L(-2, 3, -2), agony: L(-3, 3, -3), routine: L(0, -1, 1), blunt: L(-1, 1, 2), businesslike: L(0, 0, 2), methodical: L(0, 0, 2),
+    pedantic: L(-1, 0, 2), direct: L(0, 1, 2), procedural: L(0, -1, 2), distrustful: L(-2, 1, 1), inquisitive: L(1, 1, 1), impassive: L(0, -2, 1), important: L(1, 1, 3), crisp: L(0, 1, 2), dismissive: L(-1, 0, 3),
+    ridicule: L(-2, 1, -2), rattled: L(-2, 2, -2), contrite: L(-2, 0, -2), skittish: L(-2, 2, -2), violent: L(-3, 3, 2), sore: L(-1, 1, -1), conspiratorial: L(0, 2, 1), aggressive: L(-2, 3, 3), skeptical: L(-1, 0, 1),
+    practical: L(0, 0, 2), opportunistic: L(0, 1, 2), mistrustful: L(-2, 1, 1), impressed: L(2, 1, 0), hostile: L(-3, 2, 2), discreet: L(0, -1, 2), frightened: L(-3, 3, -3), exasperated: L(-2, 2, 0), frantic: L(-3, 3, -2),
+    rigid: L(-1, 1, 2), alert: L(0, 2, 1), secretive: L(-1, 0, 1), fearful: L(-2, 2, -2), subdued: L(-1, -2, -1), caught: L(-2, 2, -2), breathless: L(0, 3, -1), brusque: L(-1, 1, 2), terse: L(-1, 0, 2), cold: L(-2, 0, 2),
+    snappish: L(-2, 2, 2), impulsive: L(0, 3, 1), earnest: L(1, 1, 1),
 });
 
+const NEGATORS = new Set(['not', 'no', 'never', 'hardly', 'less', 'without', 'nor', 'neither', 'barely']);
+/** The lexicon words of a text that are not negated: a word with a negator (not / no / never / no longer / hardly / less / ...n't) in the two words before it, in its own clause, does not count. */
+export function plainMoodWords(text) {
+    const out = [];
+    for (const clause of (typeof text === 'string' ? text.toLowerCase() : '').split(/[,.;:!?()—–]+/)) {
+        const tokens = clause.match(/[\p{L}']+/gu) ?? [];
+        tokens.forEach((word, at) => {
+            if (!hasOwn(MOOD_LEXICON, word)) return;
+            if (tokens.slice(Math.max(0, at - 2), at).some(before => NEGATORS.has(before) || before.endsWith("n't") || before.endsWith('n\u2019t'))) return;
+            out.push(word);
+        });
+    }
+    return out;
+}
+
 /**
- * The axes a mood text stands for: every known word in it (lower-cased letters only), averaged per axis and rounded half away from zero.
+ * The axes a mood text stands for (the fallback when the scanner gave no numbers): every known, not-negated word in it, averaged per axis and rounded half away from zero.
  * → { v, a, d, words: [the words found] }, or null when no word is known (the numbers are then left alone). Pure and fixed.
  */
 export function moodFromWord(text) {
-    const words = (typeof text === 'string' ? text.toLowerCase().match(/\p{L}+/gu) ?? [] : []).filter(word => hasOwn(MOOD_LEXICON, word));
+    const words = plainMoodWords(text);
     if (!words.length) return null;
     const mean = index => {
         const sum = words.reduce((total, word) => total + MOOD_LEXICON[word][index], 0) / words.length;
         return clampAxis(Math.sign(sum) * Math.round(Math.abs(sum)));
     };
     return { v: mean(0), a: mean(1), d: mean(2), words };
+}
+
+/** Three numbers the scanner gave with its mood word ({ moodV, moodA, moodD } or { v, a, d }): whole numbers, each clamped to -3..3; all three or none → { v, a, d } or null. */
+export function moodNumbers(raw) {
+    const pick = (...keys) => { const key = keys.find(name => raw?.[name] !== undefined && raw[name] !== null && raw[name] !== ''); const n = key === undefined ? NaN : Number(raw[key]); return Number.isFinite(n) ? clampAxis(n) : null; };
+    const [v, a, d] = [pick('moodV', 'v'), pick('moodA', 'a'), pick('moodD', 'd')];
+    return v === null || a === null || d === null ? null : { v, a, d };
 }
 
 /**
@@ -274,11 +306,13 @@ export function moodFromWord(text) {
  */
 export function applyWord(mood, minutes, target, word, reason = '') {
     const settled = decayMood(mood, minutes);
-    if (!target) return { mood: settled, change: { v: 0, a: 0, d: 0 } };
+    // No numbers and no known word: the axes and their fade stay as they were; the reason says so (never silently nothing).
+    if (!target) return { mood: { ...settled, cause: causeLine(word, UNRATED) }, change: { v: 0, a: 0, d: 0 } };
     const next = { ...settled, v: target.v, a: target.a, d: target.d, cause: causeLine(word, reason), at: dayOf(minutes), from: { v: target.v, a: target.a, d: target.d } };
     return { mood: next, change: { v: next.v - settled.v, a: next.a - settled.a, d: next.d - settled.d } };
 }
 
+export const UNRATED = 'mood word not rated';
 function causeLine(word, reason) {
     const w = flatText(word);
     const why = flatText(reason);
@@ -286,7 +320,7 @@ function causeLine(word, reason) {
 }
 
 // ---- the per-reply mood change history (record.moodLog) ----
-// ONE text leaf (compact JSON { e: [...] }, like lastEvent): the last MOOD_LOG_MAX moves of the axes, newest first: { n: reply number (the message index) or null, date: the
+// ONE text leaf (compact JSON { e: [...] }, like lastEvent): the last MOOD_LOG_MAX moves of the axes, newest first: { n: reply number (the message index) or null, s: the reply's record id when known (the same-reply key), date: the
 // story date before the reply, v/a/d: the change of each axis (whole numbers, a zero left out), why: the plain reason }. Written in the same op as the
 // move, so a swipe or a replay gives the same list; a record without it (an old chat) has an empty history. Display only: nothing that decides reads it.
 export const MOOD_LOG_MAX = 6;
@@ -301,23 +335,27 @@ export function readMoodLog(raw) {
     if (!Array.isArray(list) || (typeof raw === 'string' && raw.length > LOG_TEXT_MAX)) return [];
     const whole = value => Number.isSafeInteger(value) && value >= 2 * MOOD_MIN && value <= 2 * MOOD_MAX && value !== 0;
     return list.slice(0, MOOD_LOG_MAX).filter(item => item && typeof item === 'object' && !Array.isArray(item)
-        && (item.n === null || (Number.isSafeInteger(item.n) && item.n >= 0)) && typeof item.date === 'string' && typeof item.why === 'string'
+        && (item.n === null || (Number.isSafeInteger(item.n) && item.n >= 0)) && typeof item.date === 'string' && typeof item.why === 'string' && (item.s === undefined || typeof item.s === 'string')
         && ['v', 'a', 'd'].every(key => item[key] === undefined || whole(item[key])) && ['v', 'a', 'd'].some(key => item[key] !== undefined))
-        .map(item => ({ n: item.n, date: item.date.slice(0, 40), ...Object.fromEntries(['v', 'a', 'd'].filter(key => item[key] !== undefined).map(key => [key, item[key]])), why: cleanReason(item.why).slice(0, LOG_WHY_MAX) }));
+        .map(item => ({ n: item.n, ...(item.s ? { s: item.s.slice(0, 60) } : {}), date: item.date.slice(0, 40), ...Object.fromEntries(['v', 'a', 'd'].filter(key => item[key] !== undefined).map(key => [key, item[key]])), why: cleanReason(item.why).slice(0, LOG_WHY_MAX) }));
 }
 
 /**
- * The history text after this reply's move: `entry` { n, date, change: { v, a, d }, why }. A reply that already has an entry (the same n) takes this move
- * on top of it (the changes add, the reasons join); an all-zero change adds nothing (the prior text comes back, or null when there is none to write).
+ * The history text after this reply's move: `entry` { n, s, date, change: { v, a, d }, why }. A reply that already has an entry takes this move on top of it
+ * (the changes add, the reasons join): the same reply is the same record id `s` when both know one, else the same message index `n`, so a delete in the middle
+ * of the chat does not join two replies. A merge that nets to zero drops that reply's row. An all-zero change on a reply with no row adds nothing (null).
  */
-export function nextMoodLog(prior, { n = null, date = '', change, why = '' }) {
+export function nextMoodLog(prior, { n = null, s = null, date = '', change, why = '' }) {
     const moved = ['v', 'a', 'd'].filter(key => change?.[key]);
     const old = readMoodLog(prior);
     if (!moved.length) return null;
-    const same = n !== null && old.length && old[0].n === n ? old[0] : null;
+    const sid = typeof s === 'string' && s ? s : null;
+    const same = old.length && (sid && old[0].s ? old[0].s === sid : n !== null && old[0].n === n) ? old[0] : null;
     const merged = Object.fromEntries(['v', 'a', 'd'].map(key => [key, (same?.[key] ?? 0) + (change[key] ?? 0)]).filter(([, value]) => value));
-    const reason = [same?.why, cleanReason(why)].filter(Boolean).filter((text, at, all) => all.indexOf(text) === at).join('; ');
-    const head = { n, date: String(date || '').slice(0, 40), ...merged, why: cleanReason(reason).slice(0, LOG_WHY_MAX) };
-    const text = JSON.stringify({ e: [head, ...old.slice(same ? 1 : 0)].slice(0, MOOD_LOG_MAX) });
-    return Object.keys(merged).length && text.length <= LOG_TEXT_MAX ? text : null;
+    const rest = old.slice(same ? 1 : 0);
+    if (!Object.keys(merged).length) return same ? JSON.stringify({ e: rest }) : null;
+    const reason = [same?.why, cleanReason(why)].filter(Boolean).filter((text, i, all) => all.indexOf(text) === i).join('; ');
+    const head = { n, ...(sid ? { s: sid } : {}), date: String(date || '').slice(0, 40), ...merged, why: cleanReason(reason).slice(0, LOG_WHY_MAX) };
+    const text = JSON.stringify({ e: [head, ...rest].slice(0, MOOD_LOG_MAX) });
+    return text.length <= LOG_TEXT_MAX ? text : null;
 }

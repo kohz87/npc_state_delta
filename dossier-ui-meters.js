@@ -41,7 +41,8 @@ function moodProjection(mood) {
     // The same three on the stored -3..+3 scale (axes) and the last moves of them, newest first (log: { n, date, v, a, d, why }; a zero axis left out).
     const axes = { v: int(mood.valence, -3, 3), a: int(mood.energy, -3, 3), d: int(mood.control, -3, 3) };
     const log = list(mood.log, 6).filter(row => Number.isInteger(row.n) || row.n === null).map(row => ({ n: row.n, date: plain(row.date).slice(0, 40), v: int(row.v, -6, 6), a: int(row.a, -6, 6), d: int(row.d, -6, 6), why: plain(row.why).slice(0, 100) }));
-    return { word: plain(mood.word), feeling, energy: int(mood.bars?.energy, 0, max), control: int(mood.bars?.control, 0, max), max, axes, log, cause: plain(mood.cause).slice(0, 120) };
+    const rest = { v: int(mood.rest?.v, -3, 3), a: int(mood.rest?.a, -3, 3), d: int(mood.rest?.d, -3, 3) };
+    return { word: plain(mood.word), feeling, energy: int(mood.bars?.energy, 0, max), control: int(mood.bars?.control, 0, max), max, axes, rest, log, cause: plain(mood.cause).slice(0, 120) };
 }
 
 // Pull (feature mood-pull): the instinct, its strength 1..3, what causes it and for how many days. Null without one.

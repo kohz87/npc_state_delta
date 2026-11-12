@@ -13,13 +13,14 @@ import { getSettings, setRpgProbe } from './runtime-settings.js';
 import { sheetLevelOf } from './core-record.js';
 import { rejectedOverallLook } from './appearance-update.js';
 import { stage1Refresh } from './dossier-tools-core.js';
+import { moodNumbers } from './npc-mood.js';
 
 export function createHostedPart(rt, deps) {
     const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex } = deps;
     // Meetings the host did not keep, `${chatKey}|${npcId}`: sent again with that person's next scan (forwardRelationshipChangesToHost).
     const meetOwed = new Set();
-    const meetTried = new Set();
-    const moodTried = new Set();   // the catch-up of a person's mood numbers is tried once a session (a mood word kept from before the numbers existed)   // the entry-missing repeat is tried once a session: a host that never makes the entry is not asked at every scan
+    const meetTried = new Set();   // the entry-missing repeat is tried once a session: a host that never makes the entry is not asked at every scan
+    const moodTried = new Set();   // the catch-up of a person's mood numbers is tried once a session (a mood word kept from before the numbers existed)
     setRpgProbe(() => (storyBlockV2Hosted() && rt.storySuiteV2?.hosted?.() ? rt.storySuiteV2.rpgOn?.() === true : false));
 
     // Set by src/storysuite-v2.js while Delta is registered with a Story Block v2 host.
@@ -253,7 +254,7 @@ export function createHostedPart(rt, deps) {
     // taken when the scan started): when the reader swiped, or a reply was added or deleted, since
     // then, nothing is sent; the changes belonged to a reply that is no longer the one Story Block
     // would write them on, and the reply now shown gets its own scan.
-    function forwardRelationshipChangesToHost(before, after, messageId, head = null, updates = []) {
+    function forwardRelationshipChangesToHost(before, after, messageId, head = null, updates = [], rows = []) {
         if (replayScope()) return;   // Story Block already holds these changes in its own per-reply records
         const adapter = storySuiteV2Meters();
         if (!adapter) return;
@@ -299,9 +300,9 @@ export function createHostedPart(rt, deps) {
         const touched = npc => prior.get(npc.id)?.updatedAt !== npc.updatedAt;
         const owed = npc => touched(npc) && (meetOwed.has(`${getChatKey()}|${npc.id}`) || (!hasEntry(npc) && !meetTried.has(`${getChatKey()}|${npc.id}`)));
         const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && (!prior.has(npc.id) || owed(npc))) : [];
-        // A mood word the scan wrote (a new or changed `mood` text) gets its numbers in the slice (npc.mood: the fixed word list, with the reason the scan
-        // recorded for the same reply: its relationship change reason). Not the dead and not incidental extras; after the meeting, which seeds the resting mood.
+        // A mood word the scan wrote (new or changed) gets its numbers in the slice (npc.mood): the three the scan gave (its row's moodV / moodA / moodD), else the fixed word list's, with the reason the scan recorded for the same reply. Not the dead or incidental extras; after the meeting.
         const moodOf = npc => String(npc?.mood ?? '').trim();
+        const vadOf = npc => { const row = (Array.isArray(rows) ? rows : []).find(item => item && ((item.id && item.id === npc.id) || (item.name && npcMatchesLabel(npc, item.name)))); return moodOf(row) ? moodNumbers(row) : null; };
         const reasonOf = npc => (JSON.stringify(npc.lastRelationshipChange) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange) ? String(npc.lastRelationshipChange?.reason ?? '').trim() : '');
         const moods = typeof adapter.mood === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && moodOf(npc) && (moodOf(npc) !== moodOf(prior.get(npc.id)) || (touched(npc) && !moodTried.has(`${getChatKey()}|${npc.id}`)))) : [];
         if (!changes.length && !looks.length && !refused.length && !met.length && !moods.length) return;
@@ -325,7 +326,7 @@ export function createHostedPart(rt, deps) {
             for (const npc of moods) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 moodTried.add(`${getChatKey()}|${npc.id}`);
-                await adapter.mood({ name: npc.name, word: moodOf(npc), reason: reasonOf(npc), reply: messageId, again: moodOf(npc) === moodOf(prior.get(npc.id)) });
+                await adapter.mood({ name: npc.name, word: moodOf(npc), vad: vadOf(npc), reason: reasonOf(npc), reply: messageId, again: moodOf(npc) === moodOf(prior.get(npc.id)), personality: npc.personality, about: npc.background });
                 stage1Refresh();
             }
             for (const npc of looks) {

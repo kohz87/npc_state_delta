@@ -360,7 +360,7 @@ export function createNpcPart(hooks = {}) {
         if (limit && moved.length && featureOn(FEATURE_MOOD_PULL, ctx) && moodStands(ctx, who.key)) {
             const day = clockMinutes(at) ?? timeMinutes(ctx);
             const events = day === null ? [] : eventsFromMoves(moved.map(item => ({ meter: item.meter, change: item.after - item.before })), { reason, impact: spent?.used ?? asked });
-            if (events.length) writeMood(ctx, who.key, record, { prev: readLeaf(record.mood), mood: applyEvents(readLeaf(record.mood), day, events), day, n: isInt(at) ? at : null, date: clockDay(at) === null ? '' : call(hooks.startDate, '', at) });
+            if (events.length) writeMood(ctx, who.key, record, { prev: readLeaf(record.mood), mood: applyEvents(readLeaf(record.mood), day, events), day, n: isInt(at) ? at : null, s: isReplyId(reply) ? reply : null, date: clockDay(at) === null ? '' : call(hooks.startDate, '', at) });
         }
         // This event's outcome, written whole on the record (display only; the card's tier, held and asked).
         if (spent && replyKey(reply, reply) !== null) {
@@ -409,7 +409,7 @@ export function createNpcPart(hooks = {}) {
 
     const shared = {
         call, resolve, baseline, tierCaps, rulesFor, presentNames, featureOn, catalog, normalized,
-        storedSettings, tierAllowance, clockDay, defsFrom, readerAction, ownOrModule, headReply, commandReply, setupFor,
+        storedSettings, tierAllowance, clockDay, clockMinutes, timeMinutes, defsFrom, readerAction, ownOrModule, headReply, commandReply, setupFor,
         ownRungs, rungsFor, limitsFor, identify, ensure, note, changesFrom, settleRecord,
         openCloseNotes, tiered, run, hooks,
     };

@@ -141,6 +141,7 @@ export const RETURN_KEYS = Object.freeze({
     keyRelationships: { value: '["Name — their role to this NPC | durable dynamic"]', states: 'keep|update|evolve' },
     relationshipSummary: {},
     mood: { states: 'keep|clear' },
+    moodV: { value: '-3..3' }, moodA: { value: '-3..3' }, moodD: { value: '-3..3' },
     location: { states: 'keep|clear' },
     goal: { states: 'keep|clear' },
     status: { states: 'keep|clear' },
@@ -158,7 +159,7 @@ export const RETURN_KEYS = Object.freeze({
 const SHAPE_IDENTITY = ['id', 'name', 'aliases'];
 const SHAPE_PROFILE = ['role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'overallAppearance', 'appearance', 'personality', 'speech',
     'behaviorProfile', 'mannerisms', 'background', 'keyRelationships', 'relationshipSummary'];
-const SHAPE_LIVE = ['mood', 'location', 'goal', 'status'];
+const SHAPE_LIVE = ['mood', 'moodV', 'moodA', 'moodD', 'location', 'goal', 'status'];
 const SHAPE_LIFE = ['lifeState', 'lifeStateCertainty', 'lifeStateReason'];
 export const RETURN_SHAPES = Object.freeze({
     // None of the three asks for relationship numbers: every targeted pass zeroes them in code.

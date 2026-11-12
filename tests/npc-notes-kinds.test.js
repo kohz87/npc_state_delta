@@ -556,7 +556,7 @@ test('notes tail: the Changes cue is the last optional line while someone is pre
 });
 
 // ---- the scanner's mood word becomes the three numbers (npc-mood.js lexicon; npc.mood) ----
-test('mood words: the fixed lexicon gives the axes of a word or phrase, an unknown text gives none, and the numbers always settle toward rest', async () => {
+test('mood words: the fixed lexicon gives the axes of a word or phrase, an unknown text gives none, a negated word does not count, and the numbers always settle toward rest', async () => {
     const { moodFromWord, applyWord, decayMood, restMood, nextMoodLog, readMoodLog } = await import('../npc-mood.js');
     assert.deepEqual(moodFromWord('mortified and flustered'), { v: -2, a: 2, d: -3, words: ['mortified', 'flustered'] }, 'the mean of the words found, rounded away from zero');
     assert.deepEqual(moodFromWord('Alarmed'), { v: -2, a: 3, d: -2, words: ['alarmed'] });
@@ -575,7 +575,7 @@ test('mood words: the fixed lexicon gives the axes of a word or phrase, an unkno
     assert.deepEqual(readMoodLog('{"e":[{"n":1}]}'), [], 'an unreadable entry is dropped');
 });
 
-test('notes host: npc.mood sets the three numbers from the scanner\'s word, logs the move with its reason, refuses an unknown word, and rebuild equals live', async () => {
+test('notes host: npc.mood sets the three numbers from the scanner\'s word, logs the move with its reason, keeps the numbers for an unrated word, and rebuild equals live', async () => {
     const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
     await s.setDay(1);
     await s.say(['~ npc Oren | trust: +1']);
@@ -596,10 +596,15 @@ test('notes host: npc.mood sets the three numbers from the scanner\'s word, logs
     const before = JSON.stringify(slice());
     assert.equal((await s.adapter.mood({ name: 'Oren', word: 'mortified and flustered', again: true })).ok, false, 'a catch-up is refused when the mood already follows a move');
     assert.equal(JSON.stringify(slice()), before);
-    assert.equal((await s.adapter.mood({ name: 'Oren', word: 'xyzzy' })).ok, false, 'no known word: refused');
-    assert.equal(JSON.stringify(slice()), before, 'nothing written for an unknown word');
+    // a word with no numbers and no known word keeps the numbers and says so (never silently nothing)
+    assert.equal((await s.adapter.mood({ name: 'Oren', word: 'xyzzy', reply: head })).ok, true);
+    const kept = readLeaf(slice().npcs.oren.mood);
+    assert.deepEqual([kept.v, kept.a, kept.d], [-2, 2, -3], 'the previous numbers stay');
+    assert.equal(kept.cause, 'now xyzzy — mood word not rated');
+    assert.equal(readLeaf(slice().npcs.oren.moodLog).e.length, 1, 'no movement: no new history row');
+    const after = JSON.stringify(slice());
     s.host.store.rebuild();
-    assert.equal(JSON.stringify(slice()), before, 'rebuild equals live');
+    assert.equal(JSON.stringify(slice()), after, 'rebuild equals live');
     assert.deepEqual(s.host.store.problems(), []);
 });
 
@@ -667,4 +672,191 @@ test('display: a person with a scanner word and the numbers the command wrote sh
     const tile = moodTile({ mood: 'Mortified and flustered', v2Meters: v2MetersProjection(view) }, 4);
     assert.equal(tile.text, 'Mortified and flustered');
     assert.deepEqual(tile.rows.map(row => row.value), [-2, 2, -3], 'the three rows hold the numbers');
+});
+
+// ---- VADFIX2: numbers from the scan, the widened word list, negation, history keyed by reply id, the entry-less mood ----
+// Every mood text the scanner wrote in the live runs of 11-12 Nov (liverun2, liverun3), one per line.
+const REAL_MOODS = `quietly relieved
+wary and desperate
+relieved and winded
+bored and mechanical
+transactional and shrewd
+brisk and dry
+wry, guarded, indifferent
+withdrawn, anxious, guarded.
+cynical and indifferent
+quietly cynical, wary of newcomers
+furious and fed up
+irritable, spiteful, stubborn
+gruff, pragmatic
+alarmed, hurried
+curt, vigilant, indifferent
+stressed, urgent
+cautious, calculating, watchful.
+brisk and impatient
+brisk, bureaucratic
+flustered and irritable
+suspicious and sharp
+observant, measured
+in shock and agony
+indifferent, weary, routine.
+suspicious and blunt
+dry, businesslike
+methodical and pedantic
+direct and procedural
+stunned and nervous
+withdrawn, mildly anxious
+terrified and urgent
+distrustful and inquisitive
+impassive and dry
+hurried and self-important
+pragmatic and wry
+crisp and dismissive
+irritated and blunt
+indifferent, bureaucratic, dismissive.
+impassive and dismissive
+brisk, bureaucratic, impatient
+furious and mortified by patron ridicule
+rattled and contrite
+terrified and skittish
+irritable and blunt
+urgent and hurried
+violent and pragmatic
+nervous and sore
+conspiratorial and hurried
+guarded and hurried
+startled and aggressive
+blunt and skeptical
+blunt, dryly amused, practical
+pragmatic and dry
+businesslike, watchful
+suspicious, irritated, blunt
+eager and nervous, eyeing the table and taps for ale
+gruff and businesslike
+brisk and dismissive
+dry, guarded, observant
+eager and self-important
+opportunistic and calculating
+hurried and guarded
+wary and mistrustful of unearned charity
+suspicious, dismissive
+stunned, wary, and quietly grateful
+businesslike and mildly observant
+impressed and businesslike
+furious, embarrassed, hostile
+anxious and urgent
+calculating and discreet
+frightened and defensive
+defensive, nervous, hostile
+terrified of being overheard
+terrified and guarded
+exasperated and sharp
+hostile, vigilant, and aggressive
+frantic and urgent
+defensive and embarrassed
+flustered but rigid
+relieved but weary
+embarrassed, flustered, irritable
+eager, alert for coin or ale
+terrified and secretive
+frightened, suspicious, overwhelmed by high coin
+bewildered and hungry
+flustered, caught out
+hostile, violent, aggressive
+bureaucratic
+anxious and fearful of discovery
+bewildered and subdued`.split('\n');
+
+test('mood words (real runs): every mood text the scanner really wrote maps to numbers, none is left unread', async () => {
+    const { moodFromWord } = await import('../npc-mood.js');
+    assert.equal(REAL_MOODS.length, 90);
+    const unread = REAL_MOODS.filter(text => !moodFromWord(text));
+    assert.deepEqual(unread, [], 'no real mood text is left without numbers');
+    assert.deepEqual(moodFromWord('gruff, pragmatic'), { v: -1, a: 1, d: 2, words: ['gruff', 'pragmatic'] }, 'a word the first list missed (Gruff) now reads');
+    assert.deepEqual(moodFromWord('Wary and desperate'), { v: -2, a: 2, d: -1, words: ['wary', 'desperate'] });
+    assert.ok(moodFromWord('Breathless') && moodFromWord('Impatient') && moodFromWord('curt and bureaucratic'), 'the words the review named');
+});
+
+test('mood words: a negated word does not count (not / no longer / never / less / n\'t), only in its own clause', async () => {
+    const { moodFromWord } = await import('../npc-mood.js');
+    assert.equal(moodFromWord('not angry'), null);
+    assert.equal(moodFromWord('never afraid'), null);
+    assert.equal(moodFromWord('less angry'), null);
+    assert.equal(moodFromWord("isn't angry"), null);
+    assert.deepEqual(moodFromWord('calm but not happy')?.words, ['calm']);
+    assert.deepEqual(moodFromWord('no longer scared, calm')?.words, ['calm'], 'the clause after the comma stands on its own');
+    assert.deepEqual(moodFromWord('not angry, furious')?.words, ['furious']);
+    assert.deepEqual(moodFromWord('angry and furious')?.words, ['angry', 'furious'], 'no negator: both count');
+});
+
+test('mood numbers the scanner gives: whole numbers clamped to -3..3, all three or none', async () => {
+    const { moodNumbers } = await import('../npc-mood.js');
+    assert.deepEqual(moodNumbers({ moodV: 2, moodA: '-1', moodD: 0 }), { v: 2, a: -1, d: 0 });
+    assert.deepEqual(moodNumbers({ moodV: 9, moodA: -9, moodD: 1.6 }), { v: 3, a: -3, d: 2 }, 'clamped and whole');
+    assert.deepEqual(moodNumbers({ v: 1, a: 1, d: -1 }), { v: 1, a: 1, d: -1 }, 'the command\'s own shape');
+    assert.equal(moodNumbers({ moodV: 1, moodA: 1 }), null, 'one missing: none');
+    assert.equal(moodNumbers({ moodV: 'high', moodA: 1, moodD: 1 }), null);
+    assert.equal(moodNumbers(null), null);
+    assert.equal(moodNumbers({ moodV: null, moodA: '', moodD: 1 }), null);
+});
+
+test('mood history: the same reply is the same record id, a netted-out move drops its row', async () => {
+    const { nextMoodLog, readMoodLog } = await import('../npc-mood.js');
+    const one = nextMoodLog(null, { n: 4, s: 'r-a', date: 'D1', change: { v: -1, a: 2, d: 0 }, why: 'first' });
+    assert.deepEqual(readMoodLog(one).map(row => [row.n, row.s]), [[4, 'r-a']]);
+    // the same index but another record id (a delete in the middle shifted the chat): another reply, another row
+    const two = nextMoodLog(one, { n: 4, s: 'r-b', date: 'D1', change: { v: 1, a: 0, d: 0 }, why: 'other' });
+    assert.deepEqual(readMoodLog(two).map(row => [row.s, row.v]), [['r-b', 1], ['r-a', -1]]);
+    // the same record id at another index: the same reply, its moves add
+    const three = nextMoodLog(two, { n: 3, s: 'r-b', date: 'D1', change: { v: 1, a: 0, d: 0 }, why: 'again' });
+    assert.deepEqual(readMoodLog(three).map(row => [row.s, row.v, row.why]), [['r-b', 2, 'other; again'], ['r-a', -1, 'first']]);
+    // a move that cancels the reply's earlier one: the row goes, the older rows stay
+    const four = nextMoodLog(two, { n: 4, s: 'r-b', date: 'D1', change: { v: -1, a: 0, d: 0 }, why: 'undo' });
+    assert.deepEqual(readMoodLog(four).map(row => row.s), ['r-a'], 'the net-zero reply has no row');
+    // no record id on either side: the index decides, as before
+    const old = nextMoodLog(null, { n: 7, date: 'D', change: { v: 1, a: 0, d: 0 } });
+    assert.equal(readMoodLog(nextMoodLog(old, { n: 7, date: 'D', change: { v: 1, a: 0, d: 0 } }))[0].v, 2);
+    assert.equal(nextMoodLog(null, { n: 1, s: 'x', change: { v: 0, a: 0, d: 0 } }), null, 'nothing moved, nothing before: nothing written');
+});
+
+test('notes host: npc.mood takes the three numbers the scan gave over the word list, writes the reply id on the history, and an unrated word keeps them', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    const slice = () => s.host.head().domains.npc;
+    const head = s.host.store.headIndex();
+    // 'Impatient' is on the list too, but the scan's own numbers win
+    assert.equal((await s.adapter.mood({ name: 'Oren', word: 'Impatient', vad: { v: 2, a: -2, d: 3 }, reply: head })).ok, true);
+    let mood = readLeaf(slice().npcs.oren.mood);
+    assert.deepEqual([mood.v, mood.a, mood.d], [2, -2, 3], 'the numbers the scan gave');
+    const row = readLeaf(slice().npcs.oren.moodLog).e[0];
+    assert.equal(row.n, head);
+    assert.equal(typeof row.s, 'string', 'the history names the reply by its record id');
+    // an unknown word without numbers: the numbers stay and the reason says so
+    await s.adapter.mood({ name: 'Oren', word: 'Zonked', reply: head });
+    mood = readLeaf(slice().npcs.oren.mood);
+    assert.deepEqual([mood.v, mood.a, mood.d], [2, -2, 3]);
+    assert.match(mood.cause, /mood word not rated/);
+    assert.deepEqual(validateNpcSlice(slice()), []);
+    const live = JSON.stringify(slice());
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(slice()), live, 'rebuild equals live');
+    // the fallback: no numbers, a known word with a negation
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.adapter.mood({ name: 'Oren', word: 'not angry, wary', reply: s.host.store.headIndex() });
+    mood = readLeaf(slice().npcs.oren.mood);
+    assert.deepEqual([mood.v, mood.a, mood.d], [-1, 1, 0], 'only "wary" counts');
+});
+
+test('notes host: npc.mood for a person the meeting has not made (it was refused) rests at their temperament, not at 0/0/0', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    const slice = () => s.host.head().domains.npc;
+    assert.equal(slice().npcs.pell, undefined);
+    assert.equal((await s.adapter.mood({ name: 'Pell', word: 'Zonked', personality: 'cheerful, warm and kind', about: '', reply: s.host.store.headIndex() })).ok, true);
+    const mood = readLeaf(slice().npcs.pell.mood);
+    assert.deepEqual([mood.v, mood.a, mood.d], [2, 0, 0], 'the mood sits at the resting mood the words give');
+    assert.deepEqual(mood.rest, { v: 2, a: 0, d: 0 }, 'so it fades toward the person\'s calm');
+    assert.deepEqual(validateNpcSlice(slice()), []);
 });

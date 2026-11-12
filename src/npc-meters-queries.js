@@ -134,14 +134,14 @@ export function createNpcQueries({
     const presentKeys = npcs => new Set(presentNames().map(name => findNpcKey(npcs, [name, ...(resolve(name)?.aliases ?? [])])).filter(Boolean));
 
     // The dossier's mood and pull (feature mood-pull; only a record that has them): `mood` { word, valence, energy, control, bars,
-    // cause, day, log (the last moves of the axes, newest first: { n, date, v, a, d, why }) } and `pull` { kind, cause, since, days, level (1..3, the top item's score), inst }. Plain data: the UI escapes the text.
+    // cause, day, rest (the resting axes it fades toward), log (the last moves of the axes, newest first: { n, date, v, a, d, why }) } and `pull` { kind, cause, since, days, level (1..3, the top item's score), inst }. Plain data: the UI escapes the text.
     function moodPullView(record) {
         const mood = normalizeMood(readLeaf(record.mood));
         const [pullRaw, instRaw] = [readLeaf(record.pull), readLeaf(record.inst)];
         const pull = isObject(pullRaw) ? pullRaw : null;
         const inst = isObject(instRaw) ? instRaw : null;
         return {
-            ...(mood ? { mood: { word: moodWord(mood), valence: mood.v, energy: mood.a, control: mood.d, bars: moodBars(mood), cause: mood.cause, day: mood.day, log: readMoodLog(readLeaf(record.moodLog)) } } : {}),
+            ...(mood ? { mood: { word: moodWord(mood), valence: mood.v, energy: mood.a, control: mood.d, bars: moodBars(mood), cause: mood.cause, day: mood.day, rest: mood.rest ?? { v: 0, a: 0, d: 0 }, log: readMoodLog(readLeaf(record.moodLog)) } } : {}),
             ...(pull ? { pull: { kind: pull.kind, cause: pull.cause, since: pull.since, days: isInt(record.day) ? Math.max(0, record.day - pull.since) : 0, level: inst && isInt(inst[INSTINCT_KEYS[pull.kind]]) ? inst[INSTINCT_KEYS[pull.kind]] : 0, inst: { ...(inst ?? {}) } } } : {}),
         };
     }

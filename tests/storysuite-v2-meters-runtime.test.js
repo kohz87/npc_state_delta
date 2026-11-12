@@ -235,7 +235,7 @@ test('hosted: a meeting the host did not keep is sent again with the next scan o
         mockState.quietResponder = async () => JSON.stringify({ npcs: [harek] });
         await turn('Harek leans on the wagon, a weathered caravan guard.');
         await sleep(300);
-        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ ...harek, mood: 'Bored and watchful' }] });
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ ...harek, mood: 'Bored and watchful', moodV: 1, moodA: -2, moodD: '2' }] });
         await turn('Harek shrugs and spits into the dust beside the wagon.');
         await sleep(300);
         console.log('RESULT ' + JSON.stringify({ total: mockState.sdk.sent.filter(item => item.type === 'npc.meet' && item.payload.name === 'Harek').length, moods: mockState.sdk.sent.filter(item => item.type === 'npc.mood').map(item => item.payload), names: api.getState().npcs.map(npc => npc.name) }));
@@ -244,6 +244,8 @@ test('hosted: a meeting the host did not keep is sent again with the next scan o
     assert.equal(result.total, 2, 'the meeting the host did not keep was sent again with a later scan of Harek, and once kept never again');
     // each mood word the scan wrote for Harek goes to the slice as npc.mood (its numbers are read there from the fixed word list), once per change
     assert.deepEqual(result.moods.map(item => [item.name, item.word]), [['Harek', 'Cynical and indifferent'], ['Harek', 'Bored and watchful']]);
+    // the three numbers the scan gave with a word travel with it (whole, -3..3); a scan that gave none sends none (the word list reads it)
+    assert.deepEqual(result.moods.map(item => item.vad), [undefined, { v: 1, a: -2, d: 2 }]);
 });
 
 test('without a v2 host the same turns send nothing, and the sidecar and the injection are the same as hosted', () => {
@@ -301,7 +303,7 @@ test('index.js: the v2 meter hooks are the identity without a host', () => {
     // Every hook asks storySuiteV2Meters() first, which is null unless the page flag is set and the adapter is hosted.
     assert.match(index, /function storySuiteV2Meters\(\) \{\n        const adapter = storyBlockV2Hosted\(\) && rt\.storySuiteV2\?\.hosted\?\.\(\) \? rt\.storySuiteV2 : null;\n        const scope = replayScope\(\);\n        return adapter && scope \? scopedAdapter\(adapter, scope\.at, scope\.sink\) : adapter;/);
     assert.match(index, /function hostedMeterView\(npcs\) \{\n        const adapter = storySuiteV2Meters\(\);\n        if \(!adapter\) return npcs;/);
-    assert.match(index, /function forwardRelationshipChangesToHost\(before, after, messageId, head = null, updates = \[\]\) \{\n        if \(replayScope\(\)\) return;[^\n]*\n        const adapter = storySuiteV2Meters\(\);\n        if \(!adapter\) return;/);
+    assert.match(index, /function forwardRelationshipChangesToHost\(before, after, messageId, head = null, updates = \[\], rows = \[\]\) \{\n        if \(replayScope\(\)\) return;[^\n]*\n        const adapter = storySuiteV2Meters\(\);\n        if \(!adapter\) return;/);
     assert.match(index, /function hostedSecretsEditorHtml\(npc\) \{\n        const adapter = storySuiteV2Meters\(\);\n        if \(!adapter\) return '';/);
     assert.match(index, /const v2Edits = hostedMeters \? hostedMeters\.readEditor\(id => document\.getElementById\(id\)\?\.value, current\) : null;/);
     assert.match(index, /const meterViews = storySuiteV2Meters\(\)\?\.dossierMeters\?\.\(state\.npcs\) \?\? \{\};/);

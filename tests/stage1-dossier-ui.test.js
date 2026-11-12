@@ -748,3 +748,13 @@ test('six sections: the Mood tile opens Mood with the Pull in its foot, Ties cou
   assert.doesNotMatch(css, /\.delta-notes-block h4 \{[^}]*margin/, 'no heading sets its own spacing');
   for (const id of ['mood', 'with', 'secrets']) assert.equal((sectionScreenHtml(id, npc, {}).match(/<h4(?! class="delta-subhead")/g) || []).length, 0, `${id}: every sub-heading carries the shared class`);
 });
+
+test('VADFIX2: a quiet reply for a mood that already rests says "no mood change this reply", not that it fades', async () => {
+  const at = (axes, rest) => ({ ...dossierDetailProjection({ id: 'r', name: 'Rika', mood: 'Steady' }, {}, {}), v2Meters: v2MetersProjection({ mood: { word: 'Steady', valence: axes[0], energy: axes[1], control: axes[2], bars: { energy: 3 + axes[1], control: 3 + axes[2], max: 6 }, cause: '', rest: { v: rest[0], a: rest[1], d: rest[2] }, log: [] }, secrets: [], bars: [] }) });
+  const resting = sectionScreenHtml('mood', at([1, 0, 0], [1, 0, 0]), { reply: 9 });
+  assert.match(resting, /no mood change this reply/);
+  assert.doesNotMatch(resting, /fading toward/);
+  const away = sectionScreenHtml('mood', at([-2, 2, 0], [0, 0, 0]), { reply: 9 });
+  assert.match(away, /no change · fading toward (her|his|their) calm/, 'still away from rest: it fades');
+  assert.doesNotMatch(away, /no mood change this reply/);
+});

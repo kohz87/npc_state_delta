@@ -82,7 +82,7 @@ function moodHistoryHtml(npc, mood, reply) {
     if (!mood.known) return `<div class="delta-sheet-recent">${title}<p class="delta-muted">No mood change recorded yet.</p></div>`;
     const now = wholeNumber(reply);
     const mark = number => (Number.isInteger(number) ? `<small>#${number}</small>` : '');
-    const quiet = mood.quiet ? [changeRowHtml(`<span class="delta-chg-when">${mark(now)}</span>`, `<span class="delta-chg-d" data-good="muted">no change \u00b7 fading toward ${escapeHtml(possessiveWord(npc.gender, { lower: true }))} calm</span>`, [])] : [];
+    const quiet = mood.quiet ? [changeRowHtml(`<span class="delta-chg-when">${mark(now)}</span>`, `<span class="delta-chg-d" data-good="muted">${mood.atRest ? 'no mood change this reply' : `no change \u00b7 fading toward ${escapeHtml(possessiveWord(npc.gender, { lower: true }))} calm`}</span>`, [])] : [];
     const moves = mood.log.map(row => {
         const heads = MOOD_AXES.filter(([key]) => row[key]).map(([key, label]) => `<span class="delta-chg-d" data-good="${row[key] > 0 ? 'yes' : 'no'}">${escapeHtml(label)} ${escapeHtml(signedText(row[key]))}</span>`).join(' \u00b7 ');
         return changeRowHtml(`<span class="delta-chg-when">${[row.date ? escapeHtml(row.date) : '', mark(row.n)].filter(Boolean).join('<br>')}</span>`, heads, [row.why || NO_REASON]);

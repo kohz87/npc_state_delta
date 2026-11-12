@@ -373,11 +373,11 @@ export function settle(record, { defs, stages, rules, name, rungs = [], conflict
 // per-field ops need the object), text otherwise (a first read, a new reply). So a Re-read of an old reply stores the same ops.
 export const asStored = (ctx, key, field, value) => (isObject(ctx?.standing?.domains?.npc?.npcs?.[key]?.[field]) ? value : leafText(value));
 /** Writes a mood move on the record in the line's own op: the new mood and, when an axis moved from `prev` settled to `day`, the reply's entry of the mood history (record.moodLog). */
-export function writeMood(ctx, key, record, { prev, mood, day, n = null, date = '', why = mood.cause }) {
+export function writeMood(ctx, key, record, { prev, mood, day, n = null, s = null, date = '', why = mood.cause }) {
     const was = decayMood(prev, day);
     record.mood = asStored(ctx, key, 'mood', mood);
     // A Re-read of a reply the older code read (the standing holds no mood history for the person) keeps writing what that read wrote: no history entry.
-    const text = !ctx.standing || own(ctx.standing.domains?.npc?.npcs?.[key], 'moodLog') ? nextMoodLog(record.moodLog, { n, date, change: { v: mood.v - was.v, a: mood.a - was.a, d: mood.d - was.d }, why }) : null;
+    const text = !ctx.standing || own(ctx.standing.domains?.npc?.npcs?.[key], 'moodLog') ? nextMoodLog(record.moodLog, { n, s, date, change: { v: mood.v - was.v, a: mood.a - was.a, d: mood.d - was.d }, why }) : null;
     if (text) record.moodLog = asStored(ctx, key, 'moodLog', JSON.parse(text));
 }
 /** The reason a story line gave, as the reply's last event may keep it: a Re-read of a reply whose earlier read kept none (older code) keeps none. */

@@ -146,7 +146,7 @@ export function moodTile(npc, reply = null) {
         const log = Array.isArray(mood.log) ? mood.log : [];
         const latest = now !== null && log[0] && wholeNumber(log[0].n) === now ? log[0] : null;
         const rows = MOOD_AXES.map(([key, label, tone]) => ({ key, label, tone, value: Math.round(Number(object(mood.axes)[key]) || 0), change: latest ? Math.round(Number(latest[key]) || 0) : 0 }));
-        return { title: 'Mood', text: plain(npc.mood) || mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause, rows, log, known: true, quiet: now !== null && !latest };
+        return { title: 'Mood', text: plain(npc.mood) || mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause, rows, log, known: true, quiet: now !== null && !latest, atRest: ['v', 'a', 'd'].every(key => Math.round(Number(object(mood.axes)[key]) || 0) === Math.round(Number(object(mood.rest)[key]) || 0)) };
     }
     const rest = moodBars(null);
     return { title: 'Mood', text: plain(npc.mood) || moodWord(null), feeling: rest.max / 2, energy: rest.energy, control: rest.control, max: rest.max, rows: MOOD_AXES.map(([key, label, tone]) => ({ key, label, tone, value: 0, change: 0 })), log: [], known: false, quiet: false };
