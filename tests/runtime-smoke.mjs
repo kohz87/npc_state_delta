@@ -522,7 +522,7 @@ try {
     assert.equal('jsonSchema' in rawScanArgs, false, 'raw scanner must not depend on provider structured-output schemas');
     assert.equal('quietPrompt' in rawScanArgs, false);
     const rawBackfillArgs = [...mockState.rawCalls].reverse().map(call => call?.[0] || {}).find(args => /backfill scanner/i.test(String(args.systemPrompt || ''))) || {};
-    assert.match(String(rawBackfillArgs.prompt || ''), /targeted dossier backfill extractor/i);
+    assert.match(String(rawBackfillArgs.prompt || ''), /TARGETED REFRESH FROM CHAT/);   // (FOLLOWREFRESH) a new person's follow-up reads as a Refresh
     assert.match(String(rawBackfillArgs.prompt || ''), /Runtime custom memory rubric/i, 'targeted backfill should use the same memory criteria');
     assert.equal('jsonSchema' in rawBackfillArgs, false, 'backfill must not depend on provider structured-output schemas');
     assert.equal(rawBackfillArgs.responseLength, 3200);
@@ -1016,7 +1016,7 @@ try {
     mockState.quietResponder = async (args = {}) => {
         if (args.jsonSchema) return '{"npcs":[]}';
         const prompt = String(args.prompt || '');
-        if (/targeted dossier backfill extractor/i.test(prompt) && /Requested NPC: Myla/i.test(prompt)) {
+        if (/targeted dossier backfill extractor|TARGETED REFRESH FROM CHAT/i.test(prompt) && /(?:Requested|Target) NPC: Myla/i.test(prompt)) {
             assert.match(prompt, /World State:\s*Myla/i, 'Myla backfill prompt must preserve World State evidence');
             assert.match(prompt, /NPC Inner Chatter:.*Myla/i, 'Myla backfill prompt must preserve Inner Chatter evidence');
             return JSON.stringify({ npcs: [{
@@ -1025,7 +1025,7 @@ try {
                 relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
             }] });
         }
-        if (/targeted dossier backfill extractor/i.test(prompt) && /Requested NPC: Toris/i.test(prompt)) {
+        if (/targeted dossier backfill extractor|TARGETED REFRESH FROM CHAT/i.test(prompt) && /(?:Requested|Target) NPC: Toris/i.test(prompt)) {
             assert.match(prompt, /World State:.*Toris/i, 'Toris backfill prompt must preserve World State evidence');
             assert.match(prompt, /NPC Inner Chatter:.*Toris/i, 'Toris backfill prompt must preserve Inner Chatter evidence');
             return JSON.stringify({ npcs: [{
@@ -1049,7 +1049,7 @@ try {
     const backfillInline = state.inlineCards.find(entry => entry.messageId === backfillStoryId);
     assert.ok(backfillInline, 'present manually backfilled NPCs should create an inline snapshot under the latest assistant scene');
     assert.deepEqual(backfillInline.cards.map(card => card.name).sort(), ['Myla', 'Toris Vale']);
-    const latestBackfillCalls = mockState.rawCalls.filter(call => /targeted dossier backfill extractor/i.test(String(call?.[0]?.prompt || '')));
+    const latestBackfillCalls = mockState.rawCalls.filter(call => /backfill scanner/i.test(String(call?.[0]?.systemPrompt || '')));
     assert.ok(latestBackfillCalls.length >= 2);
     assert.ok(latestBackfillCalls.every(call => !('jsonSchema' in (call?.[0] || {}))), 'real backfill calls should omit structured-output schemas');
 
@@ -1065,7 +1065,7 @@ try {
     let nerisBackfillAttempt = 0;
     mockState.quietResponder = async (args = {}) => {
         const prompt = String(args.prompt || '');
-        if (/targeted dossier backfill extractor/i.test(prompt) && /Requested NPC: Neris/i.test(prompt)) {
+        if (/targeted dossier backfill extractor|TARGETED REFRESH FROM CHAT/i.test(prompt) && /(?:Requested|Target) NPC: Neris/i.test(prompt)) {
             nerisBackfillAttempt += 1;
             if (nerisBackfillAttempt === 1) {
                 return '{"npcs":[{"name":"Neris","role":"Records Clerk","appearance":"Young woman with dark';
@@ -1152,7 +1152,7 @@ try {
                 relationshipChangeReason: 'Mira accepts and stays to eat with Kazuma.',
             }] });
         }
-        if (/targeted dossier backfill extractor/i.test(prompt) && /Requested NPC: Mira/i.test(prompt)) {
+        if (/targeted dossier backfill extractor|TARGETED REFRESH FROM CHAT/i.test(prompt) && /(?:Requested|Target) NPC: Mira/i.test(prompt)) {
             miraBackfillCalls += 1;
             return JSON.stringify({ npcs: [{
                 name: 'Mira', identityKind: 'proper_name', dossierSignal: 'meaningful', role: 'Guild porter',
@@ -1235,7 +1235,7 @@ try {
             }
             return JSON.stringify({ npcs: rows });
         }
-        if (/targeted dossier backfill extractor/i.test(prompt) && /Requested NPC: Mira/i.test(prompt)) {
+        if (/targeted dossier backfill extractor|TARGETED REFRESH FROM CHAT/i.test(prompt) && /(?:Requested|Target) NPC: Mira/i.test(prompt)) {
             miraContinuityCalls += 1;
             const id = globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Mira')?.id;
             return JSON.stringify({ npcs: [{
@@ -1244,7 +1244,7 @@ try {
                 relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
             }] });
         }
-        if (/targeted dossier backfill extractor/i.test(prompt) && /^Requested NPC: Neri$/im.test(prompt)) {
+        if (/targeted dossier backfill extractor|TARGETED REFRESH FROM CHAT/i.test(prompt) && /^(?:Requested|Target) NPC: Neri(?: \(.*\))?$/im.test(prompt)) {
             neriBackfillCalls += 1;
             const id = globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Neri')?.id;
             return JSON.stringify({ npcs: [{

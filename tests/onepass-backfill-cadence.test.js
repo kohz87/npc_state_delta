@@ -51,7 +51,7 @@ try {
     globalThis.ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
     // A backfill finds the NPC it asks for; every other request finds nothing new.
     mockState.quietResponder = async (args = {}) => {
-        const asked = String(args.prompt || '').match(/^Requested NPC: (.+)$/m)?.[1];
+        const asked = (/backfill scanner/i.test(String(args.systemPrompt || '')) ? String(args.prompt || '').match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] : undefined);
         return asked ? JSON.stringify({ npcs: [{ name: asked, present: true, role: 'regular', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : '{"npcs":[]}';
     };
     const emitAll = async (event, ...args) => { await Promise.all((mockState.listeners.get(event) || []).map(fn => fn(...args))); };
@@ -350,4 +350,31 @@ test('send-drop: an earlier message edited during the scan (nothing appended) ru
     const r = runSend('send-edit', { edit: true, sendAt: 150, settle: 4000 });
     assert.equal(r.total, 2, `scanner calls: ${r.total}`);
     assert.ok(r.names.includes('Yunyun'), 'its result landed: ' + JSON.stringify(r.names));
+});
+
+test('FOLLOWREFRESH: a new person\'s follow-up is read like a Refresh (memories, tie, look), keeps the reply\'s one-pass live fields and never moves meters', () => {
+    const r = runCalls('followrefresh', true, async ({ reply, mockState }) => {
+        const prompts = [];
+        mockState.quietResponder = async (args = {}) => {
+            if (!/backfill scanner/i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            prompts.push(String(args.prompt || ''));
+            return JSON.stringify({ npcs: [{ name: 'Yunyun', present: false, mood: 'furious', goal: 'leave town', status: 'asleep', location: 'the cellar', role: 'adventurer',
+                memories: ['Yunyun once saved a lost lamb on the moor.'], keyRelationships: ['Mira — innkeeper | trades gossip with her'],
+                overallAppearance: 'A slim young woman, long dark hair, crimson eyes.', relationshipImpact: 'major', relationshipDelta: { trust: 5, affection: 5, desire: 0, tension: 0 }, relationshipChangeReason: 'x' }] });
+        };
+        await reply('Yunyun waves at the gate.', { npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', mood: 'calm', goal: 'guard the gate', status: 'standing watch', location: 'the gate', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] });
+        const npc = globalThis.NPCStateDelta.getState().npcs.find(item => item.name === 'Yunyun');
+        return { count: prompts.length, refreshForm: /TARGETED REFRESH FROM CHAT/.test(prompts[0] || ''), oldForm: /targeted dossier backfill extractor/.test(prompts[0] || ''), fill: /FILL LOOKS/.test(prompts[0] || ''), window: /^\[m\d+\]/m.test(prompts[0] || ''),
+            memories: npc.memories, ties: npc.keyRelationships, look: npc.overallAppearance, live: { present: npc.present, mood: npc.mood, goal: npc.goal, status: npc.status, location: npc.location }, relationship: npc.relationship };
+    });
+    assert.equal(r.count, 1, 'still one call for the new person');
+    assert.equal(r.refreshForm, true);
+    assert.equal(r.oldForm, false);
+    assert.equal(r.fill, true, 'the look fill rides on the same call');
+    assert.equal(r.window, true, 'the Refresh story window (with message ids)');
+    assert.ok(r.memories.some(text => /lost lamb/.test(text)), 'memories come back like a Refresh');
+    assert.ok(r.ties.some(text => /^Mira/.test(text)), 'ties come back like a Refresh');
+    assert.match(r.look || '', /crimson eyes/, 'the fill is kept');
+    assert.deepEqual(r.live, { present: true, mood: 'calm', goal: 'guard the gate', status: 'standing watch', location: 'the gate' }, 'the same reply\'s one-pass live fields are kept');
+    assert.deepEqual({ ...r.relationship }, { trust: 0, affection: 0, desire: 0, tension: 0 }, 'meters never move');
 });

@@ -74,8 +74,8 @@ test('through the synthetic host: a person met on a non-catch-up reply is filled
         mockState.quietResponder = async (args = {}) => {
             const text = JSON.stringify(args);
             prompts.push(text);
-            if (/targeted dossier backfill extractor/.test(text)) {
-                const name = /Requested NPC: (\w+)/.exec(text.replace(/\\n/g, '\n'))?.[1];
+            if (/isolated dossier backfill scanner/.test(text)) {
+                const name = /(?:Requested|Target) NPC: (\w+)/.exec(text.replace(/\\n/g, '\n'))?.[1];
                 return JSON.stringify({ npcs: [row({ name, overallAppearance: 'A slim young woman, russet hair, amber eyes.', appearance: 'A salt-stained oilskin coat.' })] });
             }
             return JSON.stringify({ npcs: phase === 1 ? [row({ name: 'Tamsin' })] : [row({ name: 'Mira', role: 'innkeeper' })] });
@@ -90,10 +90,10 @@ test('through the synthetic host: a person met on a non-catch-up reply is filled
         await reply('Who runs the ferry?', 'Tamsin, the ferry keeper, ties the boat and asks the stranger for the toll. The tide is out and the reeds hiss.');
         const npc = name => runtime.getDossierState().npcs.find(item => item.name === name);
         assert.ok(npc('Tamsin'), 'the person was admitted');
-        const forName = (name, list = prompts) => list.filter(text => /targeted dossier backfill extractor/.test(text) && text.includes(`Requested NPC: ${name}`));
+        const forName = (name, list = prompts) => list.filter(text => /isolated dossier backfill scanner/.test(text) && (text.includes(`Target NPC: ${name} (`) || text.includes(`Requested NPC: ${name}`)));   // a new admission's follow-up reads as a Refresh; a missed-participant repair as a backfill
         assert.ok(forName('Tamsin').length >= 1, 'the new admission was backfilled');
         assert.ok(forName('Tamsin').every(text => text.includes('FILL LOOKS')), 'the backfill asked for the fill');
-        assert.ok(!prompts.some(text => !/backfill extractor/.test(text) && text.includes('FILL LOOKS')), 'no other call carries the line');
+        assert.ok(!prompts.some(text => !/backfill scanner/.test(text) && text.includes('FILL LOOKS')), 'no other call carries the line');
         assert.match(npc('Tamsin').overallAppearance || '', /russet hair/, 'filled without quoted evidence');
         // Phase 2: the broad scan omits Tamsin in an exchange she takes part in: a missed-participant repair (not a new admission).
         phase = 2;
