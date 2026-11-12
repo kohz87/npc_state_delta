@@ -63,13 +63,14 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-desire .delta-sheet-track b { background:var(--des, #b7a3cf); }
 #${ROOT_ID} .delta-sheet-tension .delta-sheet-track b { background:var(--dsk-ten, #d9a273); }
 /* The mood rows are the meters' own rows plus the reply's change as a chip on the same line; each axis its own colour (label and fill). */
-#${ROOT_ID} .delta-sheet-meter-chip { grid-template-columns:clamp(50px,7cqw,92px) minmax(28px,1fr) 30px minmax(26px,auto); gap:6px; }
+#${ROOT_ID} .delta-sheet-meter-chip { grid-template-columns:clamp(50px,7cqw,92px) minmax(28px,1fr) 30px 34px; gap:6px; }
 #${ROOT_ID} .delta-sheet-chip { font-style:normal; font-size:var(--dt-kick); font-weight:700; line-height:1.5; border:1px solid; border-radius:6px; padding:0 6px; justify-self:start; font-variant-numeric:tabular-nums; }
+#${ROOT_ID} .delta-sheet-chip-slot { display:block; min-width:0; }
 #${ROOT_ID} .delta-sheet-chip[data-good="yes"] { color:var(--good, var(--delta-good)); border-color:color-mix(in srgb, var(--good, var(--delta-good)) 50%, transparent); }
 #${ROOT_ID} .delta-sheet-chip[data-good="no"] { color:var(--bad, var(--delta-danger)); border-color:color-mix(in srgb, var(--bad, var(--delta-danger)) 50%, transparent); }
 #${ROOT_ID} .delta-mood-rows { margin-top:6px; }
 /* inside a tile (half width when the Pull tile sits beside it) the columns are tighter so the chip stays inside the tile and the bar keeps its length */
-#${ROOT_ID} .delta-tile .delta-sheet-meter.delta-sheet-meter-chip { grid-template-columns:clamp(40px,4.4cqw,64px) minmax(0,1fr) 22px auto; gap:5px; font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-tile .delta-sheet-meter.delta-sheet-meter-chip { grid-template-columns:clamp(40px,4.4cqw,64px) minmax(0,1fr) 22px 30px; gap:5px; font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-tile .delta-sheet-chip { padding:0 4px; }
 #${ROOT_ID} .delta-sheet-meter.delta-mood-feel > span { color:var(--feel, #e2c46f); font-weight:700; }
 #${ROOT_ID} .delta-sheet-meter.delta-mood-energy > span { color:var(--energy, #e08a5b); font-weight:700; }
@@ -175,7 +176,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-track { height:5px; border-radius:3px; }
 #${ROOT_ID} .delta-sheet-track b { border-radius:3px; }
 #${ROOT_ID} .delta-sheet-meter { grid-template-columns:clamp(62px,7cqw,92px) minmax(0,1fr) 38px; font-size:var(--dt-body); }
-#${ROOT_ID} .delta-sheet-meter.delta-sheet-meter-chip { grid-template-columns:clamp(54px,7cqw,92px) minmax(28px,1fr) 32px minmax(26px,auto); }
+#${ROOT_ID} .delta-sheet-meter.delta-sheet-meter-chip { grid-template-columns:clamp(54px,7cqw,92px) minmax(28px,1fr) 32px 34px; }
 #${ROOT_ID} .delta-sheet-meter > span { color:var(--delta-text); }
 #${ROOT_ID} .delta-secret-bar { height:12px; border-radius:3px; background:#0b0a0c; background-image:none; }
 /* Ties (mockup v22): type heading, name, description stacked; every entry has its own divider; Older ties fold last. Sizes follow the container (cqw). */
