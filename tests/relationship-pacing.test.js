@@ -761,7 +761,7 @@ test('pull trace (run 3): a hook names its giver, and the thread counts its own 
     assert.equal(stepPull({}, { day: 4, party: false, threads: [{ id: 'x', title: 't' }] }).track.threads.x, 4, 'a host that gives no opening day: the day first read, as before');
 });
 
-test('pull trace (run 3): Pull and Mood reach the prompt as kept lines (before the Changes cue), and survive a tight tail budget', async () => {
+test('pull trace (run 3): Pull and Mood reach the prompt as kept lines (after the Changes cue), and survive a tight tail budget', async () => {
     const { assemble } = await import('./vendor/story-block/src/v2/prompt.js');
     const s = await moodSuite();
     await s.setDay(1);
@@ -769,9 +769,9 @@ test('pull trace (run 3): Pull and Mood reach the prompt as kept lines (before t
     await s.say(['~ place Harbor | docks | Dunmere', '~ npc Oren | trust: -3 | impact: major | reason: a broken oath']);
     const tail = s.host.registry.module(MODULE_ID).context.tail({ state: s.host.head(), chat: { length: s.host.ctx.chat.length } });
     const kept = tail.lines.filter(line => typeof line === 'object' && line.keep === true).map(line => line.text);
-    assert.match(kept[0], /^Pull: Oren: awe \(first time at Harbor\)\.$/);
-    assert.match(kept[1], /^Mood: Oren /);
-    assert.match(kept[2], /^Whenever anything changed/, 'Pull and Mood change the scene, so they come before the cue');
+    assert.match(kept[0], /^Whenever anything changed/, 'the cue is first of the kept lines (as on main); Pull and Mood take what the cap leaves');
+    assert.match(kept[1], /^Pull: Oren: awe \(first time at Harbor\)\.$/);
+    assert.match(kept[2], /^Mood: Oren /);
     assert.ok(!tail.optional.some(line => /^(Pull|Mood): /.test(line)), 'not optional lines: the host drops those first');
     const view = { state: s.host.head(), query: () => null, settings: {}, chat: { length: s.host.ctx.chat.length } };
     const built = assemble({ registry: s.host.registry, view, settings: { tailBudget: 60 } });
@@ -779,7 +779,7 @@ test('pull trace (run 3): Pull and Mood reach the prompt as kept lines (before t
     assert.match(built.tailText, /^Mood: Oren /m);
 });
 
-test('pull + mood + cue + another module\'s kept line, tailBudget 550: all reach the prompt, the other module\'s kept line stays, the tail is under budget; a spent cap drops the cue first', async () => {
+test('pull + mood + cue + another module\'s kept line, tailBudget 550: all reach the prompt, the other module\'s kept line stays, the tail is under budget; a spent cap keeps the cue and gives up Pull and Mood first', async () => {
     const { assemble, estimateTokens } = await import('./vendor/story-block/src/v2/prompt.js');
     async function run(keptTokens) {
         const s = await moodSuite();
@@ -798,12 +798,49 @@ test('pull + mood + cue + another module\'s kept line, tailBudget 550: all reach
     assert.match(roomy.built.tailText, /^Mood: Oren /m);
     assert.match(roomy.built.tailText, /Whenever anything changed/);
     const at = text => roomy.built.tailText.indexOf(text);
-    assert.ok(at('Pull: Oren') < at('Mood: Oren') && at('Mood: Oren') < at('Whenever anything changed'), 'Pull, Mood, then the cue');
+    assert.ok(at('Whenever anything changed') < at('Pull: Oren') && at('Pull: Oren') < at('Mood: Oren'), 'the cue, then Pull, then Mood');
     assert.ok(estimateTokens(roomy.built.tailText) <= 550, `tail ${estimateTokens(roomy.built.tailText)} tokens`);
     const tight = await run(100);
     assert.ok(tight.built.tailText.includes(tight.initiative), 'a spent cap never costs the other module\'s kept line');
     assert.ok(estimateTokens(tight.built.tailText) <= 550, `tail ${estimateTokens(tight.built.tailText)} tokens`);
-    assert.ok(!/Whenever anything changed/.test(tight.built.tailText) || /^Pull: /m.test(tight.built.tailText), 'if anything gives, the cue (last) goes before Pull');
+    assert.ok(!/Whenever anything changed/.test(tight.built.tailText), 'only 20 tokens left of the cap: the 49-token cue does not fit, as on main (#315); Pull and Mood do not change that');
+});
+
+test('run-3 shape, tailBudget 550, 1/2/3 present people with a Pull: the cue and the first Pull reach the prompt, another module\'s kept line stays, a line over the felt cap is optional', async () => {
+    const { assemble, estimateTokens } = await import('./vendor/story-block/src/v2/prompt.js');
+    const record = (name, extra) => ({ name, meters: { trust: 5, affection: 0, desire: 0, tension: 0 }, stages: {}, unlocked: [], turn: { reply: 0, from: {} }, day: 5, ...extra });
+    const awe = 'first time at River wall, Highmark Capital';
+    const shapes = {
+        1: { oren: record('Oren', { mood: { v: -2, a: 2, d: -2, day: 5, cause: 'x' }, pull: { kind: 'awe', cause: 'first time at Harbor', since: 5 } }) },
+        2: { marda: record('Marda', { pull: { kind: 'awe', cause: awe, since: 5 } }), pell: record('Pell', { pull: { kind: 'awe', cause: awe, since: 5 } }) },
+        3: {
+            mira: record('Mira', { mood: { v: -2, a: 2, d: -2, day: 5, cause: 'x' }, pull: { kind: 'closure', cause: 'Dockside Recruitment and the missing ledger of Garvan', since: 1 } }),
+            oren: record('Oren', { mood: { v: 2, a: 0, d: 0, day: 5, cause: '' }, pull: { kind: 'closure', cause: 'The Stolen Letter from the Harbourmaster Office', since: 2 } }),
+            tomas: record('Tomas', { mood: { v: -3, a: 3, d: 0, day: 5, cause: 'x' }, pull: { kind: 'awe', cause: awe, since: 5 } }),
+        },
+    };
+    const filler = Array.from({ length: 11 }, (_, i) => `Scene note ${i + 1}: ${'the harbour street holds its breath '.repeat(5)}`.trim());
+    const initiative = 'Initiative: Pell acts first, then Marda, then the dock guards, then Corran.';
+    for (const [count, npcs] of Object.entries(shapes)) {
+        const names = Object.values(npcs).map(r => r.name);
+        const part = createNpcPart({ settings: () => ({}), present: () => names, feature: () => undefined });
+        const nsd = { moduleId: 'npc-state-delta', name: 'NPC State Delta', domains: ['npc'], kinds: [], static: () => '', tail: part.context.tail, budget: part.context.budget };
+        const dir = { moduleId: 'story-director', name: 'Story Director', domains: ['director'], kinds: [], tail: () => ({ lines: [{ text: initiative, keep: true }, ...filler], optional: ['Director optional line.'] }) };
+        const view = { state: { domains: { npc: { problems: [], npcs } } }, chat: { length: 1 } };
+        const built = assemble({ registry: { contexts: () => [nsd, dir] }, view, settings: { tailBudget: 550 }, keptTokens: 24 });
+        const t = built.tailText;
+        const first = Object.values(npcs)[0].name;
+        assert.ok(t.includes(initiative), `${count}: the other module's kept line stays`);
+        assert.match(t, /Whenever anything changed/, `${count} present: the cue reaches the prompt`);
+        assert.match(t, new RegExp(`^Pull: ${first}: `, 'm'), `${count} present: the first person's Pull reaches the prompt\n${t}`);
+        assert.ok(estimateTokens(t) <= 550, `${count}: tail ${estimateTokens(t)} tokens`);
+        const raw = part.context.tail(view);
+        const keptTokens = raw.lines.filter(l => typeof l === 'object' && l.keep).reduce((n, l) => n + estimateTokens(l.text), 0);
+        assert.ok(keptTokens <= 120 - 24 - 19, `${count}: NSD's kept lines (${keptTokens}) fit what pulse and Initiative leave`);
+        assert.ok(raw.lines.every(l => typeof l === 'object' || !/^(Pull|Mood): /.test(l)), 'no Pull or Mood line is a required plain line');
+        if (count === '3') assert.ok(raw.optional.some(l => /^Pull: Oren/.test(l)), 'the other people\'s Pull is optional');
+        console.log(`TAIL ${count}\n${t.split('\n').filter(l => !/^Scene note/.test(l)).join('\n')}\n--- ${estimateTokens(t)} tokens`);
+    }
 });
 
 test('pull: a person away (key people) feels left behind; a failing or missing query is no signal', async () => {
@@ -846,18 +883,17 @@ test('the tail tells mood and pull for present people only; feature off: the tai
     const on = make(true);
     assert.equal(on.context.static(), off.context.static(), 'the static prompt never changes');
     const told = on.context.tail(view);
-    // The cue stays last of the lines; Pull and Mood come just before it (they change the scene).
+    // The cue stays where it was among the lines; Pull and Mood come after it (they take what the kept cap leaves).
     const cueAt = base.lines.length - 1;
-    assert.deepEqual(told.lines.slice(0, cueAt), base.lines.slice(0, cueAt), 'the meter lines are untouched');
-    assert.deepEqual(told.lines[told.lines.length - 1], base.lines[cueAt], 'the cue is still the last line');
-    // Kept lines (run 3: as optional lines the host's tail budget cut them): Pull first, then Mood, before the cue.
-    const feltLines = told.lines.slice(cueAt, -1);
+    assert.deepEqual(told.lines.slice(0, cueAt + 1), base.lines.slice(0, cueAt + 1), 'the meter lines and the cue are untouched');
+    // Kept lines (run 3: as optional lines the host's tail budget cut them): the first person's Pull, then Mood; the others are optional.
+    const feltLines = told.lines.slice(cueAt + 1);
     const felt = feltLines.map(line => line.text);
     assert.ok(feltLines.every(line => line.keep === true));
-    assert.deepEqual(felt, ['Pull: Mira: closure (the stolen letter, 3 days).', 'Mood: Mira alarmed, cornered; Oren content.'], 'present people only: Tomas is not here');
-    assert.deepEqual(noCue(told.optional), [], 'no mood or pull line is optional');
+    assert.deepEqual(felt, ['Pull: Mira: closure (the stolen letter, 3 days).', 'Mood: Mira alarmed, cornered.'], 'present people only: Tomas is not here');
+    assert.deepEqual(noCue(told.optional), ['Mood: Oren content.'], 'the second person is an optional line, never a required one');
     const tokens = text => Math.ceil(text.length / 4);
-    assert.ok(tokens(felt.join('\n')) <= 30, `the two lines stay small (${tokens(felt.join('\n'))} tokens, budget ${CONTEXT_BUDGET})`);
+    assert.ok(tokens(felt.join('\n')) <= 28, `the two lines stay small (${tokens(felt.join('\n'))} tokens, budget ${CONTEXT_BUDGET})`);
     assert.ok(felt.every(line => !/[<>]/.test(line)));
 });
 
