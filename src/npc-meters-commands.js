@@ -138,7 +138,7 @@ export function createNpcCommands({
          * by the given amounts, with the same range, per-reply and per-NPC clamps as a story line.
          * Delta's own scanner sends its relationship changes this way while hosted (`start`: the
          * values the dossier had before them, for an NPC the slice has no entry for yet; `impact`: the tier the scanner gave the event,
-         * which the day's allowance counts like a story line's: one event however many meters it names; none given: not counted). Only
+         * which the day's allowance counts like a story line's: one event however many meters it names; none given: not counted; `reason`: the scanner's words for it). Only
          * Delta's scanner and another module's command (ctx.call) may send it: a button, screen or
          * pack at the top (cause ui, no calling module) is refused, as the host's own steps are.
          */
@@ -150,7 +150,8 @@ export function createNpcCommands({
             const defs = defsFrom(normalized(ctx.settings(), ctx));
             const changes = changesFrom(payload?.meters, defs, 'add', problems).filter(change => change.value !== 0);
             const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
-            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply: commandReply(ctx, at), at, seed: isObject(payload?.start) ? payload.start : null, yieldToStory: true, scanTier: payload?.impact });
+            // (rule NSDFOLLOW-3) `reason`: the scanner's reason for the event, kept on the reply's last event as a story line's is (why; only for a read that keeps one).
+            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply: commandReply(ctx, at), at, seed: isObject(payload?.start) ? payload.start : null, yieldToStory: true, scanTier: payload?.impact, scanWhy: clean(payload?.reason, 80) });
         },
         /**
          * npc.set { name, meters: { meter: n }, reply? }: the reader's own values (range only). From
