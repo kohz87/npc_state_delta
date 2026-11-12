@@ -188,8 +188,11 @@ function onePassEvidence(rows, npc) {
     return Object.keys(why).length ? why : null;
 }
 
-// A durable look the scan refused (the story did not explain a change): one entry per person, for a Problem and a next-reply cue.
-export function refusedLooks(prior, after, updates = []) {
+// A durable look the scan refused (the story did not explain a change): one entry per person, for a Problem and a next-reply cue;
+// `swaps` when the rest of the look was taken but a swapped trait was kept (card traits win). (card traits win) A role rewrite the
+// scan refused (no roleState "update" + reason + grounding), from the profile updates or the npcs rows: one { id, name, text }
+// per person, a Problem only (no cue, so nothing the story is told changes).
+export function refusedLooks(prior, after, updates = [], rows = []) {
     const refused = [];
     const afterBy = new Map((after || []).map(npc => [npc?.id, npc]));
     for (const row of Array.isArray(updates) ? updates : []) {
@@ -197,7 +200,17 @@ export function refusedLooks(prior, after, updates = []) {
         const now = afterBy.get(row?.id);
         if (!was || !now || now.archived) continue;
         const rejected = rejectedOverallLook(was.overallAppearance, now.overallAppearance, row);
-        if (rejected && !refused.some(item => item.id === now.id)) refused.push({ id: now.id, name: now.name, before: was.overallAppearance, incoming: rejected.incoming });
+        if (rejected && !refused.some(item => item.id === now.id)) refused.push({ id: now.id, name: now.name, before: was.overallAppearance, incoming: rejected.incoming, ...(rejected.swaps ? { swaps: rejected.swaps } : {}) });
+    }
+    const roles = new Set();
+    for (const row of [...(Array.isArray(updates) ? updates : []), ...(Array.isArray(rows) ? rows : [])]) {
+        const was = prior.get(row?.id);
+        const now = afterBy.get(row?.id);
+        const held = String(was?.role ?? '').trim();
+        const said = typeof row?.role === 'string' ? row.role.replace(/\s+/g, ' ').trim() : '';
+        if (!now || now.archived || roles.has(now.id) || (Array.isArray(was?.manualProfileFields) && was.manualProfileFields.includes('role')) || !held || !said || normalizeName(said) === normalizeName(held) || normalizeName(now.role) !== normalizeName(held)) continue;
+        roles.add(now.id);
+        refused.push({ id: now.id, name: now.name, text: `Role change refused: the story called ${now.name} "${said.slice(0, 60)}"; the record keeps "${held.slice(0, 60)}".` });
     }
     return refused;
 }

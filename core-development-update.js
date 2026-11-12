@@ -11,6 +11,7 @@ import { durableTextAccepted, incomingCustomFields, incomingKeyRelationships, me
 import { PROFILE_EVIDENCE_FIELDS } from './src/fields/registry.js';
 import { durableProfileCollectionCandidateGrounded, durableProfileCollectionEquivalent, groundedBehaviorProfile, mergeBehaviorProfileRefinements, normalizeBehaviorProfile, reconcileBehaviorProfileWithPersonality, recoverBehaviorProfileKeepAdditions } from './core-behavior.js';
 import { developmentScaleReady } from './core-development-episode.js';
+import { cardLook, withoutTraitSwaps } from './appearance-physical.js';
 
 function normalizeProfileUpdateEvidence(raw = {}) {
     return normalizeProfileEvidence(raw.evidence ?? raw.profileEvidence ?? raw.profile_evidence ?? raw.observations ?? {});
@@ -65,7 +66,7 @@ export function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
 
     const applyText = (field, stateField, reasonField, refineState, evolveState, maxChars) => {
         if (manualFields.has(field)) return;
-        const value = cleanText(incoming[field], maxChars);
+        let value = cleanText(incoming[field], maxChars);
         if (!value) return;
         const current = cleanText(npc[field], maxChars);
         const state = String(incoming[stateField] || 'keep');
@@ -112,6 +113,9 @@ export function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             evidence[field] = [];
             return;
         }
+        // (card traits win) Short of the grounded change above, an Appearance refine keeps the held value of a trait the card names.
+        if (field === 'appearance') value = withoutTraitSwaps(current, value, cardLook(npc)).text;
+        if (!value) return;
         const safeRefinement = field === 'personality'
             ? isSafeIdentityTextRefinement(current, value, options.developmentContext, fieldEvidence, binding)
             : (field === 'speech'

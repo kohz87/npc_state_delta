@@ -1430,7 +1430,7 @@ try {
     const lunaAfterRefresh = state.npcs.find(n => n.name === 'Luna');
     assert.match(lunaAfterRefresh.personality, /dry humor/i);
     assert.match(lunaAfterRefresh.speech, /honorifics/i);
-    assert.equal(lunaAfterRefresh.role, 'Senior guild archivist');
+    assert.equal(lunaAfterRefresh.role, lunaBeforeRefresh.role, '(card traits win) an unmarked role rewrite from a Refresh is kept out');
     assert.equal(lunaAfterRefresh.mood, 'Quietly focused');
     assert.equal(lunaAfterRefresh.location, 'Bluewatch archive');
     assert.deepEqual(lunaAfterRefresh.relationship, lunaBeforeRefresh.relationship, 'history refresh must never replay numeric relationship deltas');

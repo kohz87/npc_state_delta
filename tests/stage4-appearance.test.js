@@ -357,3 +357,87 @@ test('rejectedOverallLook: a refused durable look is reported, an accepted or un
     assert.equal(rejectedOverallLook(held, held, { appearance: 'A red coat.' }), null, 'not a durable look');
     assert.equal(rejectedOverallLook(held, held, null), null);
 });
+
+// (card traits win) A pack card's physical traits stay unless a story EVENT changes them (a grounded `change`); a refine adds detail.
+const TEMIWA_CARD = 'Dogfolk woman, about 160 cm. Black dog ears with cream points, the left one notched. A curled black tail with a cream underside. Long straight black hair that falls like a waterfall. An exceptionally full, curvy figure, especially her chest. Fingertips scarred from flame rites. Brown eyes ringed dark from too little sleep. She smells of lye and smoke.';
+const TEMIWA_REFINE = `${TEMIWA_CARD.replace('Brown eyes', 'Pale eyes')} A grey wool mantle hangs from her shoulders.`;
+const TEMIWA_STORY = 'Sister Temiwa looked up, her pale eyes ringed dark from too little sleep. A grey wool mantle hangs from her shoulders as she sweeps the salt yard.';
+function temiwa(extra = {}) {
+    return normalizeNpcRecord({
+        id: 'npc_sister-temiwa', name: 'Sister Temiwa', present: true, role: 'Church novice', overallAppearance: TEMIWA_CARD,
+        castFrom: { key: 'ersveil:temiwa', pack: 'ersveil', id: 'temiwa', first: { overallAppearance: TEMIWA_CARD } }, ...extra,
+    });
+}
+function scanTemiwa(npc, update, context = TEMIWA_STORY, channel = 'profileUpdates') {
+    const reply = channel === 'npcs'
+        ? { npcs: [{ id: npc.id, name: npc.name, ...update }] }
+        : { npcs: [{ id: npc.id, name: npc.name }], profileUpdates: [{ id: npc.id, name: npc.name, ...update }] };
+    return mergeScanResult({ npcs: [npc], candidates: [], turn: 3 }, reply, { turn: 4, sourceMessageId: 5, developmentContext: context }).state.npcs[0];
+}
+
+test('physicalTraitSwaps: a swapped value is named; a shade, a synonym, a fill or an omission is not a swap', async () => {
+    const { physicalTraitSwaps, physicalTraitSwapped } = await import('../appearance-physical.js');
+    assert.deepEqual(physicalTraitSwaps(TEMIWA_CARD, TEMIWA_REFINE), [{ trait: 'eyes', said: 'pale', kept: 'brown' }]);
+    assert.deepEqual(physicalTraitSwaps('Long black hair', 'Short black hair'), [{ trait: 'hair', said: 'short', kept: 'long' }]);
+    assert.deepEqual(physicalTraitSwaps('Slender build, blue eyes', 'Stocky build, green eyes'), [{ trait: 'eyes', said: 'green', kept: 'blue' }, { trait: 'build', said: 'stocky', kept: 'slender' }]);
+    assert.equal(physicalTraitSwapped('Brown eyes', 'Dark brown eyes'), false, 'a shade of the same colour');
+    assert.equal(physicalTraitSwapped('Dark eyes', 'Brown eyes'), false, 'a tone that fits the hue');
+    assert.equal(physicalTraitSwapped('Grey eyes', 'Silver eyes'), false, 'a synonym');
+    assert.equal(physicalTraitSwapped('Tall and slender', 'Tall and slender, violet eyes'), false, 'a trait the record does not name is a fill');
+    assert.equal(physicalTraitSwapped('Long silver hair', 'Silver hair'), false, 'an omission is not a swap');
+    assert.equal(physicalTraitSwapped('Brown eyes', 'Brown eyes, a pale scarf'), false, 'clothing is not a trait');
+});
+
+test('card traits win: Temiwa\'s card keeps its brown eyes when a Refresh refine says pale; the mantle is added and the drift names the swap', async () => {
+    const { rejectedOverallLook } = await import('../appearance-update.js');
+    const { lookDrift } = await import('../src/npc-notes-look.js');
+    const before = temiwa();
+    const after = scanTemiwa(before, { overallAppearance: TEMIWA_REFINE, overallAppearanceState: 'refine' });
+    assert.match(after.overallAppearance, /Brown eyes ringed dark from too little sleep/);
+    assert.doesNotMatch(after.overallAppearance, /Pale eyes/);
+    assert.match(after.overallAppearance, /grey wool mantle/);
+    const rejected = rejectedOverallLook(before.overallAppearance, after.overallAppearance, { overallAppearance: TEMIWA_REFINE });
+    assert.deepEqual(rejected?.swaps, [{ trait: 'eyes', said: 'pale', kept: 'brown' }]);
+    assert.equal(lookDrift(before.overallAppearance, { ...rejected, name: 'Sister Temiwa' }), 'Look drift refused: the story called Sister Temiwa\'s eyes pale; the record keeps brown.');
+    // Replay == live: the same inputs make the same record.
+    assert.deepEqual(scanTemiwa(temiwa(), { overallAppearance: TEMIWA_REFINE, overallAppearanceState: 'refine' }).overallAppearance, after.overallAppearance);
+});
+
+test('card traits win: a refine that only swaps a card trait is refused whole and reported the old way', async () => {
+    const { rejectedOverallLook } = await import('../appearance-update.js');
+    const swapOnly = TEMIWA_CARD.replace('Brown eyes', 'Pale eyes');
+    const after = scanTemiwa(temiwa(), { overallAppearance: swapOnly, overallAppearanceState: 'refine' });
+    assert.equal(after.overallAppearance, TEMIWA_CARD);
+    assert.deepEqual(rejectedOverallLook(TEMIWA_CARD, after.overallAppearance, { overallAppearance: swapOnly }), { incoming: swapOnly });
+});
+
+test('card traits win: a grounded change event may change a card trait', () => {
+    const story = 'The curse struck Sister Temiwa at the altar: her brown eyes turned pale as milk and stayed that way.';
+    const changed = scanTemiwa(temiwa(), {
+        overallAppearance: TEMIWA_CARD.replace('Brown eyes', 'Pale eyes'), overallAppearanceState: 'change', overallAppearanceReason: 'The curse turned her brown eyes pale as milk.',
+    }, `${story} Sister Temiwa's pale eyes were ringed dark from too little sleep.`);
+    assert.match(changed.overallAppearance, /Pale eyes/);
+    assert.doesNotMatch(changed.overallAppearance, /Brown eyes/);
+    const ungrounded = scanTemiwa(temiwa(), {
+        overallAppearance: TEMIWA_CARD.replace('Brown eyes', 'Pale eyes'), overallAppearanceState: 'change', overallAppearanceReason: 'Corrected eye color.',
+    });
+    assert.match(ungrounded.overallAppearance, /Brown eyes/, 'a change without a story event keeps the card');
+});
+
+test('card traits win: the flat appearance and a named form keep a card trait; a look that is not the card\'s still refines', async () => {
+    const { applyAppearanceUpdate } = await import('../appearance-update.js');
+    const habit = 'Brown eyes ringed dark from too little sleep, a grey Church habit';
+    const flat = temiwa({ overallAppearance: '', appearance: habit });
+    const story = 'Sister Temiwa, her pale eyes ringed dark from too little sleep, pulled a grey wool mantle over her grey Church habit.';
+    const offered = { appearance: 'Pale eyes ringed dark from too little sleep, a grey Church habit, a grey wool mantle', appearanceState: 'refine' };
+    const kept = scanTemiwa(flat, offered, story, 'npcs');
+    assert.match(kept.appearance, /Brown eyes/);
+    assert.match(kept.appearance, /wool mantle/);
+    assert.match(scanTemiwa(flat, offered, story).appearance, /Brown eyes/, 'the profileUpdates[] channel applies the same rule');
+    const formed = applyAppearanceUpdate({ ...temiwa(), appearanceForms: [{ name: 'Rite', appearance: habit }] },
+        { appearanceForms: [{ name: 'Rite', appearance: offered.appearance, state: 'refine' }] }, { context: story });
+    assert.match(formed.appearanceForms[0].appearance, /Brown eyes/);
+    // Not a cast dossier (a story-given look or a fill guess): a later story line still replaces the value (owner, 9-10 Nov).
+    const plain = scanTemiwa(temiwa({ castFrom: undefined }), { overallAppearance: TEMIWA_REFINE, overallAppearanceState: 'refine' });
+    assert.match(plain.overallAppearance, /Pale eyes/);
+});

@@ -1,7 +1,8 @@
 /* Appearance physical-feature rules: trait keys, enduring-trait carry, shared-piece deduplication and
    refinement similarity. A pure part of appearance.js (same owner, moved without change); appearance.js
    keeps the public facade and re-exports every public name. Never imports appearance.js. */
-import { DURABLE_PROFILE_LIMITS, normalizeName } from './core-mechanics.js';
+import { DURABLE_PROFILE_LIMITS } from './core-relationship.js';
+import { normalizeName } from './core-text.js';
 import { appearanceClauses, appearanceText, clean, sameAppearance } from './appearance-text.js';
 
 export const STOPWORDS = new Set([
@@ -219,4 +220,141 @@ export function withoutSharedPieces(value, shared) {
         return kept.join(', ');
     }).filter(clause => clean(clause, 800));
     return changed ? appearanceText(clauses.join('; ')) : text;
+}
+
+// (card traits win) A refine may add detail to a cast dossier's look, never swap a physical value the pack card names: the card's
+// "Brown eyes" stays brown when the narrator writes "her pale eyes". Each trait has a few value axes; a word may stand on more than
+// one pole (teal is blue and green). Two texts swap a trait when both name poles on one axis and share none of them. Tone words
+// (pale, dark) count only against a hue they cannot be (pale brown, dark blonde) or the opposite tone. Only a grounded `change`
+// (an injury, magic, dye, a disguise) may swap such a trait; a value for a trait the record does not name is a fill. Looks that
+// are not the card's (story-given, or a fill guess) keep the refine rule: a later story line replaces a guess (owner, 9-10 Nov).
+const HUES = Object.freeze({
+    black: ['black', 'raven', 'ebony', 'jet', 'inky', 'sable', 'coal', 'onyx'],
+    brown: ['brown', 'chestnut', 'umber', 'mahogany', 'chocolate', 'coffee', 'walnut', 'russet', 'tawny', 'brunette', 'bronze'],
+    hazel: ['hazel'],
+    gold: ['gold', 'golden', 'amber', 'honey', 'blonde', 'blond', 'flaxen', 'yellow', 'straw', 'sandy'],
+    red: ['red', 'crimson', 'scarlet', 'ruby', 'auburn', 'copper', 'ginger', 'rust', 'vermilion', 'strawberry'],
+    white: ['white', 'snowy', 'ivory', 'cream', 'platinum', 'silver', 'silvery', 'grey', 'gray', 'greying', 'graying', 'ashen', 'ash', 'steel', 'slate', 'pewter', 'iron', 'porcelain'],
+    blue: ['blue', 'azure', 'sapphire', 'cerulean', 'cobalt', 'navy', 'icy', 'teal', 'turquoise', 'aquamarine', 'cyan'],
+    green: ['green', 'emerald', 'jade', 'olive', 'moss', 'teal', 'turquoise', 'verdant'],
+    violet: ['violet', 'purple', 'lilac', 'lavender', 'amethyst', 'indigo', 'plum', 'mauve'],
+    pink: ['pink', 'rose', 'rosy', 'magenta'],
+    orange: ['orange'],
+});
+const LIGHT_TONES = new Set(['pale', 'light', 'fair', 'bright']);
+const DARK_TONES = new Set(['dark', 'deep']);
+const LIGHT_TONE_CLASH = new Set(['black', 'brown']);
+const DARK_TONE_CLASH = new Set(['white', 'gold']);
+const AXES = Object.freeze({
+    length: { long: ['long', 'waist', 'hip', 'ankle', 'floor', 'flowing'], shoulder: ['shoulder'], short: ['short', 'cropped', 'shaved', 'bald', 'buzzed', 'shorn', 'chin'] },
+    texture: { curly: ['curly', 'curled', 'curls', 'wavy', 'frizzy', 'kinky', 'ringlets'], straight: ['straight', 'sleek'] },
+    build: {
+        slight: ['slender', 'slim', 'lean', 'lithe', 'lanky', 'willowy', 'wiry', 'skinny', 'thin', 'petite', 'slight', 'gaunt', 'bony'],
+        heavy: ['stocky', 'curvy', 'burly', 'brawny', 'muscular', 'plump', 'heavyset', 'stout', 'full', 'broad', 'voluptuous', 'buxom', 'hulking', 'portly', 'rotund'],
+    },
+    height: { tall: ['tall', 'towering', 'statuesque'], short: ['short', 'diminutive', 'tiny', 'small', 'petite'] },
+});
+const TRAIT_AXES = Object.freeze({
+    hair: ['color', 'length', 'texture'], eyes: ['color'], skin: ['color'], fur: ['color'], scales: ['color'], ears: ['color'],
+    tail: ['color'], horns: ['color'], wings: ['color'], build: ['build'], height: ['height'],
+});
+const traitWords = text => String(text || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+const polesOf = (words, poles) => new Set(Object.entries(poles).filter(([, list]) => list.some(word => words.includes(word))).map(([pole]) => pole));
+const disjoint = (a, b) => a.size > 0 && b.size > 0 && ![...a].some(pole => b.has(pole));
+// Tones only against the other side's hues (or the other tone); a tone beside a hue is a shade of it.
+function toneClash(tones, hues) {
+    return [...tones].some(tone => (LIGHT_TONES.has(tone) && [...hues].some(hue => LIGHT_TONE_CLASH.has(hue)))
+        || (DARK_TONES.has(tone) && [...hues].some(hue => DARK_TONE_CLASH.has(hue))));
+}
+function colorSwapped(current, incoming) {
+    const [nowHues, newHues] = [polesOf(current, HUES), polesOf(incoming, HUES)];
+    if (nowHues.size && newHues.size) return disjoint(nowHues, newHues);
+    const [nowTones, newTones] = [current, incoming].map(words => new Set(words.filter(word => LIGHT_TONES.has(word) || DARK_TONES.has(word))));
+    if (nowHues.size) return toneClash(newTones, nowHues);
+    if (newHues.size) return toneClash(nowTones, newHues);
+    const light = tones => tones.size > 0 && [...tones].every(tone => LIGHT_TONES.has(tone));
+    const dark = tones => tones.size > 0 && [...tones].every(tone => DARK_TONES.has(tone));
+    return (light(nowTones) && dark(newTones)) || (dark(nowTones) && light(newTones));
+}
+// The trait pieces of a look: { text, keys } for every piece that describes an enduring trait (not clothing, not a hidden mention).
+function traitPieces(value) {
+    return presentationSegments(value)
+        .filter(segment => !CONCEALED_MENTION.test(segment))
+        .flatMap(physicalPieces)
+        .flatMap(traitParts)
+        .map(text => ({ text, keys: addressedTraitKeys(text).filter(key => TRAIT_AXES[key]) }))
+        .filter(piece => piece.keys.length);
+}
+const valueWords = (pieces, key) => pieces.filter(piece => piece.keys.includes(key)).flatMap(piece => traitWords(piece.text));
+function axisSwapped(axis, current, incoming) {
+    return axis === 'color' ? colorSwapped(current, incoming) : disjoint(polesOf(current, AXES[axis]), polesOf(incoming, AXES[axis]));
+}
+// The words of an axis a text names, for the report ("pale", "brown").
+function axisWords(axis, words) {
+    const listed = axis === 'color' ? [...Object.values(HUES).flat(), ...LIGHT_TONES, ...DARK_TONES] : Object.values(AXES[axis]).flat();
+    return [...new Set(words.filter(word => listed.includes(word)))];
+}
+/**
+ * The physical traits `incoming` swaps against `current` (card traits win): [{ trait, said, kept }] in trait order, where `said`
+ * is what the incoming text calls it and `kept` what the record holds ("eyes", "pale", "brown"); [] when nothing is swapped.
+ */
+export function physicalTraitSwaps(current, incoming) {
+    const before = traitPieces(current);
+    const after = traitPieces(incoming);
+    if (!before.length || !after.length) return [];
+    const swaps = [];
+    for (const [trait, axes] of Object.entries(TRAIT_AXES)) {
+        const now = valueWords(before, trait);
+        const next = valueWords(after, trait);
+        if (!now.length || !next.length) continue;
+        const axis = axes.find(name => axisSwapped(name, now, next));
+        if (!axis) continue;
+        const said = axisWords(axis, next).filter(word => !now.includes(word));
+        const kept = axisWords(axis, now).filter(word => !next.includes(word));
+        swaps.push({ trait, said: said.join(' ') || axisWords(axis, next).join(' '), kept: kept.join(' ') || axisWords(axis, now).join(' ') });
+    }
+    return swaps;
+}
+/** True when `incoming` swaps a named physical value of `current`; with `traits` (a Set of trait keys), only one of those. */
+export function physicalTraitSwapped(current, incoming, traits = null) {
+    return physicalTraitSwaps(current, incoming).some(swap => !traits || traits.has(swap.trait));
+}
+/** The pack card's look of a cast dossier (castFrom.first.overallAppearance, the pack's words as first written); '' for anyone else. */
+export function cardLook(npc) {
+    const first = npc?.castFrom && typeof npc.castFrom === 'object' ? npc.castFrom.first : null;
+    return first && typeof first === 'object' && typeof first.overallAppearance === 'string' ? first.overallAppearance : '';
+}
+/**
+ * A refine without its swaps of the card's traits (`card`: cardLook): every incoming clause that swaps a trait the card names gives
+ * way to the record's own clause(s) for that trait; the rest of the incoming text stays as written. → { text, swaps }; `text` is
+ * `incoming` itself when nothing the card names is swapped (always without a card), and '' when the swap cannot be taken out
+ * (the repaired text still swaps, or adds nothing to the record).
+ */
+export function withoutTraitSwaps(current, incoming, card = '') {
+    const named = card ? new Set(traitPieces(card).flatMap(piece => piece.keys)) : null;
+    const swaps = named?.size ? physicalTraitSwaps(current, incoming).filter(swap => named.has(swap.trait)) : [];
+    if (!swaps.length) return { text: incoming, swaps };
+    const text = appearanceText(incoming);
+    const swapped = new Set(swaps.map(swap => swap.trait));
+    const held = presentationSegments(current).filter(segment => traitPieces(segment).some(piece => piece.keys.some(key => swapped.has(key))));
+    const used = new Set();
+    const parts = text.split(/(\s*;\s*|(?<=[.!?])\s+|\s*,\s*)/);
+    for (let index = 0; index < parts.length; index += 2) {
+        const keys = traitPieces(parts[index]).flatMap(piece => piece.keys);
+        if (!keys.some(key => swapped.has(key))) continue;
+        const own = held.filter(segment => !used.has(segment)
+            && traitPieces(segment).some(piece => piece.keys.some(key => swapped.has(key) && keys.includes(key))));
+        own.forEach(segment => used.add(segment));
+        const tail = parts[index].match(/[.!?]+$/)?.[0] || '';
+        parts[index] = own.length ? `${own.join(', ')}${tail}` : '';
+    }
+    // Rejoin with each kept clause's own separator; a clause given way to without a held one is dropped with it.
+    let joined = '';
+    for (let index = 0; index < parts.length; index += 2) {
+        if (parts[index].trim()) joined += (joined ? (parts[index - 1] ?? ' ') : '') + parts[index];
+    }
+    const repaired = appearanceText(joined);
+    const usable = repaired && !physicalTraitSwapped(current, repaired, swapped) && !sameAppearance(current, repaired)
+        && normalizeName(repaired) !== normalizeName(current);
+    return { text: usable ? repaired : '', swaps };
 }

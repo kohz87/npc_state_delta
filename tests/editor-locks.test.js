@@ -49,7 +49,8 @@ test('editor locks through the synthetic host: a second Save, a later scan, a sw
     runEditorHostScenario('locks', async () => {
         const runtime = globalThis.NPCStateDelta;
         let role = 'adventurer';
-        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role, mood: 'calm', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named companion', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } }] });
+        let roleMark = {};
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role, ...roleMark, mood: 'calm', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named companion', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } }] });
         const reply = async (user, text) => {
             mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: user });
             mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
@@ -126,10 +127,12 @@ test('editor locks through the synthetic host: a second Save, a later scan, a sw
         assert.deepEqual(yunyun().manualProfileFields, ['role', 'mood', 'background', 'appearance'], 'the branch restore kept the locks');
         assert.equal(yunyun().overallAppearance, 'Crimson eyes and a black cloak.');
 
-        // Unticking and saving clears the locks; the next scan may then rewrite the role.
+        // Unticking and saving clears the locks; the next scan may then rewrite the role, marked as a story change with its reason
+        // (card traits win: an established role is keep-by-default like the home base).
         await editNpc(id, { lock_profile: { checked: false } });
         assert.deepEqual(yunyun().manualProfileFields, []);
         role = 'wandering adventurer';
+        roleMark = { roleState: 'update', roleReason: 'She is a wandering adventurer again.' };
         await reply('Where to?', 'Yunyun, a wandering adventurer again, points north.');
         assert.equal(yunyun().role, 'wandering adventurer', 'an unlocked role follows the story again');
     });

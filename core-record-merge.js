@@ -153,11 +153,20 @@ function mergeUnpinnedMemories(oldList, newList, retentionList = [], incomingLim
 // Speech and Appearance, have their own evidence-gated rules there).
 export const PROFILE_UPDATE_TEXT_FIELDS = Object.freeze(['role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'background']);
 
-// Gender, home base, background and ages are keep-by-default once established.
+// Role, gender, home base, background and ages are keep-by-default once established.
 export function durableTextAccepted(field, existing, incoming, value, options = {}) {
     if (field === 'gender') {
         const prior = normalizeGender(existing.gender);
         return !(prior && prior !== value && (incoming.genderState !== 'correct' || !String(incoming.genderReason || '').trim()));
+    }
+    if (field === 'role') {
+        // (card traits win) An established role (a pack cast role too) is keep-by-default like the home base: it changes only with
+        // roleState:"update" + roleReason + grounding in the story (a promotion, a new job, a revealed identity). A first role fills.
+        const prior = String(existing.role || '').trim();
+        if (!prior || normalizeName(prior) === normalizeName(value)) return true;
+        if (incoming.roleState !== 'update' || !String(incoming.roleReason || '').trim()) return false;
+        const context = String(options.developmentContext || '').trim();
+        return !context || durableSeedGrounded(value, context);
     }
     if (field === 'homeBase') {
         const prior = String(existing.homeBase || '').trim();

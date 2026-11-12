@@ -13,10 +13,10 @@ import {
 } from './core-mechanics.js';
 import { APPEARANCE_FORM_LIMIT, APPEARANCE_MODEL_VERSION, appearanceText, clean, formKey, formState, hasOwn, sameAppearance, stripOverallPrefix } from './appearance-text.js';
 import { appendedLooks, attemptsExtension } from './appearance-fill.js';
-import { mergeRefinement, preserveOmittedPhysicalTraits, withoutSharedPieces } from './appearance-physical.js';
+import { cardLook, mergeRefinement, physicalTraitSwaps, preserveOmittedPhysicalTraits, withoutSharedPieces, withoutTraitSwaps } from './appearance-physical.js';
 import { completeFormWithShared, normalizeAppearanceForms, normalizeAppearanceModel, resolveNpcAppearance } from './appearance-model.js';
 
-function reconcileFormAppearance(existing, update, context = '') {
+function reconcileFormAppearance(existing, update, context = '', card = '') {
     const current = appearanceText(existing);
     const incoming = appearanceText(update?.appearance);
     if (!incoming) return current;
@@ -28,12 +28,15 @@ function reconcileFormAppearance(existing, update, context = '') {
         if (!reason || (context && (!durableSeedGrounded(reason, context) || !durableSeedGrounded(incoming, context)))) return current;
         return incoming;
     }
+    // (card traits win) A refine keeps the held value of a trait the card names; only the `change` above may swap one.
+    const kept = withoutTraitSwaps(current, incoming, card).text;
+    if (!kept) return current;
     const compatible = state === 'refine'
-        ? (isSafeUnmarkedDurableRefinement(current, incoming)
-            || groundedAppearanceCorrection(current, incoming, context))
-        : isSafeUnmarkedDurableReplacement(current, incoming);
-    if (!compatible || (context && !durableRefinementCandidateGrounded('appearance', current, incoming, context))) return current;
-    return mergeRefinement(current, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
+        ? (isSafeUnmarkedDurableRefinement(current, kept)
+            || groundedAppearanceCorrection(current, kept, context))
+        : isSafeUnmarkedDurableReplacement(current, kept);
+    if (!compatible || (context && !durableRefinementCandidateGrounded('appearance', current, kept, context))) return current;
+    return mergeRefinement(current, kept, DURABLE_PROFILE_LIMITS?.appearance || 800);
 }
 
 // The core merge applies an accepted flat Appearance update before this model sees it, so the
@@ -54,7 +57,8 @@ export function carryOmittedPhysicalTraits(previous = {}, next = {}) {
 /**
  * The durable look the scan refused (NSDMAP2 §5): `before`/`after` are a person's overallAppearance before and after the scan's
  * update, `rawUpdate` the scanner's row. → { incoming } when a look was already set, the row offered a different one and the
- * record still holds the old one (no accepted refinement, no grounded `change`); otherwise null. Forms never count.
+ * record still holds the old one (no accepted refinement, no grounded `change`); { incoming, swaps } when the record took the
+ * rest of it but kept a trait the row swapped (physicalTraitSwaps: [{ trait, said, kept }]); otherwise null. Forms never count.
  */
 export function rejectedOverallLook(before, after, rawUpdate = {}) {
     const held = appearanceText(before);
@@ -62,13 +66,17 @@ export function rejectedOverallLook(before, after, rawUpdate = {}) {
     if (!hasOwn(rawUpdate, 'overallAppearance') && !hasOwn(rawUpdate, 'overall_appearance')) return null;
     const incoming = appearanceText(rawUpdate.overallAppearance ?? rawUpdate.overall_appearance);
     if (!incoming || normalizeName(incoming) === normalizeName(held)) return null;
-    return normalizeName(appearanceText(after)) === normalizeName(held) ? { incoming } : null;
+    if (normalizeName(appearanceText(after)) === normalizeName(held)) return { incoming };
+    // (card traits win) The rest of a refine was taken but a trait it swapped was kept: { incoming, swaps } names each.
+    const swaps = physicalTraitSwaps(after, incoming);
+    return swaps.length ? { incoming, swaps } : null;
 }
 
 export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '', seedContext = '', fillBlank = false } = {}) {
     const next = normalizeAppearanceModel(record, { locked });
     if (locked || !rawUpdate || typeof rawUpdate !== 'object') return { ...next, appearance: resolveNpcAppearance(next) };
     const priorOverall = next.overallAppearance;
+    const card = cardLook(record);
 
     const overallProvided = hasOwn(rawUpdate, 'overallAppearance') || hasOwn(rawUpdate, 'overall_appearance');
     if (overallProvided) {
@@ -96,12 +104,15 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                     next.overallAppearance = preserveOmittedPhysicalTraits(next.overallAppearance, incoming);
                 }
             } else {
-                const compatible = state === 'refine'
-                    ? (isSafeUnmarkedDurableRefinement(next.overallAppearance, incoming)
-                        || groundedAppearanceCorrection(next.overallAppearance, incoming, context))
-                    : isSafeUnmarkedDurableReplacement(next.overallAppearance, incoming);
-                if (compatible && (!context || durableRefinementCandidateGrounded('appearance', next.overallAppearance, incoming, context))) {
-                    next.overallAppearance = mergeRefinement(next.overallAppearance, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
+                // (card traits win) A refine or correction never swaps a trait the pack card names (the card's brown eyes stay brown when the
+                // narrator writes "pale eyes"): the held clause stays and the rest of the refine is weighed; none of it when it cannot be.
+                const kept = withoutTraitSwaps(next.overallAppearance, incoming, card).text;
+                const compatible = kept && (state === 'refine'
+                    ? (isSafeUnmarkedDurableRefinement(next.overallAppearance, kept)
+                        || groundedAppearanceCorrection(next.overallAppearance, kept, context))
+                    : isSafeUnmarkedDurableReplacement(next.overallAppearance, kept));
+                if (compatible && (!context || durableRefinementCandidateGrounded('appearance', next.overallAppearance, kept, context))) {
+                    next.overallAppearance = mergeRefinement(next.overallAppearance, kept, DURABLE_PROFILE_LIMITS?.appearance || 800);
                 }
             }
         }
@@ -113,10 +124,10 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             const index = next.appearanceForms.findIndex(item => formKey(item.name) === formKey(form.name));
             if (index >= 0) {
                 const existing = next.appearanceForms[index].appearance;
-                const appearance = preserveOmittedPhysicalTraits(existing, reconcileFormAppearance(existing, form, context));
+                const appearance = preserveOmittedPhysicalTraits(existing, reconcileFormAppearance(existing, form, context, card));
                 if (appearance) next.appearanceForms[index] = { ...next.appearanceForms[index], name: next.appearanceForms[index].name || form.name, appearance };
             } else if (next.appearanceForms.length < APPEARANCE_FORM_LIMIT) {
-                const appearance = reconcileFormAppearance('', form, context);
+                const appearance = reconcileFormAppearance('', form, context, card);
                 if (appearance) next.appearanceForms.push({ name: form.name, appearance: overallProvided ? completeFormWithShared(next.overallAppearance, appearance) : appearance });
             }
         }
@@ -163,27 +174,27 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                     // A named form is its own complete appearance, so the reconciled current text is
                     // stored as given, with omitted body traits carried from the form.
                     const existingLocal = next.appearanceForms[index].appearance;
-                    const resolved = reconcileFormAppearance(existingLocal, { ...update, appearance: incomingAppearance }, context);
+                    const resolved = reconcileFormAppearance(existingLocal, { ...update, appearance: incomingAppearance }, context, card);
                     const appearance = preserveOmittedPhysicalTraits(existingLocal, resolved);
                     if (appearance) next.appearanceForms[index] = { ...next.appearanceForms[index], appearance };
                 } else {
                     // A flat presentation may describe a selected-but-not-yet-established form,
                     // but it cannot fabricate that named form after its own form detail failed
                     // grounding. Keep the accepted current presentation in the compatibility slot.
-                    next.appearance = reconcileFormAppearance('', { ...update, appearance: incomingAppearance }, context);
+                    next.appearance = reconcileFormAppearance('', { ...update, appearance: incomingAppearance }, context, card);
                 }
             } else if (next.currentFormUnknown) {
                 const previous = next.unclassifiedAppearance;
                 const standalone = next.appearanceForms.length > 0;
                 next.unclassifiedAppearance = preserveOmittedPhysicalTraits(previous,
-                    reconcileFormAppearance(previous, standalone ? { ...update, appearance: incomingAppearance } : update, context),
+                    reconcileFormAppearance(previous, standalone ? { ...update, appearance: incomingAppearance } : update, context, card),
                     { alsoPresent: standalone ? '' : next.overallAppearance });
             } else {
                 // Without a selected/unknown form the shared physical features are prepended when resolved,
                 // so traits already held there are not carried into the current presentation again.
                 const previous = next.appearance;
                 next.appearance = withoutSharedPieces(
-                    preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, fillBlank && !previous ? '' : context), { alsoPresent: next.overallAppearance }),
+                    preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, fillBlank && !previous ? '' : context, card), { alsoPresent: next.overallAppearance }),
                     next.overallAppearance,
                 );
             }

@@ -28,6 +28,9 @@ export function normalizeScanNpc(rawInput = {}, options = {}) {
         name: cleanText(raw.name, 120),
         aliases: cleanList(raw.aliases, 8, 120),
         role: cleanText(raw.role, 300),
+        // (card traits win) A role change is marked like a home-base move: roleState "update" (promote, reveal...) + roleReason.
+        roleState: ['update', 'change', 'promote', 'promotion', 'promoted', 'reveal', 'revealed'].includes(String(raw.roleState ?? raw.role_state ?? '').trim().toLowerCase()) ? 'update' : 'keep',
+        roleReason: cleanText(raw.roleReason ?? raw.role_reason, 500),
         species: cleanText(raw.species ?? raw.race ?? raw.ancestry ?? raw.speciesRace ?? raw.species_race, 160),
         gender: normalizeGender(raw.gender ?? raw.sex),
         genderState: (() => {
