@@ -80,7 +80,7 @@ export function createAssistantHandlerPart(rt, deps, helpers) {
             catchUp: settings.autoScan && (replay ? replay.catchUp : rt.catchUpChats).has(eventChatKey),
             replyChanges: settings.autoScan && !settings.fullScanEveryTurn && replyNamesSomeone(state, messageId),
         });
-        // A complete capture block is a scan already paid for, so it merges whatever Scan every says.
+        // ONEPASSMISS-1: a hosted missing-capture marker and a paid-for block both own this reply, irrespective of cadence.
         const captureDue = !replay && narrationCaptureEnabled(settings) && narrationCaptures.has(narrationCaptureKey(eventChatKey, messageId));
         const scanExpected = shouldForceBranchScan || autoScanDue || captureDue;
         // Receipt state belongs to this assistant even if scanning fails, skips or is busy.

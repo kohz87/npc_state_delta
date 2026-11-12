@@ -433,3 +433,18 @@ test('a publication that fails after a successful install: the catch-up is done,
         h.check(catchUp.canGenerate() === true, 'sending is back');
     });
 });
+
+test('ONEPASSMISS-1: replay does not invent missing-capture fallbacks for old replies', () => {
+    runScenario('no-capture-fallback-on-replay', async h => {
+        h.settings.narrationCapture = true;
+        h.settings.scanEvery = 10;
+        h.addReplies(2);
+        const calls = h.scannerCalls().length;
+        const catchUp = h.controller();
+        catchUp.rebuild({ replies: null });
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'rebuild finished');
+        h.equal(h.scannerCalls().length, calls, 'quiet historical replies keep their ordinary cadence');
+        h.equal(h.runtime.scannerReport().filter(line => line.includes('the reply had no NPC capture')), [], 'replay reports no live fallback');
+    });
+});
