@@ -211,7 +211,7 @@ test('hosted: a backfill of a new dossier asks for layered notes and keeps them;
             const prompt = String(args.prompt || '');
             if (/backfill scanner/i.test(system)) {
                 asked.push({ kind: 'backfill', prompt });
-                const name = prompt.match(/^Requested NPC: (.+)$/m)?.[1] ?? 'Yunyun';
+                const name = prompt.match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] ?? 'Yunyun';
                 return JSON.stringify({ npcs: [{ name, present: true, role: 'adventurer', relationshipImpact: 'none', relationshipDelta: ZERO, secrets: withEvent }] });
             }
             if (/reconciliation scanner/i.test(system)) {
@@ -260,7 +260,7 @@ test('a backfill of a dossier that already has notes, and any pass without a hos
         mockState.quietResponder = async (args = {}) => {
             const system = String(args.systemPrompt || '');
             if (/backfill scanner/i.test(system)) prompts.push(String(args.prompt || ''));
-            const name = String(args.prompt || '').match(/^Requested NPC: (.+)$/m)?.[1];
+            const name = (/backfill scanner/i.test(String(args.systemPrompt || '')) ? String(args.prompt || '').match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] : undefined);
             return name ? JSON.stringify({ npcs: [{ name, present: true, role: 'adventurer', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : '{"npcs":[]}';
         };
         // The block already wrote this person's notes.
@@ -273,7 +273,7 @@ test('a backfill of a dossier that already has notes, and any pass without a hos
         const prompts = [];
         mockState.quietResponder = async (args = {}) => {
             prompts.push(String(args.prompt || ''));
-            const name = String(args.prompt || '').match(/^Requested NPC: (.+)$/m)?.[1];
+            const name = (/backfill scanner/i.test(String(args.systemPrompt || '')) ? String(args.prompt || '').match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] : undefined);
             return name ? JSON.stringify({ npcs: [{ name, present: true, role: 'adventurer', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : '{"npcs":[]}';
         };
         await reply('Yunyun waves from the gate.', { npcs: [yunyun()] });

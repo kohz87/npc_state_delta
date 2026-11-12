@@ -202,12 +202,12 @@ async function auditRuntimeChecks(mockState, eventSource, manualAddNpc, sleep, s
     await open('audit-missed-participant', ['I sit down at the table.']);
     await manualAddNpc('Liora Vance');
     await runtime.flush();
-    mockState.quietResponder = async (...args) => (JSON.stringify(args).includes('targeted dossier backfill extractor')
+    mockState.quietResponder = async (...args) => (JSON.stringify(args).includes('isolated dossier backfill scanner')
         ? JSON.stringify({ npcs: [{ name: 'Liora Vance', present: true, mood: 'focused', role: 'bookkeeper' }] })
         : '{"npcs":[]}');
     mockState.context.chat.push({ is_user: false, is_system: false, name: 'Narrator', mes: 'Liora Vance sits across from Kazuma and opens the ledger.', swipe_id: 0 });
     eventSource.emit('message_received', mockState.context.chat.length - 1);
-    await waitUntil(() => mockState.rawCalls.some(args => JSON.stringify(args).includes('targeted dossier backfill extractor'))
+    await waitUntil(() => mockState.rawCalls.some(args => JSON.stringify(args).includes('isolated dossier backfill scanner'))
         && (runtime.getState().pendingBackfills || []).length === 0, 'missed-participant backfill');
     await sleep(100);
     const liora = runtime.getState().npcs.find(npc => npc.name === 'Liora Vance');
