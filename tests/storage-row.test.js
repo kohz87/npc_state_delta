@@ -79,7 +79,7 @@ test('file vault never calls Data Maid; it lists what it registered, says the li
     const vault = fileVault({ fetchFn: server.fetchFn, now: () => t });
     server.files.set('npc-state-delta-checkpoint-nk_bbbbbbb1.json', '{"pre-release":true}'); // written before the registry: never named
     await vault.put('nk_bbbbbbb2', { lineage: 'lg_a' });
-    await vault.put('nk_bbbbbbb3', { lineage: 'lg_a' });
+    await vault.put('nk_bbbbbbb3', { lineage: 'lg_b' }); // another story line: not a patch against nk_bbbbbbb2, so the sweep may take that one
     const listed = await vault.list();
     assert.equal(listed.complete, false);
     assert.deepEqual(listed.files.map(f => f.id).sort(), ['nk_bbbbbbb2', 'nk_bbbbbbb3']);

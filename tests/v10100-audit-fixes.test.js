@@ -28,7 +28,7 @@ test('2/3: no unused imports or uncalled functions remain in shipped modules', (
     const sources = Object.fromEntries(modules.map(path => [path, fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')]));
     const all = Object.values(sources).join('\n');
     // Exported only so the test suite can drive them.
-    const testHooks = new Set(['cancelScannerRequests', 'estimateInjectionTokens', 'sameChatOwnerScope', 'pendingNpcStateDurabilityKeys', 'modalTopLayerSupported', 'diffJson' /* checkpoint-pack's public diff; packing uses its internal walk, the tests drive this one */,
+    const testHooks = new Set(['cancelScannerRequests', 'estimateInjectionTokens', 'sameChatOwnerScope', 'pendingNpcStateDurabilityKeys', 'modalTopLayerSupported', 'diffPlainJson' /* called from src/storysuite-participant/checkpoint.js (the hosted adapter, which the shipped-module list does not hold) */, 'diffJson' /* checkpoint-pack's public diff; packing uses its internal walk, the tests drive this one */,
         // Called from src/ (the hosted adapter, which the shipped-module list does not hold).
         'applyEvents', 'moodWord', 'moodBars', 'stepPull', 'restingMood', 'restMood', 'emptyCastHtml', 'dossierRowNodes']);
     const problems = [];
