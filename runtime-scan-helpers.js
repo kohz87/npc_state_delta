@@ -159,8 +159,10 @@ export function clearUserDismissedSuppression(state, target) {
 
 // What a committed scan tells the slice, read from the people before and after it (moved from runtime-hosted.js, bodies unchanged).
 // Each person's relationship moves since the scan began, as npc.adjust payloads; the tier the scanner gave the scan's newest event rides along
-// (one event however many meters it moved); none known: sent without one, and not counted.
-export function relationshipChanges(prior, after, baseline, messageId) {
+// (one event however many meters it moved); none known: sent without one, and not counted. `onePassRows` (a one-pass block's own rows, else null): each
+// person's relationshipEvidence for the axes the row moved rides along as `why`, also with no move of its own (the slice uses it only as the reason
+// of the same reply's story line that gave none; the sidecar drops a one-pass delta, which carries no relationshipChangeReason).
+export function relationshipChanges(prior, after, baseline, messageId, onePassRows = null) {
     const changes = [];
     for (const npc of after || []) {
         if (!npc?.id || npc.archived) continue;
@@ -169,9 +171,20 @@ export function relationshipChanges(prior, after, baseline, messageId) {
         const meters = Object.fromEntries(Object.keys(to).filter(key => to[key] !== from[key]).map(key => [key, to[key] - from[key]]));
         const last = npc.lastRelationshipChange;
         const fresh = last && JSON.stringify(last) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange);
-        if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}) });
+        const why = onePassRows ? onePassEvidence(onePassRows, npc) : null;
+        if (Object.keys(meters).length || why) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}), ...(why ? { why } : {}) });
     }
     return changes;
+}
+
+// A one-pass row's evidence for each axis it moved (non-zero delta, non-empty words): { trust: 'words' }, or null.
+function onePassEvidence(rows, npc) {
+    const row = (Array.isArray(rows) ? rows : []).find(item => item && ((item.id && item.id === npc.id) || (item.name && npcMatchesLabel(npc, item.name))));
+    const delta = row?.relationshipDelta ?? row?.relationship_delta;
+    const words = row?.relationshipEvidence ?? row?.relationship_evidence;
+    if (!delta || typeof delta !== 'object' || !words || typeof words !== 'object') return null;
+    const why = Object.fromEntries(['trust', 'affection', 'desire', 'tension'].filter(axis => Number(delta[axis]) && typeof words[axis] === 'string' && words[axis].trim()).map(axis => [axis, words[axis].trim().slice(0, 240)]));
+    return Object.keys(why).length ? why : null;
 }
 
 // A durable look the scan refused (the story did not explain a change): one entry per person, for a Problem and a next-reply cue.

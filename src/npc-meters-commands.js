@@ -4,7 +4,7 @@ import { storyMinuteText } from '../calendar.js';
 import { isAway, labelKey, labelsOf, normalizeKeyPeople } from './key-people.js';
 import { normalizeCast } from './cast-dossier.js';
 import { normalizeApproachKind } from '../npc-meters-gate.js';
-import { NPC_DOMAIN, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, isReplyId, readLeaf, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
+import { NPC_DOMAIN, BUILT_IN_METERS, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, isReplyId, readLeaf, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
 import { growDrives, DRIVE_RULE } from './npc-notes-drives.js';
 import { mergeRefreshTastes } from './npc-notes-tastes.js';
@@ -150,7 +150,10 @@ export function createNpcCommands({
             const defs = defsFrom(normalized(ctx.settings(), ctx));
             const changes = changesFrom(payload?.meters, defs, 'add', problems).filter(change => change.value !== 0);
             const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
-            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply: commandReply(ctx, at), at, seed: isObject(payload?.start) ? payload.start : null, yieldToStory: true, scanTier: payload?.impact });
+            // `why`: a one-pass scan's evidence per meter ({ trust: 'words' }), the reason of this reply's story line that gave none (it moves nothing).
+            const why = Object.fromEntries(Object.entries(isObject(payload?.why) ? payload.why : {}).filter(([axis, text]) => BUILT_IN_METERS.some(def => def.id === axis) && typeof text === 'string' && text.trim()).map(([axis, text]) => [axis, clean(text, 240)]));
+            const evidence = Object.keys(why).length ? why : null;
+            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply: commandReply(ctx, at), at, seed: isObject(payload?.start) ? payload.start : null, yieldToStory: true, scanTier: payload?.impact, evidence, allowEmpty: Boolean(evidence) });
         },
         /**
          * npc.set { name, meters: { meter: n }, reply? }: the reader's own values (range only). From

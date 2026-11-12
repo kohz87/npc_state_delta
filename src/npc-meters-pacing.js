@@ -44,7 +44,7 @@ const AXES = ['trust', 'affection', 'desire', 'tension'];
 export const EVENT_MAX = 4;
 const EVENT_TEXT_MAX = 1300;
 const NOTE_MAX = 120;
-const WHY_MAX = 80;
+const WHY_MAX = 240;   // a story line's own why is cut to 80 where it is read (captureLine); a scan's evidence (withEvidence) may be longer
 const DATE_MAX = 40;
 const SOURCES = ['story', 'scan'];
 const wholeInt = value => Number.isSafeInteger(value);
@@ -54,7 +54,7 @@ function validEvent(item) {
     if (!item || typeof item !== 'object' || Array.isArray(item) || !SOURCES.includes(item.src) || !PACING_TIERS.includes(item.tier)) return false;
     if (typeof item.held !== 'boolean' || typeof item.note !== 'string' || item.note.length > NOTE_MAX) return false;
     // The anti-lever gate's part (npc-meters-gate.js): the approach the story line named, and the outcome when the gate fired.
-    if (item.why !== undefined && (typeof item.why !== 'string' || !item.why || item.why.length > WHY_MAX)) return false;   // the story line's own reason, as given
+    if (item.why !== undefined && (typeof item.why !== 'string' || !item.why || item.why.length > WHY_MAX)) return false;   // the story line's own reason, or its one-pass evidence (withEvidence)
     if (item.via !== undefined && !normalizeApproachKind(item.via)) return false;
     if (item.gate !== undefined && (!item.via || gateEventProblems(item.gate).length)) return false;
     const ask = item.ask;
@@ -87,6 +87,21 @@ export function nextEvent(prior, { reply, date, src, ask, tier, held, note, via,
     }
     const text = JSON.stringify({ at: reply, date: String(date || '').slice(0, DATE_MAX), events: [...events, item] });
     return validEvent(item) && text.length <= EVENT_TEXT_MAX ? text : null;
+}
+
+/**
+ * A one-pass scan's evidence as the reason of this reply's story events that gave none (`evidence`: { axis: words }): each such event's why is
+ * the evidence of the axes its line asked, in axis order, joined by "; " (cut at a word to WHY_MAX). → the whole new text, or null when nothing gains a reason.
+ */
+export function withEvidence(prior, reply, evidence) {
+    const old = readEvent(prior);
+    if (!old || old.at !== reply || !evidence || typeof evidence !== 'object') return null;
+    const words = item => AXES.filter(axis => Object.hasOwn(item.ask, axis) && typeof evidence[axis] === 'string').map(axis => evidence[axis].trim().replace(/[\s.;]+$/, '')).filter(Boolean).join('; ');
+    const cut = text => (text.length <= WHY_MAX ? text : `${text.slice(0, WHY_MAX - 1).replace(/\s+\S*$/, '')}…`);
+    let changed = false;
+    const events = old.events.map(item => (item.src !== 'story' || item.why || !words(item) ? item : (changed = true, { ...item, why: cut(words(item)) })));
+    const text = changed ? JSON.stringify({ ...old, events }) : null;
+    return text && text.length <= EVENT_TEXT_MAX ? text : null;
 }
 
 /**

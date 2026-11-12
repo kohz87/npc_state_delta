@@ -18,9 +18,9 @@ import { lastRelationshipChangeHtml, projectDossierState, v2MetersHtml, v2Meters
 import { fakeRoot } from './helpers/fake-dom.js';
 import { fakeDocument } from './helpers/fake-dom.js';
 import { runtimeSource } from './helpers/runtime-source.js';
-import { relationshipHistoryHtml } from '../dossier-ui-relationship.js';
+import { NO_REASON, recentChangeRowHtml, relationshipHistoryHtml } from '../dossier-ui-relationship.js';
 import { storyMinuteText } from '../calendar.js';
-import { eventSummary } from '../src/npc-meters-pacing.js';
+import { eventSummary, withEvidence } from '../src/npc-meters-pacing.js';
 
 // TRS ideas 1-4 on the NPC meters (stage ladders with several needs and milestones, per-NPC ceilings
 // and floors, fuller custom meters with presets and drift, locked-note teasers), against Story
@@ -248,7 +248,7 @@ test('custom meters: the rule line goes in the static part only while presets an
     const on = make(true).context.static();
     const off = make(false).context.static();
     assert.match(on, / Meter rules: loyalty rises when you keep promises\.$/);
-    assert.equal(off, 'NPC meters: trust, affection, desire, tension (-100..100), loyalty (0..100). When the scene changes how someone feels: ~ npc Name | meter: +N, -N or =N. Code clamps each meter, moves it at most 15 a reply and sets the stages; never write a stage.');
+    assert.equal(off, 'NPC meters: trust, affection, desire, tension (-100..100), loyalty (0..100). When the scene changes how someone feels: ~ npc Name | meter: +N, -N or =N. Code clamps each meter, moves it at most 15 a reply and sets the stages; never write a stage. Add | why: what caused it.');
     assert.equal(on.startsWith(off.slice(0, -1)), true, 'the rule line is added at the end');
     const state = { domains: { npc: { problems: [], npcs: { mira: { name: 'Mira', meters: { trust: 5, affection: 0, desire: 0, tension: 0, loyalty: 61 }, stages: {}, unlocked: [], turn: { reply: 2, from: {} } } } } } };
     assert.deepEqual(make(true).context.tail({ state, chat: { length: 3 } }).lines.filter(line => typeof line === 'string'), ['NPC meters now: Mira trust 5, affection 0, desire 0, tension 0, loyalty devoted.']);
@@ -969,4 +969,142 @@ test('event summary: events naming only custom meters do not count toward the ti
     assert.equal(tier([item('major', {}), item('meaningful', { trust: 1 }, true)]), 'meaningful', 'all that ask were held: the asked tier');
     assert.equal(tier([item('major', {})]), 'major', 'nothing asks anything: as before');
     assert.match(fs.readFileSync(new URL('../dossier-ui-styles.js', import.meta.url), 'utf8'), /\.delta-rel-held \{ color:var\(--ss-warn-text, var\(--ss-warn, #e8c46a\)\)/);
+});
+
+// ---- 9. a reply with both a '~ npc' line and a one-pass relationshipDelta for the same person (owner's run, 12 Nov: main-reply-1755) ----
+
+const OWNER_LINES = ['~ npc Sieke | tension: +2 | trust: +1 | impact: ordinary', '~ npc Sister Temiwa | trust: +1 | impact: ordinary'];
+const SIEKE_TRUST = 'Astra paid the fifty copper registration fee in silver coin without arguing.';
+const SIEKE_TENSION = 'Her bodice button snapped while lunging for the coins, exposing her bare breasts in front of Astra before she threw contracts at him in mortification.';
+const TEMIWA_TRUST = 'Astra greeted her politely and asked about the village\'s shortage of hands before registering.';
+// The one-pass block's rows as the owner's reply sent them (relationship fields; no relationshipChangeReason, which the one-pass rules do not ask for).
+const OWNER_ROWS = [
+    { id: 'npc_sieke', relationshipImpact: 'ordinary', relationshipDelta: { trust: 1, affection: 0, desire: 0, tension: 2 }, relationshipEvidence: { trust: SIEKE_TRUST, affection: '', desire: '', tension: SIEKE_TENSION } },
+    { id: 'npc_sister-temiwa', relationshipImpact: 'ordinary', relationshipDelta: { trust: 1, affection: 0, desire: 0, tension: 0 }, relationshipEvidence: { trust: TEMIWA_TRUST, affection: '', desire: '', tension: '' } },
+];
+const ownerRecords = () => {
+    const blank = { trust: 0, affection: 0, desire: 0, tension: 0 };
+    return {
+        npc_sieke: { id: 'npc_sieke', name: 'Sieke', aliases: [], present: true, archived: false, relationship: { ...blank } },
+        'npc_sister-temiwa': { id: 'npc_sister-temiwa', name: 'Sister Temiwa', aliases: [], present: true, archived: false, relationship: { ...blank } },
+    };
+};
+// runtime-hosted.js and runtime-scan-helpers.js with their siblings copied beside them (as the hosted forward test above); only the
+// SillyTavern-bound parts are stubs. → { relationshipChanges, forward(before, after, reply, rows, onePass) → the adjusts sent }.
+async function hostedForwardParts() {
+    const sent = [];
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-onepass-why-'));
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    try {
+        fs.cpSync(root, temp, { recursive: true, filter: from => !/[\\/](tests|docs|scripts|\.git|node_modules|dist)([\\/]|$)/.test(path.relative(root, from)) });
+        fs.writeFileSync(path.join(temp, 'runtime-scan-helpers.js'), [
+            "import { normalizeRelationshipBaseline, npcMatchesLabel } from './core.js'; import { rejectedOverallLook } from './appearance-update.js'; import { moodNumbers } from './npc-mood.js';",
+            'export const chatContext = () => ({ chat: [] }); export const markStands = () => true; export const replayScope = () => null; export const scopedAdapter = a => a;',
+            fs.readFileSync(path.join(root, 'runtime-scan-helpers.js'), 'utf8').split('// What a committed scan tells the slice')[1],
+        ].map((part, index) => (index === 2 ? '//' + part : part)).join('\n'));
+        fs.writeFileSync(path.join(temp, 'runtime-settings.js'), 'export const getSettings = () => ({}); export const setRpgProbe = () => {};');
+        const { relationshipChanges } = await import(pathToFileURL(path.join(temp, 'runtime-scan-helpers.js')).href);
+        const { createHostedPart } = await import(pathToFileURL(path.join(temp, 'runtime-hosted.js')).href);
+        const rt = { storySuiteV2: { hosted: () => true, adjust: change => { sent.push(change); return Promise.resolve({ ok: true }); } } };
+        const part = createHostedPart(rt, { chatHydrationStatus: () => 'ready', getChatKey: () => 'c1', getChatState: () => ({ npcs: [] }), latestMessageId: () => 1, latestReplyIndex: () => 1 });
+        const forward = async (before, after, reply, rows, onePass) => {
+            sent.length = 0;
+            const prior = globalThis.document;
+            globalThis.document = { documentElement: { dataset: { npcStateDeltaStoryBlockV2: '1' } }, getElementById: () => null };   // hosted
+            try {
+                part.forwardRelationshipChangesToHost(before, after, reply, null, [], rows, onePass);
+                for (let n = 0; n < 5; n += 1) await new Promise(resolve => setImmediate(resolve));
+            } finally { globalThis.document = prior; }
+            return sent.map(({ guard, ...change }) => change);
+        };
+        return { relationshipChanges, forward };
+    } finally {
+        fs.rmSync(temp, { recursive: true, force: true });
+    }
+}
+let forwardParts = null;
+// What the scan forwards for that reply: the sidecar kept its numbers (a one-pass delta without relationshipChangeReason is dropped), so only the evidence goes.
+const ownerForward = async (s, reply, rows = OWNER_ROWS) => {
+    forwardParts ??= await hostedForwardParts();
+    const after = Object.values(s.delta.records);
+    return forwardParts.relationshipChanges(new Map(after.map(npc => [npc.id, npc])), after, { trust: 0, affection: 0, desire: 0, tension: 0 }, reply, rows);
+};
+const rowOf = (s, id) => {
+    const npc = { ...structuredClone(s.delta.records[id]), lastRelationshipChange: structuredClone(STORED) };
+    const shown = projectDossierState({ npcs: [npc], meterViews: s.adapter.dossierMeters([npc]), reply: s.host.store.headIndex() }, { chatKey: 'c1' }).npcs[0].lastRelationshipChange;
+    return { shown, html: recentChangeRowHtml({ change: shown }) };
+};
+
+test('one-pass + line, same reply: the meters move once (the line\'s), and Recent changes carries the one-pass evidence of the meters the line moved', async () => {
+    const s = await pacedSuite(LOOSE, { records: ownerRecords() });
+    const reply = await s.say(OWNER_LINES);
+    const moved = { sieke: structuredClone(s.npc('Sieke').meters), temiwa: structuredClone(s.npc('Sister Temiwa').meters) };
+    assert.deepEqual([moved.sieke.trust, moved.sieke.tension, moved.temiwa.trust], [1, 1, 1], 'ordinary: each meter at most 1 (tension held at 1, +2 asked)');
+    assert.equal(rowOf(s, 'npc_sieke').html.includes(NO_REASON), true, 'before the scan: no reason (the owner\'s Recent changes row)');
+    const sent = await ownerForward(s, reply);
+    assert.deepEqual(sent.map(item => [item.name, item.meters, Object.keys(item.why)]), [['Sieke', {}, ['trust', 'tension']], ['Sister Temiwa', {}, ['trust']]]);
+    for (const change of sent) assert.notEqual((await s.adapter.adjust(change))?.ok, false);
+    assert.deepEqual([s.npc('Sieke').meters, s.npc('Sister Temiwa').meters], [moved.sieke, moved.temiwa], 'the evidence moves nothing');
+    const sieke = rowOf(s, 'npc_sieke');
+    assert.equal(sieke.shown.reason, `${SIEKE_TRUST.replace(/\.$/, '')}; ${SIEKE_TENSION.replace(/\.$/, '')}`);
+    assert.match(sieke.html, /Trust \+1/);
+    assert.match(sieke.html, /Tension \+1/);
+    assert.match(sieke.html, /Astra paid the fifty copper/);
+    assert.doesNotMatch(sieke.html, new RegExp(NO_REASON));
+    assert.equal(rowOf(s, 'npc_sister-temiwa').shown.reason, TEMIWA_TRUST.replace(/\.$/, ''));
+    // A one-pass delta the sidecar did accept (it gave a reason) is still the line's: one move, not two.
+    await s.adapter.adjust({ name: 'Sieke', meters: { trust: 1, tension: 2 }, start: { trust: 0, affection: 0, desire: 0, tension: 0 }, reply, impact: 'ordinary', why: { trust: 'other words' } });
+    assert.deepEqual(s.npc('Sieke').meters, moved.sieke, 'the meters the line named move once per reply');
+    assert.equal(rowOf(s, 'npc_sieke').shown.reason.startsWith('Astra paid'), true, 'a reason once given is kept');
+    const live = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), live, 'replay is the live state');
+});
+
+test('one-pass reason: the line\'s own why wins; without a line, a zero axis, or a plain scan, nothing is written (never invented)', async () => {
+    const s = await pacedSuite(LOOSE, { records: ownerRecords() });
+    const reply = await s.say(['~ npc Sieke | tension: +2 | trust: +1 | impact: ordinary | why: the button snapped']);
+    for (const change of await ownerForward(s, reply)) await s.adapter.adjust(change);
+    assert.equal(rowOf(s, 'npc_sieke').shown.reason, 'the button snapped', 'the line\'s own reason stands');
+    // Temiwa had no line on this reply: her evidence is refused, nothing of her is written.
+    assert.equal(s.host.head().domains.npc.npcs['sister-temiwa'], undefined);
+    const quiet = await s.say([]);
+    const before = JSON.stringify(s.host.head().domains.npc);
+    const out = await s.adapter.adjust({ name: 'Sieke', meters: {}, reply: quiet, why: { trust: SIEKE_TRUST } });
+    assert.equal(out?.code, 'REFUSED');
+    assert.equal(JSON.stringify(s.host.head().domains.npc), before, 'no line on the reply: no reason, no change');
+    // Evidence only for an axis the row did not move, and a scan that is not a one-pass block, carry none.
+    const zero = [{ id: 'npc_sieke', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 }, relationshipEvidence: { trust: 'words', affection: '', desire: '', tension: '' } }];
+    assert.deepEqual(await ownerForward(s, quiet, zero), []);
+    assert.deepEqual(await ownerForward(s, quiet, null), []);
+    // An old reply (a line without why, no evidence sent) replays as it was: no reason appears.
+    const old = await pacedSuite(LOOSE, { records: ownerRecords() });
+    await old.say(OWNER_LINES);
+    const stored = JSON.stringify(old.host.head().domains.npc);
+    old.host.store.rebuild();
+    assert.equal(JSON.stringify(old.host.head().domains.npc), stored);
+    assert.equal(rowOf(old, 'npc_sieke').html.includes(NO_REASON), true);
+});
+
+test('withEvidence: only story events of the reply without a why, the axes each asked, cut at a word', () => {
+    const text = JSON.stringify({ at: 'r1', date: '', events: [{ src: 'story', ask: { trust: 1 }, tier: 'ordinary', held: false, note: '' }, { src: 'scan', ask: { tension: 1 }, tier: 'ordinary', held: false, note: '' }, { src: 'story', ask: { tension: 2 }, tier: 'ordinary', held: false, note: '', why: 'own' }] });
+    const out = JSON.parse(withEvidence(text, 'r1', { trust: 'kept the bargain.', tension: 'x' }));
+    assert.deepEqual(out.events.map(item => item.why), ['kept the bargain', undefined, 'own']);
+    assert.equal(withEvidence(text, 'r2', { trust: 'x' }), null, 'another reply');
+    assert.equal(withEvidence(text, 'r1', { affection: 'x' }), null, 'no asked axis has evidence');
+    const long = JSON.parse(withEvidence(text, 'r1', { trust: 'word '.repeat(80) })).events[0].why;
+    assert.ok(long.length <= 240 && long.endsWith('…') && !/\s…$/.test(long));
+});
+
+test('hosted forward: a one-pass scan sends its evidence with npc.adjust (also with no move); any other scan sends none', async () => {
+    forwardParts ??= await hostedForwardParts();
+    const records = Object.values(ownerRecords());
+    const onePass = await forwardParts.forward(records, records, 4, OWNER_ROWS, true);
+    assert.deepEqual(onePass, [
+        { name: 'Sieke', meters: {}, start: { trust: 0, affection: 0, desire: 0, tension: 0 }, reply: 4, why: { trust: SIEKE_TRUST, tension: SIEKE_TENSION } },
+        { name: 'Sister Temiwa', meters: {}, start: { trust: 0, affection: 0, desire: 0, tension: 0 }, reply: 4, why: { trust: TEMIWA_TRUST } },
+    ]);
+    assert.deepEqual(await forwardParts.forward(records, records, 4, OWNER_ROWS, false), [], 'a scanner scan: nothing new is sent');
+    const moved = records.map(npc => (npc.id === 'npc_sieke' ? { ...npc, relationship: { ...npc.relationship, trust: 1 } } : npc));
+    assert.deepEqual((await forwardParts.forward(records, moved, 4, OWNER_ROWS, false)).map(item => [item.name, item.meters, item.why]), [['Sieke', { trust: 1 }, undefined]], 'as before');
 });
