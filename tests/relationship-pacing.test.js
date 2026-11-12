@@ -971,3 +971,13 @@ test('a fifth event on one reply is recorded: a spent one after four held ones i
     // An unfilled list just grows.
     assert.equal(readEvent(nextEvent(null, { ...base, ask: { trust: 1 }, held: true })).events.length, 1);
 });
+
+test('a fifth event keeps the gate event: the next prompt\'s gate cue reads it', () => {
+    const base = { reply: 'r1', date: '', src: 'story', tier: 'ordinary', note: 'x', ask: { trust: 1 } };
+    let text = nextEvent(null, { ...base, held: false, via: 'flirt', gate: { mode: 'less', n: 1, span: 3 } });
+    for (let at = 0; at < 3; at += 1) text = nextEvent(text, { ...base, held: true });
+    text = nextEvent(text, { ...base, src: 'scan', held: false });
+    const kept = readEvent(text);
+    assert.equal(kept.events.length, 4);
+    assert.ok(kept.events.some(item => item.gate), 'the gate event is not the one dropped');
+});

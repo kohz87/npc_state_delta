@@ -4,7 +4,7 @@
 
 import { replayScope } from './runtime-scan-helpers.js';
 import { normalizeAutomaticBackfillRequest } from './scan-context.js';
-import { normalizeNpcRecord, normalizeNpcCandidate, normalizeFormPortraitAssets, withStoryDateMemo } from './core.js';
+import { normalizeNpcRecord, normalizeNpcCandidate, normalizeFormPortraitAssets, refreshCalendarAges, withStoryDateMemo } from './core.js';
 import { BRANCH_LINEAGE_VERSION, ROLLBACK_JOURNAL_VERSION, normalizeUserDismissedGroups } from './branch.js';
 import { normalizeSocialGraph, reconcileSocialState } from './social.js';
 import { undurableNpcStateSnapshot } from './storage.js';
@@ -123,7 +123,9 @@ export function installHydrationState(api, rt, deps) {
         if (replayScope()?.key === key) return replayScope().state;   // a history replay works on its private copy
         if (!chatStateCache.has(key)) chatStateCache.set(key, freshChatState());
         touchChatCache(key);
-        return chatStateCache.get(key);
+        const state = chatStateCache.get(key);
+        refreshCalendarAges(state.npcs);   // the stored calendarAge is fixed at scan time; a live read matches a reload (clock as it is now)
+        return state;
     }
 
     function setChatState(key, state, { markLoaded = false } = {}) {

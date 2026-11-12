@@ -37,8 +37,9 @@ export function cutToTier(changes, used, caps, value) {
 // ---- the last event of a reply (record.lastEvent): what the reply's meter lines and scans asked, and what the day's allowance made of it ----
 //
 // Stored as ONE text leaf (compact JSON), so the host always writes and replays it whole: { at: reply, date, events: [{ src, ask, tier,
-// held, note }] } (up to 4 events, the oldest of its kind making room for a fifth; `ask`: the four built-in axes' asked amounts; `date`: the story date before the reply). A new reply
-// replaces it; another event of the same reply writes the whole longer list. Display only: nothing that decides meters reads it.
+// held, note }] } (up to 4 events, the oldest of its kind making room for a fifth; `ask`: the four built-in axes' asked amounts;
+// `date`: the story date before the reply). A new reply replaces it; another event of the same reply writes the whole longer list.
+// Nothing that decides meters reads it; it feeds the card and the next prompt's gate cue (npc-meters-prompt.js), so a gate event stays.
 const AXES = ['trust', 'affection', 'desire', 'tension'];
 export const EVENT_MAX = 4;
 const EVENT_TEXT_MAX = 1300;
@@ -75,10 +76,12 @@ export function nextEvent(prior, { reply, date, src, ask, tier, held, note, via,
     const mine = Object.fromEntries(AXES.filter(axis => wholeInt(ask?.[axis]) && ask[axis] !== 0).map(axis => [axis, ask[axis]]));
     const item = { src, ask: mine, tier, held: Boolean(held), note: String(note || '').slice(0, NOTE_MAX), ...(via ? { via, ...(gate ? { gate } : {}) } : {}) };
     // A full list (EVENT_MAX) makes room by dropping the oldest event of the new one's own kind (held or spent), else the oldest, so
-    // a later spent event is never hidden behind four held ones (the card would say "Nothing moved") nor the reverse.
+    // a later spent event is never hidden behind four held ones (the card would say "Nothing moved") nor the reverse. An event that
+    // fired the gate is dropped last: the next prompt's gate cue reads it.
     if (events.length >= EVENT_MAX) {
-        const at = events.findIndex(entry => entry.held === item.held);
-        events = events.filter((_, index) => index !== (at === -1 ? 0 : at));
+        const at = [e => e.held === item.held && !e.gate, e => !e.gate, e => e.held === item.held, () => true]
+            .map(test => events.findIndex(test)).find(index => index !== -1);
+        events = events.filter((_, index) => index !== at);
     }
     const text = JSON.stringify({ at: reply, date: String(date || '').slice(0, DATE_MAX), events: [...events, item] });
     return validEvent(item) && text.length <= EVENT_TEXT_MAX ? text : null;

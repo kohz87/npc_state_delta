@@ -134,6 +134,20 @@ export function normalizeNpcRecord(raw = {}) {
     return npc;
 }
 
+// The stored calendarAge is derived and fixed at scan time (null when the hosted clock gave no date then). A live read calls this so it
+// matches what a reload derives with the clock as it is now: only calendarAge changes, in place, and only when it differs.
+export function refreshCalendarAges(npcs) {
+    if (!Array.isArray(npcs) || !npcs.length) return npcs;
+    withStoryDateMemo(() => {
+        for (const npc of npcs) {
+            if (!npc || typeof npc !== 'object') continue;
+            const age = normalizeNpcBirthday(npc).calendarAge;
+            if (age !== npc.calendarAge && (age !== undefined || npc.calendarAge !== undefined)) npc.calendarAge = age;
+        }
+    });
+    return npcs;
+}
+
 export function normalizeScanNpc(raw = {}, options = {}) {
     return withAppearanceDerivedApparentAge({ ...continuity.normalizeScanNpc(raw, options), ...normalizeScanBirthday(raw) }, raw.appearance);
 }
