@@ -94,17 +94,23 @@ function compactStateForFile(state) {
 
 // Packing is the last step (after compactStateForFile), so portrait retention above still sees full snapshots. Any packing error
 // writes the whole payload as format 1 with full checkpoints. `packing` sits before `state` so decodeStateFileHead still works.
-function packedStateForFile(snapshot) {
+// The pack memo (unchanged snapshot pairs skip the diff and its check) is kept for the last two chats only; one generation each.
+const packMemos = new Map();
+function packedStateForFile(snapshot, chatKey) {
     if (!Array.isArray(snapshot.checkpoints)) return null;
     try {
-        const { entries, packing } = packCheckpoints(snapshot.checkpoints, { activeKeys: lineageCheckpointKeys(snapshot.lineage) });
+        const memo = packMemos.get(chatKey) || null;
+        const { entries, packing, memo: next } = packCheckpoints(snapshot.checkpoints, { activeKeys: lineageCheckpointKeys(snapshot.lineage), memo });
+        packMemos.delete(chatKey);
+        packMemos.set(chatKey, next);
+        if (packMemos.size > 2) packMemos.delete(packMemos.keys().next().value);
         return { packing, state: { ...snapshot, checkpoints: entries } };
-    } catch { return null; }
+    } catch { packMemos.delete(chatKey); return null; }
 }
 
 export function encodeStateFilePayload(chatKey, state, appVersion = '', metadata = {}, writerId = '') {
     const snapshot = compactStateForFile(state);
-    const packed = packedStateForFile(snapshot);
+    const packed = packedStateForFile(snapshot, String(chatKey || ''));
     const payload = {
         format: NPC_STATE_FILE_FORMAT,
         formatVersion: packed ? NPC_STATE_FILE_FORMAT_VERSION : LEGACY_FORMAT_VERSION,

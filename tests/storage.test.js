@@ -381,7 +381,16 @@ function legacyDecode(text) {
 }
 const viaV1 = (state) => decodeStateFilePayload(legacyEncodeV1('chat:v2', state)).state;
 const viaV2 = (state) => decodeStateFilePayload(encodeStateFilePayload('chat:v2', state, 't')).state;
-const same = (a, b, note) => assert.equal(JSON.stringify(a), JSON.stringify(b), note);
+function firstDifference(a, b, path = '') {
+    if (JSON.stringify(a) === JSON.stringify(b)) return null;
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+        for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) { const d = firstDifference(a[key], b[key], `${path}/${key}`); if (d) return d; }
+    }
+    return `${path}: ${JSON.stringify(a)?.slice(0, 80)} != ${JSON.stringify(b)?.slice(0, 80)}`;
+}
+// Reconcile stamps Date.now(); both routes must see the same clock for their results to be comparable.
+function atClock(fn) { const real = Date.now; Date.now = () => 1_800_000_000_000; try { return fn(); } finally { Date.now = real; } }
+const same = (a, b, note) => assert.equal(firstDifference(a, b), null, note);
 
 const msgU = text => ({ is_user: true, is_system: false, name: 'Kazuma', mes: text });
 const msgA = (text, swipe = 0) => ({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: swipe });
@@ -471,11 +480,11 @@ test('v2 rollback: rolling back to every reply gives byte-identical results from
     const b = viaV2(state);
     for (let k = 1; k <= 30; k += 1) {
         const cut = chat.slice(0, k * 2);
-        const ra = reconcileBranchState(structuredClone(a), cut, { explicitDivergence: cut.length });
-        const rb = reconcileBranchState(structuredClone(b), cut, { explicitDivergence: cut.length });
+        const ra = atClock(() => reconcileBranchState(structuredClone(a), cut, { explicitDivergence: cut.length }));
+        const rb = atClock(() => reconcileBranchState(structuredClone(b), cut, { explicitDivergence: cut.length }));
         same(rb, ra, `reply ${k}`);
-        const da = reconcileBranchState(structuredClone(a), cut, { explicitDivergence: cut.length - 1, operation: 'delete', rewindMidDelete: true });
-        const db = reconcileBranchState(structuredClone(b), cut, { explicitDivergence: cut.length - 1, operation: 'delete', rewindMidDelete: true });
+        const da = atClock(() => reconcileBranchState(structuredClone(a), cut, { explicitDivergence: cut.length - 1, operation: 'delete', rewindMidDelete: true }));
+        const db = atClock(() => reconcileBranchState(structuredClone(b), cut, { explicitDivergence: cut.length - 1, operation: 'delete', rewindMidDelete: true }));
         same(db, da, `delete to ${k}`);
     }
 });
@@ -494,8 +503,8 @@ test('v2 reconcile: swipe, regenerate, edit and mid-chat delete give the same re
         [chat.filter((_, i) => i !== 20), { explicitDivergence: 20, operation: 'delete' }],
     ];
     for (const [live, options] of cases) {
-        const ra = reconcileBranchState(structuredClone(a), live, options);
-        const rb = reconcileBranchState(structuredClone(b), live, options);
+        const ra = atClock(() => reconcileBranchState(structuredClone(a), live, options));
+        const rb = atClock(() => reconcileBranchState(structuredClone(b), live, options));
         same(rb, ra, options.operation);
         // and back again: the re-saved result of one case reads back equal
         same(viaV2(rb.state), viaV1(ra.state));
@@ -584,3 +593,58 @@ test('v2 size and cost: 28 / 100 / 500 replies, measured against the v1 text of 
     }
     console.log('V2-SIZE', JSON.stringify(rows));
 });
+
+// Seeded fuzz at the file boundary: random replies, swipes, regenerates, edits, middle/tail deletes and rewinds. After every step the
+// state is saved and loaded once as v1 and once as v2; the reconcile of both must match exactly and the v2 file must read back equal.
+// FUZZ_SEEDS="1-200" (or "5,17") picks the seeds (default 5, 17, 41); FUZZ_STEPS the steps (default 18).
+const fuzzSeeds = (spec, fallback) => (spec ? spec.split(',').flatMap(part => { const [a, b] = part.split('-').map(Number); return b ? Array.from({ length: b - a + 1 }, (_, i) => a + i) : [a]; }) : fallback);
+function seededRandom(seed) {
+    let a = seed >>> 0;
+    const next = () => { a = (a + 0x6D2B79F5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    return { int: (lo, hi) => lo + Math.floor(next() * (hi - lo + 1)), chance: p => next() < p };
+}
+for (const seed of fuzzSeeds(process.env.FUZZ_SEEDS, [5, 17, 41])) {
+    test(`v2 file fuzz seed ${seed}: delete/swipe/edit/rewind replay is identical through the v1 and the v2 file`, () => {
+        const r = seededRandom(seed);
+        let { state, chat } = buildChat(r.int(2, 34), { npcCount: 3, noteChars: 200 });
+        for (let step = 0; step < (Number(process.env.FUZZ_STEPS) || 18); step += 1) {
+            const a = viaV1(state);
+            const b = viaV2(state);
+            same(b, a, `seed ${seed} step ${step}: load`);
+            const kind = r.int(0, 7);
+            let live = chat;
+            let options = {};
+            if (kind <= 1 || chat.length < 4) {
+                live = chat.concat(msgU(`u${step}`), msgA(`a${step}`));
+                options = {};
+            } else if (kind === 2) {
+                const at = r.int(1, Math.floor(chat.length / 2)) * 2 - 1;
+                live = chat.map((m, i) => (i === at ? msgA(`swiped ${step}`, r.int(1, 3)) : m));
+                options = { explicitDivergence: at, operation: 'swipe' };
+            } else if (kind === 3) {
+                const at = r.int(0, chat.length - 1);
+                live = chat.map((m, i) => (i === at ? { ...m, mes: `${m.mes} edit${step}` } : m));
+                options = { explicitDivergence: at, operation: 'edit' };
+            } else if (kind === 4) {
+                const at = r.int(0, chat.length - 1);
+                live = chat.filter((_, i) => i !== at);
+                options = { explicitDivergence: at, operation: 'delete', rewindMidDelete: r.chance(0.5) };
+            } else {
+                const keep = r.int(1, chat.length - 1);
+                live = chat.slice(0, keep);
+                options = { explicitDivergence: keep, operation: kind === 5 ? 'delete' : 'regenerate', rewindMidDelete: kind === 5 };
+            }
+            const ra = atClock(() => reconcileBranchState(structuredClone(a), live, options));
+            const rb = atClock(() => reconcileBranchState(structuredClone(b), live, options));
+            same(rb, ra, `seed ${seed} step ${step}: reconcile ${options.operation || 'extend'}`);
+            state = rb.state;
+            chat = live;
+            if (chat.length >= 2 && chat.at(-1).is_user === false) {
+                state.turn += 1;
+                state.npcs[step % state.npcs.length].relationship.trust = (state.npcs[step % state.npcs.length].relationship.trust + 3) % 100;
+                recordBranchCheckpoint(state, chat, chat.length - 1, 'scan');
+            }
+        }
+        same(viaV2(state), viaV1(state), `seed ${seed}: final`);
+    });
+}
