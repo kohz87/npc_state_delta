@@ -20,7 +20,8 @@ import { fakeDocument } from './helpers/fake-dom.js';
 import { runtimeSource } from './helpers/runtime-source.js';
 import { NO_REASON, recentChangeRowHtml, relationshipHistoryHtml } from '../dossier-ui-relationship.js';
 import { storyMinuteText } from '../calendar.js';
-import { eventSummary, withEvidence } from '../src/npc-meters-pacing.js';
+import { cutWords, eventSummary, withEvidence } from '../src/npc-meters-pacing.js';
+import { reasonKept } from '../src/npc-meters-slice.js';
 
 // TRS ideas 1-4 on the NPC meters (stage ladders with several needs and milestones, per-NPC ceilings
 // and floors, fuller custom meters with presets and drift, locked-note teasers), against Story
@@ -1107,6 +1108,63 @@ test('hosted forward: a one-pass scan sends its evidence with npc.adjust (also w
     assert.deepEqual(await forwardParts.forward(records, records, 4, OWNER_ROWS, false), [], 'a scanner scan: nothing new is sent');
     const moved = records.map(npc => (npc.id === 'npc_sieke' ? { ...npc, relationship: { ...npc.relationship, trust: 1 } } : npc));
     assert.deepEqual((await forwardParts.forward(records, moved, 4, OWNER_ROWS, false)).map(item => [item.name, item.meters, item.why]), [['Sieke', { trust: 1 }, undefined]], 'as before');
+});
+
+// ---- 10. the reason's length: 240 characters for both sources, cut at a word with an ellipsis (owner, 12 Nov: "Recent changes got cut off") ----
+
+test('reason length: cutWords keeps up to 240 whole, else cuts at a word with an ellipsis', () => {
+    const fits = 'a'.repeat(240);
+    assert.equal(cutWords(fits), fits);
+    const long = `${'word '.repeat(60)}end`;
+    const cut = cutWords(long);
+    assert.ok(cut.length <= 240 && cut.endsWith('…') && !/\s…$/.test(cut) && long.startsWith(cut.slice(0, -1)));
+    assert.ok(cutWords('😀 '.repeat(200)).length <= 240, 'counted in UTF-16 units, as the stored event is checked');
+});
+
+test('reason length: a line\'s own why is kept to 240 (whole when shorter, cut at a word when longer); the evidence is cut the same way', async () => {
+    const two = `${'The courier slid the sealed letter under the door and left without a word. '.repeat(3)}`.trim();   // 230 characters
+    assert.ok(two.length > 80 && two.length <= 240);
+    const s = await pacedSuite(LOOSE, { records: ownerRecords() });
+    await s.say([`~ npc Sieke | tension: +1 | impact: ordinary | why: ${two}`]);
+    const whole = rowOf(s, 'npc_sieke');
+    assert.equal(whole.shown.reason, two, 'a reason under 240 is shown whole (it was cut to 80)');
+    assert.ok(whole.html.includes(two));
+    const longer = `${two} ${two}`;
+    await s.say([`~ npc Sieke | trust: +1 | impact: ordinary | why: ${longer}`]);
+    const cut = rowOf(s, 'npc_sieke').shown.reason;
+    assert.ok(cut.length <= 240 && cut.endsWith('…') && longer.startsWith(cut.slice(0, -1)) && !/\s…$/.test(cut), 'a longer one is cut at a word with an ellipsis');
+    assert.ok(rowOf(s, 'npc_sieke').html.includes(cut.replace(/&/g, '&amp;')), 'the row carries all of it (no truncation in the markup)');
+    // The one-pass evidence goes through the same cut.
+    const e = await pacedSuite(LOOSE, { records: ownerRecords() });
+    const reply = await e.say(['~ npc Sieke | tension: +1 | impact: ordinary']);
+    await e.adapter.adjust({ name: 'Sieke', meters: {}, reply, why: { tension: longer } });
+    assert.equal(rowOf(e, 'npc_sieke').shown.reason, cut);
+    const live = JSON.stringify(e.host.head().domains.npc);
+    e.host.store.rebuild();
+    assert.equal(JSON.stringify(e.host.head().domains.npc), live, 'replay is the live state');
+});
+
+test('reason length (rule mark): a Re-read of a reply whose earlier read stored its reason cut to 80 keeps writing 80; a first read and a wide standing write 240', () => {
+    const text = 'x '.repeat(100).trim();
+    const standing = why => ({ domains: { npc: { npcs: { sieke: { lastEvent: JSON.stringify({ at: 'r1', date: '', events: [{ src: 'story', ask: { trust: 1 }, tier: 'ordinary', held: false, note: '', why }] }) } } } } });
+    assert.equal(reasonKept({}, 'sieke', text), cutWords(text), 'live: 240');
+    assert.equal(reasonKept({ standing: standing('x '.repeat(40).trim()) }, 'sieke', text), text.slice(0, 80).trim(), 'earlier read cut to 80: same again');
+    assert.equal(reasonKept({ standing: standing(cutWords(text)) }, 'sieke', text), cutWords(text), 'earlier read already wide');
+    assert.equal(reasonKept({ standing: { domains: { npc: { npcs: { sieke: { lastEvent: '{"events":[]}' } } } } } }, 'sieke', text), '', 'earlier read kept none: none (as before)');
+    assert.deepEqual(reasonKept({}, 'sieke', { trust: 'words' }), { trust: 'words' }, 'the evidence map passes untouched');
+});
+
+test('reason length: the dossier row wraps the whole reason (no CSS truncation on the Recent changes rows or the With card)', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    const css = fs.readFileSync(path.join(root, 'dossier-ui-styles-sections.js'), 'utf8');
+    for (const name of ['.delta-chg-via', '.delta-chg > div', '.delta-chg']) {
+        const rule = css.split('\n').find(line => line.includes(`${name} {`)) || '';
+        assert.ok(rule && !/text-overflow|line-clamp|white-space:\s*nowrap|max-height/.test(rule), `${name}: no truncation`);
+    }
+    assert.match(css.split('\n').find(line => line.includes('.delta-chg > div {')), /min-width:0/);
+    assert.match(css.split('\n').find(line => line.includes('.delta-chg > div {')), /overflow-wrap:anywhere/);
+    const view = fs.readFileSync(path.join(root, 'dossier-ui-view-model.js'), 'utf8');
+    assert.doesNotMatch(view, /reason: plain\(source\.reason\)\.slice/, 'the With card reason is not sliced');
 });
 
 // (card traits win) What the scan reports as refused: a swapped card trait it kept (with the swaps, worded by lookDrift) and a role

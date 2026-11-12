@@ -90,6 +90,17 @@ export function nextEvent(prior, { reply, date, src, ask, tier, held, note, via,
 }
 
 /**
+ * A reason as the dossier keeps it (both sources: a line's own why and a scan's evidence): whole up to `max` characters (WHY_MAX), else cut at a
+ * word with an ellipsis. Counted in UTF-16 units like the stored-event check (validEvent), so a cut never makes the event invalid.
+ */
+export function cutWords(text, max = WHY_MAX) {
+    const whole = String(text ?? '');
+    if (whole.length <= max) return whole;
+    const head = [...whole].reduce((out, char) => (out.length + char.length <= max - 1 ? out + char : out), '');
+    return `${head.replace(/\s+\S*$/, '')}…`;   // the same cut the one-pass evidence has had since it was added
+}
+
+/**
  * A one-pass scan's evidence as the reason of this reply's story events that gave none (`evidence`: { axis: words }): each such event's why is
  * the evidence of the axes its line asked, in axis order, joined by "; " (cut at a word to WHY_MAX). → the whole new text, or null when nothing gains a reason.
  */
@@ -97,9 +108,8 @@ export function withEvidence(prior, reply, evidence) {
     const old = readEvent(prior);
     if (!old || old.at !== reply || !evidence || typeof evidence !== 'object') return null;
     const words = item => AXES.filter(axis => Object.hasOwn(item.ask, axis) && typeof evidence[axis] === 'string').map(axis => evidence[axis].trim().replace(/[\s.;]+$/, '')).filter(Boolean).join('; ');
-    const cut = text => (text.length <= WHY_MAX ? text : `${text.slice(0, WHY_MAX - 1).replace(/\s+\S*$/, '')}…`);
     let changed = false;
-    const events = old.events.map(item => (item.src !== 'story' || item.why || !words(item) ? item : (changed = true, { ...item, why: cut(words(item)) })));
+    const events = old.events.map(item => (item.src !== 'story' || item.why || !words(item) ? item : (changed = true, { ...item, why: cutWords(words(item)) })));
     const text = changed ? JSON.stringify({ ...old, events }) : null;
     return text && text.length <= EVENT_TEXT_MAX ? text : null;
 }

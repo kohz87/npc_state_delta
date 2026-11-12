@@ -67,7 +67,7 @@ export function createNpcCommands({
         let reason = '';
         for (const [label, raw] of Object.entries(isObject(line.labels) ? line.labels : {})) {
             const key = slug(label);
-            if (REASON_LABELS.has(key)) { reason ||= clean(raw, 80); continue; }
+            if (REASON_LABELS.has(key)) { reason ||= clean(raw, 500); continue; }   // 240 at a word where it is kept (reasonKept)
             if (key === 'impact' && !byLabel.has(key)) { tier = tierOf(raw); continue; }
             // The anti-lever approach label (a feature, off: "not a meter" as before); an unknown word is no approach, quietly.
             if (key === 'via' && !byLabel.has(key) && featureOn(FEATURE_GATE, ctx)) { via = normalizeApproachKind(String(raw ?? '').trim().toLowerCase()); continue; }
@@ -152,9 +152,9 @@ export function createNpcCommands({
             const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
             // (rule NSDFOLLOW-3) `reason`: the scanner's reason for the event, kept on the reply's last event as a story line's is (scanWhy).
             // `why`: a one-pass scan's evidence per meter ({ trust: 'words' }), the reason of this reply's story line that gave none (it moves nothing).
-            const why = Object.fromEntries(Object.entries(isObject(payload?.why) ? payload.why : {}).filter(([axis, text]) => BUILT_IN_METERS.some(def => def.id === axis) && typeof text === 'string' && text.trim()).map(([axis, text]) => [axis, clean(text, 240)]));
+            const why = Object.fromEntries(Object.entries(isObject(payload?.why) ? payload.why : {}).filter(([axis, text]) => BUILT_IN_METERS.some(def => def.id === axis) && typeof text === 'string' && text.trim()).map(([axis, text]) => [axis, clean(text, 500)]));
             const evidence = Object.keys(why).length ? why : null;
-            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply: commandReply(ctx, at), at, seed: isObject(payload?.start) ? payload.start : null, yieldToStory: true, scanTier: payload?.impact, scanWhy: clean(payload?.reason, 80), evidence, allowEmpty: Boolean(evidence) });
+            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply: commandReply(ctx, at), at, seed: isObject(payload?.start) ? payload.start : null, yieldToStory: true, scanTier: payload?.impact, scanWhy: clean(payload?.reason, 500), evidence, allowEmpty: Boolean(evidence) });
         },
         /**
          * npc.set { name, meters: { meter: n }, reply? }: the reader's own values (range only). From
