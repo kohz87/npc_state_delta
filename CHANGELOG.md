@@ -1,6 +1,41 @@
 ## Unreleased
 
-Saved NPC State Delta files are about 4-5x smaller (checkpoint history is stored as patches; rollback is unchanged). A chat saved by this version cannot be opened by older versions: if an older version shows this chat's dossier as unreadable, update the extension; do not use Detach Broken Sidecar.
+## 1.17.0
+
+Update Story Block, Story Director, NPC State Delta (and Story Studio for pack authors) together. Save format 2: a chat saved by 1.17.0 cannot be opened by older NPC State Delta builds (they refuse it safely) — update every device. Replies already written replay and Re-read as before; start a new chat to see the new dossier (mood numbers and reasons, Mood section, ties types and fading, drives) behaviour.
+
+**Storage changes (read these first)**
+
+- **Save format 2: saved files are about 5x smaller.** Full checkpoints are kept only for the last 4 replies and every 25th reply; the others are stored as a patch against the previous one. In memory nothing changes; packing happens only when a file is written. Format 1 files always load and convert on their next save. An older build refuses a format 2 file without damaging it, so update every device that opens the chat. (A real run came to about 30 KB per reply instead of 100-125 KB; each save costs about 35-40 ms more CPU.)
+- **Checkpoint files are packed (about 1.8x smaller).** Each per-scan checkpoint file is now written in the packed form, self-contained and readable on its own (one 30-reply chat had reached 97 files / 152 MB; the same capture is now about 86 MB). Nothing is deleted by this change, so Storage clean-up is as safe as before, and unpacked files from earlier builds still read.
+
+**Prompt changes (flagged; static prompt unchanged except where stated)**
+
+- **The scanner/Refresh schema grew.** The background Refresh now also returns likes, dislikes and things the person values, each with its source, so tastes fill in (they came only from the narrator's `~ taste` lines before, which were almost never written). A few schema lines were added to the Refresh prompt; no extra calls.
+- **The tail cue and the story-line cues changed.** Each of the lie, tie, taste, milestone and secret line kinds now says when to write it, with one generic example, and a short tail cue keeps the Changes block at the end (prompt text only; the static prompt is byte-stable).
+- **The Changes reminder reaches the narrator.** The reminder to end with the Changes block now reaches every main prompt it should, including quiet travel and rest replies, and only after Story Director's and Story Block's kept lines fit under the tail budget. Previously it was dropped first.
+- **Mood and Pull lines reach the narrator.** They were being dropped by the 550-token tail budget; within NPC State Delta's lines the Changes cue still comes first and Pull and Mood take the rest (optional on overflow), never displacing other modules' lines.
+
+**Dossier and play**
+
+- **Dossier polish: reasons, dated mood history, mood words that match the numbers.** A reason is missing only when none was recorded; every Mood history row carries its story date and reply number; the mood words are derived from the numbers shown.
+- **Mood numbers and reasons, a Mood section, the Pull line, admission gaps.** Feeling, Energy and Control move with every mood update (numbers from the scan, with a word-list fallback that understands negation) and are shown on their own coloured meter rows with this reply's change, on the board and in a new Mood section with Recent changes (last 3) and the Pull line (1-3 dots). Lies told moved to With, Knows about others to Secrets; meter changes show their reason. Missed people are admitted, description phrases never become named dossiers, role labels with linking words are kept, and scan people get meters.
+- **Pull and Mood reach the narrator; Pull signals fire correctly.** Closure now ages threads correctly, and Awe no longer fires on one place written two ways.
+- **Ties: five types, priority and fading.** Ties are Ally, Rival, Owes, Interest or Passing, with the detail in the description. Priority is Ally/Rival/Owes, then Interest, then Passing for eviction (least recently mentioned first, hand-edited never), fading (Passing after 7, Interest after 14, the high types after 30 story days without a mention, by the story clock) and prompt order. Ties with someone who died or left fold into Older ties and are not sent to the narrator; a mention brings a tie back. Cap 8; only whole-name or alias mentions count.
+- **Drives: a word on a centred bar.** The middle of the bar is normal, with the source shown. People who are not from a pack are seeded from two cues, and drives step from story evidence already recorded (levers parsed structurally, prose cues with negation), one step per reply, recorded so replay equals live. No model calls.
+- **Past entries are longer and dated; Ties are stacked.** Past entries may run to 400 characters; each new memory records the story date and reply (old ones stay undated, also when re-worded); Ties show as type, name, description, with spacing.
+- **Profile: section lines, placeholders, one Age, a coloured meter line.** Thin lines between Profile sections; empty sections keep a placeholder when their feature is on; one Age field (no separate Looks); on desktop, section views show the role and then the four meters on their own bold coloured line, with full meter words.
+- **Profile and navigation on phone and tablet.** The profile's right pane is aligned (one label column per block; the #0 mark is hidden for the opening reply); initials are large and centred when there is no portrait; Trust, Affection, Desire and Tension are written in full everywhere; a visible "‹ Dossier" control is on every section and the profile whenever the board is not on screen (phone and tablet only), plus Esc and the browser back gesture (also leaving the map).
+- **A cast member takes the pack birthday.** A birthday in the pack is used as established; without one the deterministic date is simply the birthday (never labelled generated); a birthday the story states later still wins. Pack dates are read in the pack calendar.
+- **People get a dossier only when named in the story prose.** A new person is admitted only when named in prose (the greeting included); World State rosters and hidden notes no longer create dossiers. Existing dossiers are untouched.
+- **Pin key people from the World tab only.** The duplicate "Pin as Key people" button in the dossier's Cast section is gone; pin and unpin in Story Director's World tab. The Key person pill stays.
+- **Calendar age is live, and the last-change card is fixed.** In the hosted path a person's calendar age follows the story clock, and the last-change card is right after you delete an earlier message, with the other small items of the 12 Nov batch.
+- **Overnight sweep.** Backlog fixes, light-mode tones (checked at phone, tablet and desktop widths), and the old v1 tabs removed.
+
+**Reliability**
+
+- **Send no longer waits for the automatic scan.** SillyTavern's send lock is no longer held while NPC State Delta scans, which dropped Sends in real runs. A scan cancelled by an edit re-runs once; scanner call counts are unchanged. A Send during the scan: that reply's dossier update reaches the prompt one reply later.
+- **A warning when a restore lands far behind a swipe.** When a restore installs a state more than max(4, 2 x scan interval + 2) messages behind the divergence point, it is still installed but a visible line appears under Problems. Works with save formats 1 and 2.
 
 ## 1.16.1
 
