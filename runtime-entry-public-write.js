@@ -36,6 +36,19 @@ function createReplayBoundaries(deps) {
             const read = new Set(readAheadOf(state));
             return { ids: activeReplyIds().filter(id => id > after && !read.has(id)), marker: after >= 0 ? after : null };
         },
+        // The replies a state installed before a change has to read again: every surviving reply its scan marker has not reached (from the marker,
+        // not from `at`: replies between the marker and the change are still valid and the marker moves past them), oldest first, when a surviving
+        // reply lies at or after the change; none for a changed latest reply (the normal path reads that one). `at` is a message index of the
+        // lineage, the same index space as the reply ids. `n` is the reply number of the change as the reader counts it.
+        pendingOf: (state, at, deleted = false) => {
+            const all = activeReplyIds();
+            const after = Number.isInteger(state?.lastScannedMessageId) ? state.lastScannedMessageId : -1;
+            const read = new Set(readAheadOf(state));
+            const latest = all.length ? all[all.length - 1] : -1;
+            const needed = deleted ? all.some(id => id >= at) : at < latest;   // a surviving reply at or after the change (a swipe, delete-last, latest edit: none)
+            const ids = needed ? all.filter(id => id > after && !read.has(id)) : [];
+            return { ids, marker: after >= 0 ? after : null, n: all.filter(id => id < at).length + 1 };
+        },
         all: () => activeReplyIds(),
         active: ids => { const now = new Set(activeReplyIds()); return ids.every(id => now.has(id)); },
         copy: () => structuredClone(normalizeChatState(getChatState())),

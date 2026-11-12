@@ -16,7 +16,7 @@ export function createCatchUp(port) {
     let info = { active: false, done: 0, total: 0, older: 0, from: null, reason: '', outcome: null, message: '' };
     const live = () => port.live();
     const changed = () => { try { port.changed?.(); } catch { /* the banner is best effort */ } };
-    const status = () => ({ ...info, active: held });
+    const status = () => ({ ...info, active: held, note: port.note?.() ?? null });
 
     // The job for a trigger, worked out at once (the count is on the banner and in the hold's words before anything runs).
     function plan(kind, { reason, last } = {}) {
@@ -118,6 +118,8 @@ export function createCatchUp(port) {
             }
             return status();
         },
+        /** The reader dismisses the restore note (one click); it is gone for good. */
+        async dismiss() { await port.dismissNote?.(); changed(); return status(); },
         idle: () => task ?? Promise.resolve(),
     };
 }

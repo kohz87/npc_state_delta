@@ -38,7 +38,7 @@
 // in flight and the acknowledged deaths in the vault's index of the state's lineage.
 
 import { resolveIdentity } from './identity.js';
-import { timelineOf } from './timeline.js';
+import { restoreNoteText, timelineOf } from './timeline.js';
 import { manualLifeStateRecord } from '../../terminal-lifecycle.js';
 import { createCatchUp } from './history-replay.js';
 import { createParticipantHandlers } from './participant/handlers.js';
@@ -288,7 +288,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     });
     const { participant } = createParticipantHandlers({
         abort, bounded, boundedCheckpoint, busy, confirmedDeath, getAnnounced: () => announced, getHandle: () => handle,
-        getLast: publication.getLast, hand, hostExclusive, hydrate, made, now, port, preparedAt, quiet, restoreIndex, save,
+        getCatchUp: () => catchUp, getLast: publication.getLast, hand, hostExclusive, hydrate, made, now, port, preparedAt, quiet, restoreIndex, save,
         schedulePublish: publication.schedulePublish, setHandle: value => { handle = value; }, stands, standsOnBytes, verified, verifyOnly, vault, warn,
     });
     const { nativeChange, schedulePublish, flush, getLast } = publication;
@@ -296,6 +296,12 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     // rebuild and Skip. The one publication after an install is the ordinary one (a change announced, then published at once).
     const catchUp = createCatchUp({
         chatKey: keyNow, enabled: () => port.enabled?.() !== false && typeof port.live === 'function', live: () => port.live(), changed: () => port.changed?.(), warn, settled: () => port.settled?.(),
+        note: () => (session && session.key === keyNow() ? restoreNoteText(session.index.restoreNote) || null : null),
+        dismissNote: () => exclusive(async () => {
+            const s = await hydrate();
+            if (s?.index.restoreNote) { delete s.index.restoreNote; await save(); }
+            return { ok: true };
+        }),
         publish: async () => { announced += 1; if (handle && started()) { schedulePublish(0); await flush(); } },
         retryPublish: () => schedulePublish(retryMs),
     });
