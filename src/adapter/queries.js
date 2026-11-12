@@ -332,8 +332,31 @@ export function createQueriesPart(session, deps) {
         return changed ? out : npcs;
     }
 
+    // The story's date after reply `index` (the reply a memory was recorded in), "Icewane 27"; '' without a clock. A replay's scoped
+    // adapter forces asOf to the replayed reply, which is this same index, so live and replay agree.
+    function storyDateText(index) {
+        if (!Number.isInteger(index) || index < 0) return '';
+        try { if (calendarOwn?.() === true) return ''; } catch { return ''; }   // the calendar kept in Delta: no Story Director date (as storyClock)
+        try {
+            const time = session.sdkRef?.query?.('director.time', { asOf: index });
+            const minutes = Number.isInteger(time) ? time : time?.minutes;
+            return Number.isInteger(minutes) ? storyMinuteText(minutes, director.directorCalendar()) : '';
+        } catch { return ''; }
+    }
+
+    // The same clock as a whole story day after reply `index` (minutes / 1440; same asOf rules as storyDateText), null without a clock.
+    function storyDayNumber(index) {
+        if (!Number.isInteger(index) || index < 0) return null;
+        try { if (calendarOwn?.() === true) return null; } catch { return null; }
+        try {
+            const time = session.sdkRef?.query?.('director.time', { asOf: index });
+            const minutes = Number.isInteger(time) ? time : time?.minutes;
+            return Number.isSafeInteger(minutes) && minutes >= 0 ? Math.floor(minutes / 1440) : null;
+        } catch { return null; }
+    }
+
     return {
-        warn, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
+        warn, storyDateText, storyDayNumber, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
         entryFor, queries, ...director, send, sliceView,
     };
 }

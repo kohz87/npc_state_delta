@@ -88,3 +88,36 @@ test('explicit manual name-based tombstone clearing remains available',()=>{
   assert.ok(cleared.removedIds.includes('npc_old'));
   assert.ok(cleared.removedLabels.includes('the innkeeper'));
 });
+
+test('a swipe of the latest of six replies restores the state of the reply before it, from sidecar format 1 and from format 2 with packed checkpoints',async()=>{
+  const {encodeStateFilePayload,decodeStateFilePayload}=await import('../storage-payload.js');
+  const greeting=assistant('Greeting');
+  const chat=[greeting];
+  const state=baseState();
+  for(let reply=1;reply<=6;reply+=1){
+    chat.push(user(`Turn ${reply}`));
+    state.turn=reply;
+    state.lineage=chatLineage(chat);
+    recordBranchCheckpoint(state,chat,chat.length-1,'state');
+    chat.push(assistant(`Reply ${reply} with enough text to be worth a patch against its neighbours, so that the middle entries pack.`));
+    const mina=createNpcRecord('Mina'); mina.id='npc_mina'; mina.trust=reply; mina.notes=`seen in reply ${reply}`.repeat(reply);
+    const crowd=Array.from({length:10},(_,at)=>{const npc=createNpcRecord(`Extra ${at}`); npc.id=`npc_extra_${at}`; npc.notes='A long unchanged note about this person that every checkpoint repeats. '.repeat(8); return npc;});
+    state.npcs=[mina,...crowd];
+    state.lineage=chatLineage(chat);
+    recordBranchCheckpoint(state,chat,chat.length-1,'state');
+  }
+  const swiped=[...chat.slice(0,-1),assistant('Reply 6, swiped.')];
+  const viaFile=version=>{
+    const text=version===2?encodeStateFilePayload('chat:a.png:one',state):JSON.stringify({format:'npc_state_delta_chat_data',formatVersion:1,chatKey:'chat:a.png:one',revision:1,state:JSON.parse(JSON.stringify(state))});
+    const written=JSON.parse(text);
+    assert.equal(written.formatVersion,version);
+    if(version===2) assert.equal(written.state.checkpoints.filter(entry=>!entry.snapshot).length>0,true,'packing is active: some checkpoints are on disk as patches');
+    return decodeStateFilePayload(text).state;
+  };
+  for(const version of [1,2]){
+    const loaded=viaFile(version);
+    const result=reconcileBranchState(loaded,swiped,{explicitDivergence:swiped.length-1,operation:'swipe'});
+    assert.equal(result.state.npcs[0].trust,5,`format ${version}: the state of reply 5, not reply 1 or reply 6`);
+    assert.notEqual(result.state.npcs[0].trust,1);
+  }
+});

@@ -27,6 +27,8 @@
 //   live()               the runtime's history-replay boundaries (runtime-entry-public-write.js); without them no catch-up runs
 //   changed()            the catch-up banner redraws (optional)
 //   warn(text)           where problems are told (optional)
+//   chatLineage()        the fingerprints of the open chat's messages now (optional; a head selection far behind the change is reported only when it is given)
+//   scanEvery()          the reader's "Scan every" setting (optional; 5 without it): how far behind a state can legitimately be is sized from it
 //   ready()              whether Delta has loaded the open chat's state (optional; without it the state is taken as loaded)
 //   load()               loads the open chat's state when it is not loaded yet (asynchronous, optional)
 //   normalize(state)     the state as Delta keeps it once installed (its own normalization; synchronous, optional)
@@ -287,7 +289,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     const { participant } = createParticipantHandlers({
         abort, bounded, boundedCheckpoint, busy, confirmedDeath, getAnnounced: () => announced, getHandle: () => handle,
         getLast: publication.getLast, hand, hostExclusive, hydrate, made, now, port, preparedAt, quiet, restoreIndex, save,
-        schedulePublish: publication.schedulePublish, setHandle: value => { handle = value; }, stands, standsOnBytes, verified, verifyOnly, vault,
+        schedulePublish: publication.schedulePublish, setHandle: value => { handle = value; }, stands, standsOnBytes, verified, verifyOnly, vault, warn,
     });
     const { nativeChange, schedulePublish, flush, getLast } = publication;
     // The history replay (history-replay.js): Story Block's `restored` (a fallback installed an earlier checkpoint), the resume on chat open, the

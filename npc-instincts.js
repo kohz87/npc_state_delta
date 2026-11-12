@@ -18,7 +18,15 @@ const plainCause = (text, fallback) => {
     const clean = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, CAUSE_MAX);
     return clean || fallback;
 };
-const placeKey = name => idOf(name).toLowerCase();
+// A place's own name: the part before a region ("Market District, Highmark Capital" and "Bluewatch / Guild Office" both lose the rest), lower case.
+const placeKey = name => idOf(name).toLowerCase().split(/\s*[,/]\s*/)[0].trim();
+// The same place under a fuller or shorter name ("Ram's Head" and "Ram's Head Inn"): one name's words open the other's. Run 3 read these as arrivals.
+export function samePlace(a, b) {
+    const x = placeKey(a).split(/\s+/).filter(Boolean);
+    const y = placeKey(b).split(/\s+/).filter(Boolean);
+    const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+    return short.length > 0 && short.every((word, i) => word === long[i]);
+}
 
 // Closure score by days an open thread has been waiting: 2 to 3 days = 1, 4 to 6 = 2, 7 or more = 3.
 export function closureScore(ageDays) {
@@ -79,7 +87,7 @@ export function readAwe(input) {
     const now = dayOf(day);
     const place = idOf(here);
     if (now === null || !place || !Array.isArray(visited)) return null;
-    const seen = visited.some(name => placeKey(name) === placeKey(place));
+    const seen = visited.some(name => samePlace(name, place));
     if (seen) return null;
     return { kind: 'awe', score: AWE_SCORE, cause: plainCause(`first time at ${place}`, 'a new place'), since: now };
 }
@@ -107,7 +115,7 @@ export function readInstincts(input) {
 // `track` is the private memory the readers need and the state does not otherwise keep: whether the NPC was in the party,
 // the day they were benched or joined, the day each open thread naming them was first seen, and up to PLACES_MAX places
 // they were present at. facts: { day, party: true|false|null (null = no party answer), awayDay: int|null, threads:
-// [{ id, title }] (open threads that name them), here: place name | '', present: boolean }.
+// [{ id, title, opened?: day }] (open threads that name them), here: place name | '', present: boolean }.
 // → { track, inst, pull } with `track` and `pull` left out when empty. All whole numbers and short plain text.
 export const PLACES_MAX = 6;
 export const THREADS_MAX = 6;
@@ -126,7 +134,8 @@ export function stepPull(before, facts) {
     for (const row of (Array.isArray(facts.threads) ? facts.threads : []).slice(0, THREADS_MAX)) {
         const id = idOf(row?.id);
         if (!id) continue;
-        const first = dayOf(prior.threads?.[id]) ?? day;
+        // The thread's own opening day when the host gives it (facts.threads[].opened), else the day this person's record first saw it.
+        const first = dayOf(row.opened) ?? dayOf(prior.threads?.[id]) ?? day;
         seen[id] = Math.min(first, day);
         threads.push({ id, open: true, title: row.title, openedDay: seen[id], people: [SELF] });
     }
@@ -134,7 +143,7 @@ export function stepPull(before, facts) {
     const known = Array.isArray(prior.places) ? prior.places.filter(name => typeof name === 'string').slice(-PLACES_MAX) : [];
     const here = idOf(facts.here);
     const places = [...known];
-    if (here && facts.present === true && !known.some(name => placeKey(name) === placeKey(here))) places.push(here);
+    if (here && facts.present === true && !known.some(name => samePlace(name, here))) places.push(here);
     if (places.length) track.places = places.slice(-PLACES_MAX);
     const { inst, pressure } = readInstincts({
         id: SELF, day, here: facts.present === true ? here : '',

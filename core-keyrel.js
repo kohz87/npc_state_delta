@@ -45,7 +45,7 @@ function keyRelationshipSubjectsEquivalent(a, b) {
     return short.length >= 1 && short.every(token => long.includes(token)) && short.join(' ').length >= 4;
 }
 
-export function mergeKeyRelationshipUpdates(existing, incoming) {
+export function mergeKeyRelationshipUpdates(existing, incoming, tieState = null) {
     const current = (Array.isArray(existing) ? existing : []).slice(0, KEY_RELATIONSHIP_LIMIT * 2)
         .map(compactKeyRelationshipEntry).filter(Boolean).slice(0, KEY_RELATIONSHIP_LIMIT);
     const updates = (Array.isArray(incoming) ? incoming : []).slice(0, KEY_RELATIONSHIP_LIMIT * 2)
@@ -56,8 +56,147 @@ export function mergeKeyRelationshipUpdates(existing, incoming) {
         if (index < 0 && exact) index = current.findIndex(item => normalizeName(item) === exact);
         if (index >= 0) current[index] = entry;
         else if (current.length < KEY_RELATIONSHIP_LIMIT) current.push(entry);
+        else if (tieState) {
+            // Full list and this person records ties' last mentions: the new tie takes the place of the weakest, least recently mentioned one.
+            const victim = tieEvictionIndex(current, tieState);
+            if (victim >= 0) current[victim] = entry;
+        }
     }
     return current.slice(0, KEY_RELATIONSHIP_LIMIT);
+}
+
+// ---- Tie types, fading and priority (owner decisions 12 Nov). All pure; no model call. ----
+// A tie's type is one of five broad kinds, read from the stored relation text with the fixed keyword table below (first matching row
+// wins, in this order); no match, or a weak/one-time word, is Passing. A type set by a pack or the player (a `~ tie` tag) wins over the words.
+export const TIE_TYPE_LABELS = Object.freeze({ ally: 'Ally', rival: 'Rival', owes: 'Owes', interest: 'Interest', passing: 'Passing' });
+// Priority: Ally = Rival = Owes (high) > Interest > Passing. Rank 0 is the strongest.
+export const TIE_TYPE_RANK = Object.freeze({ ally: 0, rival: 0, owes: 0, interest: 1, passing: 2 });
+// Story days without a mention before a tie fades (one constant per tier; the owner's 14 days is the middle tier).
+export const TIE_FADE_DAYS = Object.freeze({ passing: 7, interest: 14, high: 30 });
+const TIE_KEYWORDS = [
+    ['rival', /\b(?:rival|rivals|enemy|enemies|nemesis|foe|adversary|antagonist|arch-?enem\w*|feud\w*|hostile|hates?|loathes?|bitter)\b/i],
+    ['owes', /\b(?:owes|owing|indebted|debt|beholden|creditor|obligated|oath-?bound|sworn to|saved (?:her|his|their|my) life|rescued (?:her|his|their))\b/i],
+    ['ally', /\b(?:ally|allies|friends?|best friend|partner|spouse|wife|husband|lover|fianc\w+|betrothed|girlfriend|boyfriend|mother|father|parents?|mom|dad|sister|brother|sibling|daughter|son|cousin|aunt|uncle|grand\w+|family|kin|mentor|teacher|master|apprentice|student|companion|comrade|confidant\w*|guardian|ward|protector|bodyguard|crewmate|trusted|loyal|sworn)\b/i],
+    ['interest', /\b(?:crush|attracted|attraction|curious|fascinat\w*|intrigu\w*|admires?|admirer|suitor|courting|flirt\w*|infatuat\w*|love interest|colleague|coworker|neighbou?r|client|employer|boss|employee|acquaintance|contact|regular)\b/i],
+];
+// "owed by" / "debtor": the OTHER person owes, so it is not an Owes tie for this one (owes is one-way); it falls through to the other rows.
+const OWED_BY = /\b(?:owed by|owed to by|debtor)\b/i;
+
+/** The type of one tie: `tags` (a pack/player tie tag list: rival, owes, ally) wins, else the keyword table on the relation text. */
+export function tieType(relation, tags = []) {
+    const set = Array.isArray(tags) ? tags : [];
+    if (set.includes('owes')) return 'owes';
+    for (const tag of set) if (Object.hasOwn(TIE_TYPE_RANK, tag) && TIE_TYPE_RANK[tag] === 0) return tag;
+    const text = String(relation ?? '').replace(OWED_BY, ' ');
+    for (const [type, pattern] of TIE_KEYWORDS) if (pattern.test(text)) return type;
+    return 'passing';
+}
+
+const tieFadeDays = type => (type === 'passing' ? TIE_FADE_DAYS.passing : type === 'interest' ? TIE_FADE_DAYS.interest : TIE_FADE_DAYS.high);
+const DEAD_TIE = /[;|]\s*(?:deceased|dead)\b|^surviving widow|\((?:deceased|dead)\)/i;
+const tieParts = entry => {
+    const text = compactKeyRelationshipEntry(entry);
+    const match = text.match(/^(.+?)(?:\s+[—–-]\s+|\s*\|\s*|\s*:\s+)([\s\S]*)$/);
+    return { text, name: match ? match[1].trim() : text, rest: match ? match[2].trim() : '' };
+};
+
+/** Whether this person records ties' last mentions yet (an object `tieSeen`, written by a scan that had a story day). Without it nothing fades. */
+export const tiesTracked = npc => !!npc && typeof npc.tieSeen === 'object' && npc.tieSeen !== null && !Array.isArray(npc.tieSeen);
+
+/** The name/alias → person map of a roster, for readTieRows/narratorTies/recordTieMentions: build it once per projection, not per person. */
+export function tieRoster(npcs) {
+    const map = new Map();
+    const labels = new Map();   // person -> every name key they answer to (map.labels), so a mention check never scans the roster
+    for (const other of Array.isArray(npcs) ? npcs : []) {
+        for (const label of [other?.name, ...(other?.aliases || [])]) {
+            if (!label) continue;
+            const key = normalizeName(label);
+            map.set(key, other);
+            labels.set(other, [...(labels.get(other) || []), key]);
+        }
+    }
+    map.labels = labels;
+    return map;
+}
+
+/**
+ * The ties of one person, read for the board and the narrator: [{ entry, name, key, type, rank, seen, state }] in priority order
+ * (high types, then Interest, then Passing; most recently mentioned first inside a type). `state`: 'active', 'faded' (not mentioned for
+ * its tier's days), 'left' (the other person is archived), 'died' (a death mark or the other person's life state). Only when
+ * tiesTracked(npc) does anything leave 'active'; an older chat reads exactly as before. `day`: the story day now (null: no fading by time).
+ * `tags(name)`: optional pack/player tie tags of the person. `roster`: tieRoster(npcs) built once by a caller that reads many people (else built here).
+ */
+export function readTieRows(npc, { npcs = [], day = null, tags = () => [], roster = null } = {}) {
+    const tracked = tiesTracked(npc);
+    const others = roster || tieRoster(npcs);
+    const rows = (Array.isArray(npc?.keyRelationships) ? npc.keyRelationships : []).map((entry, index) => {
+        const { text, name, rest } = tieParts(entry);
+        const key = normalizeName(name);
+        const type = tieType(rest, tags(name));
+        const seenRaw = tracked ? npc.tieSeen[key] : undefined;
+        const seen = Number.isInteger(seenRaw) ? seenRaw : null;
+        const other = others.get(key);
+        let state = 'active';
+        if (tracked) {
+            if (DEAD_TIE.test(`${rest} ${text}`) || other?.lifeState === 'deceased') state = 'died';
+            else if (other?.archived) state = 'left';
+            else if (seen !== null && Number.isInteger(day) && day - seen >= tieFadeDays(type)) state = 'faded';
+        }
+        return { entry: text, name, key, type, rank: TIE_TYPE_RANK[type], seen, state, index, quiet: seen !== null && Number.isInteger(day) ? Math.max(0, day - seen) : null };
+    });
+    return rows.sort((a, b) => a.rank - b.rank || (b.seen ?? -1) - (a.seen ?? -1) || a.index - b.index);
+}
+
+/** The ties the narrator may be told of: active ones in priority order, plus a died/left one only when `scene` (text) names the person. */
+export function narratorTies(npc, { npcs = [], day = null, scene = '', tags, roster = null } = {}) {
+    const sceneText = normalizeName(scene);
+    return readTieRows(npc, { npcs, day, tags, roster }).filter(row => row.state === 'active'
+        || (row.state === 'died' && row.key && sceneText.includes(row.key)));
+}
+
+// The victim when the list is full: the lowest-priority tier first, inside it the least recently mentioned (no mention recorded counts
+// as the oldest). A list the reader edited by hand (`tieState.manual`) is never touched; -1 = nobody to replace (the new tie is dropped).
+function tieEvictionIndex(current, tieState) {
+    if (tieState.manual) return -1;
+    const rows = readTieRows({ keyRelationships: current, tieSeen: tieState.seen ?? {} }, { npcs: tieState.npcs, day: null, tags: tieState.tags });
+    const weakest = rows.at(-1);
+    return weakest ? weakest.index : -1;
+}
+
+/**
+ * `tieSeen` after a reply on story `day`: each tie whose person `text` (the reply prose) or `named` (names in tie lines) mentions is marked `day`.
+ * A mention is the whole name or one of that person's known aliases (`roster`: tieRoster of the cast) as whole words; never a first word or a title
+ * ("the harbour captain" is not Captain Vane).
+ */
+export function recordTieMentions(npc, { day, text = '', named = [], roster = null } = {}) {
+    if (!npc || !Number.isInteger(day)) return undefined;
+    const hay = ` ${normalizeName(text)} `;
+    const tied = new Set((Array.isArray(named) ? named : []).map(entry => normalizeName(tieParts(entry).name)));
+    const next = { ...(tiesTracked(npc) ? npc.tieSeen : {}) };
+    for (const entry of Array.isArray(npc.keyRelationships) ? npc.keyRelationships : []) {
+        const key = normalizeName(tieParts(entry).name);
+        if (!key) continue;
+        const labels = [key, ...(roster?.labels?.get(roster.get(key)) || [])];
+        if (tied.has(key) || labels.some(label => label && hay.includes(` ${label} `))) next[key] = Math.max(day, Number.isInteger(next[key]) ? next[key] : day);
+    }
+    for (const key of Object.keys(next)) if (!(npc.keyRelationships || []).some(entry => normalizeName(tieParts(entry).name) === key)) delete next[key];
+    return tiesTracked(npc) || Object.keys(next).length ? next : undefined;
+}
+
+/** The `tags(name)` lookup for readTieRows from the notes' tie rows ([{ name, tags, owedBy }]): a set tag wins; a person who owes this one is a debt tie (Owes). */
+export function noteTieTags(rows) {
+    const byName = new Map((Array.isArray(rows) ? rows : []).map(row => [String(row?.name ?? '').toLowerCase(), row?.tags?.length ? row.tags : (row?.owedBy ? ['owes'] : [])]));
+    return name => byName.get(String(name).toLowerCase()) ?? [];
+}
+
+/** A stored `tieSeen` cleaned: at most KEY_RELATIONSHIP_LIMIT people, each a whole story day >= 0; undefined when it is not an object. */
+export function cleanTieSeen(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const out = {};
+    for (const [key, day] of Object.entries(value).slice(0, KEY_RELATIONSHIP_LIMIT)) {
+        if (key && key.length <= 160 && Number.isInteger(day) && day >= 0) out[key] = day;
+    }
+    return out;
 }
 
 

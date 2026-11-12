@@ -211,6 +211,43 @@ test('hosted: a scan that finishes after a swipe sends no npc.adjust onto the ne
     assert.equal(result.adjusts, 0, 'nothing was sent onto the swipe now shown');
 });
 
+// (live run 3) Pell, Harek and Theobald were admitted while the host said "A native change is finishing": their npc.meet was not kept and was never
+// sent again, so two of them had no slice entry for the rest of the chat. The refused meeting is owed and goes out with the person's next scan.
+test('hosted: a meeting the host did not keep is sent again with the next scan of that person', () => {
+    const output = runHostScenario('meters-meet-owed', async () => {
+        const sdk = {
+            registered: [], sent: [], meets: 0,
+            registerModule(def) { sdk.registered.push(def); },
+            command: async (type, payload) => {
+                sdk.sent.push({ type, payload });
+                if (type === 'npc.meet' && (sdk.meets += 1) === 1) return { ok: false, code: 'RESTORE_PENDING', message: 'NPC State Delta is waiting: A native change is finishing; every part must agree before the story goes on.' };
+                return { ok: true };
+            },
+            query: name => (name === 'npc.meters' ? [] : null),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    }, async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const harek = { name: 'Harek', present: true, role: 'caravan guard', identityKind: 'proper_name', dossierSignal: 'meaningful', dossierReason: 'named guard', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 }, relationshipEvidence: { trust: '', affection: '', desire: '', tension: '' }, mood: 'Cynical and indifferent' };
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [harek] });
+        await turn('Harek leans on the wagon, a weathered caravan guard.');
+        await sleep(300);
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ ...harek, mood: 'Bored and watchful', moodV: 1, moodA: -2, moodD: '2' }] });
+        await turn('Harek shrugs and spits into the dust beside the wagon.');
+        await sleep(300);
+        console.log('RESULT ' + JSON.stringify({ total: mockState.sdk.sent.filter(item => item.type === 'npc.meet' && item.payload.name === 'Harek').length, moods: mockState.sdk.sent.filter(item => item.type === 'npc.mood').map(item => item.payload), names: api.getState().npcs.map(npc => npc.name) }));
+    });
+    const result = scenarioOutput(output);
+    assert.equal(result.total, 2, 'the meeting the host did not keep was sent again with a later scan of Harek, and once kept never again');
+    // each mood word the scan wrote for Harek goes to the slice as npc.mood (its numbers are read there from the fixed word list), once per change
+    assert.deepEqual(result.moods.map(item => [item.name, item.word]), [['Harek', 'Cynical and indifferent'], ['Harek', 'Bored and watchful']]);
+    // the three numbers the scan gave with a word travel with it (whole, -3..3); a scan that gave none sends none (the word list reads it)
+    assert.deepEqual(result.moods.map(item => item.vad), [undefined, { v: 1, a: -2, d: 2 }]);
+});
+
 test('without a v2 host the same turns send nothing, and the sidecar and the injection are the same as hosted', () => {
     const run = (name, prelude) => scenarioOutput(runHostScenario(name, prelude, async () => {
         const api = globalThis.NPCStateDelta;
@@ -266,7 +303,7 @@ test('index.js: the v2 meter hooks are the identity without a host', () => {
     // Every hook asks storySuiteV2Meters() first, which is null unless the page flag is set and the adapter is hosted.
     assert.match(index, /function storySuiteV2Meters\(\) \{\n        const adapter = storyBlockV2Hosted\(\) && rt\.storySuiteV2\?\.hosted\?\.\(\) \? rt\.storySuiteV2 : null;\n        const scope = replayScope\(\);\n        return adapter && scope \? scopedAdapter\(adapter, scope\.at, scope\.sink\) : adapter;/);
     assert.match(index, /function hostedMeterView\(npcs\) \{\n        const adapter = storySuiteV2Meters\(\);\n        if \(!adapter\) return npcs;/);
-    assert.match(index, /function forwardRelationshipChangesToHost\(before, after, messageId, head = null, updates = \[\]\) \{\n        if \(replayScope\(\)\) return;[^\n]*\n        const adapter = storySuiteV2Meters\(\);\n        if \(!adapter\) return;/);
+    assert.match(index, /function forwardRelationshipChangesToHost\(before, after, messageId, head = null, updates = \[\], rows = \[\]\) \{\n        if \(replayScope\(\)\) return;[^\n]*\n        const adapter = storySuiteV2Meters\(\);\n        if \(!adapter\) return;/);
     assert.match(index, /function hostedSecretsEditorHtml\(npc\) \{\n        const adapter = storySuiteV2Meters\(\);\n        if \(!adapter\) return '';/);
     assert.match(index, /const v2Edits = hostedMeters \? hostedMeters\.readEditor\(id => document\.getElementById\(id\)\?\.value, current\) : null;/);
     assert.match(index, /const meterViews = storySuiteV2Meters\(\)\?\.dossierMeters\?\.\(state\.npcs\) \?\? \{\};/);

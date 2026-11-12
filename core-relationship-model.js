@@ -15,7 +15,7 @@ export const DURABLE_PROFILE_LIMITS = Object.freeze({
     mannerism: 160,
     behaviorProfile: 180,
     keyRelationship: SOCIAL_KEY_RELATIONSHIP_MAX_CHARS,
-    memory: 220,
+    memory: 400,
     evidence: 160,
 });
 

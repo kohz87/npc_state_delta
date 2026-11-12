@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { LINEAGE_ID, NP_ID, buildCheckpoint, checkpointIdOf, checkpointProblem, createParticipant, hydrateIdentity, memoryVault, resolveIdentity, restoredState, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
+import { LINEAGE_ID, NP_ID, buildCheckpoint, checkpointIdOf, checkpointProblem, createParticipant, hydrateIdentity, memoryVault, resolveIdentity, restoredState, selectionBehind, selectionMaxBehind, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
 import { hashJson, sha256 } from '../src/storysuite-participant/hash.js';
 import { fileVault } from '../src/storysuite-participant/vault.js';
 import { isTerminalNpcDeath } from '../terminal-lifecycle.js';
@@ -598,4 +598,265 @@ test('opening a chat, a reply or a scan hydrates nothing and writes nothing; the
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.match(full.timeline().lineage, LINEAGE_ID);
     assert.equal(full.queries['npc.identity'](null, { name: 'Mira' }).nativeKey, 'npc_mira');
+});
+
+// A head selection that would install a state far older than the change can reach (run 3: a swipe of the latest reply installed the first reply's
+// state and the dossier progress of five replies was lost) keeps the dossiers, says so, and is answered as done; exact restores are not asked.
+const names = (count, from = 0) => Array.from({ length: count }, (_, at) => `m${from + at}`);
+async function behindSetup(extra = {}) {
+    const told = [];
+    const chat = [...names(12).slice(0, 11), 'swiped-12'];
+    const made = setup({ extra: { warn: text => told.push(text), chatLineage: () => chat, ...extra } });
+    await made.hydrate();
+    const keep = async length => {
+        made.live.state.lineage = names(length);
+        await made.hydrate();
+        return made.participant.checkpoint({ cursor: { sid: `sr_${length}` }, headHash: String(length % 10).repeat(64) });
+    };
+    const first = await keep(3);
+    const parent = await keep(11);
+    made.live.state.npcs.push(npc('npc_late', 'Late progress'));
+    made.live.state.lineage = names(12);
+    await made.hydrate();
+    return { ...made, told, first, parent };
+}
+
+test('selectionBehind: the swiped reply and its turn are as expected, a state many messages behind where the dossiers and the chat part is told', () => {
+    const live = names(13);
+    const chat = [...names(12), 'swiped'];
+    assert.equal(selectionBehind({ saved: names(11), live, chat, max: 4 }), null, 'the exact parent (the reader\'s turn is not in it)');
+    assert.equal(selectionBehind({ saved: names(9), live, chat, max: 4 }), null, 'one exchange further back');
+    assert.deepEqual(selectionBehind({ saved: names(3), live, chat, max: 4 }), { behind: 9, at: 12 });
+    assert.deepEqual(selectionBehind({ saved: names(3), live: names(13), chat: names(8), max: 4 }), { behind: 5, at: 8 }, 'a chat shortened by a delete: it ends where the chat does');
+    for (const missing of [{ live: [] }, { chat: [] }, { saved: null }, { chat: null }]) assert.equal(selectionBehind({ saved: names(3), live, chat, max: 4, ...missing }), null, 'too little known to say');
+});
+
+test('selectionMaxBehind: at least 4, and wider with a longer "Scan every"', () => {
+    assert.deepEqual([undefined, 1, 5, 20, 'x'].map(selectionMaxBehind), [12, 4, 12, 42, 12]);
+});
+
+test('a head selection far behind the swipe is installed all the same, and told: the answer carries a Problem line, nothing is refused', async () => {
+    const { participant, live, told, first } = await behindSetup({ scanEvery: () => 1 });
+    const prepared = await participant.prepare({ return: 'hs_00000001', checkpoint: first.checkpoint, hash: first.hash });
+    assert.equal(prepared.ok, true);
+    const answer = await participant.activate({ return: 'hs_00000001', prepared: prepared.prepared });
+    assert.deepEqual({ ...answer, older: typeof answer.older }, { ok: true, checkpoint: first.checkpoint, hash: first.hash, older: 'string' });
+    assert.match(answer.older, /^Restored an older dossier state than expected: 8 messages back/);
+    assert.equal(answer.kept, undefined);
+    assert.equal(live.installs, 1, 'installed: a legitimate older selection is never refused');
+    assert.equal(live.state.npcs.some(item => item.id === 'npc_late'), false, 'the selected state is what is live');
+    assert.deepEqual(told, [answer.older]);
+    assert.equal((await participant.status({ return: 'hs_00000001' })).status, 'active');
+});
+
+test('a quiet stretch inside the "Scan every" reach is installed without a line', async () => {
+    const { participant, live, told, first } = await behindSetup({ scanEvery: () => 5 });
+    const prepared = await participant.prepare({ return: 'hs_00000005', checkpoint: first.checkpoint, hash: first.hash });
+    const answer = await participant.activate({ return: 'hs_00000005', prepared: prepared.prepared });
+    // 8 messages back is within 2*5+2
+    assert.equal(answer.older, undefined);
+    assert.deepEqual([live.installs, told], [1, []]);
+});
+
+test('a head selection at the exact parent installs; a reader\'s restore far back installs; a port that cannot read the chat installs', async () => {
+    const parentCase = await behindSetup();
+    const prepared = await parentCase.participant.prepare({ return: 'hs_00000002', checkpoint: parentCase.parent.checkpoint, hash: parentCase.parent.hash });
+    assert.equal((await parentCase.participant.activate({ return: 'hs_00000002', prepared: prepared.prepared })).ok, true);
+    assert.deepEqual([parentCase.live.installs, parentCase.live.state.npcs.some(item => item.id === 'npc_late'), parentCase.told], [1, false, []]);
+
+    const restoreCase = await behindSetup();
+    const restore = await restoreCase.participant.prepare({ return: 'rt_00000001', checkpoint: restoreCase.first.checkpoint, hash: restoreCase.first.hash });
+    assert.equal((await restoreCase.participant.activate({ return: 'rt_00000001', prepared: restore.prepared })).ok, true);
+    assert.deepEqual([restoreCase.live.installs, restoreCase.told], [1, []], 'a save point is exact and chosen by the reader');
+
+    // (the host walked back to this one because the checkpoints nearer were gone, and reads the replies it missed: that is its design, not asked)
+    const walked = await behindSetup();
+    const back = await walked.participant.prepare({ return: 'hs_00000004', fallback: true, checkpoint: walked.first.checkpoint, hash: walked.first.hash });
+    assert.equal((await walked.participant.activate({ return: 'hs_00000004', prepared: back.prepared })).older, undefined);
+    assert.deepEqual([walked.live.installs, walked.told], [1, []]);
+
+    const blind = await behindSetup({ chatLineage: undefined });
+    const head = await blind.participant.prepare({ return: 'hs_00000003', checkpoint: blind.first.checkpoint, hash: blind.first.hash });
+    assert.equal((await blind.participant.activate({ return: 'hs_00000003', prepared: head.prepared })).ok, true);
+    assert.equal(blind.live.installs, 1, 'without the chat nothing is judged');
+});
+
+test('the run data: the first reply\'s checkpoint is told for the swipe of the sixth reply, the fifth reply\'s is not (when the run data is here)', async t => {
+    const { readFile } = await import('node:fs/promises');
+    const { chatLineage } = await import('../branch.js');
+    const dir = process.env.SWIPECHK_FILES;
+    if (!dir) { t.skip('SWIPECHK_FILES (the run data folder) is not set'); return; }
+    let chat; let first; let fifth; let live;
+    try {
+        chat = (await readFile(`${dir}/chat.jsonl`, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).slice(1);
+        const doc = async id => JSON.parse(await readFile(`${dir}/npc-state-delta-checkpoint-${id}.json`, 'utf8'));
+        [first, fifth, live] = [await doc('nk_tqmebnch'), await doc('nk_835f94jp'), await doc('nk_nlfx09ia')];
+    } catch { t.skip('the run data is not here'); return; }
+    // (the chat in the file is the one after the swipe and the replies that followed: its first 12 messages are the ones before the swiped reply)
+    const now = chatLineage(chat.slice(0, 13));
+    const dossiers = [...now.slice(0, 12), 'the swiped reply as it was'];
+    assert.equal(selectionBehind({ saved: first.state.lineage, live: dossiers, chat: now, max: 4 })?.behind > 4, true);
+    assert.equal(selectionBehind({ saved: fifth.state.lineage, live: dossiers, chat: now, max: 4 }), null);
+    assert.equal(first.state.lineage.every((entry, at) => entry === now[at]), true, 'the stored fingerprints are the chat\'s own, so the comparison reads real lineage');
+    assert.ok(live.state.lineage.length > 11);
+});
+
+// ---- checkpoint files: packed on disk, plain in memory; a save that is thrown away removes only what it made -------------------------------
+
+/** A fake SillyTavern user-files server (upload / verify / delete / read) for the file vault. */
+function filesServer() {
+    const files = new Map();
+    const fetchFn = async (url, options = {}) => {
+        const name = url.split('/').pop();
+        if (url === '/api/files/upload') { const body = JSON.parse(options.body); files.set(body.name, Buffer.from(body.data, 'base64').toString()); return { ok: true, status: 200 }; }
+        if (url === '/api/files/verify') { const body = JSON.parse(options.body); return { ok: true, status: 200, json: async () => Object.fromEntries(body.urls.map(u => [u, files.has(u.split('/').pop())])) }; }
+        if (url === '/api/files/delete') { const had = files.delete(JSON.parse(options.body).path.split('/').pop()); return { ok: had, status: had ? 200 : 404, text: async () => '' }; }
+        return files.has(name) ? { ok: true, status: 200, text: async () => files.get(name) } : { ok: false, status: 404, text: async () => '' };
+    };
+    return { files, fetchFn, checkpointNames: () => [...files.keys()].filter(name => name.startsWith('npc-state-delta-checkpoint-nk_')) };
+}
+const bytesOf = (server, names) => names.reduce((sum, name) => sum + Buffer.byteLength(server.files.get(name)), 0);
+
+/** A chat state after `turn` replies: Delta's own rollback history holds a full snapshot per reply (the part that made every file big). */
+function stateAt(turn) {
+    const people = at => Array.from({ length: 6 }, (_, n) => npc(`npc_${n}`, `Person ${n}`, { trust: (at + n) % 10, memories: Array.from({ length: Math.min(at, 30) }, (_, m) => `memory ${m} of person ${n}, told on reply ${Math.min(at, m + 1)}`) }));
+    const checkpoints = Array.from({ length: turn }, (_, i) => {
+        const at = i + 1;
+        return { messageId: at, fingerprint: `fp${at}`, lineageKey: `L${at}`, parentLineageKey: at > 1 ? `L${at - 1}` : null, reason: 'scan', createdAt: at, rollbackSeq: at, snapshot: { turn: at, npcs: people(at) } };
+    });
+    return { npcs: people(turn), socialGraph: { edges: [] }, checkpoints, lineage: [{ id: 1 }], turn };
+}
+
+test('a checkpoint file is written packed and read back as the very document that was hashed; old plain files and unusable checkpoint lists stay as they are', async () => {
+    const server = filesServer();
+    const vault = fileVault({ fetchFn: server.fetchFn });
+    const built = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: { ...stateAt(40), timeline: { v: 1, lineage: 'lg_aaaaaaaa' } }, cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) });
+    await vault.put(built.id, built.doc);
+    await vault.put(built.id, built.doc);
+    const stored = JSON.parse(server.files.get(`npc-state-delta-checkpoint-${built.id}.json`));
+    assert.equal(stored.kind, 'npc-state-delta-native-packed');
+    assert.equal(stored.packing.scheme, 'chain-rfc6902');
+    assert.ok(server.files.get(`npc-state-delta-checkpoint-${built.id}.json`).length * 1.5 < JSON.stringify(built.doc).length, 'much less than the plain bytes');
+    const back = await vault.get(built.id);
+    assert.deepEqual(back, built.doc);
+    assert.equal(hashJson(back), built.hash, 'the hash (and so the id) is the plain document\'s');
+    assert.equal(checkpointProblem(back, built.hash), '');
+    // An old build's plain file is read as it is, and so is a plain write (no checkpoint list, or an empty one).
+    const old = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: freshState() });
+    server.files.set(`npc-state-delta-checkpoint-${old.id}.json`, JSON.stringify(old.doc));
+    assert.deepEqual(await vault.get(old.id), old.doc);
+    for (const [lineage, state] of [['lg_bbbbbbbb', { npcs: [], timeline: {} }], ['lg_cccccccc', { npcs: [], checkpoints: [], timeline: {} }]]) {
+        const plainOne = buildCheckpoint({ lineage, state, headHash: 'c'.repeat(64) });
+        await vault.put(plainOne.id, plainOne.doc);
+        assert.equal(JSON.parse(server.files.get(`npc-state-delta-checkpoint-${plainOne.id}.json`)).kind, plainOne.doc.kind);
+        assert.deepEqual(await vault.get(plainOne.id), plainOne.doc);
+    }
+    // A packed file that cannot be rebuilt is a file that is not there (never a partial state).
+    const broken = JSON.parse(server.files.get(`npc-state-delta-checkpoint-${built.id}.json`));
+    broken.doc.state.checkpoints.find(entry => entry.packed).packed.base = 999;
+    server.files.set(`npc-state-delta-checkpoint-${built.id}.json`, JSON.stringify(broken));
+    assert.equal(await vault.get(built.id), null);
+});
+
+test('60 replies on the file vault: the same restores as the plain memory vault, one file per save and a fraction of the bytes ', async () => {
+    const server = filesServer();
+    const plainVault = memoryVault();
+    const runs = [];
+    for (const vault of [fileVault({ fetchFn: server.fetchFn }), plainVault]) {
+        const run = setup({ state: stateAt(1), vault });
+        await run.hydrate();
+        const saves = [];
+        for (let turn = 1; turn <= 60; turn += 1) {
+            run.live.state = { ...stateAt(turn), timeline: run.live.state.timeline };
+            saves.push(await run.participant.checkpoint({ cursor: { sid: `sr_${turn}` }, headHash: hashJson({ turn }) }));
+        }
+        assert.ok(saves.every(save => save.ok), 'every save succeeds');
+        // Rollback / swipe / delete / re-read / reload all come down to prepare + activate of an earlier reply's checkpoint: the installed state.
+        const installed = [];
+        for (const turn of [59, 41, 30, 3, 60, 1]) {
+            const save = saves[turn - 1];
+            const prepared = await run.participant.prepare({ return: `rt_${turn}x${installed.length}`, checkpoint: save.checkpoint, hash: save.hash });
+            assert.equal(prepared.ok, true, prepared.message);
+            const activated = await run.participant.activate({ return: `rt_${turn}x${installed.length}`, prepared: prepared.prepared });
+            assert.equal(activated.ok, true, activated.message);
+            installed.push(structuredClone(run.live.state));
+        }
+        runs.push({ saves, installed });
+    }
+    // Each run mints its own story line (its ids and the np_ map seeded by it), so those differ; what a restore installs must not.
+    const unlined = states => states.map(({ timeline, ...state }) => state);
+    assert.deepEqual(unlined(runs[0].installed), unlined(runs[1].installed), 'the same state after each restore');
+    const names = server.checkpointNames();
+    assert.equal(names.length, 61, 'one file per save (and the baseline), none lost, none extra');
+    const plainBytes = [...plainVault.docs.values()].reduce((sum, text) => sum + text.length, 0);
+    const packedBytes = bytesOf(server, names);
+    assert.ok(packedBytes * 2.5 < plainBytes, `packed ${packedBytes} bytes against ${plainBytes} plain`);
+});
+
+const lined = turn => ({ ...stateAt(turn), timeline: { v: 1, lineage: 'lg_aaaaaaaa' } });
+const fileOf = (server, id) => JSON.parse(server.files.get(`npc-state-delta-checkpoint-${id}.json`));
+async function saveRun(vault, from, to) {
+    const out = [];
+    for (let turn = from; turn <= to; turn += 1) {
+        const built = buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: lined(turn), cursor: { sid: `sr_${turn}` }, headHash: hashJson({ turn }) });
+        await vault.put(built.id, built.doc);
+        out.push(built);
+    }
+    return out;
+}
+
+test('every checkpoint file is read on its own: a fresh vault with only that one file reads it whole, in any order', async () => {
+    const server = filesServer();
+    const built = await saveRun(fileVault({ fetchFn: server.fetchFn }), 1, 30);
+    for (const item of built) assert.equal(fileOf(server, item.id).kind, 'npc-state-delta-native-packed', 'every file is a full packed file, never a patch');
+    for (const item of [...built].reverse()) {
+        const alone = filesServer();
+        alone.files.set(`npc-state-delta-checkpoint-${item.id}.json`, server.files.get(`npc-state-delta-checkpoint-${item.id}.json`));
+        assert.deepEqual(await fileVault({ fetchFn: alone.fetchFn }).get(item.id), item.doc, `${item.id} reads with no other file there`);
+    }
+});
+
+test('the Storage clean-up never makes a remaining file unreadable: any subset of files may go and every file left reads whole', async () => {
+    const server = filesServer();
+    const vault = fileVault({ fetchFn: server.fetchFn });
+    const built = await saveRun(vault, 1, 24);
+    // Remove every third, then the oldest ten, through the vault's own remove (what the clean-up calls).
+    const gone = new Set(built.filter((_, i) => i % 3 === 0 || i < 10).map(item => item.id));
+    for (const id of gone) assert.equal(await vault.remove(id, { referenced: [] }), true);
+    const sweeper = fileVault({ fetchFn: server.fetchFn });
+    for (const item of built) {
+        if (gone.has(item.id)) assert.equal(await sweeper.get(item.id), null);
+        else assert.deepEqual(await sweeper.get(item.id), item.doc, `${item.id} still reads whole`);
+    }
+    assert.equal(server.checkpointNames().length, built.length - gone.size);
+});
+
+test('an old chat with many plain (v1, unpacked) files: they stay readable and untouched next to the packed ones', async () => {
+    const server = filesServer();
+    const olds = Array.from({ length: 40 }, (_, i) => buildCheckpoint({ lineage: 'lg_aaaaaaaa', state: lined(i + 1), cursor: { sid: `sr_${i + 1}` }, headHash: hashJson({ turn: i + 1 }) }));
+    for (const item of olds) server.files.set(`npc-state-delta-checkpoint-${item.id}.json`, JSON.stringify(item.doc));
+    const before = new Map(server.files);
+    const vault = fileVault({ fetchFn: server.fetchFn });
+    for (const item of olds) assert.deepEqual(await vault.get(item.id), item.doc);
+    const [fresh] = await saveRun(vault, 41, 41);
+    assert.equal(fileOf(server, fresh.id).kind, 'npc-state-delta-native-packed');
+    for (const [name, text] of before) assert.equal(server.files.get(name), text, 'an old file is not rewritten');
+    assert.deepEqual(await vault.get(fresh.id), fresh.doc);
+});
+
+test('this change never deletes a checkpoint file: a long run, a thrown-away save and a reload send no delete and leave every file', async () => {
+    const server = filesServer();
+    const sent = [];
+    const spy = async (url, options = {}) => { if (/delete/.test(url)) sent.push(url); return server.fetchFn(url, options); };
+    const vault = fileVault({ fetchFn: spy });
+    const built = await saveRun(vault, 1, 40);
+    const run = setup({ vault });
+    await run.hydrate();
+    let once = true;
+    run.port.busy = () => { const now = once; once = false; return now; };
+    run.live.state.npcs[0].trust = 6;
+    assert.equal((await run.participant.checkpoint({ cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) })).ok, true);
+    assert.deepEqual(sent, [], 'no delete request');
+    assert.ok(server.checkpointNames().length >= 41, 'every file written is still there, the thrown-away one included');
+    for (const item of built) assert.deepEqual(await vault.get(item.id), item.doc);
 });

@@ -1,7 +1,7 @@
 /* Scanner social edges and canonical relationship alignment.
    Split from social.js; social.js remains the public facade. */
 
-import { clean, norm, richer } from './social-primitives.js';
+import { clean, norm, richer, projectedTieLimit } from './social-primitives.js';
 import {
     socialRelationFamily, inverseRelationFamilies, inverseSocialRelation,
     preserveUnstructuredRelationshipText, splitRelationDynamic, withFoldedDynamic,
@@ -53,7 +53,7 @@ export function canonicalizeNpcKeyRelationships(npcs = [], { includeLocked = fal
             deduped.push(entry);
         }
         const before = JSON.stringify(owner.keyRelationships || []);
-        owner.keyRelationships = deduped.slice(0, 5);
+        owner.keyRelationships = deduped.slice(0, projectedTieLimit(owner));
         if (JSON.stringify(owner.keyRelationships) !== before) updatedIds.push(owner.id);
     }
     return updatedIds;

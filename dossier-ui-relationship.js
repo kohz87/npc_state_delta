@@ -70,6 +70,9 @@ function relationshipHistoryHtml(history, latest) {
 // colour (tension rising is bad) over a muted "via ..." line on the right. `change` is the latest change (the projection's
 // lastRelationshipChange, with the signed numbers and, when hosted, the event's gate and date); `event` is an earlier one from the stored
 // history, which keeps only its tier, the axes it had evidence for and its reason (no signed numbers, no calendar date).
+// Said plainly when nothing recorded why a change happened (a scan's row with no reason, a story line without one).
+export const NO_REASON = 'no reason given';
+
 export function recentChangeRowHtml({ change = null, event = null } = {}) {
     const source = change || event;
     const stamp = changeStamp(source || {});
@@ -86,11 +89,17 @@ export function recentChangeRowHtml({ change = null, event = null } = {}) {
                 const good = axis === 'tension' ? value < 0 : value > 0;
                 return `<span class="delta-chg-d" data-good="${good ? 'yes' : 'no'}">${escapeHtml(label)} ${value > 0 ? '+' : '−'}${Math.abs(value)}</span>`;
             }).join(' · ') || '<span class="delta-chg-d" data-good="muted">Progress only</span>';
-        lines = [hosted?.held ? `Held: ${hosted.note || 'the day\'s allowance is used'}` : gateWords(hosted?.gate, { row: true }), change.reason];
+        // as the mockup: how it came about and why on ONE muted line ("via help — Astra helped her cover up")
+        lines = [[hosted?.held ? `Held: ${hosted.note || 'the day\'s allowance is used'}` : gateWords(hosted?.gate, { row: true }), change.reason || NO_REASON].filter(Boolean).join(' — ')];
     } else {
         head = `<span class="delta-chg-d" data-good="muted">${escapeHtml((event.axes || []).length ? event.axes.join(' · ') : impactLabel(event.impact))}</span>`;
-        lines = [event.reason];
+        lines = [event.reason || NO_REASON];
     }
+    return changeRowHtml(whenHtml, head, lines);
+}
+
+// The row both Recent changes lists share (With {{user}} and Right now's mood): the date and reply on the left, the change over its muted reason on the right.
+export function changeRowHtml(whenHtml, head, lines) {
     const via = lines.filter(Boolean).map(line => `<div class="delta-chg-via">${escapeHtml(line)}</div>`).join('');
     return `<li class="delta-chg">${whenHtml}<div><b>${head}</b>${via}</div></li>`;
 }

@@ -64,6 +64,8 @@ export const FIELDS = Object.freeze({
     memories: { kind: 'list', tracked: 17, editorLock: 20, lock: [21, ['memories', 'manualMemories']], revertList: 0, refreshChanged: 20, snapshot: [20, 'list'], v2: 18 },
     // The memories the reader entered by hand: a later scan never evicts them (core-mechanics mergeImportantMemories).
     manualMemories: { kind: 'part', userMeta: 6 },
+    // Where and when each memory was recorded: { normalized text: { m: reply, d: story date } }, beside the list (core-record-shared.js stampMemories).
+    memoryStamps: { kind: 'part' },
     keyRelationships: { kind: 'list', tracked: 16, editorLock: 12, lock: [13, ['keyRelationships']], revertList: 3, refreshChanged: 12, snapshot: [22, 'list'], v2: 19 },
     relationshipSummary: { kind: 'text', text: 10, tracked: 14, editorLock: 15, lock: [16, ['relationshipSummary']], terminalFrozen: 9, aliasMerge: 8, refreshChanged: 13, snapshot: [14, 'text'], v2: 20 },
     relationship: {
@@ -141,6 +143,7 @@ export const RETURN_KEYS = Object.freeze({
     keyRelationships: { value: '["Name — their role to this NPC | durable dynamic"]', states: 'keep|update|evolve' },
     relationshipSummary: {},
     mood: { states: 'keep|clear' },
+    moodV: { value: '-3..3' }, moodA: { value: '-3..3' }, moodD: { value: '-3..3' },
     location: { states: 'keep|clear' },
     goal: { states: 'keep|clear' },
     status: { states: 'keep|clear' },
@@ -160,7 +163,7 @@ export const RETURN_KEYS = Object.freeze({
 const SHAPE_IDENTITY = ['id', 'name', 'aliases'];
 const SHAPE_PROFILE = ['role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'overallAppearance', 'appearance', 'personality', 'speech',
     'behaviorProfile', 'mannerisms', 'background', 'keyRelationships', 'relationshipSummary'];
-const SHAPE_LIVE = ['mood', 'location', 'goal', 'status'];
+const SHAPE_LIVE = ['mood', 'moodV', 'moodA', 'moodD', 'location', 'goal', 'status'];
 const SHAPE_LIFE = ['lifeState', 'lifeStateCertainty', 'lifeStateReason'];
 export const RETURN_SHAPES = Object.freeze({
     // None of the three asks for relationship numbers: every targeted pass zeroes them in code.

@@ -154,4 +154,5 @@ export function withoutSourceReplyNumbers(npc) {
         if (event && typeof event === 'object') delete event.message;
     }
     delete npc.fieldChangeMessages;
+    delete npc.memoryStamps;
 }

@@ -25,6 +25,7 @@ export function v2MetersProjection(view) {
         ...(tiesProjection(view.ties) ? { ties: tiesProjection(view.ties) } : {}),
         ...(moodProjection(view.mood) ? { mood: moodProjection(view.mood) } : {}),
         ...(pullProjection(view.pull) ? { pull: pullProjection(view.pull) } : {}),
+        ...(view.notesOn === true ? { notesOn: true } : {}),
         ...(notesProjection(view.notes) ? { notes: notesProjection(view.notes) } : {}),
     };
 }
@@ -38,7 +39,11 @@ function moodProjection(mood) {
     const max = int(mood.bars?.max, 1, 12, 6);
     // Feeling is the valence (-3 unpleasant .. 3 pleasant) as a step of max like the other two; without one it rests in the middle.
     const feeling = Number.isFinite(Number(mood.valence)) ? int(Number(mood.valence) + max / 2, 0, max) : Math.round(max / 2);
-    return { word: plain(mood.word), feeling, energy: int(mood.bars?.energy, 0, max), control: int(mood.bars?.control, 0, max), max, cause: plain(mood.cause).slice(0, 120) };
+    // The same three on the stored -3..+3 scale (axes) and the last moves of them, newest first (log: { n, date, v, a, d, why }; a zero axis left out).
+    const axes = { v: int(mood.valence, -3, 3), a: int(mood.energy, -3, 3), d: int(mood.control, -3, 3) };
+    const log = list(mood.log, 6).filter(row => Number.isInteger(row.n) || row.n === null).map(row => ({ n: row.n, date: plain(row.date).slice(0, 40), v: int(row.v, -6, 6), a: int(row.a, -6, 6), d: int(row.d, -6, 6), why: plain(row.why).slice(0, 100) }));
+    const rest = { v: int(mood.rest?.v, -3, 3), a: int(mood.rest?.a, -3, 3), d: int(mood.rest?.d, -3, 3) };
+    return { word: plain(mood.word), feeling, energy: int(mood.bars?.energy, 0, max), control: int(mood.bars?.control, 0, max), max, axes, rest, log, cause: plain(mood.cause).slice(0, 120) };
 }
 
 // Pull (feature mood-pull): the instinct, its strength 1..3, what causes it and for how many days. Null without one.
@@ -59,7 +64,7 @@ function notesProjection(notes) {
     const knows = list(notes.knows, 6).filter(row => !row.hidden && plain(row.text)).map(row => ({ about: plain(row.about), how: plain(row.how), day: day(row.day), text: plain(row.text), secret: row.secret === true }));
     const tastes = list(notes.tastes, 12).filter(row => plain(row.item)).map(row => ({ sign: row.sign === '-' ? '-' : '+', item: plain(row.item), from: plain(row.from), mirrored: row.mirrored === true }));
     const ties = list(notes.ties, 12).filter(row => plain(row.name)).map(row => ({ name: plain(row.name), tags: (Array.isArray(row.tags) ? row.tags : []).filter(tag => TIE_WORDS.has(tag)), owedBy: row.owedBy === true }));
-    const drives = list(notes.drives, 8).filter(row => plain(row.label)).map(row => ({ label: plain(row.label), strength: int(row.strength, 0, 3), word: plain(row.word) }));
+    const drives = list(notes.drives, 8).filter(row => plain(row.label)).map(row => ({ label: plain(row.label), strength: int(row.strength, 0, 3), word: plain(row.word), note: plain(row.note) }));
     const look = notes.look && Number.isInteger(notes.look.day) ? { day: notes.look.day } : null;
     return lies.length || knows.length || tastes.length || ties.length || drives.length || look ? { lies, knows, tastes, ties, drives, look } : null;
 }
