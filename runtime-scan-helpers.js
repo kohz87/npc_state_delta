@@ -37,7 +37,7 @@ export async function awayFromReplay(promise) {
 }
 setScannerWaitAround(awayFromReplay);
 // Story Block as a replay sees it: reads answer from the state after reply `index` (sdk.query { asOf }, adapter.at), writes are not sent.
-const HOSTED_WRITES = new Set(['adjust', 'setMeters', 'refresh', 'applyEditor', 'openByEvent', 'tick', 'pinKeyPerson']);
+const HOSTED_WRITES = new Set(['adjust', 'setMeters', 'refresh', 'applyEditor', 'openByEvent', 'tick']);
 export function scopedAdapter(adapter, index, sink) {
     return new Proxy(adapter, {
         get(target, name) {

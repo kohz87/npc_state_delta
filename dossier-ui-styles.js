@@ -130,8 +130,6 @@ export const STYLES = `
 #${ROOT_ID} .delta-key-badge { display:inline-block; margin-left:8px; padding:1px 9px; border:1px solid rgba(245,200,75,.5); border-radius:999px; background:rgba(245,200,75,.18); color:#f5c84b; font-size:.72rem; font-weight:600; line-height:1.4; vertical-align:middle; white-space:nowrap; }
 #${ROOT_ID} .delta-cast-badge { display:inline-block; margin-left:8px; font-family:var(--ss-font, system-ui, sans-serif); padding:1px 9px; border:1px solid rgba(160,130,255,.5); border-radius:999px; background:rgba(160,130,255,.18); color:#c9b8ff; font-size:.72rem; font-weight:600; line-height:1.4; vertical-align:middle; white-space:nowrap; }
 #${ROOT_ID} .delta-cast-from { display:grid; gap:6px; margin:10px 0; padding:12px 14px; border:1px solid rgba(160,130,255,.35); border-radius:12px; background:rgba(160,130,255,.08); font-size:.86rem; line-height:1.5; }
-#${ROOT_ID} .delta-cast-pin { justify-self:start; border-color:rgba(160,130,255,.6); }
-#${ROOT_ID} .delta-cast-pin-note { font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-cast-from h5 { margin:0; font-size:var(--dt-kick); letter-spacing:.08em; text-transform:uppercase; opacity:.8; }
 #${ROOT_ID} .delta-key-star { color:#f5c84b; font-size:.85em; }
 #${ROOT_ID} .delta-secrets h3 .delta-secrets-count { margin-left:6px; color:var(--delta-muted); font-size:var(--dt-meta); font-weight:400; letter-spacing:0; text-transform:none; }

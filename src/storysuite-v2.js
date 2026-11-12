@@ -81,7 +81,6 @@ export const WORLD_FEATURE = 'story-director.world';
 export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
 // Story Director's reader-only pin for key people (its feature switch is `story-director.key-people`).
-const KEY_PIN_COMMAND = 'keypeople.pin';
 // Story Block's lean RPG feature (its names.js LEAN_RPG_FEATURE); an extension cannot import Story Block.
 const RPG_FEATURE = 'story-block.rpg';
 export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity', 'npc.catchUp']);
@@ -186,7 +185,7 @@ export function createStorySuiteV2Adapter({
         suiteApi, delta, panelId, version, host, headReply, castSync, castPortraitDue, doc, timers, loadEmptyCast, retryMs,
         attempts, aliveMs, watchMs, logger, calendarOwn, loadDossierList, page, participantVault, participantOptions, settleMs,
         settlePollMs, cardSettings, MODULE_ID, MODULE_NAME, CAST_TAB_ID, DOSSIERS_TITLE, DOSSIERS_ICON, CAST_SCREEN_ID,
-        CAST_WIDGET, CAST_SCREEN_ORDER, WORLD_FEATURE, PAGE_API, PAGE_SLOT_CLASS, KEY_PIN_COMMAND, TICK_TURNS, PRESET_KIND,
+        CAST_WIDGET, CAST_SCREEN_ORDER, WORLD_FEATURE, PAGE_API, PAGE_SLOT_CLASS, TICK_TURNS, PRESET_KIND,
         V2_HOST_EVENT, HOSTED_FLAG,
     };
     // The queries part reads the timeline participant's npc.identity query when it is called; the timeline part is built after it.
@@ -203,8 +202,8 @@ export function createStorySuiteV2Adapter({
     Object.assign(deps, connectPart);
     const editorPart = createEditorPart(session, deps);
     Object.assign(deps, editorPart);
-    const { watchers, pinKeyPerson, pageApi, offerPage } = castUiPart;
-    const { dossierOf, part, sliceEntries, entryFor, partyLevelsAnswer, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, keyPinOffered, directorCalendar, keyPeople, send, sliceView } = queriesPart;
+    const { watchers, pageApi, offerPage } = castUiPart;
+    const { dossierOf, part, sliceEntries, entryFor, partyLevelsAnswer, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, directorCalendar, keyPeople, send, sliceView } = queriesPart;
     const { ownPrompt, storyClock, calendarLink, definition, scenePresentNames } = timelinePart;
     const { poll, unhost, check } = connectPart;
     const { editorHtml, readEditor, dossierMeters, eventWatch } = editorPart;
@@ -253,10 +252,6 @@ export function createStorySuiteV2Adapter({
         keyPeople,
         /** While hosted: Story Director's calendar (`director.calendar`), or null. */
         directorCalendar,
-        /** While hosted: whether Story Director offers `keypeople.pin` (the "Pin as Key people" button shows only then). */
-        keyPinOffered,
-        /** While hosted: the reader pins a person as a key person (`keypeople.pin`, cause ui) → { ok, message }. */
-        pinKeyPerson,
         /** While hosted: Story Director's cast (`director.cast`) as it answers, or null when it cannot. */
         castAnswer,
         /** The same, cleaned (src/cast-dossier.js normalizeCast), dates written on Story Director's calendar. */
