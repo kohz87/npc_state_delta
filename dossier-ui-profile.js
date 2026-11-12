@@ -64,9 +64,15 @@ function driveRow(row) {
     const note = row.note && row.strength !== 2 ? `<span class="delta-drive-note delta-muted">${escapeHtml(row.note)}</span>` : '';
     return `<div class="delta-drive" data-level="${level}"><span>${escapeHtml(row.label)}</span><i title="${escapeHtml(row.word)}"><b class="${level}"></b></i><span class="delta-drive-word">${escapeHtml(row.word)}</span>${note}</div>`;
 }
+// The seven drives in the order the notes keep them: a person with no record (or a partial one) still shows every row, 'normal'
+// for the ones without a record. Display only: nothing is created or written.
+const DRIVE_LABELS = ['Belonging', 'Closure', 'Awe', 'Preservation', 'Comfort', 'Conflict', 'Honesty'];
 function drivesBody(notes, on) {
-    if (!notes?.drives?.length) return !on ? '' : block('drives', 'Drives', emptyLine('All normal so far'));
-    return block('drives', 'Drives', `<div class="delta-drives">${notes.drives.map(driveRow).join('')}</div><span class="delta-muted delta-drive-key">The middle of each bar is normal; only real highs and lows reach out from it.</span>`);
+    if (!on && !notes?.drives?.length) return '';
+    const given = notes?.drives || [];
+    const rows = DRIVE_LABELS.map(label => given.find(row => row.label === label) || { label, strength: 2, word: 'normal', note: '' });
+    const extra = given.filter(row => !DRIVE_LABELS.includes(row.label));
+    return block('drives', 'Drives', `<div class="delta-drives">${rows.concat(extra).map(driveRow).join('')}</div><span class="delta-muted delta-drive-key">The middle of each bar is normal; only real highs and lows reach out from it.</span>`);
 }
 
 // Flat rows as the mockup has them: Look (the enduring body), Wearing (what the current form or presentation is), Habits (mannerisms).

@@ -672,10 +672,11 @@ test('notes host: the Profile placeholders (Tastes, Drives) reach the real dossi
     assert.match(on.html, /<h3>Tastes<\/h3>/);
     assert.match(on.html, /No tastes yet/);
     assert.match(on.html, /<h3>Drives<\/h3>/);
-    assert.match(on.html, /All normal so far/);
+    assert.equal((on.html.match(/class="delta-drive" data-level="normal"/g) || []).length, 7, 'no record: seven normal rows');
+    assert.match(on.html, /The middle of each bar is normal/);
     const off = await profile({ [FEATURE_NOTES]: false });
     assert.equal(off.view.notesOn, undefined);
-    assert.doesNotMatch(off.html, /Tastes|Drives|No tastes yet|All normal so far/);
+    assert.doesNotMatch(off.html, /Tastes|Drives|No tastes yet|All normal so far|delta-drive/);
 });
 
 test('notes host: npc.drives grows a drive on the 2nd different reply with a cue; live == rebuild, a swipe takes the step back, a button is refused', async () => {
