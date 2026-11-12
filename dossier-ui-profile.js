@@ -1,10 +1,10 @@
 /* NPC State Delta dossier surface: the profile screen (portrait with the four meter numbers, identity, appearance forms,
    character, background). Markup only, built from the detail projection; the screens module draws it and fills portraits. */
 import { escapeHtml } from './src/util/html.js';
-import { plain } from './dossier-ui-model.js';
+import { changeStamp, plain } from './dossier-ui-model.js';
 import { appearanceFormsHtml, birthdayCard, changedMark, currentCard, identityLine, portraitHtml, proseHtml } from './dossier-ui-html.js';
 
-const METER_LABELS = Object.freeze([['trust', 'T'], ['affection', 'A'], ['desire', 'D'], ['tension', 'Te']]);
+const METER_LABELS = Object.freeze([['trust', 'Trust'], ['affection', 'Affection'], ['desire', 'Desire'], ['tension', 'Tension']]);
 
 function signed(value) {
     const number = Number(value);
@@ -12,19 +12,18 @@ function signed(value) {
     return `${number > 0 ? '+' : ''}${number}`;
 }
 
-// The four axes as short numbers under the name ("T +11 · A +10 · D +6 · Te +13"); empty when none is stored.
-export function profileMeterLine(npc = {}) {
+// The four axes as whole items under the name (["Trust +11", "Affection +10", ...]); empty when none is stored.
+export function profileMeterItems(npc = {}) {
     const rel = npc?.relationship && typeof npc.relationship === 'object' ? npc.relationship : {};
     return METER_LABELS
-        .map(([axis, short]) => (signed(rel[axis]) ? `${short} ${signed(rel[axis])}` : ''))
-        .filter(Boolean)
-        .join(' · ');
+        .map(([axis, word]) => (signed(rel[axis]) ? `${word} ${signed(rel[axis])}` : ''))
+        .filter(Boolean);
 }
 
 // A block: its small coloured heading and its body. `heading: false` leaves the heading out (the phone's first block is the name and
 // its line, as in the mockup, not a block called Identity).
-function block(key, title, body, { heading = true } = {}) {
-    return `<section class="delta-profile-block" data-delta-profile="${key}">${heading ? `<h3>${escapeHtml(title)}</h3>` : ''}${body}</section>`;
+function block(key, title, body, { heading = true, mark = '' } = {}) {
+    return `<section class="delta-profile-block" data-delta-profile="${key}">${heading ? `<h3>${escapeHtml(title)}${mark}</h3>` : ''}${body}</section>`;
 }
 
 function identityBody(npc) {
@@ -75,15 +74,17 @@ function characterBody(npc) {
     const levers = Array.isArray(npc.behaviorProfile) ? npc.behaviorProfile.filter(Boolean).map(item => String(item).trim().replace(/[.;]+$/, '')).join('; ') : plain(npc.behaviorProfile);
     const row = (label, text, mark = '') => (plain(text) ? `<dt>${label}${mark}</dt><dd>${escapeHtml(plain(text))}</dd>` : '');
     const rows = row('Speech', npc.speech, changedMark(npc, 'speech')) + row('Levers', levers, changedMark(npc, 'behaviorProfile'));
-    return `${proseHtml(npc.personality)}${changedMark(npc, 'personality') ? `<p class="delta-muted">${changedMark(npc, 'personality')}</p>` : ''}${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : ''}`;
+    return `${proseHtml(npc.personality)}${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : ''}`;
 }
 
 // The portrait fills the top (phone) or the left column (desktop). The back control goes to the board; the
 // screens module handles the click. Pictures travel by reference (portraitRefs.fill runs after the markup is in the page).
 function portraitBlock(npc, portraitRefs, desktop) {
-    const back = `<button type="button" class="delta-profile-back" data-delta-screen="board">‹ ${desktop ? 'Back' : 'Board'}</button>`;
+    const back = `<button type="button" class="delta-profile-back" data-delta-screen="board" aria-label="Back to the dossier">‹ Dossier</button>`;
+    const items = profileMeterItems(npc);
+    // each meter is one whole item; the dot follows it in CSS, so a wrapped line never breaks inside "Trust +11"
     const caption = desktop
-        ? `<div class="delta-profile-caption"><b>${escapeHtml(plain(npc.name, 'Unnamed NPC'))}</b>${profileMeterLine(npc) ? `<span>${escapeHtml(profileMeterLine(npc))}</span>` : ''}</div>`
+        ? `<div class="delta-profile-caption"><b>${escapeHtml(plain(npc.name, 'Unnamed NPC'))}</b>${items.length ? `<span class="delta-profile-meters">${items.map(item => `<i>${escapeHtml(item)}</i>`).join('')}</span>` : ''}</div>`
         : '';
     const form = plain(npc.portraitForm);
     const stale = npc.portraitAppearanceChanged
@@ -104,7 +105,9 @@ export function dossierProfileHtml(npc = {}, { layout = 'phone', portraitRefs = 
     const desktop = layout === 'desktop';
     const identity = block('identity', 'Identity', identityBody(npc), { heading: false });
     const appearance = block('appearance', 'Appearance', appearanceBody(npc, portraitRefs));
-    const character = block('character', 'Character', characterBody(npc));
+    // the change mark sits in the heading, in line with the other rows' marks; the opening reply (#0) carries no news, so it shows none
+    const opening = changeStamp({ turn: npc.fieldChanges?.latestTurn, message: npc.fieldChanges?.message }).mark === '#0';
+    const character = block('character', 'Character', characterBody(npc), { mark: opening ? '' : changedMark(npc, 'personality') });
     const notes = npc.v2Meters?.notes;
     const tastes = tastesBody(notes) + drivesBody(notes);
     const background = block('background', 'Background', proseHtml(npc.background));
