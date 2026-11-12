@@ -392,6 +392,9 @@ export function createScanPart(rt, deps) {
             return true;
         } catch (error) {
             noteScanFailure('dossier scan', error, scanChatKey);
+            // Thrown away because the state moved on under it (a Send during a scan the reply no longer waits for), not cancelled by the
+            // reader or a chat change: asked for again, and the drain below runs it.
+            if (!manual && !replayScope() && !operation?.cancelled && Number.isInteger(messageId) && isScannerRoutingError(error) && error.code === 'NPC_SCANNER_ROUTE_CANCELLED') queuePendingAutoScan(scanChatKey, messageId, 'stale-auto-scan');
             if (replayScope()) replayScope().failed = `The scan failed: ${error?.message || error}`;
             if (manual || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) notify('error', `NPC State Delta scan failed: ${error?.message || error}`);
             return false;

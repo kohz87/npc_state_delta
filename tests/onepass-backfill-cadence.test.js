@@ -248,3 +248,28 @@ test('catch-up: every due NPC is held from the reply backfill; a newly met NPC k
     assert.deepEqual(calls.backfill[0].skipNpcIds, ['old1'], 'established NPCs are not backfilled again');
     assert.equal(rt.catchUpTaken.has(key), false, 'the hold is released');
 });
+
+test('send-drop: a reply without a capture block starts its automatic scan but the MESSAGE_RECEIVED listener returns at once (the reply and Send are not held); the scan still lands', () => {
+    const r = runCalls('detached-scan', false, async ({ settings, mockState, sleep, kinds }) => {
+        const emitAll = async (event, ...args) => { await Promise.all((mockState.listeners.get(event) || []).map(fn => fn(...args))); };
+        settings.autoScan = true; settings.fullScanEveryTurn = true; settings.narrationCapture = false;
+        const orig = mockState.quietResponder;
+        mockState.quietResponder = async args => { await sleep(700); return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] }); };
+        mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+        await emitAll('message_sent', mockState.context.chat.length - 1);
+        await emitAll('generation_after_commands', 'normal', {}, false);
+        const mes = 'Yunyun waves at you from the gate.';
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes, swipe_id: 0, swipes: [mes] });
+        const id = mockState.context.chat.length - 1;
+        const t0 = Date.now();
+        await emitAll('message_received', id);
+        const heldMs = Date.now() - t0;
+        const busyAfter = Boolean(globalThis.NPCStateDelta.uiStatus?.().scanBusyForChat);
+        await sleep(2500);
+        mockState.quietResponder = orig;
+        return { heldMs, busyAfter, scans: kinds().scanner, names: globalThis.NPCStateDelta.getState().npcs.map(n => n.name) };
+    });
+    assert.ok(r.heldMs < 400, `the listener returned in ${r.heldMs} ms`);
+    assert.ok(r.scans >= 1, 'the scan ran');
+    assert.ok(r.names.includes('Yunyun'), 'its result was kept: ' + JSON.stringify(r.names));
+});
