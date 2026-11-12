@@ -12,7 +12,7 @@
 // the hash, so the same native state at the same head is the same checkpoint.
 
 import { hashJson } from './hash.js';
-import { applyJson, diffPlainJson, packCheckpoints, unpackCheckpoints } from '../../checkpoint-pack.js';
+import { packCheckpoints, unpackCheckpoints } from '../../checkpoint-pack.js';
 
 export const PARTICIPANT_SCHEMA = 1;
 export const KIND = 'npc-state-delta-native';
@@ -94,46 +94,4 @@ export function unpackFromFile(raw) {
         if (!isRecord(raw.doc) || !isRecord(raw.doc.state) || !Array.isArray(raw.doc.state.checkpoints)) return null;
         return { ...raw.doc, state: { ...raw.doc.state, checkpoints: unpackCheckpoints(raw.doc.state.checkpoints, raw.packing) } };
     } catch { return null; }
-}
-
-// A file can also be a patch against the file written before it in the same story line (nine tenths of a save's bytes are what the last one
-// already held). `base` is the id of that file; reading follows it (vault.js `get`) and the host's hash check of the rebuilt document is the proof.
-// The chain is at most DELTA_MAX_DEPTH long, so a restore reads a bounded number of files; the file after the last link is a packed anchor.
-export const KIND_DELTA = 'npc-state-delta-native-delta';
-export const DELTA_MAX_DEPTH = 16;
-const DELTA_MAX_SHARE = 0.6;
-
-/** Two JSON values with the same content (object key order does not matter, array order does). */
-export function sameJson(a, b) {
-    if (a === b) return true;
-    if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
-    if (Array.isArray(a)) return a.length === b.length && a.every((item, i) => sameJson(item, b[i]));
-    const keys = Object.keys(a);
-    return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && sameJson(a[key], b[key]));
-}
-
-/**
- * → the delta wrapper of `doc` against `base` ({ id, doc, depth }: the file written before it), or null when it should be a packed anchor instead:
- * a different story line, a chain that would pass DELTA_MAX_DEPTH, a patch that is not clearly smaller, or a patch that does not rebuild `doc` exactly.
- */
-export function deltaForFile(doc, base) {
-    try {
-        if (!isRecord(doc) || !base || !isRecord(base.doc) || !Number.isInteger(base.depth) || base.depth + 1 > DELTA_MAX_DEPTH || doc.lineage !== base.doc.lineage) return null;
-        const patch = diffPlainJson(base.doc, doc);
-        if (JSON.stringify(patch).length > JSON.stringify(doc).length * DELTA_MAX_SHARE) return null;
-        return sameJson(applyJson(base.doc, patch), doc) ? { schema: PARTICIPANT_SCHEMA, kind: KIND_DELTA, lineage: doc.lineage, base: base.id, depth: base.depth + 1, patch } : null;
-    } catch { return null; }
-}
-
-/** → the plain document a delta wrapper stands for, given its base's plain document (parsed from a file for this read alone, so what the result shares with it is nobody else's); null when the patch does not apply. */
-export function rebuildFromDelta(wrapper, baseDoc) {
-    try {
-        return isRecord(wrapper) && wrapper.kind === KIND_DELTA && isRecord(baseDoc) ? applyJson(baseDoc, wrapper.patch) : null;
-    } catch { return null; }
-}
-
-/** The story line a stored file belongs to (a plain, packed or delta file), without rebuilding it; null when it names none. */
-export function lineageOfFile(raw) {
-    const line = isRecord(raw) ? (raw.kind === KIND_PACKED ? raw.doc?.lineage : raw.lineage) : null;
-    return typeof line === 'string' && line ? line : null;
 }

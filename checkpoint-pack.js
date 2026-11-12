@@ -211,13 +211,6 @@ export function diffJson(base, target) {
     return diffImages(jsonImage(base), jsonImage(target), [], []);
 }
 
-// The same for two values the caller already holds as plain JSON (no undefined, no non-JSON values; checkpoint documents are built so): the two
-// copies diffJson makes first cost most of its time on a multi-megabyte document. A caller that rebuilds the target from the patch (and compares)
-// is covered if the premise fails.
-export function diffPlainJson(base, target) {
-    return diffImages(base, target, [], []);
-}
-
 function fullReason(info, firstOfTurn, tailFrom, anchorEvery) {
     if (info.turn === null) return 'no-turn';
     if (tailFrom !== null && info.turn >= tailFrom) return 'tail';

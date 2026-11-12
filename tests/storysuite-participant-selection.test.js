@@ -225,7 +225,7 @@ test('in Delta\'s runtime a reply\'s scan, a branch reconcile and a generation\'
     });
 });
 
-// ---- checkpoint files across a long story: the file vault (anchors, patches) and the plain memory vault end every step on the same state ------
+// ---- checkpoint files across a long story: the file vault (packed files) and the plain memory vault end every step on the same state ------
 
 /** A fake SillyTavern user-files server (upload / verify / delete / read) for the file vault. */
 function filesServer() {
@@ -294,6 +294,6 @@ test(`${REPLIES} replies on the file vault: delete, swipe, swipe back, a restore
     const plainBytes = [...plain.docs.values()].reduce((sum, text) => sum + text.length, 0);
     const fileBytes = names.reduce((sum, name) => sum + server.files.get(name).length, 0);
     assert.equal(names.length, plain.docs.size, 'a file for every checkpoint the plain vault kept: none lost, none added');
-    assert.ok(fileBytes * 5 < plainBytes, `${names.length} files, ${fileBytes} bytes against ${plainBytes} plain`);
+    assert.ok(fileBytes * 2.5 < plainBytes, `${names.length} files, ${fileBytes} bytes against ${plainBytes} plain`);
     t.diagnostic(`${names.length} files, ${fileBytes} bytes on the file vault; ${plainBytes} plain`);
 });
