@@ -760,6 +760,7 @@ test('profile: every section keeps its heading and a muted one-line placeholder 
   const css = await builtCss();
   assert.match(css, /\.delta-profile-block \{ border-top:1px solid var\(--delta-line\)/);
   assert.match(css, /\.delta-profile-cols > \.delta-profile-block:nth-child\(2\) \{ border-top:0/, 'desktop: no line above the first row');
+  assert.doesNotMatch(css, /nth-child\(2\) \{ border-top:0; padding-top:0; \}/, 'the second column keeps main\'s 4px top padding so the top row lines up');
   assert.match(css, /--feel: #e2c46f; --energy: #e08a5b; --control: #7fb6ad/, 'the three mood axes are skin tokens, with light-theme variants');
   assert.match(css, /--feel: oklch\(from var\(--delta-text\)/);
 });

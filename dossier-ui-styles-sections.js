@@ -286,7 +286,6 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-section-head { margin-top:2px; }
 @container dsr (min-width: ${THREE_PANE_MIN}px) { #${ROOT_ID} .delta-section-back { display:none; } }
 
-@container dsr (min-width: ${TWO_PANE_MIN}px) { #${ROOT_ID} .delta-profile-cols > .delta-profile-block:nth-child(2) { border-top:0; padding-top:0; } }
 /* desktop section views: the left column's name block shows the role on its own line, then the meters (each value in its colour) */
 #${ROOT_ID} .delta-board-role, #${ROOT_ID} .delta-board-meters { display:none; }
 #${ROOT_ID} .delta-board-meters { font-weight:700; }
