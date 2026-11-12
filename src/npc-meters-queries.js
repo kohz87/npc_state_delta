@@ -2,7 +2,7 @@
 // npc-meters.js re-exports every public name it exported before. Never imports npc-meters.js.
 import { NPC_DOMAIN, MAX_STAGES_PER_METER, SECRET_TITLE_MAX, NAME_MAX, FEATURE_NOTES, isObject, isInt, isReplyId, sameReply, clean, own, bandWord, needMet, thresholdReached, stageAt, clamp, intOr, readLeaf } from './npc-meters-config.js';
 import { initialNpcSlice, findNpcKey, meterValue, rungMet, conflictOn } from './npc-meters-slice.js';
-import { readEvent } from './npc-meters-pacing.js';
+import { eventLog, readEvent } from './npc-meters-pacing.js';
 import { INSTINCT_KEYS } from '../npc-instincts.js';
 import { moodBars, moodWord, normalizeMood, readMoodLog } from '../npc-mood.js';
 import { dossierNotes, NOTE_FIELDS } from './npc-notes-kinds.js';
@@ -28,6 +28,8 @@ export function createNpcQueries({
         ...(isObject(record.turn?.from) ? { window: { from: { ...record.turn.from }, story: Array.isArray(record.turn.story) ? [...record.turn.story] : [] } } : {}),
         // The reply's last event (tier, held, asked, date) only while it is the window's own reply (read only; the card's details).
         ...(isObject(record.turn) && readEvent(record.lastEvent)?.at === record.turn.reply ? { event: readEvent(record.lastEvent) } : {}),
+        // The last three changes (this reply's event and the two before it), newest first: the dossier's Recent changes (read only).
+        ...(eventLog(readEvent(record.lastEvent)).length ? { recent: eventLog(readEvent(record.lastEvent)) } : {}),
         ...(isObject(record.progress) && Object.keys(record.progress).length ? { progress: { ...record.progress } } : {}),
         ...(isObject(record.milestones) && Object.keys(record.milestones).length ? { milestones: { ...record.milestones } } : {}),
         ...(rungs.find(step => step.key === record.rank) ? { rank: rungs.find(step => step.key === record.rank).name } : {}),

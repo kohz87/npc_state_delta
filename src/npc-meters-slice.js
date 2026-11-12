@@ -392,6 +392,14 @@ export const reasonKept = (ctx, key, reason) => {
     const wide = !earlier || earlier.events.some(item => String(item.why ?? '').length > 80);
     return wide ? cutWords(reason) : clean(reason, 80);
 };
+/**
+ * Rule mark (the last three changes): the reply's last event keeps a log of the earlier replies' events (npc-meters-pacing.js). A Re-read of a reply whose
+ * earlier read wrote its event without that log (older code) writes it without one, as it was. A first read and a new reply always may.
+ */
+export const logKept = (ctx, key, reply) => {
+    const earlier = ctx.standing ? readEvent(ctx.standing.domains?.npc?.npcs?.[key]?.lastEvent) : null;
+    return !earlier || earlier.at !== reply || Array.isArray(earlier.prev);
+};
 export const moodStands = (ctx, key) => !ctx.standing || isObject(readLeaf(ctx.standing.domains?.npc?.npcs?.[key]?.mood));
 
 export const sentence = parts => parts.filter(Boolean).map(part => (/[.!?]$/.test(part) ? part : `${part}.`)).join(' ');
