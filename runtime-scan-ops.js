@@ -9,6 +9,7 @@ import { isEmptyScannerAnswer } from './scanner-routing.js';
 import { refreshMessageGate, messageGateSettled } from './src/transcript.js';
 import { chatLineage, fingerprintMessage, lineageCheckpointKey } from './branch.js';
 import { getSettings } from './runtime-settings.js';
+import { currentWriterId } from './storage.js';
 import { replayScope, setNpcDossierScanIndicator, setNpcChatRefreshIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 
 export function createScanOpsPart(rt, deps) {
@@ -45,6 +46,21 @@ export function createScanOpsPart(rt, deps) {
         });
     }
 
+    // (REFRESHCANCEL) A targeted pass (Refresh, follow-up, import) stands on its ONE person and on the chat's line, not on every dossier write: an unrelated
+    // NPC's write, a save of an earlier change or a Story Block forward moves the state version and the saved revision without touching its source. The
+    // person's record, as a string (null when gone), is what it compares.
+    function targetFingerprint(key, npcId) {
+        const npc = rt.chatStateCache.get(key)?.npcs?.find(item => item?.id === npcId);
+        return npc ? JSON.stringify(npc) : null;
+    }
+    /** True when the pass is still the live operation, the chat's line is intact, and only its target changed (the case worth one automatic retry). */
+    function targetMoved(key, operation) {
+        const npcId = operation?.metadata?.npcId;
+        if (!npcId || !scanOperations.isCurrent(key, operation) || getChatKey() !== key) return false;
+        if (Array.isArray(operation.sourceLineage) && lineageMoved(operation.sourceLineage, chatLineage(getContext().chat || []), operation.sourceMessageId)) return false;
+        return targetFingerprint(key, npcId) !== operation.targetFingerprint;
+    }
+
     function beginScanOperation(key, label, metadata = {}) {
         const operation = scanOperations.begin(key, label, metadata);
         if (!operation) return null;
@@ -54,6 +70,8 @@ export function createScanOpsPart(rt, deps) {
         operation.canonicalRevision = canonicalRevision;
         // The chat's head when the scan began (forwardRelationshipChangesToHost).
         operation.chatHead = chatHeadMark();
+        const targetId = String(metadata?.npcId || '');
+        if (targetId) operation.targetFingerprint = targetFingerprint(key, targetId);
         operation.requestController = new AbortController();
         operation.requestScope = {
             route: { profileId: getSettings().scannerConnectionProfile },
@@ -63,8 +81,8 @@ export function createScanOpsPart(rt, deps) {
             deadline: operation.startedAt + SCAN_OPERATION_TIMEOUT_MS,
             isCurrent: () => scanOperations.isCurrent(key, operation)
                 && getChatKey() === key
-                && Number(stateVersions.get(key) || 0) === localRevision
-                && hydratedRevision(key) === canonicalRevision
+                && (targetId ? targetFingerprint(key, targetId) === operation.targetFingerprint
+                    : Number(stateVersions.get(key) || 0) === localRevision && hydratedRevision(key) === canonicalRevision)
                 && !lineageMoved(lineage, chatLineage(getContext().chat || []), operation.sourceMessageId),
         };
         return operation;
@@ -89,7 +107,15 @@ export function createScanOpsPart(rt, deps) {
         // still belong to the exact history it was extracted from before it is merged or checkpointed.
         const sourceIntact = getChatKey() === key && (!Array.isArray(operation?.sourceLineage)
             || !lineageMoved(operation.sourceLineage, chatLineage(getContext().chat || []), operation?.sourceMessageId));
-        const current = sourceIntact && scanOperationCurrent(key, operation) && currentRevision === baseRevision;
+        // A targeted pass is re-based when only the revision moved (an unrelated or earlier save): the freshness read above installed any foreign copy
+        // (which cancels the operation), so what remains is this session's own state, and its target is checked by record.
+        // Only when the move was this page session's own write (the sidecar's writer is this session, observed and held alike).
+        const meta = hydratedStateMeta.get(key);
+        const ownWrite = Boolean(meta) && meta.writerId === currentWriterId() && meta.latestObservedServerWriterId === currentWriterId();
+        const targetRebased = currentRevision !== baseRevision && ownWrite && Boolean(operation?.metadata?.npcId) && sourceIntact && scanOperationCurrent(key, operation)
+            && targetFingerprint(key, operation.metadata.npcId) === operation.targetFingerprint;
+        const current = sourceIntact && scanOperationCurrent(key, operation) && (currentRevision === baseRevision || targetRebased);
+        if (current && targetRebased) operation.canonicalRevision = currentRevision;
         if (!current) {
             recordFreshnessEvent(key, 'stale-operation-rejected', {
                 reason: label,
@@ -196,10 +222,11 @@ export function createScanOpsPart(rt, deps) {
     /** What a targeted pass (Refresh, backfill, import) was built from when it was asked for, as a test for a retry: the chat's line and the dossier
      *  state's version. Its prompt and its target were read from them, so a pass kept while the host's barrier was up is given up when either moved
      *  meanwhile (a delete, a regenerate, a restore installed): run later it would merge a reading of the old story into the new state. */
-    function passGuard(key) {
+    function passGuard(key, npcId = '') {
         const lineage = chatLineage(getContext().chat || []);
         const version = Number(stateVersions.get(key) || 0);
-        return () => getChatKey() === key && Number(stateVersions.get(key) || 0) === version && !lineageMoved(lineage, chatLineage(getContext().chat || []), null);
+        const target = npcId ? targetFingerprint(key, npcId) : null;
+        return () => getChatKey() === key && (npcId ? targetFingerprint(key, npcId) === target : Number(stateVersions.get(key) || 0) === version) && !lineageMoved(lineage, chatLineage(getContext().chat || []), null);
     }
     /** Whether dossier work is running, due or queued for the chat: an active operation, an intent, a queued automatic scan. */
     function scanWorkPending(key = getChatKey()) {
@@ -314,5 +341,5 @@ export function createScanOpsPart(rt, deps) {
         });
     }
 
-    return { recordScanDiagnostics, beginScanOperation, scanOperationCurrent, scanCanonicalBaseCurrent, endScanOperation, cancelScanOperation, withScanIntent, deferUntilSettled, replyGuard, passGuard, scanWorkPending, scanIdle, generationReady, queuePendingAutoScan, drainPendingAutoScanInner, noteScanFailure, BACKFILLS_PER_REPLY, scheduleReplyBackfills };
+    return { recordScanDiagnostics, beginScanOperation, scanOperationCurrent, scanCanonicalBaseCurrent, endScanOperation, cancelScanOperation, withScanIntent, deferUntilSettled, replyGuard, passGuard, targetFingerprint, targetMoved, scanWorkPending, scanIdle, generationReady, queuePendingAutoScan, drainPendingAutoScanInner, noteScanFailure, BACKFILLS_PER_REPLY, scheduleReplyBackfills };
 }

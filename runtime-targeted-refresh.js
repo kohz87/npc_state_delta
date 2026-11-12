@@ -54,7 +54,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
 
     // (1.2.11) `automatic`: a one-pass catch-up, not the reader's click. It stays quiet unless it
     // changed something, and never touches a dossier open in the editor.
-    async function refreshNpcFromChat(npcId, { automatic = false, fillLooks = false } = {}) {
+    async function refreshNpcFromChat(npcId, { automatic = false, fillLooks = false, retried = false } = {}) {
         const notify = automatic ? () => {} : (level, text) => globalThis.toastr?.[level]?.(text);
         const id = String(npcId || '').trim();
         const ctx = getContext();
@@ -112,6 +112,9 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
             label: `chat refresh for ${existing.name}`,
             systemPrompt: "You are NPC State Delta's targeted dossier reconciliation scanner. Re-read the supplied recent-story window for exactly one existing NPC. Return only the requested JSON object.",
             indicator: 'refresh',
+            // (REFRESHCANCEL) Only this person's record changed while it ran: read again once on the new record, then report.
+            retry: () => retried ? (notify('info', 'NPC State Delta: this dossier kept changing during the refresh; stale result was discarded.'), false)
+                : refreshNpcFromChat(id, { automatic, fillLooks, retried: true }),
             staleLabel: 'dossier refresh',
             checkpoint: 'chat-refresh',
             metricsLabel: 'targeted-refresh',
