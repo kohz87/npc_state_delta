@@ -48,7 +48,7 @@ async function indexProtected(vault, candidates) {
         for (const id of ids) {
             const isCandidate = candidates.some(file => file.id === id);
             try {
-                const lineage = (await vault.get(id))?.lineage;
+                const lineage = typeof vault.lineageOf === 'function' ? await vault.lineageOf(id) : (await vault.get(id))?.lineage;
                 if (typeof lineage === 'string' && lineage) lineages.add(lineage);
                 else if (isCandidate) keep.add(id);
             } catch { if (isCandidate) keep.add(id); unknown = true; }

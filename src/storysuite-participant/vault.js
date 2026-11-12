@@ -4,7 +4,8 @@
 //
 //   put(id, doc)         keeps a checkpoint; the same id again is the same bytes (the id is derived from the hash). Answers true when it
 //                        CREATED the file, false when the id was already kept (the participant removes only what it created itself).
-//                        The file vault writes it packed (checkpoint.js packForFile) and `get` unpacks it, so callers see the plain document.
+//                        The file vault writes it packed, or as a patch against the file it wrote before (checkpoint.js), and `get` rebuilds the
+//                        plain document, so callers never see either form. `lineageOf(id)` (file vault) names a file's story line without rebuilding it.
 //   get(id)              the checkpoint, or null when its bytes are gone
 //   getIndex(lineage)    the lineage's index or null; putIndex(lineage, index) replaces it (a lineage id is in the chat's state, not its key)
 //   list()               { files: [{ id, size, modifiedAt }], complete } for the clean-up report (vault-sweep.js). SillyTavern has no call that lists
@@ -14,7 +15,8 @@
 //   findOlder()          file vault only, and only when the user presses "Find older files": asks SillyTavern's Data Maid report for loose files named like
 //                        a dossier checkpoint and adds them (name, size, time) to what list() returns for this session; it replaces any Data Maid
 //                        report the user has open, so nothing else ever calls it. Returns how many checkpoint files the report named.
-//   remove(id, { referenced })  deletes one checkpoint; false (and nothing deleted) when `id` is in `referenced` (a Set or list) or is not there
+//   remove(id, { referenced })  deletes one checkpoint; false (and nothing deleted) when `id` is in `referenced` (a Set or list), is not there, or
+//                        (file vault) is the base another registered file is a patch against
 //
 
 // `memoryVault` is for tests (with `lose(id)` to forget bytes, `fail` to make a write throw). `fileVault` writes SillyTavern's user files
@@ -22,7 +24,7 @@
 // A first write (a new checkpoint, a new lineage's index) asks SillyTavern whether the file exists (storage.js `dataFileExists`) before it
 // reads it, so a file that is not there yet makes no 404 request (a red line in the browser's console); a server that cannot say is read as before.
 import { dataFileExists, deleteNpcStateDataFile } from '../../storage.js';
-import { CHECKPOINT_ID, packForFile, unpackFromFile } from './checkpoint.js';
+import { CHECKPOINT_ID, KIND_DELTA, deltaForFile, lineageOfFile, packForFile, rebuildFromDelta, unpackFromFile } from './checkpoint.js';
 
 const REGISTRY_NAME = 'npc-state-delta-checkpoint-registry.json';
 
@@ -123,6 +125,10 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
     // Files named by an on-demand Data Maid report (findOlder): id -> {size, modifiedAt}. Held for this session only; list() merges them in.
     const found = new Map();
     let registryChain = Promise.resolve();
+    // The last file written per story line this session (id, its plain document, chain depth): what the next file is a patch against. The document
+    // is the caller's own object, never changed after it is handed over. At most two lines are kept (a document is megabytes).
+    const written = new Map();
+    const rememberWritten = (lineage, entry) => { written.delete(lineage); written.set(lineage, entry); while (written.size > 2) written.delete(written.keys().next().value); };
     const readRegistry = async () => {
         if ((await absent(REGISTRY_NAME))) return {};
         const doc = await read(REGISTRY_NAME);
@@ -182,8 +188,20 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
                 try { await changeRegistry(files => { if (!files[id]) return false; files[id][1] = now(); }); } catch { /* the file itself is kept */ }
                 return false;
             }
-            const json = JSON.stringify(packForFile(doc));
-            await upload(name, json);
+            // A patch against the file written before it when that is clearly smaller; its dependency is recorded in the registry BEFORE the file
+            // exists (a failed record writes a packed anchor instead; a failed upload takes the record back), so remove() can never take the base away.
+            let delta = written.has(doc?.lineage) ? deltaForFile(doc, written.get(doc.lineage)) : null;
+            let json = JSON.stringify(delta ?? packForFile(doc));
+            if (delta) {
+                const entry = [new TextEncoder().encode(json).length, now(), delta.base];
+                try { await changeRegistry(files => { files[id] = entry; }); } catch { delta = null; json = JSON.stringify(packForFile(doc)); }
+            }
+            try { await upload(name, json); } catch (error) {
+                if (delta) { try { await changeRegistry(files => { delete files[id]; }); } catch { /* a stale record only keeps its base */ } }
+                throw error;
+            }
+            if (typeof doc?.lineage === 'string') rememberWritten(doc.lineage, { id, doc, depth: delta ? delta.depth : 0 });
+            if (delta) return true;
             // The registry is only a list for the clean-up, written after the checkpoint and not waited for: the checkpoint's own write path is
             // unchanged, and a failure to record only means the (young) file is not offered. Re-registering below waits, because it is the proof of age.
             const entry = [new TextEncoder().encode(json).length, now()];
@@ -194,12 +212,26 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
         findOlder,
         async remove(id, { referenced } = {}) {
             if (!CHECKPOINT_ID.test(String(id)) || isReferenced(referenced, id)) return false;
+            // A file that another registered file is a patch against stays (an unreadable registry cannot say, so it stays too).
+            try {
+                const files = await registryChain.then(readRegistry);
+                if (Object.entries(files).some(([other, entry]) => other !== id && Array.isArray(entry) && entry[2] === id)) return false;
+            } catch { return false; }
+            for (const [lineage, entry] of written) if (entry.id === id) written.delete(lineage);
             const removed = await deleteNpcStateDataFile({ path: `${base}/${nameOf(id)}` }, { fetchFn: request, headers: headersNow() });
             if (removed) found.delete(id);
             if (removed) { try { await changeRegistry(files => { if (!files[id]) return false; delete files[id]; }); } catch { /* a stale entry only fails to remove later */ } }
             return removed;
         },
-        get: async id => unpackFromFile(await read(nameOf(id))),
+        get: async function get(id, depth = 0) {
+            const raw = await read(nameOf(id));
+            if (!raw || raw.kind !== KIND_DELTA) return unpackFromFile(raw);
+            // Follow the base (a missing, cyclic or too long chain is a file that is not there); the caller's hash check proves what comes out.
+            if (depth >= 16 || typeof raw.base !== 'string' || raw.base === id || !CHECKPOINT_ID.test(raw.base)) return null;
+            const base = await get(raw.base, depth + 1);
+            return base ? rebuildFromDelta(raw, base) : null;
+        },
+        async lineageOf(id) { return lineageOfFile(await read(nameOf(id))); },
         async getIndex(lineage) {
             const name = indexName(lineage);
             return (await absent(name)) ? null : read(name);

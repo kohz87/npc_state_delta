@@ -197,6 +197,15 @@ export function createVaultSweep({ vault, now = () => Date.now(), keepNewerThanM
                     failed.push({ id: file.id, message: String(error?.message || error || 'The file could not be removed.') });
                 }
             }
+            // A file another candidate was a patch against is refused while that one exists: the oldest go first, so ask the refused ones once more.
+            for (const file of plan.candidates.filter(item => skipped.includes(item.id) && !plan.referenced.has(item.id))) {
+                try {
+                    if (await vault.remove(file.id, { referenced: plan.referenced }) !== false) { skipped.splice(skipped.indexOf(file.id), 1); deleted.push(file); }
+                } catch (error) {
+                    skipped.splice(skipped.indexOf(file.id), 1);
+                    failed.push({ id: file.id, message: String(error?.message || error || 'The file could not be removed.') });
+                }
+            }
             const removedBytes = deleted.reduce((sum, file) => sum + file.bytes, 0);
             return {
                 ok: failed.length === 0,

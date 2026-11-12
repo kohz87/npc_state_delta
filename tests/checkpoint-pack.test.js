@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PACK_SCHEME, PackError, applyJson, diffJson, packCheckpoints, unpackCheckpoints } from '../checkpoint-pack.js';
+import { PACK_SCHEME, PackError, applyJson, diffJson, diffPlainJson, packCheckpoints, unpackCheckpoints } from '../checkpoint-pack.js';
 
 const text = value => JSON.stringify(value);
 
@@ -350,4 +350,14 @@ test('applyJson shares unchanged parts with its base but never mutates it; unpac
         for (const child of Object.values(value)) walk(child);
     };
     for (const entry of back) walk(entry.snapshot);
+});
+
+test('diffPlainJson (plain JSON in, no copies made) gives the patch diffJson gives and rebuilds the target', () => {
+    const chat = makeChat(12);
+    for (let i = 1; i < chat.length; i += 1) {
+        const base = chat[i - 1].snapshot;
+        const target = chat[i].snapshot;
+        assert.deepEqual(diffPlainJson(base, target), diffJson(base, target));
+        assert.deepEqual(applyJson(base, diffPlainJson(base, target)), target);
+    }
 });
