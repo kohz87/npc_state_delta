@@ -256,3 +256,17 @@
     border-radius: var(--ss-radius-pill);
     box-shadow: none;
 }
+
+/* Diagnostics, Events: a row's condition is a long unbroken expression; it wraps inside the row (it was 640px wide on a 360px phone,
+   the page clipped it). */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-events-row {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note, .rpg-fight-offer, .rpg-fight-pause) .ss-events-when {
+    display: block;
+    max-width: 100%;
+    margin-top: 2px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}

@@ -10,6 +10,7 @@
 //
 // The Standard stat formula's numbers (`formula: 'standard'` plus the rest) travel in the same payload.
 import { FORMULA, LEVEL, LEVEL_CAP_SETTING, LIMITS, levelCapOf } from './names.js';
+import { FOE_LEVEL } from './foes.js';
 import { STANDARD_NUMBERS, foeBonus, levelBonus, levelOfClass, statPart } from './formula.js';
 
 // LEVELS (2.17.0, names.js LEVEL): a set of numbers may carry `levelDivisor` (3..8): then the roll's term for a party member is levelBonus(level, divisor) in place
@@ -169,20 +170,21 @@ export const sameRules = (a, b) => {
 export const presetOf = rules => DIFFICULTIES.slice(0, 3).find(name => sameRules(STANDARD_PRESETS[name], rules)) ?? 'custom';
 
 // What a foe of `foeClass` (its level, under levelled numbers) adds to its die.
-const foeSide = (r, foeClass) => (hasLevels(r) ? r.foeBase + levelBonus(foeClass, r.levelDivisor) : foeBonus(foeClass, r));
+const foeSide = (r, foeClass, hard = false) => (hasLevels(r) ? r.foeBase + levelBonus(foeClass, hard ? FOE_LEVEL.hardDivisor : r.levelDivisor) : foeBonus(foeClass, r));
 
 /**
  * The exact chances of one roll under `rules`: the party member's d20 + `bonus` against a foe's d20 + the foe's base + the
  * Soul Class weight × `foeClass`, the outcome rule of resolve.js (a natural 20 succeeds, a natural 1 fails, a total that
  * reaches the foe's succeeds, one within `costMargin` short is a success at a cost). Counts all 400 pairs of dice.
+ * `hard`: the harder-foes rule, where the foe adds level / 4 (board/flags.js hardFightFor); only levelled numbers read it.
  * → { success, cost, fail }, whole percentages each rounded on its own (they may add up to 99 or 101).
  */
-export function oddsFor(rules, { bonus, foeClass }) {
+export function oddsFor(rules, { bonus, foeClass, hard = false }) {
     const r = normalizeRules(rules), die = FORMULA.die;
     let success = 0, cost = 0, fail = 0;
     for (let mine = 1; mine <= die; mine += 1) {
         for (let theirs = 1; theirs <= die; theirs += 1) {
-            const total = mine + bonus, against = theirs + foeSide(r, foeClass);
+            const total = mine + bonus, against = theirs + foeSide(r, foeClass, hard);
             if (mine === die || (mine !== 1 && total >= against)) success += 1;
             else if (mine !== 1 && total >= against - r.costMargin) cost += 1;
             else fail += 1;
@@ -225,5 +227,5 @@ export function subjectOdds(rules, subject) {
     const stat = statPart(subject.uses === 'mana' ? 'magic' : 'physical', subject.stats ?? { [subject.stat]: subject.statValue }, { skillStat: subject.stat }).value;
     const levels = hasLevels(r);
     const bonus = stat + (levels ? levelBonus(subject.level, r.levelDivisor) : r.classWeight * subject.soul) + subject.rank;
-    return { bonus, ...oddsFor(r, { bonus, foeClass: levels ? subject.foeLevel : subject.foeClass }) };
+    return { bonus, ...oddsFor(r, { bonus, foeClass: levels ? subject.foeLevel : subject.foeClass, hard: subject.hard === true }) };
 }

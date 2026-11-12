@@ -1,10 +1,11 @@
 /* NPC State Delta dossier surface: the five section screens (Right now, With {{user}}, Ties, Past, Secrets) and their header with arrows and dots. Escaped markup only; reads the existing dossier projection, no new data. */
 import { escapeHtml } from './src/util/html.js';
-import { changeStamp, plain, relationshipValue, RELATIONSHIP_AXES } from './dossier-ui-model.js';
-import { lastRelationshipChangeHtml } from './dossier-ui-relationship.js';
+import { changeStamp, plain, relationshipValue, RELATIONSHIP_AXES, wholeNumber } from './dossier-ui-model.js';
+import { recentChangeRowHtml } from './dossier-ui-relationship.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
 import { castFromHtml, keyAwayHtml } from './dossier-ui-catalog.js';
-import { bondTone, boardTone, pullTile } from './dossier-ui-view-model.js';
+import { bondTone, boardTone, moodDescriptors, moodTile, pullTile } from './dossier-ui-view-model.js';
+import { barsHtml, moodBarList3 } from './dossier-ui-board.js';
 import { tieTone } from './dossier-ui-bond-tone.js';
 import { SECTION_KEYS } from './dossier-ui-screens.js';
 
@@ -52,29 +53,51 @@ export function sectionHeaderHtml(id, { npcName = '', userName = '' } = {}) {
     </header>`;
 }
 
-// Right now: mood, where and what she is doing, her goal and condition, and the away block while a key person is away.
-// Phase 1 leaves out the "Pull" tile (no data yet).
-export function nowSectionHtml(npc = {}) {
+// The fields of the dossier Right now tells about, in the words the line "Updated this reply" uses.
+const NOW_FIELD_WORDS = Object.freeze({ mood: 'mood', location: 'where', goal: 'goal', status: 'condition' });
+
+// "Updated this reply (#3): mood, where, goal." from the stored field changes; an older change reads "Updated at reply #2: ...".
+// Empty when none of the latest change's fields is one Right now shows.
+function updatedLineHtml(npc, reply) {
+    const changes = npc.fieldChanges;
+    if (!changes || changes.latestTurn === null) return '';
+    const words = (changes.latest || []).map(field => NOW_FIELD_WORDS[field]).filter(Boolean);
+    if (!words.length) return '';
+    const stamp = changeStamp({ turn: changes.latestTurn, message: changes.message });
+    const when = !stamp.legacy && stamp.message !== null && stamp.message === wholeNumber(reply) ? `this reply (#${stamp.message})` : `at ${stamp.text}`;
+    return `<p class="delta-now-updated delta-muted">Updated ${escapeHtml(when)}: ${escapeHtml(words.join(', '))}.</p>`;
+}
+
+// Right now, as the mockup draws it: the mood word with its few plain words and three bars across the row (Feeling, Energy,
+// Control, also at rest); "Moved by" (what moved the mood); "Where and what" (where, doing, goal, condition, and the Pull last,
+// marked New on its first day); then the line that says which of these the latest reply updated. The Story Director away block
+// and the pack's cast block (with its Pin button) stay above, as they did in the old dossier.
+export function nowSectionHtml(npc = {}, { reply = null } = {}) {
     const cast = npc.cast && typeof npc.cast === 'object' ? npc.cast : {};
-    const rows = [
-        ['Mood', plain(npc.v2Meters?.mood?.word) || plain(npc.mood)],
-        ['Where', plain(cast.where) || plain(npc.location)],
-        ['Doing', plain(cast.doing)],
-        ['Goal', plain(cast.goal) || plain(npc.goal)],
-        ['Condition', plain(npc.status)],
-    ].filter(([, value]) => value);
-    // The Story Director away block and the pack's cast block (with its Pin button) live here, as they did in the old dossier.
-    const mood = npc.v2Meters?.mood;
+    const mood = moodTile(npc);
     const pull = pullTile(npc);
-    if (mood?.cause) rows.splice(1, 0, ['What moved it', mood.cause]);
-    if (pull) rows.splice(mood?.cause ? 2 : 1, 0, ['Pull', `${pull.text} · ${pull.note}${pull.cause ? ` · ${pull.cause}` : ''}`]);
+    const rows = [
+        ['Where', escapeHtml(plain(cast.where) || plain(npc.location))],
+        ['Doing', escapeHtml(plain(cast.doing))],
+        ['Goal', escapeHtml(plain(cast.goal) || plain(npc.goal))],
+        ['Condition', escapeHtml(plain(npc.status))],
+        ...(pull ? [['Pull', `<b>${escapeHtml(pull.text)}</b>${[pull.cause, pull.note].filter(Boolean).map(part => ` · ${escapeHtml(part)}`).join('')}`, pull.fresh ? 'New' : '']] : []),
+    ].filter(([, value]) => value);
     const blocks = `${npc.key ? keyAwayHtml(npc.key) : ''}${npc.cast ? castFromHtml(npc.cast, npc.id) : ''}`;
-    if (!rows.length) return blocks || '<p class="delta-muted">Nothing about this moment is known yet.</p>';
-    return `${blocks}<dl class="delta-sheet delta-kv">${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('')}</dl>`;
+    const words = moodDescriptors(mood);
+    const cause = plain(npc.v2Meters?.mood?.cause);
+    const kv = list => `<dl class="delta-kv">${list.map(([label, value, badge]) => `<dt>${escapeHtml(label)}${badge ? ` <span class="delta-new-badge">${escapeHtml(badge)}</span>` : ''}</dt><dd>${value}</dd>`).join('')}</dl>`;
+    return `${blocks}<div class="delta-sheet delta-now">`
+        + kv([['Mood', `<b>${escapeHtml(mood.text)}</b>${words.length ? ` · ${escapeHtml(words.join(', '))}` : ''}`]])
+        + (moodBarList3(mood) ? `<div class="delta-now-bars">${barsHtml(moodBarList3(mood))}</div>` : '')
+        + (cause ? `<h4>Moved by</h4><p class="delta-now-moved">${escapeHtml(cause)}</p>` : '')
+        + (rows.length ? `<h4>Where and what</h4>${kv(rows)}` : '')
+        + updatedLineHtml(npc, reply)
+        + '</div>';
 }
 
 // With {{user}}: the four meters as bars that run from the centre (−100..100), the dynamic between them,
-// the last change with how it came about, and the three recent changes before it.
+// and the list of recent changes: the last one with how it came about, then the earlier ones.
 export function withSectionHtml(npc = {}) {
     const rel = npc.relationship && typeof npc.relationship === 'object' ? npc.relationship : {};
     const meters = RELATIONSHIP_AXES.map(([axis, label]) => {
@@ -84,16 +107,18 @@ export function withSectionHtml(npc = {}) {
         return `<div class="delta-sheet-meter delta-sheet-${escapeHtml(axis)}"><span>${escapeHtml(label)}</span><i class="delta-sheet-track" aria-hidden="true"><b style="left:${left}%;width:${width}%"></b></i><strong>${value > 0 ? '+' : ''}${value}</strong></div>`;
     }).join('');
     const summary = plain(npc.relationshipSummary);
-    const recent = (Array.isArray(npc.recentRelationshipChanges) ? npc.recentRelationshipChanges : []).slice(0, 3).map(event => {
-        const when = changeStamp(event).label;
-        const impact = plain(event?.impact);
-        return `<li>${when ? `<span class="delta-sheet-when">${escapeHtml(when)}</span>` : ''}${impact ? `<span class="delta-sheet-impact">${escapeHtml(impact)}</span>` : ''}<span>${escapeHtml(plain(event?.reason))}</span></li>`;
-    }).join('');
+    // "Recent changes": the latest change first (signed numbers, via, date), then the earlier ones from the stored history (the latest's own
+    // event is not repeated).
+    const last = npc.lastRelationshipChange;
+    const hasLast = last && last.impact !== 'none' && (last.reason || last.impact === 'manual' || last.hosted);
+    const earlier = (Array.isArray(npc.recentRelationshipChanges) ? npc.recentRelationshipChanges : [])
+        .filter((event, index) => !(hasLast && ((index === 0 && last.reason && event.reason === last.reason) || (last.hosted && wholeNumber(event.message) !== null && wholeNumber(event.message) === wholeNumber(last.message)))))
+        .slice(0, 3);
+    const rows = [...(hasLast ? [recentChangeRowHtml({ change: last })] : []), ...earlier.map(event => recentChangeRowHtml({ event }))].join('');
     return `<div class="delta-sheet">
         <div class="delta-sheet-meters">${meters}</div>
         ${summary ? `<p class="delta-sheet-prose">${escapeHtml(summary)}</p>` : ''}
-        ${lastRelationshipChangeHtml(npc.lastRelationshipChange)}
-        ${recent ? `<div class="delta-sheet-recent"><h4>Recent changes</h4><ul class="delta-list">${recent}</ul></div>` : ''}
+        <div class="delta-sheet-recent"><h4>Recent changes</h4>${rows ? `<ul class="delta-list">${rows}</ul>` : '<p class="delta-muted">No relationship change recorded yet.</p>'}</div>
     </div>`;
 }
 
@@ -153,7 +178,7 @@ export function secretsSectionHtml(npc = {}) {
     const rows = notes.map(note => (note.state === 'open'
         ? `<div class="delta-secret delta-secret-open"><div class="delta-secret-head"><b>${escapeHtml(plain(note.title))}</b><span class="delta-secret-pill">${escapeHtml(plain(note.pill))}</span></div>${plain(note.text) ? `<p>${escapeHtml(plain(note.text))}</p>` : ''}</div>`
         : `<div class="delta-secret delta-secret-hidden"><span class="delta-secret-bar" style="width:${Math.max(0, Math.min(100, Number(note.width) || 0))}%" aria-hidden="true"></span><span class="delta-secret-when">${escapeHtml(plain(note.opens))}</span></div>`)).join('');
-    return `<p class="delta-muted">${opened} opened · ${notes.length - opened} still hidden. The narrator knows them all and keeps them; each appears here when it opens.</p>
+    return `<p class="delta-muted delta-secrets-intro">${opened} opened · ${notes.length - opened} still hidden. The narrator knows them all and keeps them; each appears here when it opens.</p>
         <div class="delta-sheet delta-secrets">${rows}</div>`;
 }
 
@@ -166,11 +191,11 @@ const SECTION_BODIES = new Map([
 ]);
 
 // One whole section screen: its header with arrows and dots, then its body. Empty string for an unknown id.
-export function sectionScreenHtml(id, npc = {}, { userName = '' } = {}) {
+export function sectionScreenHtml(id, npc = {}, { userName = '', reply = null } = {}) {
     const body = SECTION_BODIES.get(id);
     if (!body) return '';
     return `<section class="delta-section-screen" data-delta-section="${escapeHtml(id)}" aria-label="${escapeHtml(sectionTitle(id, userName))}">
         ${sectionHeaderHtml(id, { npcName: npc?.name, userName })}
-        <div class="delta-section-body">${body(npc ?? {})}</div>
+        <div class="delta-section-body">${body(npc ?? {}, { reply })}</div>
     </section>`;
 }

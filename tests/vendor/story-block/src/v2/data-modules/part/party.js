@@ -244,7 +244,9 @@ export function createParty(deps) {
             const person = rpg().partyOf(prefix).find(entry => fold(entry.name) === fold(read.name));
             if (!person || person.left) refuse('DM_SCHEMA', '', fill(J.nothing, { name: read.name }));
             // The player's own character (the one named like the persona) never leaves: companions only.
-            if (isReader(person.name)) refuse('REFUSED', '', fill(J.isYou, { name: person.name }));
+            // (a reply marked `partyLeft` that already made this person leave keeps doing so on a Re-read, whatever the persona is called now; an older reply is judged as before)
+            const wasLeft = ctx.carrier?.rules?.includes('partyLeft') && (ctx.standingReceipts ?? []).some(receipt => receipt?.data?.join?.op === 'left' && fold(receipt.data.join.name ?? '') === fold(person.name));
+            if (isReader(person.name) && !wasLeft) refuse('REFUSED', '', fill(J.isYou, { name: person.name }));
             return leave(ctx, person, true, call);
         }
         const limit = partyLimit(marked(ctx)), check = rpg().checkJoin(prefix, read, dmRoom(ctx), limit);

@@ -14,6 +14,7 @@ import { within } from './text.js';
 import { ensureModules } from '../sdk.js';
 import { boardStep, heldForMessage, rememberHeld, pruneMissingBoard } from './held-board.js';
 import { clearStart, pendingStart } from './fight-start.js';
+import { ruleMarksOf } from './rule-marks.js';
 
 export function createEvents(s, deps) {
     const { markIdle, clearPrompts, ctx, metadata = () => ctx?.chatMetadata, isCarrier, store, ensureInitial, problem, notify, stopChangedBoard, boardError, changeHeads, readBlock, strayProblems, legacyProblem, lateLines, captureLines, withCaps, timeline, trySave, saveText, redraw, events, registry, view, prepare, RPG_LOAD_WAIT_MS, rebuild, bus, hasCarrier, reconcileNow, REBUILD_REASONS, INTERCEPTOR_NAME, V1_KEYS, setPrompt, interceptor, onGenerationStarted, onPromptReady, onTextPromptReady, getApi } = deps;
@@ -59,7 +60,7 @@ export function createEvents(s, deps) {
             // Change lines written in the story near the block are read with it (capture.js strayLines).
             const heads = changeHeads();
             const block = extractBlock(text, 'Changes', at, { stopped, heads });
-            const parsed = block === null ? { lines: [], problems: [] } : readBlock(id, block);
+            const parsed = block === null ? { lines: [], problems: [] } : readBlock(id, block, { fresh: current.type !== 'continue' });
             const problems = [...parsed.problems, ...strayProblems(id, text, heads, { from: at?.from ?? 0, tail: at?.tail === true, stopped }, parsed.lines.map(line => line.raw))];
             if (adopted.legacy === 'read') problems.push(legacyProblem(id));
             const cut = block === null ? null : cutLine(text, 'Changes', at);
@@ -236,7 +237,8 @@ export function createEvents(s, deps) {
         const heads = changeHeads();
         const mes = String(message.mes ?? '');
         const block = extractBlock(mes, 'Changes', null, { heads });
-        const blockLines = block === null ? [] : parseChanges(block).lines.map(line => line.raw);
+        // Read the way the reply was captured (its caretWords mark), so a preset's ^ block gives the lines it gave live and on Re-read.
+        const blockLines = block === null ? [] : parseChanges(block, { caret: ruleMarksOf(readRecord(message)?.rules).includes('caretWords') }).lines.map(line => line.raw);
         const own = [...blockLines, ...lateLines(index, []).map(line => line.raw)];
         const parsed = parseChanges(String(text ?? '')).lines;
         const fresh = new Set(notWritten(parsed.map(line => line.raw), own, { scene: blockLines }));

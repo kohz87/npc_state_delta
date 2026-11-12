@@ -287,8 +287,24 @@ export function createHostedPart(rt, deps) {
             const rejected = rejectedOverallLook(was.overallAppearance, now.overallAppearance, row);
             if (rejected && !refused.some(item => item.id === now.id)) refused.push({ id: now.id, name: now.name, before: was.overallAppearance, incoming: rejected.incoming });
         }
-        if (!changes.length && !looks.length && !refused.length) return;
+        // (scan-admitted people) A dossier the scan made (an id the sidecar did not have) gets a slice entry the way a cast meeting gives one;
+        // an adjust below has made it first when the scan moved its meters, and the meeting then only adds the mood and drives. Not the dead
+        // and not incidental extras: the slice holds 80 people, and a long chat must not fill it with people who never matter.
+        const worth = npc => !['dead', 'deceased'].includes(String(npc.lifeState ?? '').toLowerCase()) && npc.dossierSignal !== 'incidental';
+        const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && !prior.has(npc.id) && worth(npc)) : [];
+        if (!changes.length && !looks.length && !refused.length && !met.length) return;
         void (async () => {
+            // The slice entry comes first (adjust, else meet): a look flag never makes one, so a new person's look lock needs it.
+            for (const change of changes) {
+                if (!chatHeadUnchanged(head)) return dropped();
+                await adapter.adjust(change);
+                stage1Refresh();   // an open dossier panel draws again once the host's meters took this change
+            }
+            for (const npc of met) {
+                if (!chatHeadUnchanged(head)) return dropped();
+                await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId });
+                stage1Refresh();
+            }
             for (const npc of looks) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.flag?.({ name: npc.name, lock: true, reply: messageId });
@@ -296,11 +312,6 @@ export function createHostedPart(rt, deps) {
             for (const item of refused) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.flag?.({ name: item.name, drift: { before: item.before, incoming: item.incoming }, reply: messageId });
-            }
-            for (const change of changes) {
-                if (!chatHeadUnchanged(head)) return dropped();
-                await adapter.adjust(change);
-                stage1Refresh();   // an open dossier panel draws again once the host's meters took this change
             }
         })();
     }

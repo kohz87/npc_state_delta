@@ -11,7 +11,9 @@ import {
     normalizeRelationshipMapSettings,
     PHONE_NODE_CAP,
     relationshipDelta,
+    nodeBoxes,
     resolveMapBonds,
+    ringWordSpot,
     selectMapNpcs,
 } from '../relationship-map-core.js';
 import { runtimeSource } from './helpers/runtime-source.js';
@@ -178,8 +180,8 @@ test('focus: the web of one person lights her ties, dims the rest and words each
     assert.match(svg, /delta-map-bond-solid/);
     assert.equal((mapSvgHtml(map, buildFocusModel(projection, map, '')).match(/<line /g) || []).length, 3, 'all bonds without focus');
     assert.match(focus.chip.html, /Focus: Rika[\s\S]*data-map-focus-clear="rika"[\s\S]*✕/);
-    assert.match(mapCardHtml(map, buildFocusModel(projection, map, ''), 'Astra'), /data-map-focus="rika"[\s\S]*Open dossier ›/);
-    assert.match(mapCardHtml(map, focus, 'Astra'), /Rika&#039;s ties<\/b>[\s\S]*rival<\/span> Bregje/);
+    assert.match(mapCardHtml(map, buildFocusModel(projection, map, ''), 'Astra'), /Open dossier ›[\s\S]*data-map-focus="rika"/);
+    assert.match(mapCardHtml(map, focus, 'Astra'), /Rika&#039;s ties<\/span>[\s\S]*rival<\/span> Bregje/);
     assert.equal(mapKeyLine('warmth', 'Astra'), 'Closer to Astra = warmer · the dashed outer ring = cold · hostile');
 });
 
@@ -207,10 +209,74 @@ test('map mode hides the dossier hero and gives the map the full width; meters g
     const { mapNodeHtml, buildFocusModel } = await import('../relationship-map-focus.js');
     const adapter = fs.readFileSync(new URL('../relationship-map.js', import.meta.url), 'utf8');
     assert.match(adapter, /delta-map-mode > \.delta-hero \{ display:none; \}/);
-    assert.match(adapter, /\.delta-spread\.delta-map-mode \{ grid-template-columns:minmax\(0,1fr\); \}/);
+    assert.match(adapter, /\.delta-spread\.delta-map-mode \{ grid-template-columns:minmax\(0,1fr\); grid-template-rows:minmax\(0,1fr\); \}/);
     assert.doesNotMatch(adapter, /delta-map-mode \.delta-hero-media/);
-    assert.match(adapter, /\.delta-map-bars \{ display:grid; grid-template-columns:repeat\(4,minmax\(0,1fr\)\); gap:8px 28px; \}/);
+    // the card stands beside the map from a width derived from content (map minimum + card minimum + room), under it below; no bare 899 / 520 lines
+    const core = await import('../relationship-map-core.js');
+    assert.equal(core.MAP_CARD_BESIDE_MIN, core.MAP_CIRCLE_MIN + core.MAP_CARD_MIN + core.MAP_ROOM);
+    assert.match(adapter, /@container dsr \(min-width: \$\{MAP_CARD_BESIDE_MIN\}px\)/);
+    assert.match(adapter, /@container dmap \(max-width: \$\{MAP_LABELS_SHORT_MAX\}px\)/);
+    assert.doesNotMatch(adapter, /899\.98|@container \(max-width/);
+    assert.doesNotMatch(adapter, /delta-map-strip|delta-map-bars/);
     const map = buildMapModel({ npcs: [npc('rika', { portrait: 'data:image/png;base64,AAAA' }), npc('vane')] }, {});
     const face = mapNodeHtml(map.nodes.find(n => n.id === 'vane'), buildFocusModel({}, map, ''), {});
     assert.match(face, /delta-map-face delta-portrait-placeholder[\s\S]*<span>V<\/span>/, 'initials when there is no portrait');
+});
+
+test('the map card: ties without Focus, the numbers line, a portrait or initials, the library bar and compact tap pills', async () => {
+    const { buildFocusModel, mapCardHtml, selectedTies, cardNumbersLine, mapNodeHtml } = await import('../relationship-map-focus.js');
+    const npcs = [
+        npc('rika', { name: 'Rika', relationship: { trust: 11, affection: 11, desire: 6, tension: 13 }, keyRelationships: ['Temiwa: friend', 'Bregje: rival'], v2Meters: { ties: { bregje: ['rival'] } } }),
+        npc('temiwa', { name: 'Temiwa' }), npc('bregje', { name: 'Bregje' }),
+    ];
+    const map = buildMapModel({ npcs, turn: 1 }, { selectedId: 'rika' });
+    assert.deepEqual(selectedTies(map).map(t => [t.name, t.word, t.tone]), [['Bregje', 'rival', 'bad'], ['Temiwa', 'friend', 'good']], 'the ties of the selected person need no focus');
+    assert.equal(cardNumbersLine(map.selected), 'Warmth +11 · Trust +11 · Tension +13', 'the mockup\'s three numbers (the dial carries all four)');
+    const card = mapCardHtml(map, buildFocusModel({ npcs }, map, ''), 'Astra', { npc: { ...npcs[0], key: { here: true }, gender: 'female', mood: 'Alarmed' } });
+    assert.match(card, /<aside class="delta-map-card" data-focus="off"[\s\S]*dossier-dial[\s\S]*<h3 class="delta-map-card-name delta-map-beside">Rika<\/h3>/, 'the dial round her portrait, then her name');
+    assert.match(card, /delta-pill-key">★ Key<\/span><span class="delta-pill delta-pill-mood">Alarmed/);
+    assert.match(card, /Bonds on the map<\/b>[\s\S]*rival<\/span> Bregje/);
+    assert.match(card, /warmth \+11 · rival of Bregje · friend of Temiwa/, 'the phone line');
+    assert.match(card, /Open dossier ›[\s\S]*data-map-focus="rika"/);
+    assert.match(card, /delta-portrait-placeholder[^>]*><span>R<\/span>/, 'initials when she has no portrait');
+    assert.match(card, /delta-map-focus ss-tap-pill/);
+    const focused = mapCardHtml(map, buildFocusModel({ npcs }, map, 'rika'), 'Astra', { npc: { ...npcs[0], gender: 'female' } });
+    assert.match(focused, /Her ties<\/span>[\s\S]*delta-map-ties-rows/, 'Her ties in Focus, one row each');
+    assert.doesNotMatch(focused, /data-map-focus="rika"/, 'Focus is on already');
+    assert.match(mapCardHtml(map, buildFocusModel({ npcs }, map, 'rika'), 'Astra', { npc: { ...npcs[0], gender: 'male' } }), /His ties/);
+    assert.match(mapCardHtml(map, buildFocusModel({ npcs }, map, 'rika'), 'Astra', { npc: { ...npcs[0], gender: '' } }), /Their ties/);
+    const face = mapNodeHtml({ ...map.nodes[0], name: 'Captain Vane', short: 'Vane', portrait: '' }, buildFocusModel({}, map, ''), {});
+    assert.match(face, /<span>CV<\/span>/, 'two initials for a two-word name');
+    const adapter = fs.readFileSync(new URL('../relationship-map.js', import.meta.url), 'utf8');
+    assert.match(adapter, /libraryFootHtml\(count\)/, 'the map ends in the same Dossier library bar');
+    assert.match(adapter, /closest\('\.delta-library-foot'\)\) return void setMode\(ui, 'dossier'\)/);
+    assert.match(adapter, /class="ss-tap-pill" data-map-mode="map"/);
+});
+
+test('the outer ring word sits where no face or label is, and moves out of the way of a face at the bottom', () => {
+    const box = (x, y, half = 60) => ({ l: x - half, r: x + half, t: y - 34, b: y + 70 });
+    const empty = ringWordSpot([]);
+    assert.ok(Math.abs(empty.x - 390) < 1 && empty.y > 700, 'with no face it keeps the old bottom place');
+    const crowded = ringWordSpot([box(390, 700)]);   // a face and label right where the word used to be written
+    assert.ok(Math.abs(crowded.x - 390) > 90 || crowded.y < 690, 'the word moved off the face');
+    for (const spot of [empty, crowded]) assert.ok(['start', 'middle', 'end'].includes(spot.anchor));
+    assert.deepEqual(ringWordSpot([box(390, 700), box(100, 400)]), ringWordSpot([box(390, 700), box(100, 400)]), 'deterministic');
+    assert.deepEqual(nodeBoxes([{ x: 50, y: 50 }]).length, 1);
+    const source = fs.readFileSync(new URL('../relationship-map-focus.js', import.meta.url), 'utf8');
+    assert.match(source, /ringWordSpot\(nodeBoxes\(model\.nodes\)\)/);
+    const adapter = fs.readFileSync(new URL('../relationship-map.js', import.meta.url), 'utf8');
+    assert.match(adapter, /fitRingWord\(map\)[\s\S]*ResizeObserver/, 'placed against the measured labels, again when the circle resizes');
+});
+
+test('round 2 fix 5: a tie tag names the tie, the card says "Her ties" by gender, full names show down to a named width', async () => {
+    const { possessiveWord, tagWord, buildFocusModel } = await import('../relationship-map-focus.js');
+    assert.deepEqual(['female', 'Female', 'male', 'nonbinary', ''].map(possessiveWord), ['Her', 'Her', 'His', 'Their', 'Their']);
+    assert.equal(tagWord(['ally']), 'ally');
+    assert.equal(tagWord(['rival', 'owes']), 'owes');
+    const npcs = [npc('rika', { keyRelationships: ['Temiwa: friend | saved her'], v2Meters: { ties: { temiwa: ['ally'] } } }), npc('temiwa')];
+    const map = buildMapModel({ npcs, turn: 1 }, { selectedId: 'rika' });
+    const tie = buildFocusModel({ npcs }, map, 'rika').ties[0];
+    assert.deepEqual([tie.word, tie.dynamic], ['ally', 'saved her'], 'the tag, not the family word, and the dynamic text');
+    const core = await import('../relationship-map-core.js');
+    assert.ok(core.MAP_NAMES_MIN < core.MAP_LABELS_SHORT_MAX && core.MAP_DENSE_NODES >= 10);
 });

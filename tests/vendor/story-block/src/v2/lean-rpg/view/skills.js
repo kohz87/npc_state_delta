@@ -208,7 +208,7 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         if (run.draft.flags && run.draft.type !== 'utility') drawSkillFlags(doc, form, run.draft.flags);
         name.addEventListener('input', () => { run.draft.name = name.value; });
         about.addEventListener('input', () => { run.draft.about = about.value; });
-        form.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault?.(); cancel(); } });
+        form.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault?.(); event.stopPropagation?.(); cancel(); } });
         const actions = h(doc, 'div', 'rpg-card-actions');
         saveButton = h(doc, 'button', 'ss-button ss-button-primary rpg-skill-save', K.save);
         saveButton.setAttribute('type', 'button');

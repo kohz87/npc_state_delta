@@ -10,7 +10,7 @@
 // Pure: no DOM, no state, no randomness.
 
 import { STAT_KEYS, blocksFor, foeHealthBlocks, LUCK_STEPS, luckWindow } from './formula.js';
-import { foeBlocksByLevel } from './foes.js';
+import { foeBlocksByLevel, hardBlocksByLevel, isHardBar } from './foes.js';
 import { STAGES } from './names.js';
 
 const whole = value => (Number.isSafeInteger(value) ? value : 0);
@@ -57,7 +57,7 @@ export function sizeOf(schema, fields, key) {
     if (bar === 'foe') {
         const slot = /^hurt(\d+)$/.exec(String(key))?.[1];
         // A block of the Levels rules has `level{n}`: 4 + level/30 blocks; one of the earlier rules has `class{n}` (4 + class/3).
-        if (slot && Object.hasOwn(fields ?? {}, `level${slot}`)) return foeBlocksByLevel(whole(fields[`level${slot}`]) || 1);
+        if (slot && Object.hasOwn(fields ?? {}, `level${slot}`)) { const level = whole(fields[`level${slot}`]) || 1; return isHardBar(schema) ? hardBlocksByLevel(level) : foeBlocksByLevel(level); }
         return foeHealthBlocks(slot ? whole(fields?.[`class${slot}`]) || 1 : 1);
     }
     return blocksFor(statsOfFields(fields), scaleOf(schema))[bar];

@@ -16,6 +16,7 @@ import { dmHidden } from '../data-modules/schema.js';
 import { barOf, characterBars, scaleOf, sizeOf } from './blocks.js';
 import { soulReading } from './soul.js';
 import { classOfLevel, levelOfClass } from './formula.js';
+import { isHardBar } from './foes.js';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const int = value => (Number.isSafeInteger(value) ? value : null);
@@ -163,7 +164,7 @@ function foesOf(id, fields, offset = 0, hidden = new Set(), state = null) {
         // A block of the Levels rules has `level{n}`; one of the earlier rules has `class{n}` (kept as it was), whose level is worked out from it.
         const levelled = Object.hasOwn(fields, `level${n}`), soulClass = int(fields[`class${n}`]) ?? 1;
         const level = levelled ? Math.max(1, Math.min(99, int(fields[`level${n}`]) ?? 1)) : levelOfClass(soulClass) ?? 1;
-        out.push({ slot: offset + n, ...(six ? { local: n } : {}), module: id, name, count, class: levelled ? classOfLevel(level) : soulClass, level, ...(levelled ? { levelled } : {}), hurt: int(fields[`hurt${n}`]) ?? 0, ...(size ? { size } : {}), filled: Boolean(name) && count > 0,
+        out.push({ slot: offset + n, ...(six ? { local: n } : {}), module: id, name, count, class: levelled ? classOfLevel(level) : soulClass, level, ...(levelled ? { levelled } : {}), hurt: int(fields[`hurt${n}`]) ?? 0, ...(size ? { size } : {}), ...(size && isHardBar(state[`hurt${n}`]) ? { hard: 1 } : {}), filled: Boolean(name) && count > 0,
             hidden: ['count', 'class', 'level', 'hurt'].filter(part => hidden.has(`${part}${n}`)) });
     }
     return out;

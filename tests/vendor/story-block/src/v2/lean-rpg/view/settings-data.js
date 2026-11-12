@@ -3,6 +3,7 @@
 
 import { oneLine } from '../../../text.js';
 import { CLASS_NAMES, RANK_NAMES } from '../names.js';
+import { hardFightFor } from '../board/flags.js';
 import { DIFFICULTIES, hasLevels, STANDARD_PRESETS, STANDARD_SETTING, normalizeStandard, oddsSubject, presetOf, rulesFromSettings, subjectOdds, difficultyOf } from '../rules.js';
 import { applyGear } from '../gear.js';
 import { fold, readSheet } from '../read.js';
@@ -61,6 +62,8 @@ export function oddsView(state, own, rules, gear = null) {
     const sheet = applyGear(readSheet(state), gear);
     const subject = oddsSubject(sheet, own, { rankNames: RANK_NAMES, soulNames: CLASS_NAMES, fold, standard: true });
     if (!subject) return null;
+    // (the foe's level ÷ 4 of the harder-foes rule when a fight on this sheet would play it, foes.js hardFightFor)
+    subject.hard = hardFightFor(sheet);
     const words = { who: subject.who, stat: subject.stat.toUpperCase(), value: subject.statValue, dex: subject.stats?.dex ?? '?', soul: subject.soulName, rank: subject.rankName, label: soulLabelOfSheet(sheet, own), short: soulShortOf(soulLabelOfSheet(sheet, own), 'Class') };
     const chosen = presetOf(rules), presets = STANDARD_PRESETS;
     const text = subject.skill ? S.oddsForStandard : S.oddsForStandardUntrained;

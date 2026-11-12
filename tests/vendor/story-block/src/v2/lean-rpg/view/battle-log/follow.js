@@ -127,7 +127,8 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
         if (!shown) {
             for (const node of old) releasePanel(doc, node);
             const text = message.querySelector('.mes_text');
-            if (text) hideMarkers(doc, text);
+            // (a reader's own message is theirs as typed: a `[battle]` line in it stays visible)
+            if (text && !chat()[index]?.is_user) hideMarkers(doc, text);
             return null;
         }
         const text = message.querySelector('.mes_text');

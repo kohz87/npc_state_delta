@@ -8,11 +8,12 @@ import { applyFocusedRelationshipDecisions } from '../src/relationship-pass.js';
 import { DEFAULT_IMPACT_CRITERIA } from '../core-prompts-criteria.js';
 import { DEFAULT_ALLOWANCE, flatDayProblems, fromFlatDay, impactDayProblems, toFlatDay, normalizeAllowance, pacingDefaults, spendEvent, spendFlatEvent } from '../src/relationship-pacing.js';
 import { cutToTier, eventSummary, pacingNote, readEvent } from '../src/npc-meters-pacing.js';
-import { FEATURE_GATE, FEATURE_MOOD_PULL, CONTEXT_BUDGET } from '../src/npc-meters-config.js';
+import { FEATURE_GATE, FEATURE_MOOD_PULL, CONTEXT_BUDGET, readLeaf } from '../src/npc-meters-config.js';
 import { gateApproach, readApproachRing } from '../npc-meters-gate.js';
 import { createNpcPart } from '../src/npc-meters.js';
 import { applyEvents, easeAxis, eventsFromMoves, moodBars, moodWord, restMood, restingMood } from '../npc-mood.js';
 import { stepPull } from '../npc-instincts.js';
+import { diff } from './vendor/story-block/src/v2/ops/diff.js';
 import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-suite.js';
 
 // Relationship pacing: points per event 1 / 2 / 3 / 6 and events per story day for each person
@@ -361,18 +362,42 @@ function prng(seed) {
     return { int: (lo, hi) => lo + Math.floor(next() * (hi - lo + 1)), chance: p => next() < p, pick: list => list[Math.floor(next() * list.length)] };
 }
 
-for (const seed of [3, 11, 29]) {
-    test(`pacing fuzz seed ${seed}: tiers over several story days, middle deletes and swipes; the slice validates and replay equals rebuild`, async t => {
+// FUZZ_SEEDS="1-200" (or "3,11,29") runs those seeds; the default is the three below. FUZZ_STEPS sets the steps (default 16).
+const fuzzSeeds = (spec, fallback) => (spec ? spec.split(',').flatMap(part => { const [a, b] = part.split('-').map(Number); return b ? Array.from({ length: b - a + 1 }, (_, i) => a + i) : [a]; }) : fallback);
+const PEOPLE = ['Astra', 'Sister Temiwa', 'Brann', 'Cole', 'Dova', 'Esk', 'Finn', 'Gale', 'Hobb', 'Ines', 'Jory', 'Kess', 'Lund', 'Mave'];   // 14: past the bond limit (8) and the ties limit (12)
+// One random line of the notes kinds (lie, know, taste, tie), a gate `via:` meter line, or a plain meter line: every change-line kind NSD owns.
+function fuzzLine(r, who) {
+    const other = r.pick(PEOPLE);
+    switch (r.int(0, 9)) {
+        case 0: return `~ lie ${who} | to: ${other} | said: it was not me ${r.int(0, 3)}`;
+        case 1: return `~ lie ${who} | to: ${other} | caught: yes`;
+        case 2: return `~ know ${who} | about: ${other} | fact: keeps a ledger ${r.int(0, 3)} | how: ${r.pick(['saw', 'heard'])}${r.chance(0.4) ? ' | secret: yes' : ''}`;
+        case 3: return `~ know ${who} | about: ${other} | fact: keeps a ledger ${r.int(0, 3)} | told: yes`;
+        case 4: return `~ taste ${who} | ${r.pick(['likes', 'dislikes'])}: ${r.pick(['tea', 'toffee', 'rain', 'paperwork'])}${r.chance(0.3) ? ' | why: a change of heart' : ''}`;
+        case 5: return `~ tie ${who} | with: ${other} | tag: ${r.pick(['+', '-'])}${r.pick(['ally', 'rival', 'owes'])}${r.chance(0.3) ? `, ${r.pick(['+', '-'])}${r.pick(['ally', 'rival', 'owes'])}` : ''}`;
+        case 6: case 7: return `~ npc ${who} | affection: +${r.int(1, 9)} | trust: ${r.pick(['+', '-'])}${r.int(0, 6)} | via: ${r.pick(['praise', 'gift', 'help', 'flirt', 'threat', 'shared-danger'])} | impact: ${r.pick(['ordinary', 'meaningful', 'major', 'extreme'])}`;
+        default: return `~ npc ${who} | trust: +${r.int(1, 9)} | affection: ${r.pick(['+', '-'])}${r.int(0, 6)} | impact: ${r.pick(['ordinary', 'meaningful', 'major', 'extreme'])}`;
+    }
+}
+
+for (const seed of fuzzSeeds(process.env.FUZZ_SEEDS, [3, 11, 29])) {
+    test(`pacing fuzz seed ${seed}: tiers, notes kinds, via gate, look stamp and mood/pull tick over several story days, middle deletes and swipes; the slice validates and replay equals rebuild`, async t => {
         t.mock.method(console, 'warn', () => {});
-        const s = await suite();
+        // FUZZ_OFF=mood-pull,anti-lever,notes switches those features off for a run (to look past a failure of one).
+        const s = await suite({ modules: [worldModule], features: process.env.FUZZ_OFF ? Object.fromEntries(process.env.FUZZ_OFF.split(',').map(id => [`npc-state-delta.${id}`, false])) : null });
         const r = prng(seed);
         await s.say(['~ npc Oren | trust: +1', '~ npc Sister Temiwa | trust: +1']);   // the set-up reply makes both entries and is never deleted
         const setup = s.host.store.headIndex();
         let day = 1;
-        for (let step = 0; step < 16; step += 1) {
+        for (let step = 0; step < (Number(process.env.FUZZ_STEPS) || 16); step += 1) {
             if (r.chance(0.4)) { day += r.int(1, 2); await s.setDay(day); }
-            const lines = Array.from({ length: r.int(1, 2) }, () => `~ npc ${r.pick(['Oren', 'Sister Temiwa'])} | trust: +${r.int(1, 9)} | affection: ${r.pick(['+', '-'])}${r.int(0, 6)} | impact: ${r.pick(['ordinary', 'meaningful', 'major', 'extreme'])}`);
+            // The world (party, open threads, a place): inst, pull and track are written by the tick, so they get middle deletes too.
+            if (r.chance(0.5)) await world(s, { party: r.chance(0.7) ? [{ id: 'a', name: r.pick(['Oren', 'Sister Temiwa']) }] : [], threads: r.chance(0.6) ? [{ id: `th_${'abcdefgh'.slice(0, 7)}${r.int(0, 3)}`, key: r.pick(['The stolen letter', 'Old debt']), status: 'active', fields: { people: r.pick(['Oren', 'Sister Temiwa', 'Oren, Sister Temiwa']) } }] : [] });
+            const lines = Array.from({ length: r.int(1, 3) }, () => fuzzLine(r, r.pick(['Oren', 'Sister Temiwa'])));
             const index = await s.say(lines);
+            // The look stamp / flag (feature notes): first look set, or a refused contradiction; replayed with the reply.
+            if (r.chance(0.2)) await s.adapter.flag(r.chance(0.5) ? { name: 'Oren', lock: true, reply: s.host.store.headIndex(), cue: 'Oren\'s look is fixed: grey hair.' } : { name: 'Oren', drift: { before: 'grey hair', incoming: 'red hair' }, reply: s.host.store.headIndex() });
+            if (r.chance(0.15)) await s.host.sdk.command('npc.tick', {});   // from outside: refused (the step is Delta's own); must change nothing
             if (r.chance(0.2)) await s.swipe(lines);
             if (step > 3 && r.chance(0.35)) {
                 assert.equal((await s.host.sdk.reread(s.host.store.headIndex())).ok, true);
@@ -566,7 +591,8 @@ const worldModule = {
 };
 const moodSuite = (extra = {}) => suite({ allowance: null, features: MOOD_ON, modules: [worldModule], ...extra });
 const world = async (s, patch) => { const out = await s.host.sdk.command('zz.world', patch); assert.equal(out.ok, true, JSON.stringify(out)); };
-const recordOf = (s, key = 'oren') => s.host.head().domains.npc.npcs[key];
+// The record as stored, with its text leaves (mood, inst, pull, track) read back as objects.
+const recordOf = (s, key = 'oren') => { const raw = s.host.head().domains.npc.npcs[key]; return raw && Object.fromEntries(Object.entries(raw).map(([field, value]) => [field, ['mood', 'inst', 'pull', 'track'].includes(field) ? readLeaf(value) : value])); };
 const plain = ({ v, a, d, day, cause }) => ({ v, a, d, day, cause });
 const clockTo = (s, minutes) => s.host.sdk.command('zz.clock', { minutes });
 const axes = s => { const m = recordOf(s).mood; return [m.v, m.a, m.d]; };
@@ -844,4 +870,90 @@ test('defaults on: a chat written with the three features off (a ladder ticking 
     const moody = bare(s);
     assert.equal((await s.host.sdk.reread(fresh)).ok, true);
     assert.equal(bare(s), moody, 'and a Re-read of that reply keeps it, as it was');
+});
+
+test('mood, pull, inst, track are stored whole as one text leaf: a middle delete of the reply that made them leaves no skipped change', async () => {
+    const s = await moodSuite();
+    await s.setDay(2);
+    await s.say(['~ npc Oren | trust: +3']);
+    const made = await s.say(['~ npc Oren | trust: -2 | impact: meaningful | reason: Astra lied']);
+    await s.say(['~ npc Oren | trust: -2 | impact: meaningful | reason: Astra lied again']);
+    await s.setDay(3);
+    await s.say(['~ npc Oren | trust: +1']);
+    await world(s, { party: [{ id: 'a', name: 'Oren' }], threads: [{ id: 'th_aaaaaaaa', key: 'The stolen letter', status: 'active', fields: { people: 'Oren' } }] });
+    await s.say([]);
+    await s.setDay(6);
+    await s.say([]);
+    const raw = s.host.head().domains.npc.npcs.oren;
+    for (const field of ['mood', 'inst', 'pull', 'track']) assert.equal(typeof raw[field], 'string', `${field} is one text leaf`);
+    assert.equal(readLeaf(raw.pull).kind, 'closure');
+    assert.equal(typeof raw.mood, 'string', 'the mood is one text leaf');
+    assert.match(readLeaf(raw.mood).cause, /Astra lied/);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    await s.host.st.deleteMessage(made);
+    const live = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), live, 'rebuild equals live after the delete');
+    assert.deepEqual(s.host.store.problems(), [], 'nothing was skipped');
+    assert.equal(readLeaf('{"a":1}').a, 1);
+    assert.deepEqual(readLeaf({ a: 1 }), { a: 1 }, 'an old stored object reads as it is');
+    assert.equal(readLeaf('not json'), undefined);
+});
+
+// A chat written under 1.16.0 stores mood, inst, pull and track as objects (per-field ops). Rewrite a chat's leaf ops that way.
+function toOld(chat) {
+    const prev = new Map();
+    const LEAF = /^\/domains\/npc\/npcs\/[^/]+\/(mood|inst|pull|track)$/;
+    for (const message of chat) {
+        const rec = message.extra?.storySuite;
+        if (!rec?.ops) continue;
+        const out = [];
+        const blockOf = [];
+        (rec.spans ?? []).forEach((span, b) => { for (let k = 0; k < span.n; k++) blockOf.push(b); });
+        const grow = new Array((rec.spans ?? []).length).fill(0);
+        for (const [i, op] of rec.ops.entries()) {
+            const at = out.length;
+            if (!LEAF.test(op.path ?? '')) { out.push(op); continue; }
+            if (op.op === 'remove') { prev.delete(op.path); out.push(op); continue; }
+            const obj = typeof op.value === 'string' ? JSON.parse(op.value) : op.value;
+            const before = prev.get(op.path);
+            if (before && typeof before === 'object') out.push(...diff(before, obj, op.path)); else out.push({ op: 'add', path: op.path, value: obj });
+            prev.set(op.path, obj);
+            if (blockOf[i] !== undefined) grow[blockOf[i]] += out.length - at - 1;
+        }
+        rec.ops = out;
+        (rec.spans ?? []).forEach((span, b) => { span.n += grow[b]; });
+        if (Array.isArray(message.swipe_info)) for (const info of message.swipe_info) if (info?.extra?.storySuite && info.extra.storySuite.sid === rec.sid) info.extra.storySuite = structuredClone(rec);
+    }
+}
+
+test('an old 1.16.0 chat (object leaves, per-field ops): a Re-read of a middle reply is ok and stores the same ops; replay equals live', async t => {
+    t.mock.method(console, 'warn', () => {});
+    const s = await moodSuite();
+    await s.setDay(2);
+    await s.say(['~ npc Oren | trust: +3']);
+    const made = await s.say(['~ npc Oren | trust: -2 | impact: meaningful | reason: Astra lied']);
+    await s.setDay(3);
+    const mid = await s.say(['~ npc Oren | trust: -3 | impact: meaningful | reason: Astra lied again']);
+    await s.setDay(5);
+    await s.say(['~ npc Oren | affection: +1']);
+    await s.setDay(7);
+    const last = await s.say(['~ npc Oren | trust: -3 | impact: meaningful | reason: a lie found out']);
+    const chat = s.host.st.ctx.chat;
+    toOld(chat);
+    s.host.store.rebuild();
+    assert.deepEqual(s.host.store.problems(), [], 'the rewritten chat is a clean old chat');
+    assert.equal(typeof s.host.head().domains.npc.npcs.oren.mood, 'object', 'the old chat holds the mood as an object');
+    const opsOf = at => JSON.stringify(chat[at].extra.storySuite.ops);
+    for (const at of [made, mid, last]) {
+        const head = JSON.stringify(s.host.head().domains.npc);
+        const ops = opsOf(at);
+        const out = await s.host.sdk.reread(at);
+        assert.equal(out.ok, true, `a Re-read of old reply ${at} is ok: ${JSON.stringify(out)}`);
+        assert.equal(opsOf(at), ops, `a Re-read of old reply ${at} stores the same ops`);
+        assert.equal(JSON.stringify(s.host.head().domains.npc), head, `and the same head (reply ${at})`);
+        s.host.store.rebuild();
+        assert.equal(JSON.stringify(s.host.head().domains.npc), head, 'replay equals live');
+        assert.deepEqual(s.host.store.problems(), []);
+    }
 });

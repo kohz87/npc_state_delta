@@ -54,7 +54,7 @@ function move(bar, blocks) {
  * start can happen). → { checks, rounds, opening, order, quickStart, idle, hurts, stop, text, summary }; the rounds are already cut to the stop
  * and the cue budget, and the hurts hold only what the told rolls did to the bars.
  */
-export function rollStandard(plan, prepared, source, rules, { carried = null, flow = 1, wearOf = null, drop = null, opened = null, fix = false, then = false, board = false, scaled = false, soak = false, memberRolls = null, noXp = false } = {}) {
+export function rollStandard(plan, prepared, source, rules, { carried = null, flow = 1, wearOf = null, drop = null, opened = null, fix = false, then = false, board = false, scaled = false, soak = false, memberRolls = null, noXp = false, hard = false } = {}) {
     const own = new Map();
     // (An action's dice belong to its place in the plan: the entry as prepared, even when it is rolled without its skill.)
     const diceOf = entry => {
@@ -182,7 +182,7 @@ export function rollStandard(plan, prepared, source, rules, { carried = null, fl
         // (a marked fight, `soak`: a hit that is not decisive and is within 2 + S of the defender's total glances off; the skill's cost is paid as ever)
         const s = soak && !rolled.pcWins ? soakOf(me.character.stats?.vit) : 0;
         const glance = soak && !rolled.pcWins && soaked(s, rolled.foe.total - rolled.pc.total, rolled.decisive);
-        const damage = rolled.pcWins || glance ? undefined : damageOf(me, rolled.decisive ? 2 : 1);
+        const damage = rolled.pcWins || glance ? undefined : damageOf(me, rolled.decisive ? (hard ? 4 : 2) : (hard ? 2 : 1));   // (the harder-foes rule: a foe's clean hit costs 2 blocks, a decisive one 4)
         return { lines: [{ kind: 'foe', type: 'defence', skill: entry.skill, pc: rolled.pc, foe: rolled.foe, outcome: rolled.outcome, decisive: rolled.decisive, ...(glance ? { soaked: s } : {}), ...(damage ? { damage } : {}) }] };
     };
 

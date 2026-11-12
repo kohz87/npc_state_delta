@@ -77,7 +77,7 @@ test('mobile and tablet dossier is top-anchored to the full dynamic viewport wit
     // The full screen's height, divided by Story Suite's zoom (--ss-zoomed; unset outside it) so the zoomed panel still fills the screen.
     assert.match(source, /height:\s*calc\(100vh \/ var\(--ss-zoomed, 1\)\)\s*!important;[\s\S]*height:\s*calc\(100dvh \/ var\(--ss-zoomed, 1\)\)\s*!important;/);
     assert.match(source, /#\$\{ROOT_ID\} \.delta-topbar\s*\{[\s\S]*position:\s*sticky;[\s\S]*top:\s*0;[\s\S]*safe-area-inset-top/);
-    assert.match(source, /#\$\{ROOT_ID\} \.delta-close\s*\{[\s\S]*min-width:\s*44px;[\s\S]*min-height:\s*44px;/);
+    assert.match(source, /#\$\{ROOT_ID\} \.delta-close::after\s*\{[\s\S]*top:\s*50%;[\s\S]*height:\s*44px;/, 'Close keeps a 44px tap area; its visible button is compact (ss-tap-pill)');
 });
 
 test('settings stay under Extensions and the old document-header Edit button is gone with the document header', () => {

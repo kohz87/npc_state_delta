@@ -7,7 +7,7 @@
 //   literals     12  3.5  'text'  "text"  true  false  null  { key: value }  (records only as call args)
 //   operators    !  -(number)  <  <=  >  >=  ==  !=  &&  ||  ( … )   (a record or list == only null)
 //   reads        .name  [index]   on what a call returned
-//   calls        query(name, args?)  quest(key)  has(itemName, qty?)  time()  actor(name)  count(list)
+//   calls        query(name, args?)  quest(key)  has(itemName, qty?)  time()  actor(name)  count(list)  region(name, …)
 //
 // Precedence, loosest first: `||`, `&&`, `== !=`, `< <= > >=`, `! -`, then `.x [n] (…)`. Comparisons
 // do not chain (`1 < x < 3` is refused, write `1 < x && x < 3`). There is no truthiness: `&&`, `||`

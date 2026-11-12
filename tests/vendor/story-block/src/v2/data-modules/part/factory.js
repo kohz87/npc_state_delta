@@ -54,7 +54,7 @@ export function createDataModulesPart(opts = {}) {
                 if (!parsed.ok) return ctx.fail('INVALID', `"${line?.raw}" was not used: ${parsed.reason}.`);
                 return { summary: '', narrate: false, data: { check: { raw: String(line.raw).slice(0, 200) } } };
             } },
-            dm: kind, party: { grammar: () => rpgLib()?.joinGrammar() ?? '', feature: LEAN_RPG_FEATURE, get enabled() { const lib = rpgLib(); return lib !== null && lib.joinMode(settings()) !== 'off' && lib.partyOf(state()).length > 0; }, apply: wrap(d.party) } },
+            dm: kind, party: { grammar: hint => { const lib = rpgLib(); return lib === null ? '' : hint?.view?.rule?.('partyFields') ?? true ? lib.joinGrammarOwn(lib.soulNaming(hint?.view?.state ?? state())) : lib.joinGrammar(); }, feature: LEAN_RPG_FEATURE, get enabled() { const lib = rpgLib(); return lib !== null && lib.joinMode(settings()) !== 'off' && lib.partyOf(state()).length > 0; }, apply: wrap(d.party) } },
         queries: { 'dataModules.offers': offers, 'dataModules.view': moduleView, 'dataModules.public': publicView,
             'dataModules.replayInputs': replayInputs, 'dataModules.actors': actorsOf,
             'dataModules.setup': prefix => {

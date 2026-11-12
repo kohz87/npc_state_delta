@@ -91,6 +91,8 @@ export const STORY_STRINGS = Object.freeze({
         offerNote: 'Asked: {name} could join the party. The reader picks Add to party, Edit first or No on the reply\'s card.',
         nameLong: 'a name is at most {max} characters',
         grammar: '+ party Mara | about: a hedge-witch from Kvildal | class: I | best: int (when someone joins the party for good: about up to 240 characters, class I to IX, best one of str, vit, agi, dex, int, luk, cha), - party Mara when they leave',
+        // The same line in the words of the story's own class field (turn/rule-marks.js `partyFields`): its first and last class.
+        grammarOwn: '+ party Mara | about: a hedge-witch from Kvildal | class: {first} | best: int (when someone joins the party for good: about up to 240 characters, class {first} to {last}, best one of str, vit, agi, dex, int, luk, cha), - party Mara when they leave',
         storyOnly: 'a party line is the story\'s to write',
         cardOnly: 'only the Add to party button makes a companion this way',
     }),

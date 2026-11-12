@@ -4,7 +4,7 @@
 
 export { KEY, isCarrier, swipeOf, newRecordId, carrierIndexes, lastCarrier, recordFault } from './persist/carrier.js';
 export { hash, payloadText, swipeMark, markFits } from './persist/marks.js';
-export { readRecord, restamp, writeRecord } from './persist/records.js';
+export { chatMarked, readRecord, restamp, writeRecord } from './persist/records.js';
 export { keepsCopy, swipeLoading, mirrorCopy, restoreCopy, dropCopy } from './persist/copies.js';
 export { RECEIPT_KEEP, trimReceipts } from './persist/receipts.js';
 export { carryRecord } from './persist/carry.js';
