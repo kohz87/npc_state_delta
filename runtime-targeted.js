@@ -178,7 +178,7 @@ export function createTargetedPart(rt, deps) {
                 commitBranchCheckpoint(merged.state, targetMessageId, job.checkpoint);
             }
             setChatState(chatKey, merged.state);
-            forwardRelationshipChangesToHost(latest.npcs, merged.state.npcs, targetMessageId, operation.chatHead, [], parsed?.npcs);
+            forwardRelationshipChangesToHost(latest.npcs, merged.state.npcs, targetMessageId, operation.chatHead, parsed?.profileUpdates || [], parsed?.npcs);
             persist();
             renderDossier();
             updateInjection();

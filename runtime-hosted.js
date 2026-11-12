@@ -270,7 +270,7 @@ export function createHostedPart(rt, deps) {
         const changes = relationshipChanges(prior, after, normalizeRelationshipBaseline(getSettings().relationshipBaseline), messageId, onePass ? rows : null);
         // A person's look set for the first time by this scan: its day and reply are stamped (the notes feature's locked look).
         const looks = (after || []).filter(npc => npc?.id && !npc.archived && String(npc.overallAppearance ?? '').trim() && !String(prior.get(npc.id)?.overallAppearance ?? '').trim());
-        const refused = refusedLooks(prior, after, updates);
+        const refused = refusedLooks(prior, after, updates, rows);
         // (scan-admitted people) A dossier the scan made (an id the sidecar did not have) gets a slice entry the way a cast meeting gives one;
         // an adjust below has made it first when the scan moved its meters, and the meeting then only adds the mood and drives (`worth`: not the dead or incidental).
         // A meeting the host refused ("waiting: a native change is finishing", run 3) is owed and sent again with the next scan of that person; so is a
@@ -317,7 +317,7 @@ export function createHostedPart(rt, deps) {
                 await adapter.drives({ name: item.name, before: item.before, after: item.after, reply: messageId, guard: () => markStands(head) });
                 stage1Refresh();   // an open dossier draws again when a drive stepped
             }
-            for (const flag of [...looks.map(npc => ({ name: npc.name, lock: true })), ...refused.map(item => ({ name: item.name, drift: { before: item.before, incoming: item.incoming } }))]) {
+            for (const flag of [...looks.map(npc => ({ name: npc.name, lock: true })), ...refused.map(item => (item.text ? { name: item.name, text: item.text } : { name: item.name, drift: { before: item.before, incoming: item.incoming, ...(item.swaps ? { swaps: item.swaps } : {}) } }))]) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.flag?.({ ...flag, reply: messageId, guard: () => markStands(head) });
             }

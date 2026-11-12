@@ -25,7 +25,7 @@ const TODAY = {
     LOCKED_FIELD_KEYS: {
         name: ['name', 'identityKind'], role: ['role'], species: ['species'], gender: ['gender'], homeBase: ['homeBase'], age: ['age'],
         apparentAge: ['apparentAge', 'apparentAgeAnchor'],
-        appearance: ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion', 'lookLockedAt'],
+        appearance: ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion', 'lookGuess', 'lookLockedAt'],
         personality: ['personality'], speech: ['speech'], behaviorProfile: ['behaviorProfile'], background: ['background'], mannerisms: ['mannerisms'],
         keyRelationships: ['keyRelationships'], customFields: ['customFields'], aliases: ['aliases'],
         // Step 6:
@@ -34,7 +34,7 @@ const TODAY = {
     },
     NPC_REVERT_GROUPS: [
         ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange', 'impactDay'],
-        ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion', 'lookLockedAt'],
+        ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion', 'lookGuess', 'lookLockedAt'],
         ['age', 'apparentAge', 'birthDate', 'birthDateSource', 'birthDatePrecision', 'birthDateYearSource', 'birthDateReason',
             'birthDateSourceMessageId', 'birthDateCalendarFingerprint', 'birthDateDisplay', 'calendarAge', 'apparentAgeAnchor'],
         ['lifeState', 'lifeStateCertainty', 'lifeStateReason', 'archived', 'archiveReason', 'archivedAt', 'archiveSourceMessageId'],

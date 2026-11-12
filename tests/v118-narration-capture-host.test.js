@@ -270,7 +270,7 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
     });
 });
 
-test('v1.1.8 Capture mode off, or Auto scan off, never arms', () => {
+test('v1.1.8 Capture mode off never arms; Auto scan off no longer blocks it (ONEPASSMISS-2)', () => {
     runScenario('arming-gates', async h => {
         await h.sendUser('Who is at the gate?');
         await h.generate('normal');
@@ -278,8 +278,9 @@ test('v1.1.8 Capture mode off, or Auto scan off, never arms', () => {
         h.settings.narrationCapture = true;
         h.settings.autoScan = false;
         await h.generate('normal');
-        h.equal([h.status().enabled, h.status().armed], [false, false], 'Auto scan off disables capture');
-        h.check(h.dossierPrompts().every(text => !text.includes(h.HEADER)), 'no capture instruction was ever injected');
+        h.equal(h.status().enabled, true, 'one-pass with Auto scan off is never a silent no-capture state');
+        h.equal(h.status().armed, true, 'the capture instruction is sent with Auto scan off');
+        h.check(h.lastPrompt().includes(h.HEADER), 'the capture instruction was injected');
     });
 });
 

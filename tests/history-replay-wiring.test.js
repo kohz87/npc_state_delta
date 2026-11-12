@@ -514,3 +514,18 @@ test('parity: a scanner-read reply with a string tie and an underscore-id edge r
         h.equal(h.runtime.getState().npcs.find(npc => npc.name === 'Sieke').keyRelationships, [], 'an old reply keeps its old bytes: the string tie is still not read');
     });
 });
+
+test('ONEPASSMISS-1: replay does not invent missing-capture fallbacks for old replies', () => {
+    runScenario('no-capture-fallback-on-replay', async h => {
+        h.settings.narrationCapture = true;
+        h.settings.scanEvery = 10;
+        h.addReplies(2);
+        const calls = h.scannerCalls().length;
+        const catchUp = h.controller();
+        catchUp.rebuild({ replies: null });
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'rebuild finished');
+        h.equal(h.scannerCalls().length, calls, 'quiet historical replies keep their ordinary cadence');
+        h.equal(h.runtime.scannerReport().filter(line => line.includes('the reply had no NPC capture')), [], 'replay reports no live fallback');
+    });
+});

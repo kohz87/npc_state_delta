@@ -107,8 +107,10 @@ export function createScanPart(rt, deps) {
         const state = hostedScanState(getChatState(scanChatKey));
         const newChatAtStart = chatNeverScanned(state, Number.isInteger(messageId) ? messageId : (ctx.chat || []).length - 1);
         const scanStateVersion = Number(stateVersions.get(scanChatKey) || 0);
-        const capture = savedCapture ? { parsed: structuredClone(savedCapture.parsed), watch: savedCapture.watch, raw: '' }
+        const pendingCapture = savedCapture ? { parsed: structuredClone(savedCapture.parsed), watch: savedCapture.watch, raw: '' }
             : (!replayScope() && !manual && !fullWindowScan && Number.isInteger(messageId) ? takeNarrationCapture(scanChatKey, messageId) : null);
+        const fallback = pendingCapture?.fallback === true;
+        const capture = fallback ? null : pendingCapture;
         const scanLabel = capture ? 'narration-capture' : (manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'));
         // (v2 hidden notes) Hosted: a new dossier's layered notes are asked for (setting) and the story events of present people's
         // locked notes are looked for in the current exchange. A scan sends both in its prompt; a one-pass block was asked
@@ -188,7 +190,7 @@ export function createScanPart(rt, deps) {
                 ? prepareFullWindowRelationshipPayload(resolvedParsed, state.npcs)
                 : { evaluation: resolvedParsed, mergeSafe: resolvedParsed };
             // (user decision 5) Hosted, a one-pass block's own rows are the reply's relationship decision.
-            const relationshipPass = capture && hostedMeters() ? { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 } : await runFocusedRelationshipPass(
+            const relationshipPass = (capture || fallback) && hostedMeters() ? { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 } : await runFocusedRelationshipPass(
                 ctx,
                 fullWindowRelationship.evaluation,
                 state.npcs,
@@ -400,6 +402,8 @@ export function createScanPart(rt, deps) {
             }
             if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'scan');
             setChatState(chatKey, nextState);
+            // ONEPASSMISS-1: this notice describes a completed fallback, never a stale or failed scan.
+            rt.lastCaptureFallback = fallback ? { chatKey, messageId } : null;   // the notice follows the latest committed scan only
             forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId, operation.chatHead, resolvedParsed?.profileUpdates, resolvedParsed?.npcs, Boolean(capture));
             if (eventWatch.length) forwardSecretEventsToHost(eventWatch, resolvedParsed?.secretEvents ?? parsed?.secretEvents, operation.chatHead);
             persist();

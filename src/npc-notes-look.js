@@ -23,11 +23,19 @@ export function lookText(value) {
  * The drift the scan refused: `before` is the locked look, `rejected` the incoming durable text (a string, or { incoming }).
  * → '' when there is no lock, nothing incoming, or the same look (case, spacing and a closing full stop ignored).
  * Otherwise: `Look drift refused: "<rejected>" does not match the fixed look "<before>".`
+ * (card traits win) With `rejected.swaps` ([{ trait, said, kept }], the traits a refine swapped and the record kept) and `name`:
+ * `Look drift refused: the story called Temiwa's eyes pale; the record keeps brown.` (one clause pair per trait).
  */
 export function lookDrift(before, rejected) {
     const locked = lookText(before);
     const incoming = lookText(isObject(rejected) ? rejected.incoming : rejected);
-    if (!locked || !incoming || comparable(locked) === comparable(incoming)) return '';
+    const swaps = isObject(rejected) && Array.isArray(rejected.swaps) ? rejected.swaps.filter(swap => isObject(swap) && clean(swap.trait, 20) && clean(swap.said, 40) && clean(swap.kept, 40)) : [];
+    if (!locked || !incoming || (!swaps.length && comparable(locked) === comparable(incoming))) return '';
+    // A kept swap may sit past the capped text both looks share, so it is named whatever their first words.
+    if (swaps.length) {
+        const who = possessive(clean(rejected.name, NAME_MAX) || 'The NPC');
+        return `Look drift refused: ${swaps.map((swap, index) => `${index ? 'The' : 'the'} story called ${who} ${clean(swap.trait, 20)} ${clean(swap.said, 40)}; the record keeps ${clean(swap.kept, 40)}`).join('. ')}.`;
+    }
     return `Look drift refused: "${incoming}" does not match the fixed look "${locked}".`;
 }
 

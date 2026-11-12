@@ -82,6 +82,7 @@ export function createAssistantHandlerPart(rt, deps, helpers) {
             replyChanges: settings.autoScan && !settings.fullScanEveryTurn && replyNamesSomeone(state, messageId),
         });
         // A complete capture block is a scan already paid for, so it merges whatever Scan every says.
+        // ONEPASSMISS-1: a hosted missing-capture marker and a paid-for block both own this reply, irrespective of cadence.
         const captureDue = replay ? Boolean(captureJournalEntry(replay, getContext().chat || [], messageId)?.parsed)
             : narrationCaptureEnabled(settings) && narrationCaptures.has(narrationCaptureKey(eventChatKey, messageId));
         const scanExpected = shouldForceBranchScan || autoScanDue || captureDue;

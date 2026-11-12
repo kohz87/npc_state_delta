@@ -745,7 +745,7 @@ test('hosted forward: an open dossier panel draws again when each delayed npc.ad
         const root = fileURLToPath(new URL('..', import.meta.url));
         fs.cpSync(root, temp, { recursive: true, filter: from => !/[\\/](tests|docs|scripts|\.git|node_modules|dist)([\\/]|$)/.test(path.relative(root, from)) });
         fs.writeFileSync(path.join(temp, 'runtime-scan-helpers.js'), [
-            "import { normalizeRelationshipBaseline, npcMatchesLabel } from './core.js'; import { rejectedOverallLook } from './appearance-update.js'; import { moodNumbers } from './npc-mood.js';",
+            "import { normalizeName, normalizeRelationshipBaseline, npcMatchesLabel } from './core.js'; import { rejectedOverallLook } from './appearance-update.js'; import { physicalTraitSwaps } from './appearance-physical.js'; import { moodNumbers } from './npc-mood.js';",
             'export const chatContext = () => ({ chat: [] }); export const markStands = () => true; export const replayScope = () => null; export const scopedAdapter = a => a;',
             fs.readFileSync(path.join(root, 'runtime-scan-helpers.js'), 'utf8').split('// What a committed scan tells the slice')[1],   // the real pure readers moved out of runtime-hosted.js
         ].map((part, index) => (index === 2 ? '//' + part : part)).join('\n'));
@@ -998,12 +998,12 @@ async function hostedForwardParts() {
     try {
         fs.cpSync(root, temp, { recursive: true, filter: from => !/[\\/](tests|docs|scripts|\.git|node_modules|dist)([\\/]|$)/.test(path.relative(root, from)) });
         fs.writeFileSync(path.join(temp, 'runtime-scan-helpers.js'), [
-            "import { normalizeRelationshipBaseline, npcMatchesLabel } from './core.js'; import { rejectedOverallLook } from './appearance-update.js'; import { moodNumbers } from './npc-mood.js';",
+            "import { normalizeName, normalizeRelationshipBaseline, npcMatchesLabel } from './core.js'; import { rejectedOverallLook } from './appearance-update.js'; import { physicalTraitSwaps } from './appearance-physical.js'; import { moodNumbers } from './npc-mood.js';",
             'export const chatContext = () => ({ chat: [] }); export const markStands = () => true; export const replayScope = () => null; export const scopedAdapter = a => a;',
             fs.readFileSync(path.join(root, 'runtime-scan-helpers.js'), 'utf8').split('// What a committed scan tells the slice')[1],
         ].map((part, index) => (index === 2 ? '//' + part : part)).join('\n'));
         fs.writeFileSync(path.join(temp, 'runtime-settings.js'), 'export const getSettings = () => ({}); export const setRpgProbe = () => {};');
-        const { relationshipChanges } = await import(pathToFileURL(path.join(temp, 'runtime-scan-helpers.js')).href);
+        const { relationshipChanges, refusedLooks } = await import(pathToFileURL(path.join(temp, 'runtime-scan-helpers.js')).href);
         const { createHostedPart } = await import(pathToFileURL(path.join(temp, 'runtime-hosted.js')).href);
         const rt = { storySuiteV2: { hosted: () => true, adjust: change => { sent.push(change); return Promise.resolve({ ok: true }); } } };
         const part = createHostedPart(rt, { chatHydrationStatus: () => 'ready', getChatKey: () => 'c1', getChatState: () => ({ npcs: [] }), latestMessageId: () => 1, latestReplyIndex: () => 1 });
@@ -1017,7 +1017,7 @@ async function hostedForwardParts() {
             } finally { globalThis.document = prior; }
             return sent.map(({ guard, ...change }) => change);
         };
-        return { relationshipChanges, forward };
+        return { relationshipChanges, refusedLooks, forward };
     } finally {
         fs.rmSync(temp, { recursive: true, force: true });
     }
@@ -1107,4 +1107,39 @@ test('hosted forward: a one-pass scan sends its evidence with npc.adjust (also w
     assert.deepEqual(await forwardParts.forward(records, records, 4, OWNER_ROWS, false), [], 'a scanner scan: nothing new is sent');
     const moved = records.map(npc => (npc.id === 'npc_sieke' ? { ...npc, relationship: { ...npc.relationship, trust: 1 } } : npc));
     assert.deepEqual((await forwardParts.forward(records, moved, 4, OWNER_ROWS, false)).map(item => [item.name, item.meters, item.why]), [['Sieke', { trust: 1 }, undefined]], 'as before');
+});
+
+// (card traits win) What the scan reports as refused: a swapped card trait it kept (with the swaps, worded by lookDrift) and a role
+// rewrite it kept (a Problem line, no cue), from the profile updates and the npcs rows; an accepted role or a first role is not reported.
+test('refusedLooks: a kept card trait and a refused role rewrite are reported once per person; accepted ones are not', async () => {
+    forwardParts ??= await hostedForwardParts();
+    const was = { id: 'npc_sister-temiwa', name: 'Sister Temiwa', role: 'Church novice', overallAppearance: 'Long black hair. Brown eyes ringed dark.' };
+    const now = { ...was, overallAppearance: 'Long black hair. Brown eyes ringed dark. A grey wool mantle.' };
+    const row = { id: was.id, role: 'Exiled Saintess Candidate and Lay Sealer', overallAppearance: 'Long black hair. Pale eyes ringed dark. A grey wool mantle.' };
+    const refused = forwardParts.refusedLooks(new Map([[was.id, was]]), [now], [row], [{ id: was.id, role: row.role }]);
+    assert.deepEqual(refused, [
+        { id: was.id, name: 'Sister Temiwa', before: was.overallAppearance, incoming: row.overallAppearance, swaps: [{ trait: 'eyes', said: 'pale', kept: 'brown' }] },
+        { id: was.id, name: 'Sister Temiwa', text: 'Role change refused: the story called Sister Temiwa "Exiled Saintess Candidate and Lay Sealer"; the record keeps "Church novice".' },
+    ]);
+    assert.deepEqual(forwardParts.refusedLooks(new Map([[was.id, was]]), [{ ...now, role: 'Lay Sealer' }], [], [{ id: was.id, role: 'Lay Sealer' }]), [], 'an accepted role');
+    assert.deepEqual(forwardParts.refusedLooks(new Map([[was.id, { ...was, role: '' }]]), [{ ...was, role: '' }], [], [{ id: was.id, role: 'Lay Sealer' }]), [], 'no role held');
+    assert.deepEqual(forwardParts.refusedLooks(new Map([[was.id, { ...was, manualProfileFields: ['role'] }]]), [was], [], [{ id: was.id, role: 'Lay Sealer' }]), [], 'a locked role is the reader\'s');
+});
+
+// (card traits win, round 2) A refusal is reported from either row channel, from the flat appearance, a named form and the overall look,
+// and a row without an id is matched by name or alias the way the merge matches it.
+test('refusedLooks: flat and named-form swaps, a name-only row and an ordinary npcs row are reported once', async () => {
+    forwardParts ??= await hostedForwardParts();
+    const was = { id: 'npc_sister-temiwa', name: 'Sister Temiwa', aliases: ['Temiwa'], role: 'Church novice', overallAppearance: '', appearance: 'Brown eyes, a grey habit',
+        appearanceForms: [{ name: 'Rite', appearance: 'Black hair, a white stole' }] };
+    const prior = new Map([[was.id, was]]);
+    const flat = forwardParts.refusedLooks(prior, [was], [], [{ name: 'Temiwa', appearance: 'Pale eyes, a grey habit' }]);
+    assert.deepEqual(flat.map(item => [item.id, item.swaps]), [[was.id, [{ trait: 'eyes', said: 'pale', kept: 'brown' }]]], 'name-only ordinary npcs row, flat appearance');
+    const formed = forwardParts.refusedLooks(prior, [was], [{ name: 'Sister Temiwa', appearanceForms: [{ name: 'Rite', appearance: 'Red hair, a white stole' }] }], []);
+    assert.deepEqual(formed.map(item => [item.id, item.swaps?.[0]?.trait]), [[was.id, 'hair']], 'profile row by name, named form');
+    const twice = forwardParts.refusedLooks(prior, [was], [{ id: was.id, appearance: 'Pale eyes, a grey habit' }], [{ id: was.id, appearance: 'Pale eyes, a grey habit' }]);
+    assert.equal(twice.length, 1, 'the same person in both channels is reported once');
+    assert.deepEqual(forwardParts.refusedLooks(prior, [{ ...was, appearance: 'Pale eyes, a grey habit' }], [], [{ id: was.id, appearance: 'Pale eyes, a grey habit' }]), [], 'an accepted look is not reported');
+    const role = forwardParts.refusedLooks(prior, [was], [], [{ name: 'Temiwa', role: 'Prioress' }]);
+    assert.equal(role.length, 1, 'a role rewrite sent by name only is reported');
 });

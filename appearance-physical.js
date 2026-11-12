@@ -1,7 +1,8 @@
 /* Appearance physical-feature rules: trait keys, enduring-trait carry, shared-piece deduplication and
    refinement similarity. A pure part of appearance.js (same owner, moved without change); appearance.js
    keeps the public facade and re-exports every public name. Never imports appearance.js. */
-import { DURABLE_PROFILE_LIMITS, normalizeName } from './core-mechanics.js';
+import { DURABLE_PROFILE_LIMITS } from './core-relationship.js';
+import { normalizeName } from './core-text.js';
 import { appearanceClauses, appearanceText, clean, sameAppearance } from './appearance-text.js';
 
 export const STOPWORDS = new Set([
@@ -219,4 +220,181 @@ export function withoutSharedPieces(value, shared) {
         return kept.join(', ');
     }).filter(clause => clean(clause, 800));
     return changed ? appearanceText(clauses.join('; ')) : text;
+}
+
+// (card traits win) Every established physical value is protected, regardless of where it came from.
+// A missing value may be filled; a contradictory value needs a grounded change event.
+const HUES = Object.freeze({
+    black: ['black', 'raven', 'ebony', 'jet', 'inky', 'sable', 'coal', 'onyx'],
+    brown: ['brown', 'chestnut', 'umber', 'mahogany', 'chocolate', 'coffee', 'walnut', 'russet', 'tawny', 'brunette', 'bronze'],
+    hazel: ['hazel'],
+    gold: ['gold', 'golden', 'amber', 'honey', 'blonde', 'blond', 'flaxen', 'yellow', 'straw', 'sandy'],
+    red: ['red', 'crimson', 'scarlet', 'ruby', 'auburn', 'copper', 'ginger', 'rust', 'vermilion', 'strawberry'],
+    white: ['white', 'snowy', 'ivory', 'cream', 'platinum', 'porcelain'],
+    grey: ['silver', 'silvery', 'grey', 'gray', 'greying', 'graying', 'ashen', 'ash', 'steel', 'slate', 'pewter', 'iron'],
+    blue: ['blue', 'azure', 'sapphire', 'cerulean', 'cobalt', 'navy', 'icy', 'teal', 'turquoise', 'aquamarine', 'cyan'],
+    green: ['green', 'emerald', 'jade', 'olive', 'moss', 'teal', 'turquoise', 'verdant'],
+    violet: ['violet', 'purple', 'lilac', 'lavender', 'amethyst', 'indigo', 'plum', 'mauve'],
+    pink: ['pink', 'rose', 'rosy', 'magenta'],
+    orange: ['orange'],
+});
+const LIGHT_TONES = new Set(['pale', 'light', 'fair', 'bright']);
+const DARK_TONES = new Set(['dark', 'deep']);
+const LIGHT_TONE_CLASH = new Set(['black', 'brown']);
+const DARK_TONE_CLASH = new Set(['white', 'gold']);
+const AXES = Object.freeze({
+    length: { long: ['long', 'waist', 'hip', 'ankle', 'floor', 'flowing'], shoulder: ['shoulder'], short: ['short', 'cropped', 'shaved', 'bald', 'buzzed', 'shorn', 'chin'] },
+    texture: { curly: ['curly', 'curled', 'curls', 'wavy', 'frizzy', 'kinky', 'ringlets'], straight: ['straight', 'sleek'] },
+    build: {
+        slight: ['slender', 'slim', 'lean', 'lithe', 'lanky', 'willowy', 'wiry', 'skinny', 'thin', 'petite', 'slight', 'gaunt', 'bony'],
+        heavy: ['stocky', 'curvy', 'burly', 'brawny', 'muscular', 'plump', 'heavyset', 'stout', 'full', 'broad', 'voluptuous', 'buxom', 'hulking', 'portly', 'rotund'],
+    },
+    height: { tall: ['tall', 'towering', 'statuesque'], short: ['short', 'diminutive', 'tiny', 'small', 'petite'] },
+    shape: { narrow: ['narrow', 'thin', 'slender'], broad: ['broad', 'wide'], pointed: ['pointed', 'sharp'], rounded: ['rounded', 'round', 'blunt'], straight: ['straight'], crooked: ['crooked', 'bent'] },
+    position: { left: ['left'], right: ['right'], upper: ['upper'], lower: ['lower'] },
+});
+const TRAIT_AXES = Object.freeze({
+    hair: ['color', 'length', 'texture'], eyes: ['color', 'shape'], skin: ['color'], fur: ['color'], scales: ['color'], ears: ['color', 'shape', 'length'],
+    tail: ['color', 'shape', 'length'], horns: ['color', 'shape', 'length'], wings: ['color', 'shape'], build: ['build'], height: ['height'],
+    face: ['color', 'shape'], scar: ['position', 'shape', 'length'], tattoo: ['position', 'shape'], birthmark: ['position', 'shape'],
+    fangs: ['shape', 'length'], claws: ['shape', 'length'], antlers: ['shape'], tusks: ['shape', 'length'],
+});
+const traitWords = text => String(text || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+const polesOf = (words, poles) => new Set(Object.entries(poles).filter(([, list]) => list.some(word => words.includes(word))).map(([pole]) => pole));
+const disjoint = (a, b) => a.size > 0 && b.size > 0 && ![...a].some(pole => b.has(pole));
+// Tones only against the other side's hues (or the other tone); a tone beside a hue is a shade of it.
+function toneClash(tones, hues) {
+    return [...tones].some(tone => (LIGHT_TONES.has(tone) && [...hues].some(hue => LIGHT_TONE_CLASH.has(hue)))
+        || (DARK_TONES.has(tone) && [...hues].some(hue => DARK_TONE_CLASH.has(hue))));
+}
+function colorSwapped(current, incoming) {
+    const [nowHues, newHues] = [polesOf(current, HUES), polesOf(incoming, HUES)];
+    if (nowHues.size && newHues.size) return disjoint(nowHues, newHues)
+        || (current.filter(word => Object.values(HUES).some(list => list.includes(word))).length > 1
+            && incoming.filter(word => Object.values(HUES).some(list => list.includes(word))).length > 1
+            && [...nowHues].some(hue => !newHues.has(hue)) && [...newHues].some(hue => !nowHues.has(hue)));
+    const [nowTones, newTones] = [current, incoming].map(words => new Set(words.filter(word => LIGHT_TONES.has(word) || DARK_TONES.has(word))));
+    if (nowHues.size) return toneClash(newTones, nowHues);
+    if (newHues.size) return toneClash(nowTones, newHues);
+    const light = tones => tones.size > 0 && [...tones].every(tone => LIGHT_TONES.has(tone));
+    const dark = tones => tones.size > 0 && [...tones].every(tone => DARK_TONES.has(tone));
+    return (light(nowTones) && dark(newTones)) || (dark(nowTones) && light(newTones));
+}
+// A piece that speaks of a wrap, sash or other garment on a body part ("tail in a grey linen wrap") is clothing, not the part's colour.
+const OUTFIT_WORDS = /\b(?:wrap|wrapped|wrapping|linen|sash|veil|bandages?|bandaged|binding|bound|ribbons?|silk|cloth|leather|lace|gauze|fabric|collar|band)\b/i;
+// "Brown eyes with a pale ring" is one claim, but "Long black hair with violet eyes" holds two: split at "with" only when both halves name a trait.
+function withParts(text) {
+    const parts = text.split(/\s+with\s+/i).map(part => clean(part, 400)).filter(Boolean);
+    return parts.length > 1 && parts.every(part => physicalTraitKeys(part).length) ? parts : [text];
+}
+// The trait pieces of a look: { text, keys } for every piece that describes an enduring trait (not clothing, not a hidden mention).
+function traitPieces(value) {
+    return presentationSegments(value)
+        .filter(segment => !CONCEALED_MENTION.test(segment))
+        .flatMap(physicalPieces)
+        .flatMap(traitParts)
+        .flatMap(withParts)
+        .filter(text => !OUTFIT_WORDS.test(text))
+        .map(text => ({ text, keys: addressedTraitKeys(text).filter(key => TRAIT_AXES[key]) }))
+        .filter(piece => piece.keys.length);
+}
+const valueWords = (pieces, key) => pieces.filter(piece => piece.keys.includes(key)).flatMap(piece => traitWords(piece.text));
+function axisSwapped(axis, current, incoming) {
+    return axis === 'color' ? colorSwapped(current, incoming) : disjoint(polesOf(current, AXES[axis]), polesOf(incoming, AXES[axis]));
+}
+// The words of an axis a text names, for the report ("pale", "brown").
+function axisWords(axis, words) {
+    const listed = axis === 'color' ? [...Object.values(HUES).flat(), ...LIGHT_TONES, ...DARK_TONES] : Object.values(AXES[axis]).flat();
+    return [...new Set(words.filter(word => listed.includes(word)))];
+}
+/**
+ * The physical traits `incoming` swaps against `current` (card traits win): [{ trait, said, kept }] in trait order, where `said`
+ * is what the incoming text calls it and `kept` what the record holds ("eyes", "pale", "brown"); [] when nothing is swapped.
+ */
+export function physicalTraitSwaps(current, incoming, replaceable = null) {
+    const before = traitPieces(current);
+    const after = traitPieces(incoming);
+    if (!before.length || !after.length) return [];
+    const swaps = [];
+    for (const [trait, axes] of Object.entries(TRAIT_AXES)) {
+        if (replaceable?.has(trait)) continue;   // a fill guess (record.lookGuess) is replaceable by a later story line
+        const now = valueWords(before, trait);
+        const next = valueWords(after, trait);
+        if (!now.length || !next.length) continue;
+        // A jaw is not a nose: compare facial shapes only when the same feature is named.
+        if (trait === 'face') {
+            const features = ['face', 'facial', 'jaw', 'jawline', 'cheekbones', 'nose', 'lips', 'beard', 'mustache', 'moustache', 'stubble'];
+            if (!features.some(feature => now.includes(feature) && next.includes(feature))) continue;
+        }
+        const axis = axes.find(name => axisSwapped(name, now, next));
+        if (!axis) continue;
+        const said = axisWords(axis, next).filter(word => !now.includes(word));
+        const kept = axisWords(axis, now).filter(word => !next.includes(word));
+        swaps.push({ trait, said: said.join(' ') || axisWords(axis, next).join(' '), kept: kept.join(' ') || axisWords(axis, now).join(' ') });
+    }
+    return swaps;
+}
+/** True when `incoming` swaps a named physical value of `current`; with `traits` (a Set of trait keys), only one of those. */
+export function physicalTraitSwapped(current, incoming, traits = null, replaceable = null) {
+    return physicalTraitSwaps(current, incoming, replaceable).some(swap => !traits || traits.has(swap.trait));
+}
+/** (card traits win) Repair only separable conflicting claims; refuse an ambiguous shared clause. */
+export function withoutTraitSwaps(current, incoming, replaceable = null) {
+    const swaps = physicalTraitSwaps(current, incoming, replaceable);
+    if (!swaps.length) return { text: incoming, swaps };
+    const text = appearanceText(incoming);
+    const swapped = new Set(swaps.map(swap => swap.trait));
+    const held = traitPieces(current);
+    const used = new Set();
+    const parts = text.split(/(\s*;\s*|(?<=[.!?])\s+|\s*,\s*)/);
+    for (let index = 0; index < parts.length; index += 2) {
+        const pieces = parts[index].split(/\s+and\s+/i);
+        const separable = pieces.length > 1 && pieces.slice(0, -1).every(piece => addressedTraitKeys(piece).length);
+        const candidates = separable ? pieces : [parts[index]];
+        for (let part = 0; part < candidates.length; part += 1) {
+            const conflicts = physicalTraitSwaps(current, candidates[part], replaceable);
+            if (!conflicts.length) continue;
+            const keys = traitPieces(candidates[part]).flatMap(piece => piece.keys);
+            if (keys.some(key => !conflicts.some(swap => swap.trait === key)) || (!separable && /\s+(?:and|with)\s+/i.test(candidates[part]))) return { text: '', swaps };
+            const own = held.filter(piece => !used.has(piece.text) && piece.keys.some(key => conflicts.some(swap => swap.trait === key)));
+            if (!own.length) return { text: '', swaps };
+            own.forEach(piece => used.add(piece.text));
+            const tail = candidates[part].match(/[.!?]+$/)?.[0] || '';
+            candidates[part] = `${own.map(piece => piece.text).join(', ')}${tail}`;
+        }
+        parts[index] = candidates.join(' and ');
+    }
+    // Rejoin with each kept clause's own separator; a clause given way to without a held one is dropped with it.
+    let joined = '';
+    for (let index = 0; index < parts.length; index += 2) {
+        if (parts[index].trim()) joined += (joined ? (parts[index - 1] ?? ' ') : '') + parts[index];
+    }
+    const repaired = appearanceText(joined);
+    const usable = repaired && !physicalTraitSwapped(current, repaired, swapped, replaceable) && !sameAppearance(current, repaired)
+        && normalizeName(repaired) !== normalizeName(current);
+    return { text: usable ? repaired : '', swaps };
+}
+
+// ---- Provenance of a fill guess (appearance-fill.js). The fill call's invented hair / eyes / build are the only physical values a later
+// story line may replace (owner, DECISIONS 90 and 113); `record.lookGuess` lists those trait keys. A record without the list (every
+// card trait, every story-given or hand-written value, and any guess filled before this list existed) is fully protected.
+export const guessedTraits = record => new Set((Array.isArray(record?.lookGuess) ? record.lookGuess : []).filter(key => TRAIT_AXES[key]));
+const traitKeysOf = text => new Set(traitPieces(text).flatMap(piece => piece.keys));
+/** The guess list after a fill call wrote `after` over `before`: the traits it newly names are guesses. */
+export function filledGuess(record, before, after) {
+    const had = traitKeysOf(before);
+    return [...new Set([...guessedTraits(record), ...[...traitKeysOf(after)].filter(key => !had.has(key))])];
+}
+/** The guess list after an accepted text: a trait the text swapped is now the story's (established), no longer a guess. */
+export function settledGuess(record, before, after) {
+    const swapped = new Set(physicalTraitSwaps(before, after).map(swap => swap.trait));
+    return [...guessedTraits(record)].filter(key => !swapped.has(key));
+}
+const lookOf = record => [record?.overallAppearance, record?.appearance].filter(Boolean).join('; ');
+/** `after` with its guess list settled against what changed since `before` (a merge path that wrote the look without applyAppearanceUpdate). */
+export function withSettledGuess(before, after) {
+    const held = guessedTraits(after);
+    if (!held.size) return after;
+    const next = settledGuess(after, lookOf(before), lookOf(after));
+    return next.length === held.size ? after : { ...after, lookGuess: next };
 }

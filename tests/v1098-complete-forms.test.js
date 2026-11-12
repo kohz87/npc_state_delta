@@ -54,9 +54,10 @@ test('v1.0.98 a named form is its own complete appearance; the shared slot serve
 });
 
 test('v1.0.98 a form keeps its body through outfit and styling updates, but a real hair change replaces it', () => {
-    const base = normalizeAppearanceModel({ appearanceModelVersion: APPEARANCE_MODEL_VERSION, currentForm: 'Human',
+    const base = normalizeAppearanceModel({ name: 'Myla', appearanceModelVersion: APPEARANCE_MODEL_VERSION, currentForm: 'Human',
         appearanceForms: [{ name: 'Human', appearance: 'Tall and slender, long silver hair, violet eyes, pale skin, a thin scar on her left cheek; wearing a grey travelling cloak' }] });
-    const update = appearance => applyAppearanceUpdate(base, { appearanceForms: [{ name: 'Human', appearance, state: 'change', reason: 'she changed' }] }).appearanceForms[0].appearance;
+    const event = 'Myla dyed her hair black and cut her hair short. Myla now wears a red silk dress, her hair tied up in a bun and soaked from the rain, her eyes hidden behind dark glasses; her hair is cropped short and dyed black.';   // (card traits win) a swapped trait needs the person\'s own event
+    const update = appearance => applyAppearanceUpdate({ ...base, name: 'Myla' }, { appearanceForms: [{ name: 'Human', appearance, state: 'change', reason: event }] }, { context: event }).appearanceForms[0].appearance;
     for (const text of ['Wearing a red silk dress', 'Her hair is tied up in a bun; wearing a red silk dress', 'Hair soaked from the rain, wearing a red silk dress', 'Eyes hidden behind dark glasses, wearing a red silk dress']) {
         const result = update(text);
         assert.match(result, /long silver hair/, text);

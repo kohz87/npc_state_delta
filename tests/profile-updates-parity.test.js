@@ -7,7 +7,7 @@ import { mergeScanResult, normalizeNpcRecord } from '../core.js';
 // gender, ages, custom fields and Key Relationships. Each case runs once per channel and compares.
 
 const context = [
-    'Myla Venn, now a former royal archivist, says she lives in rooms above the bakery on Mill Street.',
+    'The guild made Myla Venn a former royal archivist. Myla Venn, now a former royal archivist, says she lives in rooms above the bakery on Mill Street.',
     'She served ten years as a royal archivist. She passed the guild trial: Level 4.',
     'Tobin Ash, her courier, brings her letters. She is thirty-five now; her birthday was yesterday.',
 ].join(' ');
@@ -30,7 +30,13 @@ function run(channel, fields, extra = {}) {
 
 const cases = [
     // [label, field read back, fields sent, expected (null = unchanged), dossier extra]
-    ['role replaced', 'role', { role: 'Former royal archivist' }, 'Former royal archivist'],
+    // (card traits win) An established role is keep-by-default like the home base; a first role still fills.
+    ['a bare role the story names as an event is taken (no unrequested key needed)', 'role', { role: 'Former royal archivist' }, 'Former royal archivist'],
+    ['a role the story does not name is kept', 'role', { role: 'Court cartographer' }, null],
+    ['a role with an explicit matching reason is taken', 'role', { role: 'Former royal archivist', roleState: 'update', roleReason: 'The guild made her a former royal archivist.' }, 'Former royal archivist'],
+    ['a role whose reason is not the story\'s event is kept', 'role', { role: 'Former royal archivist', roleState: 'update', roleReason: 'Needed a fresh title.' }, null],
+    ['a role only another person holds is kept', 'role', { role: 'Courier' }, null],
+    ['a first role fills', 'role', { role: 'Former royal archivist' }, 'Former royal archivist', { role: '' }],
     ['species replaced', 'species', { species: 'Half-elf' }, 'Half-elf'],
     ['background replaced', 'background', { background: 'Raised in the river quarter; served ten years as a royal archivist.' }, 'Raised in the river quarter; served ten years as a royal archivist.'],
     ['homeBase update with state, reason and grounding', 'homeBase', { homeBase: 'Rooms above the bakery on Mill Street', homeBaseState: 'update', homeBaseReason: 'She says she lives there now.' }, 'Rooms above the bakery on Mill Street'],
@@ -70,4 +76,19 @@ test('profileUpdates[] leaves live state to npcs[] (mood, location, goal, status
 test('a durable fact from profileUpdates[] is stamped as a change like any other', () => {
     const npc = run('profileUpdates', { homeBase: 'Rooms above the bakery on Mill Street', homeBaseState: 'update', homeBaseReason: 'She lives there now.' });
     assert.equal(npc.fieldChangeMessages?.homeBase, 9);
+});
+
+// (card traits win) The pack cast's role stays as written unless a story event (a promotion, a new job, a revealed identity) changes it.
+test('Temiwa\'s pack role is kept against an unmarked rewrite; a promotion with a reason in the story is taken', () => {
+    const story = 'The abbess named Sister Temiwa Lay Sealer of the Bluewatch chapel before the whole congregation.';
+    const temiwa = () => normalizeNpcRecord({ id: 'npc_sister-temiwa', name: 'Sister Temiwa', present: true, role: 'Church novice',
+        castFrom: { key: 'ersveil:temiwa', pack: 'ersveil', id: 'temiwa', first: {} } });
+    const scan = (fields, channel) => mergeScanResult({ turn: 3, npcs: [temiwa()], candidates: [] }, channel === 'npcs'
+        ? { npcs: [{ id: 'npc_sister-temiwa', name: 'Sister Temiwa', ...fields }] }
+        : { npcs: [{ id: 'npc_sister-temiwa', name: 'Sister Temiwa' }], profileUpdates: [{ id: 'npc_sister-temiwa', name: 'Sister Temiwa', ...fields }] },
+    { turn: 4, sourceMessageId: 9, developmentContext: story }).state.npcs[0].role;
+    for (const channel of ['npcs', 'profileUpdates']) {
+        assert.equal(scan({ role: 'Exiled Saintess Candidate and Lay Sealer' }, channel), 'Church novice', `${channel}: no event, the card's role stays`);
+        assert.equal(scan({ role: 'Lay Sealer of the Bluewatch chapel', roleState: 'promote', roleReason: 'The abbess named her Lay Sealer.' }, channel), 'Lay Sealer of the Bluewatch chapel', `${channel}: a promotion`);
+    }
 });
