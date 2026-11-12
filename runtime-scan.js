@@ -24,6 +24,9 @@ export function createScanPart(rt, deps) {
     // and Delta's numbers are set from the slice afterwards (runtime-hosted.js), so the pass does not count (null).
     const scanPace = settings => (hostedMeters() ? null : { allowance: normalizeAllowance(settings.relationshipAllowance), day: null });
     const { narrationCaptures, stateVersions } = rt;
+    // (live run 4) A scan cancelled because the saved state moved on under it (Delta's own native-change publication advances the sidecar revision) is asked for
+    // again once per reply and chat, like one whose state version moved; a cancel by the reader or a chat change is not (reasons: runtime-scan-ops cancelScanOperation).
+    const rerunOnce = new Set();
     const { noteCaptureCatchUp, runCaptureCatchUp } = createCatchUpPart(rt, { getChatKey, getChatState, hostedOnePass, isHostSwipeActive, isScanBusy, persist, processPendingBackfills, refreshNpcFromChat });
     const { replyParentKey, sameReplyRewritten, stripLiveSceneFields, chatNeverScanned } = createScanReplyPart({ getChatKey });
     const { handleAssistantMessageReceivedInner } = createAssistantHandlerPart(rt, deps, { replyParentKey, sameReplyRewritten, scanInner: options => scanNowInner(options) });
@@ -397,7 +400,7 @@ export function createScanPart(rt, deps) {
             // Thrown away because the state moved on under it (an edit during a scan the reply no longer waits for), not cancelled by the
             // reader or a chat change: asked for again, and the drain below runs it. Only while nothing was appended after this reply: a Send
             // or the next reply means that reply's own scan reads the window, and re-asking would be one more paid call than before.
-            if (!manual && !replayScope() && !operation?.cancelled && Number.isInteger(messageId) && latestMessageId() === messageId && isScannerRoutingError(error) && error.code === 'NPC_SCANNER_ROUTE_CANCELLED') queuePendingAutoScan(scanChatKey, messageId, 'stale-auto-scan');
+            if (!manual && !replayScope() && (!operation?.cancelled || (operation.cancelReason === 'server revision advanced' && !rerunOnce.has(`${scanChatKey}|${messageId}`) && rerunOnce.add(`${scanChatKey}|${messageId}`))) && Number.isInteger(messageId) && latestMessageId() === messageId && isScannerRoutingError(error) && error.code === 'NPC_SCANNER_ROUTE_CANCELLED') queuePendingAutoScan(scanChatKey, messageId, 'stale-auto-scan');
             if (replayScope()) replayScope().failed = `The scan failed: ${error?.message || error}`;
             if (manual || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) notify('error', `NPC State Delta scan failed: ${error?.message || error}`);
             return false;

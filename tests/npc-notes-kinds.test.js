@@ -461,7 +461,7 @@ test('scan-admitted people: the scan sends npc.meet for a dossier it just made, 
         const { createHostedPart } = await import(pathToFileURL(path.join(ext, 'runtime-hosted.js')).href);
         const deps = { chatHydrationStatus: () => ({}), getChatKey: () => 'k', getChatState: () => ({}), latestMessageId: () => 0, latestReplyIndex: () => 0 };
         const order = [];
-        const adapter = { hosted: () => true, flag: async () => { order.push('flag'); }, adjust: async () => { order.push('adjust'); }, meet: async item => { order.push('meet'); sent.push(item); } };
+        const adapter = { hosted: () => true, flag: async () => { order.push('flag'); }, adjust: async () => { order.push('adjust'); }, meet: async ({ guard, ...item }) => { order.push('meet'); assert.equal(typeof guard, 'function', 'the meeting carries its guard (held while a native change finishes, dropped if its reply is taken back)'); sent.push(item); } };
         const part = createHostedPart({ storySuiteV2: adapter }, deps);
         const old = { id: 'o1', name: 'Oren' };
         const fresh = { id: 'n2', name: 'Coram', personality: 'calm and stoic', background: 'a ferryman' };

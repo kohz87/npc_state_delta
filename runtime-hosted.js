@@ -3,7 +3,7 @@
    relationship changes, secret events and hidden-note options Delta sends back, and the words for why no one shows as present. Built by index.js once per module instance with the shared
    runtime state and the controller functions it calls. Bodies are moved from index.js without change. */
 
-import { chatContext as getContext, refusedLooks, worth, relationshipChanges, replayScope, scanMoodNumbers, scopedAdapter } from './runtime-scan-helpers.js';
+import { chatContext as getContext, markStands, refusedLooks, worth, relationshipChanges, replayScope, scanMoodNumbers, scopedAdapter } from './runtime-scan-helpers.js';
 import { replyScanned } from './scan-context.js';
 import { tieDayAt } from './src/transcript.js';
 import { normalizeRelationshipBaseline, isTerminalNpcDeath, npcMatchesLabel, storyMinuteText } from './core.js';
@@ -293,13 +293,13 @@ export function createHostedPart(rt, deps) {
             // The slice entry comes first (adjust, else meet): a look flag never makes one, so a new person's look lock needs it.
             for (const change of changes) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                await adapter.adjust(change);
+                await adapter.adjust({ ...change, guard: () => markStands(head) });
                 stage1Refresh();   // an open dossier panel draws again once the host's meters took this change
             }
             for (const npc of met) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 const key = `${getChatKey()}|${npc.id}`;
-                const out = await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId });
+                const out = await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId, guard: () => markStands(head) });
                 meetTried.add(key);
                 // Owed again when the host did not keep it (not REFUSED: nothing to add); taken, or no answer (no host), clears it.
                 if (out?.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') meetOwed.add(key);
@@ -309,17 +309,17 @@ export function createHostedPart(rt, deps) {
             for (const npc of moods) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 moodTried.add(`${getChatKey()}|${npc.id}`);
-                await adapter.mood({ name: npc.name, word: moodOf(npc), vad: vadOf(npc), reason: reasonOf(npc), reply: messageId, again: moodOf(npc) === moodOf(prior.get(npc.id)), personality: npc.personality, about: npc.background });
+                await adapter.mood({ name: npc.name, word: moodOf(npc), vad: vadOf(npc), reason: reasonOf(npc), reply: messageId, again: moodOf(npc) === moodOf(prior.get(npc.id)), personality: npc.personality, about: npc.background, guard: () => markStands(head) });
                 stage1Refresh();
             }
             for (const item of grown) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                await adapter.drives({ name: item.name, before: item.before, after: item.after, reply: messageId });
+                await adapter.drives({ name: item.name, before: item.before, after: item.after, reply: messageId, guard: () => markStands(head) });
                 stage1Refresh();   // an open dossier draws again when a drive stepped
             }
             for (const flag of [...looks.map(npc => ({ name: npc.name, lock: true })), ...refused.map(item => ({ name: item.name, drift: { before: item.before, incoming: item.incoming } }))]) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                await adapter.flag?.({ ...flag, reply: messageId });
+                await adapter.flag?.({ ...flag, reply: messageId, guard: () => markStands(head) });
             }
         })();
     }
