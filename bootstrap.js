@@ -43,7 +43,7 @@ try {
 try {
     await import('./story-block-tabs.js');
 } catch (error) {
-    console.error('[NPC State Delta] Story Block tabs failed to load', error);
+    console.error('[NPC State Delta] dossier rows module (story-block-tabs.js) failed to load', error);
 }
 try {
     await import('./continuity-ui.js');

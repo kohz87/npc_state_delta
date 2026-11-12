@@ -22,7 +22,7 @@ export function createInlineCardsModePart(deps, inlineRosterHtml) {
         data.npcStateDeltaLauncherV2 = getSettings().launcherWithStoryBlockV2 === true ? 'keep' : 'auto';
     }
 
-    // Set by story-block-tabs.js once its Present NPCs and Dossiers tabs are registered with Story Block.
+    // Nothing sets this flag any more (the v1 Present NPCs / Dossiers tab registration was removed): it is always false. Kept as a dead reader.
     function storyBlockTabsActive() {
         return document?.documentElement?.dataset?.npcStateDeltaStoryBlock === '1';
     }

@@ -78,7 +78,7 @@ packs. Nothing flows back to Studio.
 
 ## Reader features
 
-- **Dossiers screen** (Story Block Game view, plus a Dossiers tab in the Story panel; id `npc-state-delta/cast`, tab id `cast`):
+- **Dossiers screen** (Story Block Game view; id `npc-state-delta/cast`, tab id `cast`; the v1 Dossiers tab in the Story panel was removed):
   list rows with portrait, stage pill and up to 6 meter bars; search box. Built in `story-block-tabs.js`,
   `src/storysuite-v2.js`.
 - **Dossier panel** (`dossier-ui.js`, root `#npc_state_delta_dossier_root`): hero portrait, badges (Key person, cast), Edit, Refresh,
@@ -268,7 +268,7 @@ Detail: [docs/dev/storysuite-adapter.md](docs/dev/storysuite-adapter.md), [docs/
 - State and recovery: `branch.js`, `branch-core.js`, `destructive-settlement*.js`, `hardening*.js`, `terminal-lifecycle.js`,
   `continuity-core.js`, `appearance.js`, `social.js` (social graph), `calendar*.js`, `birthday.js`, `bundle.js`, `native-transfer.js`.
 - UI: `dossier-ui.js`, `dossier-experience.js`, `dossier-tools*.js`, `portrait-tools.js`, `launcher-ui.js`, `relationship-map*.js`,
-  `continuity-ui.js`, `story-block-tabs.js`, `style.css`, `suite.css`.
+  `continuity-ui.js`, `story-block-tabs.js` (only the dossier rows and empty-cast line now), `style.css`, `suite.css`.
 - Suite: `src/storysuite-v2.js` (adapter: registration, queries, commands, screens, page API), `src/npc-meters*.js` (the `npc`
   domain), `src/social-check.js`, `src/key-people.js`, `src/cast-dossier.js`, `src/portrait-file.js`,
   `src/storysuite-participant/`, `src/fields/registry.js`, `suite.js` and `suite-handshake.js` (the v1 registry; offers nothing to a
