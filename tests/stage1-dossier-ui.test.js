@@ -220,7 +220,7 @@ test('the board shows the tiles in order with the player\'s name, escapes text a
   // Mood tile: the word plus both bars, also for a person with no hosted mood (a mid-step rest) and no scanner word (the resting word).
   assert.match(html, /Energy[\s\S]*Control/);
   const rest = boardHtml({ ...rika, mood: '', v2Meters: undefined }, {});
-  assert.match(rest, /delta-mood-feel[^"]*"><span>Feeling<\/span>[\s\S]*delta-mood-energy[^"]*"><span>Energy<\/span>[\s\S]*delta-mood-control"><span>Control<\/span>/, 'the Mood tile shows all three rows, each with its number');
+  assert.match(rest, /delta-mood-feel[^"]*"><span>Feeling<\/span>[\s\S]*delta-mood-energy[^"]*"><span>Energy<\/span>[\s\S]*delta-mood-control[^"]*"><span>Control<\/span>/, 'the Mood tile shows all three rows, each with its number');
   assert.match(boardHtml({ id: 'x', name: 'Marrit', gender: 'male', role: 'bargemaster' }, {}), /Male · Bargemaster/);
 });
 
@@ -281,7 +281,10 @@ test('profile polish: empty sections keep a heading and a muted line; one Age fi
   for (const html of [off, standalone]) assert.doesNotMatch(html, /Tastes|Drives|No tastes yet|All normal so far/, 'notes off or no host: no placeholders');
   for (const title of ['Appearance', 'Character', 'Tastes', 'Drives', 'Background']) assert.match(bare, new RegExp(`<h3>${title}</h3>`), `${title} keeps its heading`);
   assert.match(bare, /No tastes yet: they appear when the story shows a like or dislike/);
-  assert.match(bare, /All normal so far/);
+  assert.doesNotMatch(bare, /All normal so far/, 'no record: the full list, not a line');
+  assert.equal((bare.match(/class="delta-drive" data-level="normal"/g) || []).length, 7, 'seven normal rows');
+  for (const label of ['Belonging', 'Closure', 'Awe', 'Preservation', 'Comfort', 'Conflict', 'Honesty']) assert.match(bare, new RegExp(`<span>${label}</span>`));
+  assert.match(bare, /The middle of each bar is normal/, 'footer line');
   assert.equal(bare.match(/Nothing known yet/g).length, 2, 'Character and Background');
   assert.match(bare, /No appearance established yet/, 'Appearance keeps main\'s own wording');
   assert.doesNotMatch(bare, /Looks/);
@@ -523,7 +526,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
   assert.doesNotMatch(sectionScreenHtml('ties', bare), /Lies told|Knows about/);
   assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /look was set/);
-  assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: { ...bare.v2Meters, notesOn: true } }, { layout: 'phone' }), /No tastes yet[\s\S]*All normal so far/, 'no data: the headings stay with a placeholder line');
+  assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: { ...bare.v2Meters, notesOn: true } }, { layout: 'phone' }), /No tastes yet[\s\S]*<span>Belonging<\/span>[\s\S]*<span>Honesty<\/span>/, 'no data: Tastes keeps its line, Drives the full list');
 });
 
 // The dossier's stylesheets as the page gets them (the template numbers filled in), plus the source for the pins that read it.
@@ -743,7 +746,8 @@ test('mood rows: Feeling / Energy / Control with their number on the -3..+3 scal
   const quiet = sectionScreenHtml('mood', base, { reply: 115 });
   assert.match(quiet, /<h4 class="delta-subhead">Recent changes<\/h4><ul class="delta-list"><li class="delta-chg"><span class="delta-chg-when"><small>#115<\/small><\/span><div><b><span class="delta-chg-d" data-good="muted">no change \u00b7 fading toward her calm/, 'a quiet reply starts the list');
   assert.equal((quiet.match(/class="delta-chg"/g) || []).length, 3, 'the quiet row counts in the three');
-  assert.doesNotMatch(quiet, /delta-sheet-chip/, 'no chip when the reply on show moved nothing');
+  assert.doesNotMatch(quiet, /delta-sheet-chip"/, 'no chip when the reply on show moved nothing');
+  assert.match(quiet, /<em class="delta-sheet-chip-slot"/, 'an empty chip slot keeps the bar columns aligned');
   const board = boardHtml(base, { reply: 112 });
   assert.match(board, /delta-mood-rows[\s\S]*Feeling[\s\S]*Energy[\s\S]*Control/, 'the board tile shows all three');
 });
@@ -767,7 +771,7 @@ test('profile: every section keeps its heading and a muted one-line placeholder 
   const html = dossierProfileHtml({ id: 'r', name: 'Rika', v2Meters: { notesOn: true } }, { layout: 'desktop' });
   for (const key of ['appearance', 'character', 'tastes', 'drives', 'background']) assert.match(html, new RegExp(`data-delta-profile="${key}"`), key);
   assert.match(html, /No tastes yet: they appear when the story shows a like or dislike/);
-  assert.match(html, /All normal so far/);
+  assert.match(html, /<span>Belonging<\/span>[\s\S]*<span>Honesty<\/span>/, 'Drives: the full list even with no record');
   assert.equal((html.match(/Nothing known yet/g) || []).length, 2, 'Character and Background');
   const css = await builtCss();
   assert.match(css, /\.delta-profile-block \{ border-top:1px solid var\(--delta-line\)/);

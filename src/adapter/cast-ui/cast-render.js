@@ -5,7 +5,7 @@ import { elementOf, PANE_CLASS } from './dom.js';
 
 export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
     const {
-        doc, enabled, npcList, part, runtime, worldShown,
+        doc, enabled, npcList, part, runtime, timeline, worldShown,
     } = deps;
 
     // ---- the Dossiers tab (once Cast) ----
@@ -17,6 +17,7 @@ export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
             const action = event.target?.closest?.('[data-npc-state-delta-action]')?.dataset?.npcStateDeltaAction;
             if (action === 'scan') return void runtime()?.scan?.();
             if (action === 'add') return void runtime()?.addNpc?.();
+            if (action === 'dismiss-restore-note') return void timeline?.catchUp?.dismiss?.();
             // A dossier row opens that dossier (v1's Dossiers tab did the same); so does a World → People here row, anywhere on it.
             const row = event.target?.closest?.('.npc-state-delta-story-row')
                 ?? event.target?.closest?.('.npc-state-delta-world-people[data-npc-id]');
@@ -59,9 +60,11 @@ export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
             else if (!enabled()) listText = session.emptyCast({ text: 'NPC State Delta is off.' });
             else listPart = dossier.dossierListNode(el, owner);
         }
+        // The restore note (a middle delete, edit or Re-read rebuilt the dossiers, or the rebuild was refused): kept until the reader dismisses it.
+        const restoreNote = list ? String(timeline?.catchUp?.status?.()?.note ?? '') : '';
         const pane = `<div class="${PANE_CLASS}">${body}${listText}</div>`;
         const rowsKey = list ? JSON.stringify([el.__npcStateDeltaV2Find ?? '', dossier.withKeyMarks(dossier.dossierRows()).map(row => [row.id, row.name, row.statusLabel, row.role, row.key === true]), meters?.cast ?? null]) : '';
-        const key = `${pane}\u0001${meters ? JSON.stringify(meters.cast) : ''}\u0001${rowsKey}`;
+        const key = `${pane}\u0001${meters ? JSON.stringify(meters.cast) : ''}\u0001${rowsKey}\u0001${restoreNote}`;
         // A full redraw replaces the search box: the reader typing in it keeps the focus and the caret.
         const typing = list && owner?.activeElement?.classList?.contains?.('npc-state-delta-story-search') && el.contains?.(owner.activeElement);
         // Skip an unchanged redraw only while the element still holds what was drawn: Story Block's tab host empties the
@@ -119,6 +122,16 @@ export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
                 }
                 extras.push(block);
             }
+        }
+        if (restoreNote) {
+            const note = elementOf(owner, 'div', 'npc-state-delta-restore-note');
+            note.setAttribute('role', 'status');
+            const close = elementOf(owner, 'button', 'npc-state-delta-restore-dismiss', '×');
+            close.type = 'button';
+            close.dataset.npcStateDeltaAction = 'dismiss-restore-note';
+            close.setAttribute('aria-label', 'Dismiss');
+            note.append(elementOf(owner, 'span', 'npc-state-delta-restore-text', restoreNote), close);
+            extras.unshift(note);
         }
         if (listPart) extras.push(listPart);
         if (extras.length) {

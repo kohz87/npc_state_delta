@@ -112,7 +112,7 @@ Generated 2026-11-07.
 - `dossier-ui-model.js`: Dossier record lookups, change stamps and index/detail projections split from `dossier-ui.js`.
 - `dossier-ui-mount.js`: Singleton dossier UI mounting and open-dossier request forwarding split from `dossier-ui.js`.
 - `dossier-ui-panel.js`: Dossier panel lifecycle, shell, screen clicks and Esc order, observers and portrait lightbox split from `dossier-ui.js`.
-- `dossier-ui-profile.js`: The Profile screen: portrait, identity, appearance forms, character and background (phone full screen, desktop two columns). Tastes, Drives and the locked-look note (only with data).
+- `dossier-ui-profile.js`: The Profile screen: portrait, identity, appearance forms, character and background (phone full screen, desktop two columns). Tastes (only with data), Drives (always the full seven-row list, "normal" without a record) and the locked-look note.
 - `dossier-ui-relationship.js`: Relationship meter steps, latest change and history markup split from `dossier-ui.js`.
 - `dossier-ui-render.js`: Draws the current screen (library, board, profile or section) from the projection, with signature caching; split from `dossier-ui.js`.
 - `dossier-ui-screens.js`: Screen state machine (library | board | profile | section), back and Esc order, swipe steps and the shared 650px phone query.

@@ -618,6 +618,7 @@ async function behindSetup(extra = {}) {
     made.live.state.npcs.push(npc('npc_late', 'Late progress'));
     made.live.state.lineage = names(12);
     await made.hydrate();
+    await keep(12);   // the dossiers as they are now are the published ones (a head selection never replaces unpublished work)
     return { ...made, told, first, parent };
 }
 
