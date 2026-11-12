@@ -968,7 +968,7 @@ test('secrets: the scanner prompt asks for layered notes and watches story event
 
 test('secrets: the dossier\'s Secrets section follows Background / History, with a Secrets chip, and only for a dossier with notes', () => {
     const ui = dossierUiSource();
-    assert.match(ui, /SECTION_KEYS = Object\.freeze\(\['now', 'with', 'ties', 'past', 'secrets'\]\)/, 'Secrets is the fifth and last section');
+    assert.match(ui, /SECTION_KEYS = Object\.freeze\(\['mood', 'now', 'with', 'ties', 'past', 'secrets'\]\)/, 'Secrets is the sixth and last section');
     assert.match(ui, /\['secrets', secretsSectionHtml\]/);
     assert.match(ui, /ring: \{ value: secrets\.total/, 'the board\'s Secrets tile shows opened / total');
     const notes = [{ state: 'open', title: 'Her past', text: SECRET, pill: 'Opened · Trust 20' }, { state: 'hidden', opens: 'Opens with the story', width: 61 }, { state: 'bogus' }, null];

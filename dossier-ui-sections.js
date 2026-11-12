@@ -1,20 +1,21 @@
-/* NPC State Delta dossier surface: the five section screens (Right now, With {{user}}, Ties, Past, Secrets) and their header with arrows and dots. Escaped markup only; reads the existing dossier projection, no new data. */
+/* NPC State Delta dossier surface: the six section screens (Mood, Right now, With {{user}}, Ties, Past, Secrets) and their header with arrows and dots. Escaped markup only; reads the existing dossier projection, no new data. */
 import { escapeHtml } from './src/util/html.js';
 import { changeStamp, plain, relationshipValue, RELATIONSHIP_AXES, wholeNumber } from './dossier-ui-model.js';
 import { changeRowHtml, NO_REASON, recentChangeRowHtml } from './dossier-ui-relationship.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
 import { castFromHtml, keyAwayHtml } from './dossier-ui-catalog.js';
 import { bondTone, boardTone, MOOD_AXES, moodDescriptors, moodTile, possessiveWord, pullTile } from './dossier-ui-view-model.js';
-import { meterRowHtml, moodRowsHtml, signedText } from './dossier-ui-board.js';
+import { meterRowHtml, moodRowsHtml, pullRowHtml, signedText } from './dossier-ui-board.js';
 import { tieTone } from './dossier-ui-bond-tone.js';
 import { SECTION_KEYS } from './dossier-ui-screens.js';
 
-// The five sections in the order the arrows, a sideways swipe and the dots walk them.
+// The six sections in the order the arrows, a sideways swipe and the dots walk them.
 export const SECTION_IDS = SECTION_KEYS;
 
 // The heading of one section. "With" takes the persona's name in each chat (the mockup's "With {{user}}").
 export function sectionTitle(id, userName = '') {
     const who = plain(userName);
+    if (id === 'mood') return 'Mood';
     if (id === 'now') return 'Right now';
     if (id === 'with') return who ? `With ${who}` : 'With you';
     if (id === 'ties') return 'Ties';
@@ -30,7 +31,7 @@ export function sectionStep(id, step) {
     return SECTION_IDS[at + Math.sign(Number(step) || 0)] ?? null;
 }
 
-// The header every section shares: ‹ and › (disabled at the ends), the title, "Name · N of 5" and one dot per section.
+// The header every section shares: ‹ and › (disabled at the ends), the title, "Name · N of 6" and one dot per section.
 // The arrows carry data-delta-section-step="-1|1" and the dots data-delta-section-go="<id>" for the screens' handler.
 export function sectionHeaderHtml(id, { npcName = '', userName = '' } = {}) {
     const at = SECTION_IDS.indexOf(id);
@@ -54,15 +55,19 @@ export function sectionHeaderHtml(id, { npcName = '', userName = '' } = {}) {
     </header>`;
 }
 
-// The fields of the dossier Right now tells about, in the words the line "Updated this reply" uses.
-const NOW_FIELD_WORDS = Object.freeze({ mood: 'mood', location: 'where', goal: 'goal', status: 'condition' });
+// The fields each of the two sections tells about, in the words the line "Updated this reply" uses.
+const MOOD_FIELD_WORDS = Object.freeze({ mood: 'mood' });
+const NOW_FIELD_WORDS = Object.freeze({ location: 'where', goal: 'goal', status: 'condition' });
 
-// "Updated this reply (#3): mood, where, goal." from the stored field changes; an older change reads "Updated at reply #2: ...".
-// Empty when none of the latest change's fields is one Right now shows.
-function updatedLineHtml(npc, reply) {
+// A sub-heading inside a section (Recent changes, Pull, Lies told, Knows about others, Where and what): one class, so one CSS rule spaces them all.
+const subhead = text => `<h4 class="delta-subhead">${escapeHtml(text)}</h4>`;
+
+// "Updated this reply (#3): where, goal." from the stored field changes; an older change reads "Updated at reply #2: ...".
+// Empty when none of the latest change's fields is one this section shows.
+function updatedLineHtml(npc, reply, fieldWords) {
     const changes = npc.fieldChanges;
     if (!changes || changes.latestTurn === null) return '';
-    const words = (changes.latest || []).map(field => NOW_FIELD_WORDS[field]).filter(Boolean);
+    const words = (changes.latest || []).map(field => fieldWords[field]).filter(Boolean);
     if (!words.length) return '';
     const stamp = changeStamp({ turn: changes.latestTurn, message: changes.message });
     const when = !stamp.legacy && stamp.message !== null && stamp.message === wholeNumber(reply) ? `this reply (#${stamp.message})` : `at ${stamp.text}`;
@@ -73,8 +78,8 @@ function updatedLineHtml(npc, reply) {
 // right, the With {{user}} list's own row); when the reply on show moved nothing the list starts with a "no change" row (it counts in the three).
 const RECENT_MOOD = 3;
 function moodHistoryHtml(npc, mood, reply) {
-    const title = '<h4>Recent changes</h4>';
-    if (!mood.known) return `${title}<p class="delta-muted">No mood change recorded yet.</p>`;
+    const title = subhead('Recent changes');
+    if (!mood.known) return `<div class="delta-sheet-recent">${title}<p class="delta-muted">No mood change recorded yet.</p></div>`;
     const now = wholeNumber(reply);
     const mark = number => (Number.isInteger(number) ? `<small>#${number}</small>` : '');
     const quiet = mood.quiet ? [changeRowHtml(`<span class="delta-chg-when">${mark(now)}</span>`, `<span class="delta-chg-d" data-good="muted">no change \u00b7 fading toward ${escapeHtml(possessiveWord(npc.gender, { lower: true }))} calm</span>`, [])] : [];
@@ -84,39 +89,47 @@ function moodHistoryHtml(npc, mood, reply) {
     });
     // A chat from before the history existed has only the last cause: it stands as one row (no numbers, date or reply were kept).
     const older = !mood.log.length && mood.cause ? [changeRowHtml('<span class="delta-chg-when"></span>', '<span class="delta-chg-d" data-good="muted">last mood move</span>', [mood.cause])] : [];
-    return `${title}<ul class="delta-list">${[...quiet, ...moves, ...older].slice(0, RECENT_MOOD).join('')}</ul>`;
+    return `<div class="delta-sheet-recent">${title}<ul class="delta-list">${[...quiet, ...moves, ...older].slice(0, RECENT_MOOD).join('')}</ul></div>`;
 }
 
-// Right now, as the mockup draws it: the mood word with its few plain words and three meter rows (Feeling, Energy,
-// Control: the number on the -3..+3 scale and this reply's change, also at rest); "Recent changes" (what moved the mood); "Where and what" (where, doing, goal, condition, and the Pull last,
-// marked New on its first day); then the line that says which of these the latest reply updated. The Story Director away block
-// and the pack's cast block (with its Pin button) stay above, as they did in the old dossier.
-export function nowSectionHtml(npc = {}, { reply = null } = {}) {
-    const cast = npc.cast && typeof npc.cast === 'object' ? npc.cast : {};
+// Mood, as the mockup draws it: the mood word with its few plain words and three meter rows (Feeling, Energy, Control: the number on the
+// -3..+3 scale and this reply's change, also at rest); "Recent changes" (the last three moves of the mood); the Pull as one line under its heading
+// (marked New on its first day); then the line that says whether the latest reply updated the mood.
+export function moodSectionHtml(npc = {}, { reply = null } = {}) {
     const mood = moodTile(npc, reply);
     const pull = pullTile(npc);
+    const words = moodDescriptors(mood);
+    return '<div class="delta-sheet delta-now">'
+        + `<dl class="delta-kv"><dt>Mood</dt><dd><b>${escapeHtml(mood.text)}</b>${words.length ? ` · ${escapeHtml(words.join(', '))}` : ''}</dd></dl>`
+        + moodRowsHtml(mood)
+        + moodHistoryHtml(npc, mood, reply)
+        + (pull ? subhead('Pull') + pullRowHtml(pull) : '')
+        + updatedLineHtml(npc, reply, MOOD_FIELD_WORDS)
+        + '</div>';
+}
+
+// Right now: where she is, what she is doing and wants, her condition, then the line that says which of these the latest reply updated.
+// The Story Director away block and the pack's cast block (with its Pin button) stay above, as they did in the old dossier.
+export function nowSectionHtml(npc = {}, { reply = null } = {}) {
+    const cast = npc.cast && typeof npc.cast === 'object' ? npc.cast : {};
     const rows = [
         ['Where', escapeHtml(plain(cast.where) || plain(npc.location))],
         ['Doing', escapeHtml(plain(cast.doing))],
         ['Goal', escapeHtml(plain(cast.goal) || plain(npc.goal))],
         ['Condition', escapeHtml(plain(npc.status))],
-        ...(pull ? [['Pull', `<b>${escapeHtml(pull.text)}</b>${[pull.cause, pull.note].filter(Boolean).map(part => ` · ${escapeHtml(part)}`).join('')}`, pull.fresh ? 'New' : '']] : []),
     ].filter(([, value]) => value);
     const blocks = `${npc.key ? keyAwayHtml(npc.key) : ''}${npc.cast ? castFromHtml(npc.cast) : ''}`;
-    const words = moodDescriptors(mood);
-    const kv = list => `<dl class="delta-kv">${list.map(([label, value, badge]) => `<dt>${escapeHtml(label)}${badge ? ` <span class="delta-new-badge">${escapeHtml(badge)}</span>` : ''}</dt><dd>${value}</dd>`).join('')}</dl>`;
+    const kv = list => `<dl class="delta-kv">${list.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${value}</dd>`).join('')}</dl>`;
     return `${blocks}<div class="delta-sheet delta-now">`
-        + kv([['Mood', `<b>${escapeHtml(mood.text)}</b>${words.length ? ` · ${escapeHtml(words.join(', '))}` : ''}`]])
-        + moodRowsHtml(mood)
-        + moodHistoryHtml(npc, mood, reply)
-        + (rows.length ? `<h4>Where and what</h4>${kv(rows)}` : '')
-        + updatedLineHtml(npc, reply)
+        + (rows.length ? subhead('Where and what') + kv(rows) : '')
+        + updatedLineHtml(npc, reply, NOW_FIELD_WORDS)
         + '</div>';
 }
 
-// With {{user}}: the four meters as bars that run from the centre (−100..100), the dynamic between them,
+// With {{user}}: the four meters as bars that run from the centre (−100..100), the dynamic between them, the lies this person told,
 // and the list of recent changes: the last one with how it came about, then the earlier ones.
 export function withSectionHtml(npc = {}) {
+    const lies = npc.v2Meters?.notes ? liesHtml(npc.v2Meters.notes.lies) : '';
     const rel = npc.relationship && typeof npc.relationship === 'object' ? npc.relationship : {};
     const meters = RELATIONSHIP_AXES.map(([axis, label]) => meterRowHtml({ label, value: relationshipValue(rel[axis]), range: 100, text: `${relationshipValue(rel[axis]) > 0 ? '+' : ''}${relationshipValue(rel[axis])}`, cls: `delta-sheet-${axis}` })).join('');
     const summary = plain(npc.relationshipSummary);
@@ -132,7 +145,8 @@ export function withSectionHtml(npc = {}) {
     return `<div class="delta-sheet">
         <div class="delta-sheet-meters">${meters}</div>
         ${summary ? `<p class="delta-sheet-prose">${escapeHtml(summary)}</p>` : ''}
-        <div class="delta-sheet-recent"><h4>Recent changes</h4>${rows ? `<ul class="delta-list">${rows}</ul>` : '<p class="delta-muted">No relationship change recorded yet.</p>'}</div>
+        ${lies}
+        <div class="delta-sheet-recent">${subhead('Recent changes')}${rows ? `<ul class="delta-list">${rows}</ul>` : '<p class="delta-muted">No relationship change recorded yet.</p>'}</div>
     </div>`;
 }
 
@@ -149,9 +163,9 @@ function tieHtml(entry, tie = null) {
 }
 
 const dayText = day => (Number.isInteger(day) ? `day ${day}` : '');
-const part = (label, kind, body) => (body ? `<section class="delta-notes-block" data-notes="${kind}"><h4>${escapeHtml(label)}</h4>${body}</section>` : '');
+const part = (label, kind, body) => (body ? `<section class="delta-notes-block" data-notes="${kind}">${subhead(label)}${body}</section>` : '');
 
-// Lies told: a caught lie in its words; lies not caught only as a count (never the words). Hidden when there are none.
+// Lies told (in With {{user}}, after the dynamic): a caught lie in its words; lies not caught only as a count (never the words). Hidden when there are none.
 export function liesHtml(lies = []) {
     const caught = lies.filter(lie => !lie.hidden);
     const hidden = lies.length - caught.length;
@@ -160,21 +174,18 @@ export function liesHtml(lies = []) {
     return part('Lies told', 'lies', rows + count);
 }
 
-// What this person knows about others: only what the story told or opened (a secret not opened is not in the projection).
+// What this person knows about others (in Secrets, after the list): only what the story told or opened (a secret not opened is not in the projection).
 export function knowsHtml(knows = []) {
     return part('Knows about others', 'knows', knows.map(row => `<p class="delta-note-row"><b>${escapeHtml(row.text)}</b><span>${escapeHtml([row.how && `${row.how} it`, dayText(row.day)].filter(Boolean).join(' · '))}</span></p>`).join(''));
 }
 
+// Ties: the relationships only; lies told live in With {{user}} and what she knows about others in Secrets.
 export function tiesSectionHtml(npc = {}) {
     const entries = Array.isArray(npc.keyRelationships) ? npc.keyRelationships : [];
-    const notes = npc.v2Meters?.notes;
-    const byName = new Map((notes?.ties ?? []).map(row => [row.name.toLowerCase(), row]));
-    const extra = lieAndKnow(notes);
-    if (!entries.length && !extra) return '<p class="delta-muted">No important ties recorded yet.</p>';
-    return `<div class="delta-sheet delta-ties">${entries.map(entry => tieHtml(entry, byName.get(String(parseKeyRelationshipEntry(entry)?.subject ?? '').toLowerCase()))).join('')}${extra}</div>`;
+    const byName = new Map((npc.v2Meters?.notes?.ties ?? []).map(row => [row.name.toLowerCase(), row]));
+    if (!entries.length) return '<p class="delta-muted">No important ties recorded yet.</p>';
+    return `<div class="delta-sheet delta-ties">${entries.map(entry => tieHtml(entry, byName.get(String(parseKeyRelationshipEntry(entry)?.subject ?? '').toLowerCase()))).join('')}</div>`;
 }
-
-const lieAndKnow = notes => (notes ? liesHtml(notes.lies) + knowsHtml(notes.knows) : '');
 
 // Past: the remembered events as written on a timeline of dots (the projection carries no timestamps for them).
 export function pastSectionHtml(npc = {}) {
@@ -187,16 +198,18 @@ export function pastSectionHtml(npc = {}) {
 // only its bar and its rule ("opens at Trust 60"), never its title or text. Same data as dossier-ui-meters.js v2SecretsHtml.
 export function secretsSectionHtml(npc = {}) {
     const notes = Array.isArray(npc.v2Meters?.secrets) ? npc.v2Meters.secrets.filter(note => note && typeof note === 'object') : [];
-    if (!notes.length) return '<p class="delta-muted">No secrets for this character yet.</p>';
+    const knows = npc.v2Meters?.notes ? knowsHtml(npc.v2Meters.notes.knows) : '';
+    if (!notes.length) return knows ? `<div class="delta-sheet">${knows}</div>` : '<p class="delta-muted">No secrets for this character yet.</p>';
     const opened = notes.filter(note => note.state === 'open').length;
     const rows = notes.map(note => (note.state === 'open'
         ? `<div class="delta-secret delta-secret-open"><div class="delta-secret-head"><b>${escapeHtml(plain(note.title))}</b><span class="delta-secret-pill">${escapeHtml(plain(note.pill))}</span></div>${plain(note.text) ? `<p>${escapeHtml(plain(note.text))}</p>` : ''}</div>`
         : `<div class="delta-secret delta-secret-hidden"><span class="delta-secret-bar" style="width:${Math.max(0, Math.min(100, Number(note.width) || 0))}%" aria-hidden="true"></span><span class="delta-secret-when">${escapeHtml(plain(note.opens))}</span></div>`)).join('');
     return `<p class="delta-muted delta-secrets-intro">${opened} opened · ${notes.length - opened} still hidden. The narrator knows them all and keeps them; each appears here when it opens.</p>
-        <div class="delta-sheet delta-secrets">${rows}</div>`;
+        <div class="delta-sheet delta-secrets">${rows}${knows}</div>`;
 }
 
 const SECTION_BODIES = new Map([
+    ['mood', moodSectionHtml],
     ['now', nowSectionHtml],
     ['with', withSectionHtml],
     ['ties', tiesSectionHtml],

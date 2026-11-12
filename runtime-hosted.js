@@ -296,13 +296,14 @@ export function createHostedPart(rt, deps) {
         // scan returns: dossiers no scan touches are left as they are.
         const entries = typeof adapter.meterEntries === 'function' ? adapter.meterEntries() : null;
         const hasEntry = npc => !Array.isArray(entries) || Boolean(adapter.meters?.(npc.name));
-        const owed = npc => meetOwed.has(`${getChatKey()}|${npc.id}`) || (prior.get(npc.id)?.updatedAt !== npc.updatedAt && !hasEntry(npc) && !meetTried.has(`${getChatKey()}|${npc.id}`));
+        const touched = npc => prior.get(npc.id)?.updatedAt !== npc.updatedAt;
+        const owed = npc => touched(npc) && (meetOwed.has(`${getChatKey()}|${npc.id}`) || (!hasEntry(npc) && !meetTried.has(`${getChatKey()}|${npc.id}`)));
         const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && (!prior.has(npc.id) || owed(npc))) : [];
         // A mood word the scan wrote (a new or changed `mood` text) gets its numbers in the slice (npc.mood: the fixed word list, with the reason the scan
         // recorded for the same reply: its relationship change reason). Not the dead and not incidental extras; after the meeting, which seeds the resting mood.
         const moodOf = npc => String(npc?.mood ?? '').trim();
         const reasonOf = npc => (JSON.stringify(npc.lastRelationshipChange) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange) ? String(npc.lastRelationshipChange?.reason ?? '').trim() : '');
-        const moods = typeof adapter.mood === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && moodOf(npc) && (moodOf(npc) !== moodOf(prior.get(npc.id)) || (prior.get(npc.id)?.updatedAt !== npc.updatedAt && !moodTried.has(`${getChatKey()}|${npc.id}`)))) : [];
+        const moods = typeof adapter.mood === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && moodOf(npc) && (moodOf(npc) !== moodOf(prior.get(npc.id)) || (touched(npc) && !moodTried.has(`${getChatKey()}|${npc.id}`)))) : [];
         if (!changes.length && !looks.length && !refused.length && !met.length && !moods.length) return;
         void (async () => {
             // The slice entry comes first (adjust, else meet): a look flag never makes one, so a new person's look lock needs it.
@@ -313,8 +314,8 @@ export function createHostedPart(rt, deps) {
             }
             for (const npc of met) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                const out = await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId });
                 const key = `${getChatKey()}|${npc.id}`;
+                const out = await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId });
                 meetTried.add(key);
                 // Owed again when the host did not keep it (not REFUSED: nothing to add); taken, or no answer (no host), clears it.
                 if (out?.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') meetOwed.add(key);

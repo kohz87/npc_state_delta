@@ -125,6 +125,9 @@ ${PANEL} .delta-tile-ring { --v:0; position:relative; display:grid; place-items:
 ${PANEL} .delta-tile-ring::after { content:""; position:absolute; inset:5px; border-radius:50%; background:var(--dsk-tile); }
 ${PANEL} .delta-tile-ring > span { position:relative; z-index:1; font-size:var(--dt-kick); font-weight:700; }
 
+/* the Pull is one line in the Mood tile's foot (its dots and thin line are in dossier-ui-styles-sections.js) */
+${PANEL} .delta-tile .delta-pull-row { margin-top:3px; padding-top:7px; font-size:var(--dt-meta); text-align:left; }
+
 /* mood bars, pull ring, ties initials and past dots (phase 2 data) */
 ${PANEL} .delta-tile-ring { --c:var(--held, var(--delta-warn)); }
 ${PANEL} .delta-tile-faces .delta-tile-face.delta-tile-initials { display:grid; place-items:center; font-size:clamp(7px,.2cqw + 6px,9px); line-height:1; letter-spacing:-.04em; overflow:hidden; font-weight:700; background:var(--face-flat); color:var(--delta-text); transform:none; }

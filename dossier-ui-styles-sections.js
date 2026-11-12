@@ -31,7 +31,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-panes > [data-pane] { min-width:0; min-height:0; }
 #${ROOT_ID} .delta-pane-body { min-height:0; overflow:auto; overscroll-behavior:contain; touch-action:pan-y; }
 
-/* section screen: the title bar with arrows, "N of 5" and the dots (the sections.js classes) */
+/* section screen: the title bar with arrows, "N of 6" and the dots (the sections.js classes) */
 #${ROOT_ID} .delta-section-screen { display:grid; align-content:start; min-width:0; }
 #${ROOT_ID} .delta-section-head { display:grid; grid-template-columns:40px minmax(0,1fr) 40px; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--delta-line); }
 #${ROOT_ID} .delta-section-arrow { box-sizing:border-box; width:40px; height:40px; min-width:0 !important; min-height:0 !important; display:grid; place-items:center; padding:0; border:1px solid var(--delta-line); border-radius:10px; background:transparent; color:var(--delta-text); font-size:20px; line-height:1; cursor:pointer; }
@@ -82,14 +82,27 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-pill-key { color:var(--delta-warn); }
 
 /* Ties: one row per bond; the relation word takes the bond tone (data-tone) */
-#${ROOT_ID} .delta-bond { --c:var(--delta-muted); display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 10px; padding:8px 0; border-top:1px solid var(--delta-line); }
-#${ROOT_ID} .delta-bond:first-child { border-top:0; padding-top:0; }
+#${ROOT_ID} .delta-bond { --c:var(--delta-muted); display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 10px; }
 #${ROOT_ID} .delta-bond[data-tone="good"] { --c:var(--good, var(--delta-good)); }
 #${ROOT_ID} .delta-bond[data-tone="bad"] { --c:var(--bad, var(--delta-danger)); }
 #${ROOT_ID} .delta-bond[data-tone="gold"] { --c:var(--held, var(--delta-warn)); }
 #${ROOT_ID} .delta-bond > b { min-width:0; overflow-wrap:anywhere; }
 #${ROOT_ID} .delta-bond-word { grid-column:2; grid-row:1; font-size:var(--dt-meta); font-weight:700; color:var(--c); text-align:right; }
 #${ROOT_ID} .delta-bond > p { grid-column:1 / -1; margin:0; font-size:var(--dt-body); color:var(--delta-muted); overflow-wrap:anywhere; }
+
+/* Every entry of a list (a tie, a lie told, something she knows) has its own thin divider above it, the first one too, and the same spacing. */
+#${ROOT_ID} .delta-bond, #${ROOT_ID} .delta-note-row { margin:0; padding:10px 0; border-top:1px solid var(--delta-line); }
+/* ONE spacing above every sub-heading inside a section (Where and what, Recent changes, Pull, Lies told, Knows about others); none when it opens the section */
+#${ROOT_ID} .delta-sheet .delta-subhead { margin:18px 0 0; }
+#${ROOT_ID} .delta-sheet > .delta-subhead:first-child { margin-top:0; }
+/* The Pull as one line: the word, one to three dots for its strength, the muted words; a thin line above, as Recent changes' rows have */
+#${ROOT_ID} .delta-pull-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin:0; padding-top:8px; border-top:1px solid var(--delta-line); font-size:var(--dt-body); }
+#${ROOT_ID} .delta-pull-k { font-size:var(--dt-kick); font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--held, var(--delta-warn)); }
+#${ROOT_ID} .delta-pull-row > b { color:var(--delta-text); }
+#${ROOT_ID} .delta-pull-row > .delta-muted { font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-pips { display:inline-flex; gap:3px; }
+#${ROOT_ID} .delta-pips i { box-sizing:border-box; width:8px; height:8px; border-radius:50%; border:1.5px solid var(--held, var(--delta-warn)); }
+#${ROOT_ID} .delta-pips i.on { background:var(--held, var(--delta-warn)); }
 
 /* Past: the memories, one per row */
 #${ROOT_ID} .delta-past { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
@@ -148,7 +161,7 @@ export const SECTIONS_STYLES = `
 
 /* each section has its own accent, shared by its title, dots and small headings */
 #${ROOT_ID} .delta-section-screen { --c:var(--delta-accent); }
-#${ROOT_ID} .delta-section-screen[data-delta-section="now"] { --c:var(--dsk-ten, #d9a273); }
+#${ROOT_ID} .delta-section-screen[data-delta-section="mood"], #${ROOT_ID} .delta-section-screen[data-delta-section="now"] { --c:var(--dsk-ten, #d9a273); }
 #${ROOT_ID} .delta-section-screen[data-delta-section="with"] { --c:var(--bad); }
 #${ROOT_ID} .delta-section-screen[data-delta-section="ties"] { --c:var(--aff, #d99aaa); }
 #${ROOT_ID} .delta-section-screen[data-delta-section="past"] { --c:var(--des, #b7a3cf); }
@@ -212,9 +225,9 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID}[data-skin="fantasy"] .delta-profile-portrait { border-radius:4px; box-shadow:0 0 0 1px var(--delta-line), 0 0 0 4px var(--delta-floor), 0 0 0 5px var(--delta-line); }
 
 /* phase 2: lies told / knows about others, the Past timeline, tastes, drives, the look lock, the gate wording */
-#${ROOT_ID} .delta-notes-block h4 { margin:10px 0 2px; font-size:var(--dt-kick); letter-spacing:.12em; text-transform:uppercase; color:var(--held, var(--delta-warn)); }
+#${ROOT_ID} .delta-notes-block h4 { font-size:var(--dt-kick); letter-spacing:.12em; text-transform:uppercase; color:var(--held, var(--delta-warn)); }
 #${ROOT_ID} .delta-notes-block[data-notes="knows"] h4 { color:var(--trust, var(--delta-accent-soft)); }
-#${ROOT_ID} .delta-note-row { display:grid; gap:2px; margin:6px 0; }
+#${ROOT_ID} .delta-note-row { display:grid; gap:2px; }
 #${ROOT_ID} .delta-note-row > span { font-size:var(--dt-meta); color:var(--delta-muted); }
 #${ROOT_ID} .delta-timeline { position:relative; }
 #${ROOT_ID} .delta-timeline li, #${ROOT_ID} .delta-timeline li:first-child { position:relative; padding:0 0 4px 22px; border-top:0; }

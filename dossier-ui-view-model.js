@@ -6,6 +6,7 @@ import { bondTone as bondToneOf, tieTone } from './dossier-ui-bond-tone.js';
 
 // Tile titles for the two sections the board names. The label "{{user}}" is kept literal here; the renderer substitutes the player's name.
 const SECTION_TITLES = Object.freeze({
+    mood: 'Mood',
     now: 'Right now',
     with: 'With {{user}}',
     ties: 'Ties',
@@ -103,8 +104,7 @@ function tiesModel(npc) {
     // Tie tags (feature notes) tint a face by the bond: rival red, owes gold, ally green; else the relation word's tone.
     const tagged = new Map(object(npc.v2Meters).notes?.ties?.map(row => [String(row.name).toLowerCase(), row.tags]) ?? []);
     const faces = entries.slice(0, 3).map(entry => ({ name: entry.name, tone: tagTone(tagged.get(entry.name.toLowerCase())) || bondTone(entry.relation) }));
-    const lies = object(npc.v2Meters).notes?.lies?.length ?? 0;
-    return { count: entries.length, names: faces.map(face => face.name), faces, entries, lies };
+    return { count: entries.length, names: faces.map(face => face.name), faces, entries };
 }
 
 function pastModel(npc) {
@@ -215,7 +215,7 @@ export function boardModel(npc = {}, { reply = null } = {}) {
             mood: moodTile(source, reply),
             pull: pullTile(source),
             rightNow: { title: SECTION_TITLES.now, ...(({ place, doing, summary }) => ({ place, doing, summary }))(rightNowModel(source)) },
-            ties: { title: 'Ties', count: ties.count, names: ties.names, faces: ties.faces, lies: ties.lies },
+            ties: { title: 'Ties', count: ties.count, names: ties.names, faces: ties.faces },
             past: { title: 'Past', count: past.count, latest: past.latest, dots: past.dots },
             secrets: { title: 'Secrets', total: secrets.total, open: secrets.open, next: secrets.next, lastOpen: secrets.lastOpen },
         },

@@ -220,7 +220,7 @@ test('hosted: a meeting the host did not keep is sent again with the next scan o
             registerModule(def) { sdk.registered.push(def); },
             command: async (type, payload) => {
                 sdk.sent.push({ type, payload });
-                if (type === 'npc.meet' && (sdk.meets += 1) === 1) return { ok: false, code: 'WAITING', message: 'NPC State Delta is waiting: A native change is finishing; every part must agree before the story goes on.' };
+                if (type === 'npc.meet' && (sdk.meets += 1) === 1) return { ok: false, code: 'RESTORE_PENDING', message: 'NPC State Delta is waiting: A native change is finishing; every part must agree before the story goes on.' };
                 return { ok: true };
             },
             query: name => (name === 'npc.meters' ? [] : null),

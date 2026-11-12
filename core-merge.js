@@ -132,9 +132,10 @@ export function mergeScanResult(state, scanResult, options = {}) {
             continue;
         }
 
-        // A description is not a person ("leader in the gambeson", live run 3): never admitted, as a dossier or a candidate. A real name or a
-        // role label ("the innkeeper") is unaffected; people already in the registry were matched above.
-        if (isDescriptivePhrase(incoming.name)) {
+        // A description read as a proper name is not a person ("leader in the gambeson", live run 3): never admitted, as a dossier or a
+        // candidate. A real name and a role label, with or without a linking word ("the captain of the guard", "woman in red"), go on to the
+        // candidate and promotion path as before; people already in the registry were matched above.
+        if (inferNpcIdentityKind(incoming.name, incoming.identityKind) === 'proper_name' && isDescriptivePhrase(incoming.name)) {
             report.skipped.push(incoming.name);
             continue;
         }

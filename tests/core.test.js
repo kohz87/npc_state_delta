@@ -3815,6 +3815,20 @@ test('a descriptive phrase is not admitted as a person; names, role labels and u
     assert.equal(isDescriptivePhrase('Leader in the gambeson'), true, 'a sentence-cased start');
     for (const name of ['Lady of the Lake', 'Sister Callow', 'Old Garvan of the Seven Stones']) assert.equal(isDescriptivePhrase(name), false, name);
     assert.equal(isDescriptivePhrase('ライラ の 友人 で'), false);
+    // A role label with a linking word is admitted as before: a candidate at the first sighting, a dossier at the second.
+    for (const label of ['captain of the guard', 'woman in red', 'man with the scar']) {
+        const roleRow = { npcs: [{ name: label, identityKind: 'role_label', dossierSignal: 'meaningful', present: true, sameIndividual: true }] };
+        const first = mergeScanResult({ npcs: [], candidates: [], turn: 1 }, roleRow, { turn: 1, storyTexts: [`The ${label} waits.`] });
+        assert.equal(first.state.candidates.length, 1, `${label}: candidate at sighting 1`);
+        const second = mergeScanResult(first.state, roleRow, { turn: 2, storyTexts: [`The ${label} waits.`] });
+        assert.equal(second.state.npcs.length, 1, `${label}: dossier at sighting 2`);
+    }
+    // ...while "leader in the gambeson" stays out whatever kind the scanner gave it, with and without story texts.
+    for (const identityKind of ['role_label', 'proper_name']) for (const storyTexts of [['The leader in the gambeson shouts.'], undefined]) {
+        let st = { npcs: [], candidates: [], turn: 1 };
+        for (const turn of [1, 2, 3]) st = mergeScanResult(st, { npcs: [{ name: 'leader in the gambeson', identityKind, dossierSignal: 'meaningful', present: true, sameIndividual: true }] }, { turn, ...(storyTexts ? { storyTexts } : {}) }).state;
+        assert.equal(st.npcs.length + st.candidates.length, 0, `${identityKind} ${storyTexts ? 'with' : 'without'} texts`);
+    }
     // A dossier that already exists (made before this rule) keeps updating.
     const had = { npcs: [createNpcRecord('leader in the gambeson', [])], candidates: [], turn: 1 };
     const again = mergeScanResult(had, row('leader in the gambeson'), { turn: 2 });

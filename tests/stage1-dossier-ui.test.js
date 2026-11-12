@@ -213,7 +213,7 @@ test('the board shows the tiles in order with the player\'s name, escapes text a
   assert.doesNotMatch(html, /data:image/, 'the portrait goes through refs, not the markup');
   assert.match(html, /data-delta-portrait="\d+"/);
   assert.match(html, /data-delta-screen="profile"/);
-  for (const section of ['with', 'now', 'ties', 'past', 'secrets']) assert.match(html, new RegExp(`data-delta-section="${section}"`), section);
+  for (const section of ['mood', 'with', 'now', 'ties', 'past', 'secrets']) assert.match(html, new RegExp(`data-delta-section="${section}"`), section);
   assert.match(html, /Human · Female · Mage/, 'each identity part keeps its words with the first letter capitalised');
   // Mood tile: the word plus both bars, also for a person with no hosted mood (a mid-step rest) and no scanner word (the resting word).
   assert.match(html, /Energy[\s\S]*Control/);
@@ -222,11 +222,11 @@ test('the board shows the tiles in order with the player\'s name, escapes text a
   assert.match(boardHtml({ id: 'x', name: 'Marrit', gender: 'male', role: 'bargemaster' }, {}), /Male · Bargemaster/);
 });
 
-test('sections: five screens with arrows and dots; hidden secrets never show their words; bond tones', () => {
-  assert.deepEqual([...SECTION_KEYS], ['now', 'with', 'ties', 'past', 'secrets']);
+test('sections: six screens with arrows and dots; hidden secrets never show their words; bond tones', () => {
+  assert.deepEqual([...SECTION_KEYS], ['mood', 'now', 'with', 'ties', 'past', 'secrets']);
   const head = sectionHeaderHtml('now', { npcName: 'Rika', userName: 'Astra' });
-  assert.match(head, /Rika · 1 of 5/);
-  assert.match(head, /data-delta-section-step="-1"[^>]*disabled/, 'no previous before the first');
+  assert.match(head, /Rika · 2 of 6/);
+  assert.match(sectionHeaderHtml('mood', { npcName: 'Rika' }), /data-delta-section-step="-1"[^>]*disabled/, 'no previous before the first');
   assert.doesNotMatch(sectionHeaderHtml('secrets', {}), /data-delta-section-step="1"[^>]*aria-label="Next section"><|data-delta-section-step="1"[^>]*>(?!›)/);
   assert.match(sectionHeaderHtml('secrets', {}), /data-delta-section-step="1"[^>]*disabled/, 'no next after the last');
   assert.match(sectionHeaderHtml('with', { userName: 'Astra' }), /With Astra/);
@@ -278,10 +278,12 @@ test('screens: back, section arrows, Esc order, swipe, layout and the signature 
   state = openNpc(state, 'rika');
   assert.deepEqual([state.name, state.npcId], ['board', 'rika']);
   state = openSection(state, 2);
-  assert.equal(screenSignature(state), 'rika|section:2');
+  assert.equal(screenSignature(state), 'rika|section:with');
   state = stepSection(stepSection(state, 1), 1);
   assert.equal(state.section, 4);
-  assert.equal(stepSection(state, 1).section, 4, 'clamped at the last section');
+  state = stepSection(state, 1);
+  assert.equal(state.section, 5);
+  assert.equal(stepSection(state, 1).section, 5, 'clamped at the last section');
   assert.equal(setSection(state, 0).section, 0);
   assert.equal(escapeAction(state, { blocked: true }), 'none', 'the editor or lightbox keeps Esc');
   assert.equal(escapeAction(state), 'back');
@@ -292,6 +294,10 @@ test('screens: back, section arrows, Esc order, swipe, layout and the signature 
   assert.equal(goBack(createScreenState()).name, 'library');
   assert.equal(showScreen(createScreenState(), 'board').name, 'library', 'a board needs an NPC');
   assert.deepEqual(parseScreen('section:9'), { name: 'section', section: 0 });
+  // saved screens: by id, and the old numbers (0 Right now = Mood and where, 1 With, 2 Ties, 3 Past, 4 Secrets) open the same place
+  assert.deepEqual(['section:mood', 'section:now', 'section:with', 'section:ties', 'section:past', 'section:secrets'].map(text => parseScreen(text).section), [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual([0, 1, 2, 3, 4].map(n => parseScreen(`section:${n}`).section), [0, 2, 3, 4, 5]);
+  assert.equal(parseScreen(screenSignature(state).split('|')[1]).section, state.section, 'the signature parses back to the same section');
   assert.equal(parseScreen('nonsense').name, 'library');
   assert.equal(swipeStep(-80, 5), 1);
   assert.equal(swipeStep(80, 5), -1);
@@ -354,14 +360,14 @@ test('the panel walks library, board, section and profile from one projection; a
     ui.setScreen(openNpc(ui.screen, 'rika'));
     assert.equal(ui.selectedNpcId, 'rika');
     assert.match(doc.html, /data-screen="board"/);
-    ui.setScreen(openSection(ui.screen, 2));
+    ui.setScreen(openSection(ui.screen, 3));
     assert.match(doc.html, /data-delta-section-head="ties"/);
     assert.match(doc.html, /data-pane="board"[\s\S]*data-pane="section"/, 'desktop: the board beside the section');
     token = 't2';
     state.npcs[0] = { ...state.npcs[0], mood: 'calm' };
     await ui.refresh();
     assert.equal(ui.screen.name, 'section', 'a refresh does not reset the screen');
-    assert.equal(ui.screen.section, 2);
+    assert.equal(ui.screen.section, 3);
     ui.setScreen(showScreen(ui.screen, 'profile'));
     assert.match(doc.html, /delta-profile-desktop/);
     assert.equal(ui.goBackOrClose(), 'back');
@@ -450,16 +456,23 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.equal((tiles.find(tile => tile.title === 'Mood').rowsHtml.match(/delta-sheet-meter /g) || []).length, 3, 'the Mood tile has Feeling, Energy and Control');
   assert.equal(tiles.find(tile => tile.title === 'Mood').big, 'old', 'the scanner\'s own word leads (the numbers follow it); the table word shows only when it wrote none');
   assert.equal(boardTiles(boardModel({ ...npc, mood: '' }), { userName: 'Astra' }).find(tile => tile.title === 'Mood').big, 'alarmed · tense');
-  assert.equal(tiles.find(tile => tile.title === 'Pull').note, 'high · 2 days');
+  assert.equal(tiles.find(tile => tile.title === 'Pull'), undefined, 'the Pull is no card of its own');
+  assert.match(tiles.find(tile => tile.title === 'Mood').footHtml, /delta-pull-row[\s\S]*Closure[\s\S]*aria-label="strength 3 of 3"[\s\S]*high · 2 days · an open thread/, 'the Pull is one footer line of the Mood tile, as dots');
+  assert.equal(tiles.find(tile => tile.title === 'Mood').ring, undefined, 'no ring on the Mood tile');
   assert.match(boardHtml(npc, { userName: 'Astra' }), /praise, the 3rd time in 2 days, backfired/, 'the gate receipt in the mockup\'s words');
   assert.doesNotMatch(boardHtml(npc, { userName: 'Astra' }), /Reply #3/, 'no stamp line under the change');
   assert.match(boardHtml(npc, { userName: 'Astra' }), /tap the portrait for (?:her|his|their) profile/);
   const ties = sectionScreenHtml('ties', npc);
   assert.match(ties, />ally</); assert.match(ties, />owes</); assert.match(ties, />owed by</);
-  assert.match(ties, /a lie you have not caught/);
-  assert.doesNotMatch(ties, /SECRET WORDS|a secret about/);
-  assert.match(ties, /I sold nothing/); assert.match(ties, /Y owes a debt/);
-  assert.match(sectionScreenHtml('now', npc), /trust dropped: Astra lied/);
+  assert.doesNotMatch(ties, /lie|I sold nothing|Y owes a debt|Knows about/i, 'Ties holds relationships only');
+  const withUser = sectionScreenHtml('with', npc);
+  assert.match(withUser, /a lie you have not caught/); assert.match(withUser, /I sold nothing/);
+  assert.doesNotMatch(withUser + sectionScreenHtml('secrets', npc), /SECRET WORDS|a secret about/);
+  assert.ok(withUser.indexOf('Lies told') > withUser.indexOf('delta-sheet-meters') && withUser.indexOf('Lies told') < withUser.indexOf('Recent changes'), 'Lies told sits after the meters and before Recent changes');
+  const secretsHtml = sectionScreenHtml('secrets', npc);
+  assert.match(secretsHtml, /Knows about others[\s\S]*Y owes a debt/);
+  assert.equal((ties.match(/class="delta-bond"/g) || []).length, 3, 'each tie is one entry');
+  assert.match(sectionScreenHtml('mood', npc), /trust dropped: Astra lied/);
   const profile = dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: meters }, { layout: 'phone' });
   assert.match(profile, /toffee/); assert.match(profile, /Conflict/); assert.match(profile, /look was set on day 3/);
   const bare = { ...npc, v2Meters: v2MetersProjection({ bars: [], secrets: [] }) };
@@ -513,9 +526,9 @@ test('fix 3: two-letter initials, mood bars in Right now, flat profile rows in t
   assert.equal(initialsOf('The inspector'), 'TI');
   assert.equal(initialsOf('Marrit'), 'M');
   assert.match(portraitHtml({ name: 'Sister Temiwa' }, 'x'), /<span>ST<\/span>/);
-  const now = sectionScreenHtml('now', { id: 'n', name: 'Marrit', mood: 'Cautious' });
+  const now = sectionScreenHtml('mood', { id: 'n', name: 'Marrit', mood: 'Cautious' });
   assert.match(now, /<dt>Mood<\/dt><dd><b>Cautious<\/b><\/dd>[\s\S]*delta-mood-rows[\s\S]*Feeling[\s\S]*Energy[\s\S]*Control/, 'Mood: the word and the three rows, at rest as well');
-  assert.match(sectionScreenHtml('now', { id: 'n', name: 'Marrit' }), /<dt>Mood<\/dt><dd><b>[^<]+<\/b><\/dd>[\s\S]*delta-mood-rows/, 'also with no mood word at all');
+  assert.match(sectionScreenHtml('mood', { id: 'n', name: 'Marrit' }), /<dt>Mood<\/dt><dd><b>[^<]+<\/b><\/dd>[\s\S]*delta-mood-rows/, 'also with no mood word at all');
   const npc = { ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), appearanceModel: { overallAppearance: 'Freckled', appearanceForms: [{ name: 'Mage', appearance: 'Singed coat' }], currentForm: 'Mage' }, mannerisms: ['Ties off bandages'], personality: 'Proud', background: 'Frostbite', birthdaySource: 'generated' };
   const html = dossierProfileHtml(npc, { layout: 'desktop' });
   assert.match(html, /<dt>Look<\/dt><dd>Freckled<\/dd><dt>Wearing<\/dt><dd>Singed coat<\/dd><dt>Habits<\/dt><dd>Ties off bandages<\/dd>/);
@@ -531,25 +544,31 @@ test('fix 3: two-letter initials, mood bars in Right now, flat profile rows in t
   assert.doesNotMatch(css.match(/@media \(max-width: 900px\)/)?.[0] || '', /./, 'the sheet and the launcher agree on the full-screen line (1100)');
 });
 
-test('round 2 fix 2-4: Right now in groups with three bars and Pull last, Recent changes list, plain coloured tie words', async () => {
+test('round 2 fix 2-4: the Mood section with three bars and the Pull last, Right now with where and what, Recent changes list, plain coloured tie words', async () => {
   const meters = { mood: { word: 'Alarmed', valence: -2, bars: { energy: 5, control: 2, max: 6 }, cause: 'trust dropped: Astra lied' }, pull: { kind: 'closure', level: 3, days: 0, cause: 'an open thread' },
     secrets: [], bars: [], notes: { ties: [{ name: 'Bregje', tags: ['rival'] }], lies: [{ hidden: true, day: 5 }], knows: [], tastes: [], drives: [] } };
   const base = { ...dossierDetailProjection({ id: 'r', name: 'Rika', location: 'Deck', goal: 'Pay the crew', status: 'Tense', keyRelationships: ['Bregje: rival | clashes'],
     fieldChanges: { mood: 3, location: 3 }, fieldChangeMessages: { mood: 3, location: 3 }, relationshipEventHistory: [{ impact: 'ordinary', reason: 'a gift', evidence: { desire: 'toffee' }, message: 1 }] }, {}, {}), v2Meters: v2MetersProjection(meters) };
-  const now = sectionScreenHtml('now', base, { reply: 3 });
+  const now = sectionScreenHtml('mood', base, { reply: 3 });
+  const where = sectionScreenHtml('now', base, { reply: 3 });
   assert.match(now, /<b>Alarmed<\/b> · unpleasant, keyed-up/, 'the word with the bars\' plain words');
   assert.equal((now.match(/delta-sheet-meter delta-mood-/g) || []).length, 3, 'Feeling, Energy, Control');
-  assert.ok(now.indexOf('Recent changes') < now.indexOf('Where and what') && now.indexOf('<dt>Goal</dt>') < now.indexOf('<dt>Pull'), 'groups in order, Pull last');
+  assert.ok(now.indexOf('Recent changes') < now.indexOf('>Pull<'), 'Mood: the mood rows, Recent changes, then the Pull');
+  assert.doesNotMatch(now, /Where and what|<dt>Goal/, 'where and what moved to Right now');
+  assert.doesNotMatch(where, /Recent changes|delta-mood-rows|<dt>Mood|delta-pull-row/, 'Right now has no mood part');
+  assert.match(where, /<dt>Where<\/dt>[\s\S]*<dt>Goal<\/dt>[\s\S]*<dt>Condition<\/dt>/);
   assert.match(now, /no change \u00b7 fading toward (her|his|their) calm[\s\S]*trust dropped: Astra lied/, 'a quiet reply says so, and an older cause stands as a row');
-  assert.match(now, /<dt>Pull <span class="delta-new-badge">New<\/span><\/dt><dd><b>Closure<\/b> · an open thread/);
-  assert.match(now, /Updated this reply \(#3\): mood, where\./);
-  assert.match(sectionScreenHtml('now', base, { reply: 5 }), /Updated at reply #3: mood, where\./);
+  assert.match(now, /<h4 class="delta-subhead">Pull<\/h4><div class="delta-pull-row"><b>Closure<\/b><span class="delta-pips"[^>]*><i class="on"><\/i><i class="on"><\/i><i class="on"><\/i><\/span><span class="delta-muted">high · 0 days · an open thread<\/span> <span class="delta-new-badge">New<\/span>/);
+  assert.match(now, /Updated this reply \(#3\): mood\./);
+  assert.match(where, /Updated this reply \(#3\): where\./);
+  assert.match(sectionScreenHtml('now', base, { reply: 5 }), /Updated at reply #3: where\./);
+  assert.match(sectionScreenHtml('mood', base, { reply: 5 }), /Updated at reply #3: mood\./);
   const withHtml = sectionScreenHtml('with', { ...base, lastRelationshipChange: { impact: 'net', delta: { trust: 0, affection: 0, desire: 0, tension: 2 }, reason: '', turn: null, message: 3, hosted: true, event: { tier: 'meaningful', held: false, note: '', ask: [], date: 'Goldwane 21', gate: 'via praise · backfired' } } }, {});
   assert.match(withHtml, /Recent changes[\s\S]*delta-chg-when">Goldwane 21<br><small>#3<\/small>[\s\S]*data-good="no">Tension \+2[\s\S]*via praise: it backfired[\s\S]*Desire/);
   assert.doesNotMatch(withHtml, /Last relationship change/);
   const ties = sectionScreenHtml('ties', base, {});
   assert.match(ties, /data-tone="bad"><span class="delta-bond-word">rival<\/span>/);
-  assert.match(ties, /a lie you have not caught/, 'an uncaught lie never shows its words');
+  assert.match(withHtml, /a lie you have not caught/, 'an uncaught lie never shows its words');
   const css = await builtCss();
   assert.doesNotMatch(css.match(/\.delta-bond-word \{[^}]*\}/g)?.join(' ') || '', /border:1px/, 'the relation word is plain coloured text, no pill');
 });
@@ -563,7 +582,8 @@ test('round 2 fix 6-11: gate words, pronouns, the Pull ring at three quarters, t
   assert.deepEqual(['female', 'male', 'x'].map(g => possessiveWord(g, { lower: true })), ['her', 'his', 'their']);
   const tiles = boardTiles({ tiles: { lastChange: { moved: [{ axis: 'tension', label: 'Tension', value: 2 }] }, pull: { text: 'Closure', level: 3, note: 'high' }, mood: { text: 'Calm' } } }, { userName: 'Astra' });
   assert.equal(tiles[0].tone, 'bad', 'tension up reads as bad');
-  assert.equal(tiles.find(tile => tile.title === 'Pull').ring.value, 75, 'high is three quarters');
+  assert.match(tiles.find(tile => tile.title === 'Mood').footHtml, /aria-label="strength 3 of 3"/, 'high is all three dots');
+  assert.match(boardTiles({ tiles: { pull: { text: 'Awe', level: 1, note: 'low' }, mood: { text: 'Calm' } } }, {}).find(tile => tile.title === 'Mood').footHtml, /strength 1 of 3"[^>]*><i class="on"><\/i><i><\/i><i><\/i>/, 'low is one dot');
   const sweep = value => { const arc = dialArcs({ trust: value }).find(a => a.axis === 'trust'); const [x, y] = arc.path.split('A')[1].split(' ').slice(-2).map(Number); return Math.round(Math.atan2(x - 120, 120 - y) * 180 / Math.PI); };
   assert.equal(sweep(100), 90); assert.equal(sweep(25), 45); assert.ok(sweep(11) >= 28 && sweep(11) <= 32, 'about a third of the quadrant at +11');
   const { dossierIndexProjection } = await import('../dossier-ui-model.js');
@@ -669,15 +689,15 @@ test('mood rows: Feeling / Energy / Control with their number on the -3..+3 scal
   ];
   const meters = { mood: { word: 'Alarmed', valence: -1, energy: 2, control: -1, bars: { energy: 5, control: 2, max: 6 }, cause: '', log }, bars: [], secrets: [] };
   const base = { ...dossierDetailProjection({ id: 'r', name: 'Rika', gender: 'female' }, {}, {}), v2Meters: v2MetersProjection(meters) };
-  const now = sectionScreenHtml('now', base, { reply: 112 });
+  const now = sectionScreenHtml('mood', base, { reply: 112 });
   assert.match(now, /delta-mood-feel[^"]*"><span>Feeling<\/span><i class="delta-sheet-track"[^>]*><b style="left:33\.3\d*%;width:16\.6\d*%"><\/b><\/i><strong>\u22121<\/strong><em class="delta-sheet-chip" data-good="no">\u22121<\/em>/, 'number and chip on the one row');
   assert.match(now, /delta-mood-energy[^"]*"><span>Energy<\/span>[\s\S]*<strong>\+2<\/strong><em class="delta-sheet-chip" data-good="yes">\+2<\/em>/);
   assert.equal((now.match(/class="delta-chg"/g) || []).length, 3, 'the last three changes only');
   assert.doesNotMatch(now, /ancient/);
   assert.match(now, /Goldwane 21<br><small>#112<\/small>[\s\S]*Feeling \u22121[\s\S]*Energy \+2[\s\S]*Control \u22121[\s\S]*the crawlers breached/);
   assert.match(now, /Energy \+1<\/span><\/b><div class="delta-chg-via">no reason given/, 'no reason recorded is said plainly');
-  const quiet = sectionScreenHtml('now', base, { reply: 115 });
-  assert.match(quiet, /<h4>Recent changes<\/h4><ul class="delta-list"><li class="delta-chg"><span class="delta-chg-when"><small>#115<\/small><\/span><div><b><span class="delta-chg-d" data-good="muted">no change \u00b7 fading toward her calm/, 'a quiet reply starts the list');
+  const quiet = sectionScreenHtml('mood', base, { reply: 115 });
+  assert.match(quiet, /<h4 class="delta-subhead">Recent changes<\/h4><ul class="delta-list"><li class="delta-chg"><span class="delta-chg-when"><small>#115<\/small><\/span><div><b><span class="delta-chg-d" data-good="muted">no change \u00b7 fading toward her calm/, 'a quiet reply starts the list');
   assert.equal((quiet.match(/class="delta-chg"/g) || []).length, 3, 'the quiet row counts in the three');
   assert.doesNotMatch(quiet, /delta-sheet-chip/, 'no chip when the reply on show moved nothing');
   const board = boardHtml(base, { reply: 112 });
@@ -708,4 +728,23 @@ test('profile: every section keeps its heading and a muted one-line placeholder 
   assert.match(css, /\.delta-profile-cols > \.delta-profile-block:nth-child\(2\) \{ border-top:0/, 'desktop: no line above the first row');
   assert.match(css, /--feel: #e2c46f; --energy: #e08a5b; --control: #7fb6ad/, 'the three mood axes are skin tokens, with light-theme variants');
   assert.match(css, /--feel: oklch\(from var\(--delta-text\)/);
+});
+
+test('six sections: the Mood tile opens Mood with the Pull in its foot, Ties counts ties not lies, every entry has a divider and every sub-heading one spacing rule', async () => {
+  const lies = [{ hidden: false, to: 'Astra', said: 'I sold nothing', day: 3, caught: { day: 4 } }, { hidden: true, to: 'Astra', day: 5 }];
+  const npc = { ...rika, keyRelationships: ['Temiwa: friend | kind', 'Vane: rival | clashes'], v2Meters: { bars: [], secrets: [], pull: { kind: 'closure', level: 2, days: 1, cause: '' }, notes: { lies, knows: [{ about: 'Y', how: 'heard', day: 3, text: 'Y owes a debt', secret: false, hidden: false }], ties: [], tastes: [], drives: [] } } };
+  const html = boardHtml(npc, {});
+  assert.match(html, /data-delta-section="mood"[\s\S]*delta-pull-row[\s\S]*strength 2 of 3/);
+  assert.equal((html.match(/delta-pull-row/g) || []).length, 1, 'one Pull line, no card of its own');
+  assert.match(html, /<span class="delta-tile-small">2 · Temiwa, Vane<\/span>/, 'the Ties tile counts ties only');
+  assert.doesNotMatch(html, / · \d+ lies?\b/);
+  const ties = sectionScreenHtml('ties', npc, {});
+  assert.doesNotMatch(ties, /delta-notes-block/);
+  assert.match(sectionScreenHtml('with', npc, {}), /data-notes="lies"/);
+  assert.match(sectionScreenHtml('secrets', npc, {}), /data-notes="knows"/);
+  const css = await builtCss();
+  assert.match(css, /\.delta-bond, [^{]*\.delta-note-row \{ margin:0; padding:10px 0; border-top:1px solid var\(--delta-line\); \}/, 'every tie, lie and knows entry: a divider above, one spacing');
+  assert.match(css, /\.delta-sheet \.delta-subhead \{ margin:18px 0 0; \}/, 'one shared rule spaces every sub-heading');
+  assert.doesNotMatch(css, /\.delta-notes-block h4 \{[^}]*margin/, 'no heading sets its own spacing');
+  for (const id of ['mood', 'with', 'secrets']) assert.equal((sectionScreenHtml(id, npc, {}).match(/<h4(?! class="delta-subhead")/g) || []).length, 0, `${id}: every sub-heading carries the shared class`);
 });
