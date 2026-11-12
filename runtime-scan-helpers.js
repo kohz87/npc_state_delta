@@ -83,7 +83,7 @@ export function stampManualEdit(state, npc, before) {
 }
 
 export function narrationCaptureEnabled(settings = getSettings()) {
-    return Boolean(settings.enabled && settings.narrationCapture && settings.autoScan && !settings.fullScanEveryTurn);
+    return Boolean(settings.enabled && settings.narrationCapture && !settings.fullScanEveryTurn);
 }
 
 // A change between two lineages other than the reply at `messageId` rewritten in place.

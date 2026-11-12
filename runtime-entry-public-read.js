@@ -23,7 +23,9 @@ export function createPublicApiReadPart(deps) {
     cancelScan: () => { const key = getChatKey(); pendingAutoScans.delete(key); return cancelScanOperation(key, 'user cancelled'); },
     scannerRouting: scannerRoutingMetrics,
     // (v2 Diagnostics) The scanner's plain lines for Story Block's report: route, profile, calls, last outcome.
-    scannerReport: () => scannerDiagnosticLines({ ctx: getContext(), settings: getSettings(), enabled: !!getSettings().enabled }),
+    scannerReport: () => scannerDiagnosticLines({ ctx: getContext(), settings: getSettings(), enabled: !!getSettings().enabled }).concat(
+        rt.lastCaptureFallback?.chatKey === getChatKey() ? ['Problems: the reply had no NPC capture; scanned it instead.'] : [],
+    ),
     processBackfills: processPendingBackfills,
     scanDossier: async value => {
         const key = getChatKey();

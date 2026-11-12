@@ -70,11 +70,12 @@ try {
     const minus = (a, b) => Object.fromEntries(Object.keys(a).map(key => [key, a[key] - b[key]]));
     // One reply with a capture block: the calls the reply's MESSAGE_RECEIVED awaited, and all the
     // calls it led to once Delta settled.
-    const reply = async (text, payload) => {
+    const reply = async (text, payload, { unterminated = false } = {}) => {
         mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
         await emitAll('message_sent', mockState.context.chat.length - 1);
         await emitAll('generation_after_commands', 'normal', {}, false);
-        const mes = \`\${text}\\n\\n<!--npc_state_delta\\n\${JSON.stringify(payload)}\\n-->\`;
+        const raw = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        const mes = payload === null ? text : text + '\\n\\n<!--npc_state_delta\\n' + raw + (unterminated ? '' : '\\n-->');
         mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes, swipe_id: 0, swipes: [mes] });
         const id = mockState.context.chat.length - 1;
         const before = kinds();
@@ -84,7 +85,7 @@ try {
         await sleep(400);
         return { id, held, all: minus(kinds(), before) };
     };
-    const result = await (${scenario.toString()})({ reply, settings, mockState, sleep, kinds });
+    const result = await (${scenario.toString()})({ reply, settings, mockState, sleep, kinds, emitAll });
     console.log('RESULT ' + JSON.stringify(result));
 } finally {
     for (const handle of pendingHostTimers) nativeClearTimeout(handle);
@@ -168,4 +169,114 @@ test('hosted one-pass: the backfill runs on the reply, the catch-up Refresh on i
     assert.equal(result.second.refresh, 1, 'the catch-up Refresh of the second captured reply');
     assert.equal(result.second.backfill, 0, 'nothing left to backfill');
     assert.equal(result.queued, 0);
+});
+
+test('ONEPASSMISS-1: missing hosted capture scans the same reply once, admits new people and reports it quietly', () => {
+    const result = runCalls('missing-capture', true, async ({ reply, settings, mockState, emitAll, sleep, kinds }) => {
+        settings.scanEvery = 10;
+        mockState.sdk.feature = id => id !== 'npc-state-delta.scan-every-reply';
+        const people = ['Sieke', 'Sister Temiwa'].map(name => ({ name, present: true, role: 'clerk', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named person', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }));
+        mockState.quietResponder = async (args = {}) => /isolated dossier scanner\./i.test(String(args.systemPrompt || '')) ? JSON.stringify({ npcs: people }) : '{"npcs":[]}';
+        const first = await reply('Sieke waves. Sister Temiwa greets her at the gate.', null);
+        const scanCount = globalThis.NPCStateDelta.getState().scanCount;
+        await emitAll('message_received', first.id);
+        await sleep(100);
+        return {
+            calls: first.all, afterDuplicate: kinds(), scanCount, scanCountAfterDuplicate: globalThis.NPCStateDelta.getState().scanCount,
+            people: globalThis.NPCStateDelta.getState().npcs.map(npc => npc.name),
+            lines: globalThis.NPCStateDelta.scannerReport().filter(line => line.includes('the reply had no NPC capture')),
+            prompt: mockState.rawCalls.find(call => /isolated dossier scanner\./i.test(String(call?.[0]?.systemPrompt || '')))?.[0]?.prompt,
+        };
+    });
+    assert.equal(result.calls.scanner, 1);
+    assert.equal(result.calls.relationship, 0, 'hosted one-pass keeps its focused-pass budget');
+    assert.ok(result.calls.backfill <= 1, 'the existing hosted per-reply backfill limit remains');
+    assert.equal(result.afterDuplicate.scanner, 1, 'a duplicate receipt does not scan again');
+    assert.equal(result.scanCountAfterDuplicate, result.scanCount, 'a duplicate receipt is not applied twice');
+    assert.ok(result.people.includes('Sieke') && result.people.includes('Sister Temiwa'));
+    assert.match(result.prompt, /Sieke waves/);
+    assert.deepEqual(result.lines, ['Problems: the reply had no NPC capture; scanned it instead.']);
+});
+
+test('ONEPASSMISS-1: valid and salvageable hosted captures replace the scan; empty and broken captures fall back', () => {
+    const result = runCalls('capture-salvage-and-fallback', true, async ({ reply, settings, mockState }) => {
+        settings.scanEvery = 10;
+        mockState.sdk.feature = id => id !== 'npc-state-delta.scan-every-reply';
+        const valid = await reply('The night is quiet.', { npcs: [] });
+        const openEnvelope = await reply('The road is empty.', '{"npcs":[]}', { unterminated: true });
+        const slipped = await reply('Sieke is weary.', '{"npcs":[{"name":"Sieke","present":true,"moodV:0,"moodA":1}]}', { unterminated: true });
+        const empty = await reply('They walk down the road.', '');
+        const emptyObject = await reply('They stop at a bridge.', '{}');
+        const broken = await reply('They rest by the fire.', '{"npcs":[{"name":"Sis', { unterminated: true });
+        return { valid: valid.all, openEnvelope: openEnvelope.all, slipped: slipped.all, empty: empty.all, emptyObject: emptyObject.all, broken: broken.all, stats: globalThis.NPCStateDelta.uiStatus().narrationCapture };
+    });
+    assert.equal(result.valid.scanner, 0, 'an empty NPC array is still a complete capture');
+    assert.equal(result.openEnvelope.scanner, 0, 'a complete JSON object in an unclosed envelope is read');
+    assert.equal(result.slipped.scanner, 0, 'existing key salvage runs before fallback');
+    assert.equal(result.empty.scanner, 1, 'an empty block is not a capture');
+    assert.equal(result.emptyObject.scanner, 1, 'an empty object is not a capture');
+    assert.equal(result.broken.scanner, 1, 'irrecoverably cut-off JSON is scanned');
+    assert.equal(result.stats.used, 3);
+    assert.equal(result.stats.invalid, 2);
+    assert.equal(result.stats.unterminated, 1);
+});
+
+test('ONEPASSMISS-1: a fallback result is discarded if its chat changes during the request', () => {
+    const result = runCalls('fallback-chat-change', true, async ({ reply, settings, mockState, sleep }) => {
+        settings.scanEvery = 10;
+        mockState.sdk.feature = id => id !== 'npc-state-delta.scan-every-reply';
+        let release;
+        mockState.quietResponder = async args => {
+            if (!/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            return new Promise(resolve => { release = resolve; });
+        };
+        const pending = reply('Sieke waves at the gate.', null);
+        for (let i = 0; i < 100 && !release; i += 1) await sleep(10);
+        if (!release) throw new Error('the fallback did not start');
+        mockState.context.chatId = 'another-chat';
+        mockState.context.getCurrentChatId = () => 'another-chat';
+        release(JSON.stringify({ npcs: [{ name: 'Sieke', present: true, identityKind: 'proper_name', dossierSignal: 'high', directInteraction: true }] }));
+        await pending;
+        mockState.context.chatId = 'smoke-chat';
+        mockState.context.getCurrentChatId = () => 'smoke-chat';
+        await sleep(100);
+        return { names: globalThis.NPCStateDelta.getState().npcs.map(npc => npc.name), lines: globalThis.NPCStateDelta.scannerReport().filter(line => line.includes('the reply had no NPC capture')) };
+    });
+    assert.ok(!result.names.includes('Sieke'), 'no stale dossier is committed');
+    assert.deepEqual(result.lines, [], 'a discarded result is not reported as scanned');
+});
+
+test('ONEPASSMISS-2: one-pass with Auto scan off still captures; a missing block falls back exactly once', () => {
+    const result = runCalls('autoscan-off', true, async ({ reply, settings, mockState, emitAll, sleep, kinds }) => {
+        settings.autoScan = false;
+        settings.scanEvery = 10;
+        mockState.sdk.feature = id => id !== 'npc-state-delta.scan-every-reply';
+        const enabled = globalThis.NPCStateDelta.uiStatus().narrationCapture.enabled;
+        const captured = await reply('Sieke waves at the gate.', { npcs: [{ name: 'Sieke', present: true, role: 'clerk', identityKind: 'proper_name', dossierSignal: 'high', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] });
+        const names = globalThis.NPCStateDelta.getState().npcs.map(npc => npc.name);
+        mockState.quietResponder = async (args = {}) => /isolated dossier scanner\./i.test(String(args.systemPrompt || '')) ? JSON.stringify({ npcs: [{ name: 'Temiwa', present: true, role: 'nun', identityKind: 'proper_name', dossierSignal: 'high', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] }) : '{"npcs":[]}';
+        const missing = await reply('Sister Temiwa greets her.', null);
+        await sleep(150);
+        const scanCount = globalThis.NPCStateDelta.getState().scanCount;
+        await emitAll('message_received', missing.id);
+        await sleep(100);
+        const noticeAfterMissing = globalThis.NPCStateDelta.scannerReport().filter(line => line.includes('the reply had no NPC capture')).length;
+        const scanCountAfterDuplicate = globalThis.NPCStateDelta.getState().scanCount;
+        await reply('The gate closes.', { npcs: [] });
+        return { enabled, captured: captured.all, names, missing: missing.all, afterDuplicate: kinds(), scanCount, scanCountAfterDuplicate, noticeAfterMissing, noticeAfterCapture: globalThis.NPCStateDelta.scannerReport().filter(line => line.includes('the reply had no NPC capture')).length };
+    });
+    assert.equal(result.enabled, true);
+    assert.equal(result.captured.scanner, 0, 'the block alone updated the dossiers');
+    assert.ok(result.names.includes('Sieke'), 'a capture with Auto scan off is applied');
+    assert.equal(result.missing.scanner, 1, 'a missing block scans once');
+    assert.equal(result.afterDuplicate.scanner, 1, 'a duplicate receipt never scans or applies twice');
+    assert.equal(result.scanCountAfterDuplicate, result.scanCount);
+    assert.equal(result.noticeAfterMissing, 1);
+    assert.equal(result.noticeAfterCapture, 0, 'the notice follows the latest reply only');
+});
+
+test('ONEPASSMISS-2: the settings text no longer ties one-pass to Auto scan', () => {
+    const html = fs.readFileSync(new URL('../runtime-settings-html.js', import.meta.url), 'utf8');
+    assert.match(html, /Works on its own, with Auto scan on or off/);
+    assert.doesNotMatch(html, /'With Auto scan, the roleplay model/);
 });
