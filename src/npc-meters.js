@@ -319,7 +319,7 @@ export function createNpcPart(hooks = {}) {
     }
 
     // `milestone`: { add: [{ key, name }], remove: [key] } (the reader's or a story line's).
-    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false, scanTier = null, via = null, reason = '', leaf = null }) {
+    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false, scanTier = null, scanWhy = '', via = null, reason = '', leaf = null }) {
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         if (!changes.length && disposition === undefined && !allowEmpty) {
@@ -364,7 +364,7 @@ export function createNpcPart(hooks = {}) {
         }
         // This event's outcome, written whole on the record (display only; the card's tier, held and asked).
         if (spent && replyKey(reply, reply) !== null) {
-            const text = nextEvent(record.lastEvent, { reply: replyKey(reply, reply), date: clockDay(at) === null ? '' : call(hooks.startDate, '', at), src: impact ? 'story' : 'scan', ask: askedNow, tier: spent.used ?? asked, held: !spent.used, note: pace, via: gated?.via, gate: gated?.event, why: reasonKept(ctx, who.key, reason) });
+            const text = nextEvent(record.lastEvent, { reply: replyKey(reply, reply), date: clockDay(at) === null ? '' : call(hooks.startDate, '', at), src: impact ? 'story' : 'scan', ask: askedNow, tier: spent.used ?? asked, held: !spent.used, note: pace, via: gated?.via, gate: gated?.event, why: reasonKept(ctx, who.key, reason || scanWhy) });
             if (text) record.lastEvent = text;
         }
         if (!limit) {
