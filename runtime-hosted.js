@@ -314,8 +314,8 @@ export function createHostedPart(rt, deps) {
                 const out = await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId });
                 const key = `${getChatKey()}|${npc.id}`;
                 meetTried.add(key);
-                // Kept when the host took it or says there is nothing to add (REFUSED); anything else is owed again.
-                if (!out || (out.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND')) meetOwed.add(key);
+                // Owed again when the host did not keep it (not REFUSED: nothing to add); taken, or no answer (no host), clears it.
+                if (out?.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') meetOwed.add(key);
                 else meetOwed.delete(key);
                 stage1Refresh();
             }
