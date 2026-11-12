@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
     decodeStateFilePayload,
     decodeStateFileHead,
@@ -501,10 +506,10 @@ test('v2: a v1 file is read without any write; reading never converts it', async
 });
 
 test('v2 rollback: rolling back to every reply gives byte-identical results from the v1 and the v2 file', () => {
-    const { state, chat } = buildChat(30);
+    const { state, chat } = buildChat(60);
     const a = viaV1(state);
     const b = viaV2(state);
-    for (let k = 1; k <= 30; k += 1) {
+    for (let k = 1; k <= 60; k += 1) {
         const cut = chat.slice(0, k * 2);
         const ra = atClock(() => reconcileBranchState(structuredClone(a), cut, { explicitDivergence: cut.length }));
         const rb = atClock(() => reconcileBranchState(structuredClone(b), cut, { explicitDivergence: cut.length }));
@@ -597,6 +602,37 @@ test('v2 older build: a v1 decoder refuses a v2 file and the file bytes are unto
     assert.ok(gets >= 1);
     assert.equal(undurableNpcStateSnapshot(chatKey)?.state?.turn, state.turn, 'the unsaved copy is kept in memory');
     assert.equal(cancelPendingNpcStateWrite(chatKey), true);
+});
+
+// T9b: the real pre-format-2 build (origin/main at the time of format 2) meets a v2 file on its write path. Its decoder refuses
+// (no error code, so it retries a bounded number of times); it must never upload, and the server bytes stay unchanged.
+// Skipped when git or the base ref is not available (a source tarball). Uses the real old storage.js, not a copy kept here.
+test('v2 older build (T9b): the real previous build, writing over a v2 file, uploads nothing and leaves the bytes unchanged', async t => {
+    const dir = mkdtempSync(join(tmpdir(), 'nsd-old-build-'));
+    try {
+        const here = dirname(fileURLToPath(import.meta.url));
+        const packed = spawnSync('sh', ['-c', 'git archive "$0" | tar -x -C "$1"', 'origin/main', dir], { cwd: join(here, '..') });
+        if (packed.status !== 0 || !existsSync(join(dir, 'storage.js'))) { t.skip('no git history for origin/main'); return; }
+        const old = await import(pathToFileURL(join(dir, 'storage.js')).href);
+        if (old.NPC_STATE_FILE_FORMAT_VERSION !== 1) { t.skip('origin/main already writes format 2'); return; }
+        const { state } = buildChat(30);
+        const chatKey = 'chat:old-tab';
+        const v2 = encodeStateFilePayload(chatKey, state, 'new', { revision: 5, writerId: 'newtab' });
+        assert.equal(JSON.parse(v2).formatVersion, 2);
+        assert.throws(() => old.decodeStateFilePayload(v2), /Unsupported NPC State Delta data file version: 2/);
+        const name = old.makeNpcStateDataFileName(chatKey);
+        const path = `/user/files/${name}`;
+        let gets = 0; let uploads = 0;
+        const fetchFn = async (url) => {
+            if (String(url).startsWith(path)) { gets += 1; return { ok: true, status: 200, headers: { get: () => null }, text: async () => v2 }; }
+            if (url === '/api/files/upload') { uploads += 1; return { ok: true, status: 200, json: async () => ({ path }), text: async () => '' }; }
+            return { ok: false, status: 404, headers: { get: () => null }, text: async () => '' };
+        };
+        await assert.rejects(old.writeNpcStateDataFile({ chatKey, state: { turn: 1, npcs: [] }, appVersion: 'old', pointer: { name, path, revision: 4, writerId: 'oldtab' }, fetchFn, sleepFn: (fn) => fn(), continuousRetry: false }), /Unsupported/);
+        assert.equal(uploads, 0, 'the old build uploads nothing over a v2 file');
+        assert.ok(gets >= 1);
+        old.cancelPendingNpcStateWrite?.(chatKey);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('v2 size and cost: 28 / 100 / 500 replies, measured against the v1 text of the same state (numbers are printed)', () => {

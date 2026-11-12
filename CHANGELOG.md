@@ -1,5 +1,7 @@
 ## Unreleased
 
+Saved NPC State Delta files are about 4-5x smaller (checkpoint history is stored as patches; rollback is unchanged). A chat saved by this version cannot be opened by older versions: if an older version shows this chat's dossier as unreadable, update the extension; do not use Detach Broken Sidecar.
+
 ## 1.16.1
 
 Update Story Block, Story Director and NPC State Delta together. Replies already written replay and Re-read exactly as before. For the harder foes, start a new chat (or re-add the Foes block).
