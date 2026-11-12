@@ -8,6 +8,7 @@ import { storyDayAt, tieDayAt, currentExclusions, refreshMessageGate, activeChat
 import { BACKFILL_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { buildDossierImportPrompt, mergeScanResult, protectTerminalNpc } from './core.js';
 import { chatLineage } from './branch.js';
+import { isScannerRoutingError } from './scanner-routing.js';
 import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { replayScope, setNpcDossierScanIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
@@ -101,6 +102,7 @@ export function createTargetedPart(rt, deps) {
         operation.sourceLineage = lineage;
         // (1.2.9, as the scan) The latest reply rewritten in place by another extension is still the source.
         operation.sourceMessageId = boundMessageId >= 0 ? boundMessageId : null;
+        let committed = false;   // set once anything is written or forwarded: from then on an error is reported, never retried
         runningTargetedPasses.add(operation);
         setScanIndicator(true);
         job.setIndicator?.(true);
@@ -120,6 +122,13 @@ export function createTargetedPart(rt, deps) {
                 job.onStale();
                 return false;
             }
+            // The last awaited read comes BEFORE the state is read and merged: everything below is synchronous, so a write that lands during the
+            // freshness fetch is already in `latest` and is never overwritten by an older snapshot.
+            if (!await scanCanonicalBaseCurrent(chatKey, operation, `${job.staleLabel} final commit`)) {
+                if (targetMoved(chatKey, operation)) return TARGET_CHANGED;
+                job.onLateStale?.();
+                return false;
+            }
             if (targetFingerprint(chatKey, id) !== operation.targetFingerprint) return TARGET_CHANGED;
             const latest = getChatState(chatKey);
             const liveBefore = latest.npcs.find(npc => npc.id === id) || null;
@@ -134,6 +143,7 @@ export function createTargetedPart(rt, deps) {
             const scoped = job.scope(parsed, { latest, liveBefore });
             if (!scoped.ok) {
                 if (scoped.noChange) {
+                    committed = true;
                     forwardNotes();
                     const metrics = targetedPassMetrics(metricsLabel, { startedAt, prompt, raw, retried, parsed, localEdges: scoped.localEdges });
                     if (job.reportsScanMetrics) rt.lastScanMetrics = metrics;
@@ -175,11 +185,7 @@ export function createTargetedPart(rt, deps) {
             job.afterMerge?.(result, { liveBefore, scoped, merged });
             if (liveBefore) advanceCastAdmission(merged.state, liveBefore, result); // (ONEPASSCAPR2-2) an automatic fill is still subordinate to the pack
             if (liveBefore) Object.assign(result, protectTerminalNpc(liveBefore, result));
-            if (!await scanCanonicalBaseCurrent(chatKey, operation, `${job.staleLabel} final commit`)) {
-                if (targetMoved(chatKey, operation)) return TARGET_CHANGED;
-                job.onLateStale?.();
-                return false;
-            }
+            committed = true;
             forwardNotes();
             if (acceptedInput) recordAcceptedFill(merged.state, ctx.chat || [], job.captureMessageId, id, acceptedInput, job.captureKind || 'fills');
             if (targetMessageId >= 0) {
@@ -198,7 +204,7 @@ export function createTargetedPart(rt, deps) {
             console.info(`[NPC State Delta] ${metricsLabel} metrics`, metrics);
             return job.onDone(getChatState(chatKey).npcs.find(npc => npc.id === id));
         } catch (error) {
-            if (targetMoved(chatKey, operation)) return TARGET_CHANGED;   // cancelled mid-call only because its target's record changed
+            if (!committed && isScannerRoutingError(error) && error.code === 'NPC_SCANNER_ROUTE_CANCELLED' && targetMoved(chatKey, operation)) return TARGET_CHANGED;   // cancelled mid-call only because its target's record changed
             return job.onError(error);
         } finally {
             runningTargetedPasses.delete(operation);

@@ -9,6 +9,7 @@ import { isEmptyScannerAnswer } from './scanner-routing.js';
 import { refreshMessageGate, messageGateSettled } from './src/transcript.js';
 import { chatLineage, fingerprintMessage, lineageCheckpointKey } from './branch.js';
 import { getSettings } from './runtime-settings.js';
+import { currentWriterId } from './storage.js';
 import { replayScope, setNpcDossierScanIndicator, setNpcChatRefreshIndicator, lineageMoved, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
 
 export function createScanOpsPart(rt, deps) {
@@ -108,7 +109,10 @@ export function createScanOpsPart(rt, deps) {
             || !lineageMoved(operation.sourceLineage, chatLineage(getContext().chat || []), operation?.sourceMessageId));
         // A targeted pass is re-based when only the revision moved (an unrelated or earlier save): the freshness read above installed any foreign copy
         // (which cancels the operation), so what remains is this session's own state, and its target is checked by record.
-        const targetRebased = currentRevision !== baseRevision && Boolean(operation?.metadata?.npcId) && sourceIntact && scanOperationCurrent(key, operation)
+        // Only when the move was this page session's own write (the sidecar's writer is this session, observed and held alike).
+        const meta = hydratedStateMeta.get(key);
+        const ownWrite = Boolean(meta) && meta.writerId === currentWriterId() && meta.latestObservedServerWriterId === currentWriterId();
+        const targetRebased = currentRevision !== baseRevision && ownWrite && Boolean(operation?.metadata?.npcId) && sourceIntact && scanOperationCurrent(key, operation)
             && targetFingerprint(key, operation.metadata.npcId) === operation.targetFingerprint;
         const current = sourceIntact && scanOperationCurrent(key, operation) && (currentRevision === baseRevision || targetRebased);
         if (current && targetRebased) operation.canonicalRevision = currentRevision;
