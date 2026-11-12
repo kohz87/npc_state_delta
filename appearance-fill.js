@@ -79,7 +79,7 @@ export function fillLooksLine(npc = {}) {
     if (gaps.length) {
         // The dossier shows one combined look ("<overall>; <clothes>"): quote the exact text appendedLooks checks, and the clothes apart.
         const clothes = appearanceText(currentPresentationText(npc));
-        parts.push(`overallAppearance is exactly ${JSON.stringify(appearanceText(npc.overallAppearance))} and does not yet describe this person's ${gaps.join(', ')}. Return overallAppearance as that quoted text, unchanged, followed by a short addition for ${gaps.join(', ')} only, fitted to what the story and dossier say (kind and its own features, age, role, region, setting).${clothes ? ` The clothes text ${JSON.stringify(clothes)} is appearance, never part of overallAppearance.` : ''} Add nothing already described, and never a second colour or style for anything already stated.`);
+        parts.push(`overallAppearance is exactly ${JSON.stringify(appearanceText(npc.overallAppearance))} and does not yet describe this person's ${gaps.join(', ')}. Return overallAppearance as that quoted text, unchanged, followed by a short addition for ${gaps.join(', ')} only, fitted to what the story and dossier say (kind and its own features, age, role, region, setting).${clothes ? ` The current-presentation text ${JSON.stringify(clothes)} is appearance, never part of overallAppearance.` : ''} Add nothing already described, and never a second colour or style for anything already stated.`);
     }
     return `\nFILL LOOKS: ${parts.join(' ')} Never contradict or repeat anything stated; invent nothing else.`;
 }

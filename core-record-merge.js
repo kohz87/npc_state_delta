@@ -51,20 +51,34 @@ export function mergeLists(oldList, newList, limit = 8) {
 
 // A second pass over a reply already recorded (a new person's backfill or fill reads the reply the one-pass scan just stored) re-tells
 // that reply's memory in other words, too far apart for the similarity rule ("Registered Astra ... bodice button snapped ... culling
-// contracts" against "Took Astra's registration fee ... bodice burst open ... culling contracts", about 0.2 against 0.58). A new memory
-// sharing three or more distinctive words (4+ letters) with a stored memory stamped at that same reply is that event again: not stored.
-const distinctWords = text => new Set(durableRefinementTokens(text).filter(token => token.length >= 4 && !/^\d+$/.test(token)));
-export function sameReplyRetelling(item, oldList = [], stamps = {}, message = null) {
+// contracts" against "Took Astra's registration fee ... bodice burst open ... culling contracts", about 0.2 against 0.58). Narrow on purpose:
+// only a new memory, against a stored memory stamped at the SAME reply (same message id), never a hand-written (pinned) one, sharing
+// three or more distinctive words (4+ letters, proper names and places left out: they recur in every memory of a person) that are at
+// least a quarter of the shorter memory's words, is that event again and is not stored. Another reply, or a near-similar but different event, is kept.
+function distinctWords(text) {
+    const names = new Set();
+    for (const hit of String(text || '').matchAll(/[A-Z][a-z]+/g)) {
+        if (hit.index > 0 && !/[.!?]\s*$/.test(String(text).slice(0, hit.index))) names.add(hit[0].toLowerCase());
+    }
+    return new Set(durableRefinementTokens(text).filter(token => token.length >= 4 && !/^\d+$/.test(token) && !names.has(token)));
+}
+export function sameReplyRetelling(item, oldList = [], stamps = {}, message = null, pinned = []) {
     if (!Number.isInteger(message)) return false;
+    const keep = new Set((Array.isArray(pinned) ? pinned : []).map(normalizeName));
+    if (keep.has(normalizeName(item))) return false;
     const words = distinctWords(item);
-    return (Array.isArray(oldList) ? oldList : []).some(old => stamps?.[normalizeName(old)]?.m === message
-        && [...distinctWords(old)].filter(word => words.has(word)).length >= 3);
+    return (Array.isArray(oldList) ? oldList : []).some(old => {
+        if (stamps?.[normalizeName(old)]?.m !== message || keep.has(normalizeName(old))) return false;
+        const oldWords = distinctWords(old);
+        const shared = [...oldWords].filter(word => words.has(word)).length;
+        return shared >= 3 && shared / Math.min(oldWords.size, words.size) >= 0.25;
+    });
 }
 
 // (cleanup step 6) Memories the reader entered by hand (`pinned`, the record's manualMemories) are
 // never evicted: new ones take only the slots the reader's own leave free. `sameReply` ({ stamps, message }) drops re-tellings (above).
 export function mergeImportantMemories(oldList, newList, retentionList = [], incomingLimit = 3, pinned = [], sameReply = {}) {
-    const fresh = (Array.isArray(newList) ? newList : []).filter(item => !sameReplyRetelling(item, oldList, sameReply.stamps, sameReply.message));
+    const fresh = (Array.isArray(newList) ? newList : []).filter(item => !sameReplyRetelling(item, oldList, sameReply.stamps, sameReply.message, pinned));
     const merged = mergeUnpinnedMemories(oldList, fresh, retentionList, incomingLimit);
     const keep = (Array.isArray(pinned) ? pinned : []).map(normalizeName).filter(Boolean);
     if (!keep.length) return merged;

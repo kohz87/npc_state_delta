@@ -244,7 +244,7 @@ test('the fill line quotes the exact overallAppearance and, apart, the clothes t
     assert.deepEqual(partialLookGaps(sieke()), ['eyes']);
     assert.ok(line.includes(`overallAppearance is exactly ${JSON.stringify(`${SIEKE_LOOK}.`)} and does not yet describe this person's eyes.`), line);
     assert.ok(line.includes(`Return overallAppearance as that quoted text, unchanged, followed by a short addition for eyes only`));
-    assert.ok(line.includes(`The clothes text ${JSON.stringify(SIEKE_CLOTHES)} is appearance, never part of overallAppearance.`), line);
+    assert.ok(line.includes(`The current-presentation text ${JSON.stringify(SIEKE_CLOTHES)} is appearance, never part of overallAppearance.`), line);
     assert.ok(buildBackfillPrompt({ transcript: story, targetName: 'Sieke', existingNpc: sieke(), fillLooks: true }).includes(line));
     console.log(`Sieke fill line: ${line.length} chars (quoted look ${SIEKE_LOOK.length + 1}, clothes ${SIEKE_CLOTHES.length})`);
 });

@@ -143,6 +143,13 @@ test('a profile reply whose content arrives as a JSON object (proxy log shape) i
     assert.deepEqual(parseScanJson(raw), reply);
 });
 
+test('a profile reply shaped as a text content block is unwrapped to its text', async () => {
+    const { ctx } = fixture('fast');
+    const reply = { npcs: [{ name: 'Roelof', memories: ['Took the toll.'] }] };
+    ctx.ConnectionManagerRequestService.sendRequest = async () => ({ content: { type: 'text', text: JSON.stringify(reply) }, reasoning: '' });
+    assert.deepEqual(parseScanJson(await dispatchScannerRequest(ctx, payload)), reply);
+});
+
 for (const value of [null, {}, { content: {} }, () => {}]) test(`invalid profile response ${typeof value} does not coerce to fake JSON`, async () => {
     const { ctx } = fixture('fast');
     ctx.ConnectionManagerRequestService.sendRequest = async () => value;

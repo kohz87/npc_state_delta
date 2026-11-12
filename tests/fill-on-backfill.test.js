@@ -125,3 +125,17 @@ test('a backfill memory re-telling the same reply\'s one-pass memory is not stor
     assert.equal(sameReplyRetelling(BACKFILL, [ONE_PASS], { [normalizeName(ONE_PASS)]: { m: 11 } }, 12), false, 'another reply\'s memory: ordinary rule');
     assert.deepEqual(merge(recorded(), { memories: [BACKFILL] }, { sourceMessageId: 13 }).memories, [ONE_PASS, BACKFILL], 'a later reply is a new event');
 });
+
+test('same-reply rule is narrow: near-similar but different events, pinned memories and other replies are kept', () => {
+    const different = [
+        'Weeks earlier, Astra begged the Bluewatch Guild healer to save her dying hound after the ambush in the marshes.',
+        'Saw Astra beaten by the Bluewatch Guild master in front of the whole hall for a forged ledger.',
+        'Astra registered with the guild and later fought off three thugs in the Bluewatch alley, saving his life.',
+    ];
+    const stamps = { [normalizeName(ONE_PASS)]: { m: 12 } };
+    for (const text of different) assert.equal(sameReplyRetelling(text, [ONE_PASS], stamps, 12), false, text);
+    assert.equal(sameReplyRetelling(BACKFILL, [ONE_PASS], stamps, 12, [ONE_PASS]), false, 'a pinned stored memory is never matched');
+    assert.equal(sameReplyRetelling(BACKFILL, [ONE_PASS], stamps, 12, [BACKFILL]), false, 'a pinned incoming memory is never dropped');
+    assert.equal(sameReplyRetelling(BACKFILL, [ONE_PASS], stamps, 12), true, 'the owner pair still matches at the same reply');
+    assert.deepEqual(merge(recorded(), { memories: different }).memories.slice(0, 1), [ONE_PASS]);
+});
