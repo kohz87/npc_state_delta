@@ -36,6 +36,7 @@
 // before it). This file keeps the exported constants, the assembly of the parts and the adapter object they make.
 import { FEATURE_SCAN_EVERY_REPLY, FEATURE_NOTES, normalizeGeneratedSecrets, secretsFromLines, secretsToLines } from './npc-meters.js';
 import { lookDrift, lookFlagWording } from './npc-notes-look.js';
+import { driveEvidence } from './npc-notes-drives.js';
 import { METERS_CARD_ID } from './npc-meters-screen.js';
 import { DOSSIER_FIELDS } from './fields/registry.js';
 import { escapeHtml } from './util/html.js';
@@ -84,7 +85,7 @@ export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
 // Story Block's lean RPG feature (its names.js LEAN_RPG_FEATURE); an extension cannot import Story Block.
 const RPG_FEATURE = 'story-block.rpg';
 export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity', 'npc.catchUp']);
-export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.open', 'npc.tick', 'npc.flag', 'npc.meet', 'npc.taste']);
+export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.open', 'npc.tick', 'npc.flag', 'npc.meet', 'npc.mood', 'npc.taste', 'npc.drives']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
 export const TICK_TURNS = Object.freeze(['normal', 'swipe', 'regenerate']);
@@ -203,7 +204,7 @@ export function createStorySuiteV2Adapter({
     const editorPart = createEditorPart(session, deps);
     Object.assign(deps, editorPart);
     const { watchers, pageApi, offerPage } = castUiPart;
-    const { storyDateText, dossierOf, part, sliceEntries, entryFor, partyLevelsAnswer, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, directorCalendar, keyPeople, send, sliceView } = queriesPart;
+    const { storyDateText, storyDayNumber, dossierOf, part, sliceEntries, entryFor, partyLevelsAnswer, keyPeopleAnswer, keyPeopleReadable, keyAwayMemory, castAnswer, castPeople, castMade, packNames, packPortraitUrl, castGearLine, directorCalendar, keyPeople, send, sliceView } = queriesPart;
     const { ownPrompt, storyClock, calendarLink, definition, scenePresentNames } = timelinePart;
     const { poll, unhost, check } = connectPart;
     const { editorHtml, readEditor, dossierMeters, eventWatch } = editorPart;
@@ -218,6 +219,11 @@ export function createStorySuiteV2Adapter({
         adjust: ({ name, meters, start, reply, impact } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(typeof impact === 'string' ? { impact } : {}) }, { own: true, background: true }),
         /** While hosted: Delta's scan admitted a person → `npc.meet` (an entry with the dossier's meters, a resting mood and drives, like a cast meeting). */
         meet: ({ name, personality, about, reply } = {}) => send('npc.meet', { name, ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(personality ? { personality: String(personality).slice(0, 600) } : {}), ...(about ? { about: String(about).slice(0, 600) } : {}) }, { own: true, background: true }),
+        /** While hosted: Delta's scan wrote a new mood word for a person → `npc.mood` (its numbers: the three the scan gave, else the fixed word list; with the reason the scan recorded). */
+        mood: ({ name, word, vad, reason, reply, again, personality, about } = {}) => send('npc.mood', { name, word: String(word ?? '').slice(0, 220), ...(vad ? { vad } : {}), ...(personality ? { personality: String(personality).slice(0, 600) } : {}), ...(about ? { about: String(about).slice(0, 600) } : {}), ...(again === true ? { again: true } : {}), ...(reason ? { reason: String(reason).slice(0, 200) } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true, background: true }),
+        /** While hosted: what a scan newly recorded for one person (plain strings) → `npc.drives` (drive growth, rule 1). Only with the notes feature on and for a person who already has meters; else null. */
+        drives: ({ name, texts: given, before, after, reply } = {}) => ((texts) => !texts.length || part.featureOn(FEATURE_NOTES) !== true || !(() => { const entries = sliceEntries(); return Boolean(entries && entryFor(entries, dossierOf(name) ?? { name })); })() ? null
+            : send('npc.drives', { name, texts: texts.slice(0, 12).map(text => String(text).slice(0, 200)), rule: 1, ...(after?.role ? { ignore: String(after.role).slice(0, 120) } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true, background: true }))(Array.isArray(given) ? given : driveEvidence(before, after)),
         /** While hosted: Delta's scan tells the slice a person's look was first set (`lock`) or contradicted (`drift: { before, incoming }`, worded by npc-notes-look.js; or `text`, `cue`) → `npc.flag`. Only with the notes feature on and for a person who already has meters (a flag never makes an entry); else null. */
         flag: ({ name, text: said, cue: told, lock, reply, drift } = {}) => ((text, cue) => (!text && lock !== true ? null : part.featureOn(FEATURE_NOTES) === true && (() => { const entries = sliceEntries(); return Boolean(entries && entryFor(entries, dossierOf(name) ?? { name })); })() ? send('npc.flag', { name, ...(text ? { text } : {}), ...(cue ? { cue } : {}), ...(lock === true ? { lock: true } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true, background: true }) : null))(said || (drift ? lookDrift(drift.before, drift.incoming) : ''), told || (drift ? lookFlagWording(name, drift.before) : '')),
         /** While hosted: the tastes a Refresh read (`tastes`: [{ sign, item, from }]) → `npc.taste`, recorded on `reply`. Only for a person who already has meters and with the notes feature on; else null. `asksTastes()`: whether a Refresh should ask for them. */
@@ -258,6 +264,8 @@ export function createStorySuiteV2Adapter({
         directorCalendar,
         /** While hosted: the story's date after reply `index` ("Icewane 27"), '' without a clock; dates a memory when it is recorded. */
         storyDateText,
+        /** While hosted: the story day (whole days of Story Director's clock) after reply `index`, null without a clock; ties' last mention uses it. */
+        storyDayNumber,
         /** While hosted: Story Director's cast (`director.cast`) as it answers, or null when it cannot. */
         castAnswer,
         /** The same, cleaned (src/cast-dossier.js normalizeCast), dates written on Story Director's calendar. */

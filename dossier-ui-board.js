@@ -4,6 +4,7 @@ import { capFirst, initialsOf, portraitHtml } from './dossier-ui-html.js';
 import { dialHtml } from './dossier-ui-dial.js';
 import { profileMeterAxes } from './dossier-ui-profile.js';
 import { boardModel, gateWords, possessiveWord } from './dossier-ui-view-model.js';
+import { NO_REASON } from './dossier-ui-relationship.js';
 
 // Tone keys → the --delta-* tokens the skins define. Anything else gets no tone, so a model value can never inject CSS.
 const TONES = { good: 'var(--good, var(--delta-good))', bad: 'var(--bad, var(--delta-danger))', ten: 'var(--dsk-ten)', aff: 'var(--aff)', des: 'var(--des)', held: 'var(--held)' };
@@ -12,11 +13,26 @@ const toneVar = key => TONES[key] || 'var(--delta-muted)';
 const percent = value => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
 const signed = value => `${value > 0 ? '+' : ''}${value}`;
 
-// The Energy and Control bars of the Mood tile (the Board tile and the Right now section draw the same two bars).
-export const moodBarList = mood => (mood?.max ? [{ label: 'Energy', value: mood.energy, max: mood.max }, { label: 'Control', value: mood.control, max: mood.max }] : null);
-// Right now draws all three: Feeling too, spanning the full row.
-export const moodBarList3 = mood => (mood?.max ? [{ label: 'Feeling', value: mood.feeling, max: mood.max }, ...moodBarList(mood)] : null);
-export const barsHtml = bars => `<span class="delta-tile-bars">${bars.map(bar => `<span class="delta-tile-bar"><span>${esc(bar.label)}</span><i><b style="width:${percent((bar.value / (bar.max || 1)) * 100)}%"></b></i></span>`).join('')}</span>`;
+// One meter row, the markup the With {{user}} meters use: the label, a bar from the centre (the middle is zero; `range` is the value at either end), the
+// number, and, when it moved, the change as a small chip on the same line (`chip`: { text, good }). The mood rows reuse it.
+export const signedText = value => (value > 0 ? '+' : value < 0 ? '−' : '') + (Number.isInteger(value) ? Math.abs(value) : Math.abs(value).toFixed(1));
+export function meterRowHtml({ label, value, range, text = signedText(value), chip = null, cls = '' }) {
+    const pct = Math.max(-50, Math.min(50, (value / range) * 50));
+    return `<div class="delta-sheet-meter ${esc(cls)}${chip ? ' delta-sheet-meter-chip' : ''}"><span>${esc(label)}</span><i class="delta-sheet-track" aria-hidden="true"><b style="left:${pct < 0 ? 50 + pct : 50}%;width:${Math.abs(pct)}%"></b></i><strong>${esc(text)}</strong>${chip ? `<em class="delta-sheet-chip" data-good="${chip.good ? 'yes' : 'no'}">${esc(chip.text)}</em>` : ''}</div>`;
+}
+// Feeling, Energy and Control as meter rows (the Mood tile and Right now): the value on the stored -3..+3 scale, each axis in its own colour, the change of the reply on show as the chip.
+export const moodRowsHtml = mood => (mood?.rows?.length
+    ? `<div class="delta-sheet-meters delta-mood-rows">${mood.rows.map(row => meterRowHtml({ label: row.label, value: row.value, range: 3, cls: `delta-mood-${row.tone}`, chip: row.change ? { text: signedText(row.change), good: row.change > 0 } : null })).join('')}</div>` : '');
+
+// The Pull as one line (the mockup's pull row): the instinct word, one to three dots for its strength (no ring), and the strength and cause in muted words.
+// In the Mood tile it leads with the small PULL label; in the Mood section a PULL heading stands above it. Empty without a pull.
+export function pullRowHtml(pull, { label = false } = {}) {
+    if (!pull) return '';
+    const level = Math.max(1, Math.min(3, Math.round(Number(pull.level) || 1)));
+    const pips = `<span class="delta-pips" role="img" aria-label="strength ${level} of 3">${[1, 2, 3].map(n => `<i${n <= level ? ' class="on"' : ''}></i>`).join('')}</span>`;
+    const words = [pull.note, pull.cause].filter(Boolean).map(esc).join(' · ');
+    return `<div class="delta-pull-row">${label ? '<span class="delta-pull-k">Pull</span>' : ''}<b>${esc(pull.text)}</b>${pips}${words ? `<span class="delta-muted">${words}</span>` : ''}${pull.fresh ? ' <span class="delta-new-badge">New</span>' : ''}</div>`;
+}
 
 // One tile. Fields (all optional except title): title, section, tone, wide, big, lines[], note, ring{value,text}.
 // A tile without a section is not tappable.
@@ -30,7 +46,8 @@ export function boardTileHtml(tile = {}) {
     const body = [
         tile.big ? `<span class="delta-tile-big${tile.bigClass ? ` ${tile.bigClass}` : ''}">${esc(tile.big)}</span>` : '',
         tile.faces || '',
-        tile.bars ? barsHtml(tile.bars) : '',
+        tile.rowsHtml || '',
+        tile.footHtml || '',
         tile.dots?.length ? `<span class="delta-tile-dots">${tile.dots.map(kind => `<i class="delta-dot-${/^(mem|lie|know)$/.test(kind) ? kind : 'mem'}"></i>`).join('')}</span>` : '',
         ...lines,
         tile.ring ? `<span class="delta-tile-row"><span class="delta-tile-ring" style="--v:${percent(tile.ring.value)}"><span>${esc(tile.ring.text)}</span></span>${tile.note ? `<span class="delta-muted">${esc(tile.note)}</span>` : ''}</span>` : (tile.note ? `<span class="delta-muted">${esc(tile.note)}</span>` : ''),
@@ -42,7 +59,7 @@ export function boardTileHtml(tile = {}) {
     return `<div class="${classes}">${head}${body}</div>`;
 }
 
-// The tiles, in mockup order, from the boardModel tiles object. Pull is null until phase-2 data exists: no tile.
+// The tiles, in mockup order, from the boardModel tiles object. The Pull rides inside the Mood tile (nothing when there is no pull).
 // `userName` replaces the literal "{{user}}" in the With {{user}} title.
 export function boardTiles(model = {}, { userName = 'you', facesHtml = '' } = {}) {
     const tiles = model.tiles || {};
@@ -62,13 +79,13 @@ export function boardTiles(model = {}, { userName = 'you', facesHtml = '' } = {}
             tone: moved.some(item => (item.axis === 'tension' ? item.value > 0 : item.value < 0)) ? 'bad' : (moved.length ? 'good' : ''),
             lead: moved.length ? moved.map(item => `${item.label} ${signed(item.value)}`).join(' · ') : '',
             big: moved.length ? '' : (last.hasChange ? '' : 'No change yet'),
-            lines: [gateWords(last.gate), last.reason],
+            lines: [gateWords(last.gate), last.reason || (last.hasChange ? NO_REASON : '')],
         },
         {
-            title: tiles.mood?.title || 'Mood', wide: !tiles.pull, tone: 'ten', big: tiles.mood?.text || 'Unknown', bigClass: 'delta-tile-mood',
-            bars: moodBarList(tiles.mood),
+            // The Mood tile opens the Mood section and carries the Pull as its one footer line (no separate Pull card).
+            title: tiles.mood?.title || 'Mood', section: 'mood', wide: true, tone: 'ten', big: tiles.mood?.text || 'Unknown', bigClass: 'delta-tile-mood',
+            rowsHtml: moodRowsHtml(tiles.mood), footHtml: pullRowHtml(tiles.pull, { label: true }),
         },
-        tiles.pull ? { title: tiles.pull.title || 'Pull', big: tiles.pull.text, bigClass: 'delta-tile-mood', ring: { value: (tiles.pull.level / 4) * 100, text: '' }, note: tiles.pull.note } : null,
         {
             // The place joins the title when the body is what she is doing, as the mockup reads: RIGHT NOW · NORTHERN RIDGE.
             title: `${now.title || 'Right now'}${now.doing && now.place ? ` · ${now.place}` : ''}`,
@@ -83,7 +100,7 @@ export function boardTiles(model = {}, { userName = 'you', facesHtml = '' } = {}
             tone: 'aff',
             faces: facesHtml,
             small: true,
-            lines: [ties.count ? `${ties.count}${ties.lies ? ` · ${ties.lies} ${ties.lies === 1 ? 'lie' : 'lies'}` : ''} · ${(ties.names || []).join(', ')}` : 'None established yet'],
+            lines: [ties.count ? `${ties.count} · ${(ties.names || []).join(', ')}` : 'None established yet'],
         },
         {
             title: `${past.title || 'Past'}${past.count ? ` · ${past.count}` : ''}`,
@@ -126,8 +143,8 @@ function sectionCaptionHtml(role, npc) {
 // The Board screen for one NPC: the dial (portrait inside; a tap opens the profile), the name, identity
 // and status, the pills (key person, mood), then the tiles. `refs` is the panel's createPortraitRefs()
 // (refs.fill is the caller's job, after the markup is in the DOM).
-export function boardHtml(npc = {}, { refs = null, userName = 'you', peers = null } = {}) {
-    const model = boardModel(npc) || {};
+export function boardHtml(npc = {}, { refs = null, userName = 'you', peers = null, reply = null } = {}) {
+    const model = boardModel(npc, { reply }) || {};
     const name = model.name || 'Unnamed NPC';
     const pills = [
         model.isKey ? { text: '★ Key person', kind: 'key' } : null,

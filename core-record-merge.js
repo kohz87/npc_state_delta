@@ -6,7 +6,7 @@ import { DURABLE_PROFILE_LIMITS, durableSeedGrounded, durableSemanticSimilarity,
 import { cleanList, normalizeName } from './core-text.js';
 import { identityConflict, partialNamePair, placesOverlap } from './core-merge-names.js';
 
-import { keyRelationshipSubject, mergeKeyRelationshipUpdates } from './core-keyrel.js';
+import { keyRelationshipSubject, mergeKeyRelationshipUpdates, tiesTracked } from './core-keyrel.js';
 import { isSafeUnmarkedDurableReplacement } from './core-durable.js';
 
 import { IMPORTANT_MEMORY_LIMIT } from './core-record-shared.js';
@@ -194,6 +194,8 @@ export function incomingCustomFields(existing, incoming, manualFields, options =
 // The NPC's Key Relationships after an incoming row: merged by counterpart; unmarked rows add new
 // counterparts only.
 export function incomingKeyRelationships(existing, incoming, manualFields) {
+    // A person who records ties' last mentions (tieSeen) lets a full list make room for a new tie (core-keyrel.js); others drop it as before.
+    const tieState = tiesTracked(existing) ? { seen: existing.tieSeen, manual: manualFields.has('keyRelationships') } : null;
     if (manualFields.has('keyRelationships')) {
         return [...(existing.keyRelationships || [])];
     } else if ((existing.keyRelationships || []).length) {
@@ -205,13 +207,13 @@ export function incomingKeyRelationships(existing, incoming, manualFields) {
         if (incoming.keyRelationshipsState === 'evolve'
             && String(incoming.keyRelationshipsReason || '').trim()
             && incoming.keyRelationshipsProvided) {
-            return mergeKeyRelationshipUpdates(existing.keyRelationships, incoming.keyRelationships || []);
+            return mergeKeyRelationshipUpdates(existing.keyRelationships, incoming.keyRelationships || [], tieState);
         } else if (incoming.keyRelationshipsState === 'update'
             && incoming.keyRelationshipsProvided) {
             // Discovery/clarification is not social evolution. A model that correctly
             // marks an update may omit the audit reason, so the explicit lifecycle state
             // plus grounded entries is sufficient to merge by counterpart.
-            return mergeKeyRelationshipUpdates(existing.keyRelationships, incoming.keyRelationships);
+            return mergeKeyRelationshipUpdates(existing.keyRelationships, incoming.keyRelationships, tieState);
         } else if (incoming.keyRelationshipsProvided && (incoming.keyRelationships || []).length) {
             // Recovery for models that extract an explicit newly revealed tie but omit
             // the lifecycle marker entirely. Only NEW counterparts are admitted here;
@@ -222,7 +224,7 @@ export function incomingKeyRelationships(existing, incoming, manualFields) {
                 return subject && !knownSubjects.has(subject);
             });
             return newlyEstablished.length
-                ? mergeKeyRelationshipUpdates(existing.keyRelationships, newlyEstablished)
+                ? mergeKeyRelationshipUpdates(existing.keyRelationships, newlyEstablished, tieState)
                 : [...(existing.keyRelationships || [])];
         } else {
             return [...(existing.keyRelationships || [])];

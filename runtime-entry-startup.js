@@ -5,7 +5,7 @@
 export function createStartup(rt, deps) {
     const {
         getSettings, clearLegacyPromptKeys, connectStorySuite, SUITE_API, UI_ID, NPC_STATE_VERSION,
-        latestReplyIndex, castSync, castPortraitDue, normalizeSourceOfTruth, nsdCardSettings, setStoryClockSource, setStoryDateAtSource, hostedStoryDateAt,
+        latestReplyIndex, castSync, castPortraitDue, normalizeSourceOfTruth, nsdCardSettings, setStoryClockSource, setStoryDateAtSource, setStoryDayAtSource, hostedStoryDateAt, hostedStoryDayAt,
         hostedStoryClock, bindUi, installUiCaptureBridge, registerEvents, startInlineWatchdog,
         flushCurrentChatOnPageHide, refreshCurrentChatFromServer, scheduleSettingsMountRetries, getChatKey,
         isCanonicalChatKey, ensureChatStateLoaded, maybeInheritKnownBranch, seedBranchTracking, getChatState,
@@ -27,6 +27,7 @@ export function createStartup(rt, deps) {
         // unless the reader keeps the calendar here (Source of truth: calendar "mine"). No host: none.
         setStoryClockSource(hostedStoryClock);
         setStoryDateAtSource(hostedStoryDateAt);
+        setStoryDayAtSource(hostedStoryDayAt);
         bindUi();
         installUiCaptureBridge();
         registerEvents();

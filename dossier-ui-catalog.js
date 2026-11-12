@@ -3,6 +3,7 @@ import { escapeHtml } from './src/util/html.js';
 import { awayRange } from './src/key-people.js';
 import { changeStamp, dossierDetailProjection, plain, RELATIONSHIP_AXES, wholeNumber } from './dossier-ui-model.js';
 import { v2MetersProjection } from './dossier-ui-meters.js';
+import { noteTieTags, readTieRows, tieRoster } from './core-keyrel.js';
 import { libraryTone, moodTile } from './dossier-ui-view-model.js';
 
 export function sortDossierIndex(rows = []) {
@@ -123,14 +124,16 @@ function eventDetails(event) {
     const tier = ['ordinary', 'meaningful', 'major', 'extreme'].includes(event.tier) ? event.tier : null;
     if (!tier) return null;
     const ask = Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(event.ask?.[axis]) || 0)]).filter(([, value]) => value !== 0));
-    return { tier, held: event.held === true, note: plain(event.note).slice(0, 120), ask, date: plain(event.date).slice(0, 40), ...(plain(event.gate) ? { gate: plain(event.gate).slice(0, 80) } : {}) };
+    return { tier, held: event.held === true, note: plain(event.note).slice(0, 120), ask, date: plain(event.date).slice(0, 40), ...(plain(event.gate) ? { gate: plain(event.gate).slice(0, 80) } : {}), ...(plain(event.why) ? { why: plain(event.why).slice(0, 80) } : {}) };
 }
 
 function ownRelationshipChange(stored, net) {
     if (stored?.impact === 'manual' && (stored.message ?? -1) >= net.message) return stored;
     const delta = Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(net.delta?.[axis]) || 0)]));
     const event = eventDetails(net.event);
-    return { impact: 'net', delta, reason: '', turn: null, message: net.message, when: changeStamp({ message: net.message }).label, hosted: true, ...(event ? { event } : {}) };
+    // The reason: the story line's own (the event's why), else the scanner's reason for the same reply; none recorded stays empty (the views say so).
+    const reason = event?.why || (Number.isInteger(stored?.message) && stored.message === net.message ? plain(stored.reason) : '');
+    return { impact: 'net', delta, reason, turn: null, message: net.message, when: changeStamp({ message: net.message }).label, hosted: true, ...(event ? { event } : {}) };
 }
 
 export function projectDossierState(state = {}, status = {}) {
@@ -142,12 +145,16 @@ export function projectDossierState(state = {}, status = {}) {
     const keyViews = state?.keyViews && typeof state.keyViews === 'object' ? state.keyViews : {};
     const castViews = state?.castViews && typeof state.castViews === 'object' ? state.castViews : {};
     const sheetLevels = state?.sheetLevels && typeof state.sheetLevels === 'object' ? state.sheetLevels : {};
+    const tieNames = tieRoster(records);   // once for the whole projection, not once per person
     const details = records.map(npc => {
         const detail = dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames });
         const meters = v2MetersProjection(Object.hasOwn(meterViews, String(npc?.id ?? '')) ? meterViews[npc.id] : null);
         const key = keyProjection(Object.hasOwn(keyViews, String(npc?.id ?? '')) ? keyViews[npc.id] : null);
         const cast = castProjection(Object.hasOwn(castViews, String(npc?.id ?? '')) ? castViews[npc.id] : null);
-        return { ...detail, ...(meters?.relChange ? { lastRelationshipChange: ownRelationshipChange(detail.lastRelationshipChange, meters.relChange) } : {}), ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}), ...(Object.hasOwn(sheetLevels, String(npc?.id ?? '')) ? { levelFromSheet: true } : {}) };
+        // The ties as the board shows them: type, priority order and the Older fold (core-keyrel.js); a tie tag from the notes wins over the words.
+        const tieRows = readTieRows(npc, { npcs: records, roster: tieNames, day: Number.isInteger(state?.storyDay) ? state.storyDay : null, tags: noteTieTags(meters?.notes?.ties) })
+            .map(({ index, ...row }) => row);
+        return { ...detail, tieRows, ...(meters?.relChange ? { lastRelationshipChange: ownRelationshipChange(detail.lastRelationshipChange, meters.relChange) } : {}), ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}), ...(Object.hasOwn(sheetLevels, String(npc?.id ?? '')) ? { levelFromSheet: true } : {}) };
     }).filter(npc => npc.id);
     return {
         chatKey: plain(status?.chatKey, 'no-chat'),
@@ -174,7 +181,7 @@ export function projectDossierState(state = {}, status = {}) {
             lifeState: npc.lifeState,
             bucket: npc.bucket,
             statusLabel: npc.statusLabel,
-            // The same word the board, its pill and Right now show (the meters' mood first), not the scanner's own.
+            // The same word the board, its pill and Right now show (the scanner's own word, which the mood numbers follow; the numbers' table word when it wrote none).
             mood: moodTile(npc).text,
             portrait: npc.portrait,
             updatedAt: npc.updatedAt,

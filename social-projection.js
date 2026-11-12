@@ -1,7 +1,7 @@
 /* Projection of the social graph into Important Bonds and id remapping.
    Split from social.js; social.js remains the public facade. */
 
-import { clean, norm, uniq, confidenceRank, richer } from './social-primitives.js';
+import { clean, norm, uniq, confidenceRank, richer, projectedTieLimit } from './social-primitives.js';
 import {
     socialRelationFamily, conflictingKinship, inverseRelationFamilies,
     preserveUnstructuredRelationshipText, mergeRelations, collectiveRelationshipShape,
@@ -86,7 +86,7 @@ function projectGraphToKeyRelationships(npcs, graph) {
                 const counterpart = npcs.find(npc => npc?.id === item.counterpartId);
                 return counterpart ? formatKeyRelationship(counterpart.name, item.relation, item.dynamic, counterpart) : '';
             }).filter(Boolean);
-        const next = [...unresolvedText, ...rendered].filter(Boolean).slice(0, 5);
+        const next = [...unresolvedText, ...rendered].filter(Boolean).slice(0, projectedTieLimit(owner));
         const before = JSON.stringify(owner.keyRelationships || []);
         owner.keyRelationships = next;
         if (JSON.stringify(next) !== before) updatedIds.push(owner.id);

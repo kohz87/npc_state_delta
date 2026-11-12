@@ -55,16 +55,24 @@ function tastesBody(notes, on) {
     return block('tastes', 'Tastes', `<ul class="delta-tastes">${notes.tastes.map(row => `<li><span class="delta-taste-sign" aria-label="${row.sign === '-' ? 'dislikes' : 'likes'}">${row.sign === '-' ? '✕' : '♥'}</span><b>${escapeHtml(row.item)}</b>${row.from || row.mirrored ? `<span class="delta-muted">${escapeHtml([row.from, row.mirrored ? 'echoes you' : ''].filter(Boolean).join(' · '))}</span>` : ''}</li>`).join('')}</ul>`);
 }
 
+// Each drive: its word on a bar whose middle is normal (high reaches right, low and off reach left), and a small source note when
+// it is not normal. The mockup's rows; the layout is fluid by the block's width.
+const DRIVE_BAR = ['off', 'low', 'normal', 'high'];
+function driveRow(row) {
+    const level = DRIVE_BAR[row.strength] ?? 'normal';
+    const note = row.note && row.strength !== 2 ? `<span class="delta-drive-note delta-muted">${escapeHtml(row.note)}</span>` : '';
+    return `<div class="delta-drive" data-level="${level}"><span>${escapeHtml(row.label)}</span><i title="${escapeHtml(row.word)}"><b class="${level}"></b></i><span class="delta-drive-word">${escapeHtml(row.word)}</span>${note}</div>`;
+}
 function drivesBody(notes, on) {
     if (!notes?.drives?.length) return !on ? '' : block('drives', 'Drives', emptyLine('All normal so far'));
-    return block('drives', 'Drives', `<div class="delta-drives">${notes.drives.map(row => `<div class="delta-drive"><span>${escapeHtml(row.label)}</span><i title="${escapeHtml(row.word)}"><b style="width:${Math.round((row.strength / 3) * 100)}%"></b></i></div>`).join('')}</div>`);
+    return block('drives', 'Drives', `<div class="delta-drives">${notes.drives.map(driveRow).join('')}</div><span class="delta-muted delta-drive-key">The middle of each bar is normal; only real highs and lows reach out from it.</span>`);
 }
 
 // Flat rows as the mockup has them: Look (the enduring body), Wearing (what the current form or presentation is), Habits (mannerisms).
 // Named forms (each can take its own portrait) stay one tap away in a folded list, so no portrait control is lost.
 function appearanceBody(npc, portraitRefs) {
     const model = npc.appearanceModel;
-    if (!model || typeof model !== 'object') return emptyLine(NOTHING_YET);
+    if (!model || typeof model !== 'object') return emptyLine('No appearance established yet');
     const locked = npc.v2Meters?.notes?.look;
     const forms = Array.isArray(model.appearanceForms) ? model.appearanceForms : [];
     const wearing = forms.find(form => form.name === model.currentForm)?.appearance || plain(model.unclassifiedAppearance) || plain(npc.currentPresentation);
@@ -74,7 +82,7 @@ function appearanceBody(npc, portraitRefs) {
     const rows = row('Look', model.overallAppearance)
         + row('Wearing', wearing, changedMark(npc, 'currentPresentation')) + row('Habits', habits, changedMark(npc, 'mannerisms'));
     const more = forms.length ? `<details class="delta-profile-forms"><summary>Forms and portraits · ${forms.length}</summary>${appearanceFormsHtml(npc, { portraitRefs })}</details>` : '';
-    return `${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : emptyLine(NOTHING_YET)}${note}${more}`;
+    return `${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : emptyLine('No appearance established yet')}${note}${more}`;
 }
 
 // Personality as plain prose, then label / value rows (Speech, Levers) as the mockup draws it: no sub-headings.

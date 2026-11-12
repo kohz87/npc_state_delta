@@ -44,6 +44,7 @@ const AXES = ['trust', 'affection', 'desire', 'tension'];
 export const EVENT_MAX = 4;
 const EVENT_TEXT_MAX = 1300;
 const NOTE_MAX = 120;
+const WHY_MAX = 80;
 const DATE_MAX = 40;
 const SOURCES = ['story', 'scan'];
 const wholeInt = value => Number.isSafeInteger(value);
@@ -53,6 +54,7 @@ function validEvent(item) {
     if (!item || typeof item !== 'object' || Array.isArray(item) || !SOURCES.includes(item.src) || !PACING_TIERS.includes(item.tier)) return false;
     if (typeof item.held !== 'boolean' || typeof item.note !== 'string' || item.note.length > NOTE_MAX) return false;
     // The anti-lever gate's part (npc-meters-gate.js): the approach the story line named, and the outcome when the gate fired.
+    if (item.why !== undefined && (typeof item.why !== 'string' || !item.why || item.why.length > WHY_MAX)) return false;   // the story line's own reason, as given
     if (item.via !== undefined && !normalizeApproachKind(item.via)) return false;
     if (item.gate !== undefined && (!item.via || gateEventProblems(item.gate).length)) return false;
     const ask = item.ask;
@@ -70,11 +72,11 @@ export function readEvent(text) {
 }
 
 /** What a hosted run records for one paced event: the whole new text for the record (`prior`: the stored text), or null when it need not change. */
-export function nextEvent(prior, { reply, date, src, ask, tier, held, note, via, gate }) {
+export function nextEvent(prior, { reply, date, src, ask, tier, held, note, via, gate, why }) {
     const old = readEvent(prior);
     let events = old && old.at === reply ? old.events : [];
     const mine = Object.fromEntries(AXES.filter(axis => wholeInt(ask?.[axis]) && ask[axis] !== 0).map(axis => [axis, ask[axis]]));
-    const item = { src, ask: mine, tier, held: Boolean(held), note: String(note || '').slice(0, NOTE_MAX), ...(via ? { via, ...(gate ? { gate } : {}) } : {}) };
+    const item = { src, ask: mine, tier, held: Boolean(held), note: String(note || '').slice(0, NOTE_MAX), ...(src === 'story' && String(why || '').trim() ? { why: String(why).trim().slice(0, WHY_MAX) } : {}), ...(via ? { via, ...(gate ? { gate } : {}) } : {}) };
     // A full list (EVENT_MAX) makes room by dropping the oldest event of the new one's own kind (held or spent), else the oldest, so
     // a later spent event is never hidden behind four held ones (the card would say "Nothing moved") nor the reverse. An event that
     // fired the gate is dropped last: the next prompt's gate cue reads it.
@@ -110,7 +112,9 @@ export function eventSummary(event) {
     // The anti-lever gate's words for the last story line that named an approach: "via praise · 3rd in 2 days · backfired".
     const approach = event.events.findLast(item => item.src === 'story' && item.via);
     const gate = approach ? describeGate(approach.gate ? { via: approach.via, ...approach.gate } : null) || `via ${approach.via}` : '';
-    return { tier: top(countedSpent.length ? countedSpent : counted), held, note: held ? event.events[0].note : '', ask, date: event.date, ...(gate ? { gate } : {}) };
+    // The reason the story line gave (reason / why / because ...): the last story event's.
+    const why = event.events.findLast(item => item.src === 'story' && item.why)?.why ?? '';
+    return { tier: top(countedSpent.length ? countedSpent : counted), held, note: held ? event.events[0].note : '', ask, date: event.date, ...(gate ? { gate } : {}), ...(why ? { why } : {}) };
 }
 
 /** What `changes` ask of the four built-in axes, per axis: an add is its value, a set the distance from the value now (`now(meter)`). */
