@@ -1,4 +1,5 @@
 /* NPC State Delta: pure scan/backfill eligibility helpers. */
+import { storyProse } from './core.js';
 
 export const AUTOMATIC_BACKFILL_QUEUE_VERSION = 1;
 export const AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT = 1;
@@ -250,4 +251,17 @@ export function settleScan({ marker = null, readAhead = [], readIds = [], target
     // `deferred`: the marker stayed behind replies that are still unread; `waiting`: how many (the cadence counts them, so the safety scan still comes).
     const waiting = unread ? replies.filter(id => id > next && !read.has(id)).length : 0;
     return { marker: next, readAhead: rest.slice(-READ_AHEAD_MAX), deferred: unread, waiting };
+}
+
+/**
+ * The story's own prose for admitting a new person: messages 0..`upTo` (the scanned reply, nothing later), faded and system
+ * messages left out, each reduced to narration and dialogue (storyProse). The World State rosters, the hidden Notebook
+ * and the other blocks never count; the greeting's prose does. A name only those hold is background, not met in the story.
+ */
+export function storyTextsForAdmission(chat, upTo = Infinity) {
+    const list = Array.isArray(chat) ? chat.slice(0, Number.isInteger(upTo) && upTo >= 0 ? upTo + 1 : undefined) : [];
+    return list
+        .filter(message => message && !message.is_system)
+        .map(message => storyProse(String(message.mes || '')))
+        .filter(Boolean);
 }

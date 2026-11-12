@@ -3761,3 +3761,35 @@ test('explicit key-relationship edges: a 400+ character run with no space is ski
     assert.ok(edges.some(edge => edge.a === 'Mira' && edge.b === 'Sera' && edge.aToB === 'sister'), JSON.stringify(edges));
     assert.deepEqual(extractExplicitKeyRelationshipEdges('Sera is Mira\'s sister.', roster, []).map(edge => edge.aToB), ['sister']);
 });
+
+// Card-only ghost: a name only the greeting's World State roster or a hidden Notebook note holds is never admitted.
+import { storyTextsForAdmission } from '../scan-context.js';
+const GREETING = 'Mist over Bluewatch, and Astra waits at the gate.\n<Blocks><World_State>\n**📡 Off-Screen:**\n* Watch-Captain Edda Rorke - Counting a short garrison\n</World_State></Blocks>';
+const REPLY1 = 'The guard nods at you.\n<Blocks><Notebook>\nSecret: the toll is forged.\nHidden from: Astra, Edda Rorke, the reader\nComes out when: Astra speaks directly with Watch-Captain Edda Rorke\n</Notebook><CYOA>\n1. Ask about the toll\n</CYOA></Blocks>';
+const ghostRow = name => ({ npcs: [{ name, identityKind: 'proper_name', dossierSignal: 'meaningful', present: false, worldActive: true }] });
+const admit = (chat, upTo) => mergeScanResult({ npcs: [], candidates: [], turn: 1 }, ghostRow('Edda Rorke'), { turn: 1, storyTexts: storyTextsForAdmission(chat, upTo) });
+test('card-only name (greeting roster, reply-1 Notebook secret) is not admitted at any scan', () => {
+    const chat = [{ mes: GREETING, is_user: false }, { mes: 'I ride to the gate.', is_user: true }, { mes: REPLY1, is_user: false }];
+    for (const upTo of [0, 1, 2]) {
+        const texts = storyTextsForAdmission(chat, upTo);
+        assert.ok(!texts.some(t => t.includes('Edda')));
+        const merged = admit(chat, upTo);
+        assert.equal(merged.state.npcs.length, 0);
+        assert.equal(merged.state.candidates.length, 0);
+        assert.deepEqual(merged.report.skipped, ['Edda Rorke']);
+    }
+});
+test('a person named in the greeting prose is admitted at the greeting scan; later messages do not count', () => {
+    const chat = [{ mes: 'Captain Rorke eyes the gate.' }, { mes: 'I ask for Edda Rorke.', is_user: true }];
+    assert.equal(admit(chat, 0).state.npcs.length, 1);
+    const later = [{ mes: GREETING }, { mes: 'I ask for Edda Rorke.', is_user: true }];
+    assert.equal(admit(later, 0).state.npcs.length, 0);
+    assert.equal(admit(later, 1).state.npcs.length, 1);
+    assert.equal(admit([{ mes: GREETING }, { mes: 'Edda Rorke nods.', is_system: true }], 1).state.npcs.length, 0);
+});
+test('an existing ghost dossier keeps updating, no storyTexts means no check', () => {
+    const base = mergeScanResult({ npcs: [], candidates: [], turn: 1 }, ghostRow('Edda Rorke'), { turn: 1 });
+    assert.equal(base.state.npcs.length, 1);
+    const again = mergeScanResult(base.state, ghostRow('Edda Rorke'), { turn: 2, storyTexts: ['someone'] });
+    assert.equal(again.state.npcs.length, 1);
+});

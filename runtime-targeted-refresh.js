@@ -94,7 +94,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
         // Never the reader's own character, never a dead/archived record (appearance-fill.js). Nothing else changes in this call.
         const fillBlankLooks = (fillLooks || !automatic) && fillAllowed(existing, ctx.name1);
         // (v2 hidden notes) A Refresh looks for this person's story events (never writes layers: the dossier is not new).
-        const notes = hostedTargetNotes(existing);
+        const notes = hostedTargetNotes(existing, { tastes: true });
         const prompt = buildProfileRefreshPrompt({
             transcript,
             targetNpc: hostedMeterView([existing])[0],   // hosted: its currentRelationship is the slice's
