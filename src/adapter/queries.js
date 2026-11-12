@@ -336,6 +336,7 @@ export function createQueriesPart(session, deps) {
     // adapter forces asOf to the replayed reply, which is this same index, so live and replay agree.
     function storyDateText(index) {
         if (!Number.isInteger(index) || index < 0) return '';
+        try { if (calendarOwn?.() === true) return ''; } catch { return ''; }   // the calendar kept in Delta: no Story Director date (as storyClock)
         try {
             const time = session.sdkRef?.query?.('director.time', { asOf: index });
             const minutes = Number.isInteger(time) ? time : time?.minutes;

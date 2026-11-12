@@ -120,8 +120,8 @@ export function stampMemories(before, after, message = null, dateAt = null) {
         if (!key) continue;
         if (old[key]) { out[key] = old[key]; continue; }
         if (had.has(key)) continue;   // stored before stamps existed: no date, never a guessed one
-        const reworded = gone.find(item => old[normalizeName(item)] && durableSemanticSimilarity(item, text) >= 0.58);
-        if (reworded) { out[key] = old[normalizeName(reworded)]; continue; }
+        const reworded = gone.find(item => durableSemanticSimilarity(item, text) >= 0.58);
+        if (reworded) { const inherited = old[normalizeName(reworded)]; if (inherited) out[key] = inherited; continue; }   // an undated old memory stays undated
         if (!Number.isInteger(message) || message < 0) continue;
         date ??= String(dateAt?.(message) ?? '').trim().slice(0, 40);
         out[key] = date ? { m: message, d: date } : { m: message };

@@ -248,3 +248,8 @@ test('storyDateText: the story date after a given reply, the same asked live and
     adapter.stop();
     assert.equal(adapter.storyDateText(first), '');
 });
+test('storyDateText: no date while the reader keeps the calendar in Delta', async t => {
+    const mine = await suite(t, { modules: [director({ minutes: gregorianMinutes(611, 3, 15), calendar: SD_GREGORIAN })], calendarOwn: () => true });
+    await mine.host.send('Hello.', 'Mira looks up.');
+    assert.equal(mine.adapter.storyDateText(mine.host.store.headIndex()), '');
+});

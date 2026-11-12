@@ -205,7 +205,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-timeline li, #${ROOT_ID} .delta-timeline li:first-child { position:relative; padding:0 0 4px 22px; border-top:0; }
 #${ROOT_ID} .delta-timeline li > i { position:absolute; left:0; top:.45em; }
 /* a dated memory: the story date and reply as a small label on its dot, the memory under it (an older memory has no label) */
-#${ROOT_ID} .delta-timeline li { display:grid; gap:clamp(2px,.4cqw,5px); padding-bottom:clamp(8px,1.1cqw,14px); }
+#${ROOT_ID} .delta-timeline li, #${ROOT_ID} .delta-timeline li:first-child { display:grid; gap:clamp(2px,.4cqw,5px); padding-bottom:clamp(8px,1.1cqw,14px); }
 #${ROOT_ID} .delta-timeline li > .delta-mem-when { font-size:var(--dt-kick); letter-spacing:.06em; color:var(--delta-muted); line-height:1.3; }
 #${ROOT_ID} .delta-timeline::before { content:""; position:absolute; left:4px; top:8px; bottom:8px; width:1px; background:var(--delta-line); }
 #${ROOT_ID} .delta-tastes { display:grid; gap:6px; margin:0; padding:0; list-style:none; }

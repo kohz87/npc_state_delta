@@ -166,6 +166,16 @@ test('Dated memories: a new memory is stamped with its reply and that reply\'s s
     } finally { setStoryDateAtSource(null); }
 });
 
+test('Dated memories: an old undated memory re-worded longer by a later scan stays undated (never a guessed date)', () => {
+    setStoryDateAtSource(index => clockAt[index] ?? '');
+    try {
+        const legacy = normalizeNpcRecord({ id: 'npc_myla', name: 'Myla', present: true, memories: ['Crossed the border at night with forged papers'] });
+        const next = mergeAt(legacy, ['Crossed the border at night with forged papers hidden in a hollow boot heel'], 9);
+        assert.equal(next.memories.length, 1);
+        assert.ok(!next.memoryStamps || Object.keys(next.memoryStamps).length === 0, 'no stamp for the re-worded old memory');
+    } finally { setStoryDateAtSource(null); }
+});
+
 test('Dated memories: live and replay give the same stamp (the date comes from the reply that recorded it, not the time of viewing)', () => {
     let viewing = 'later';   // the clock at the time of viewing differs from the clock at the reply
     setStoryDateAtSource(index => (Number.isInteger(index) && clockAt[index] ? clockAt[index] : `viewed ${viewing}`));
