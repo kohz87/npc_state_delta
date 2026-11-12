@@ -1,6 +1,6 @@
 /* NPC State Delta dossier surface: dossier record lookups and presentation projections. */
 import { appearanceFingerprint, currentPresentationText, normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
-import { formatBirthDate } from './birthday.js';
+import { PACK_BIRTHDAY_REASON, formatBirthDate } from './birthday.js';
 import { escapeHtml } from './src/util/html.js';
 import { normalizeMemoryStamps } from './core-record-shared.js';
 import { portraitSrc } from './src/portrait-file.js';
@@ -185,7 +185,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
         appearanceModel: normalizeAppearanceModel(npc, { locked: Array.isArray(npc?.manualProfileFields) && npc.manualProfileFields.includes('appearance') }),
         currentPresentation: currentPresentationText(npc),
         birthday: formatBirthDate(npc?.birthDate),
-        birthdaySource: plain(npc?.birthDateSource),
+        birthdaySource: npc?.birthDateReason === PACK_BIRTHDAY_REASON ? '' : plain(npc?.birthDateSource),   // a pack date is not "story established"
         personality: plain(npc?.personality),
         behaviorProfile: stringList(npc?.behaviorProfile, 10),
         speech: plain(npc?.speech),

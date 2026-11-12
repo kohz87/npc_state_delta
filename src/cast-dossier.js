@@ -36,6 +36,8 @@ import { portraitFileKnownGone, portraitHasImage } from './portrait-file.js';
 import { isBehaviorLever, normalizeBehaviorProfile } from '../core-behavior.js';
 import { normalizeMannerisms } from '../core-durable.js';
 import { DURABLE_PROFILE_LIMITS } from '../core-relationship.js';
+import { PACK_BIRTHDAY_REASON, normalizeBirthDate } from '../birthday.js';
+import { getActiveCalendarConfig, normalizeCalendarConfig } from '../calendar.js';
 import { normalizeAge, normalizeApparentAge, normalizeGender } from '../core-identity.js';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -215,6 +217,7 @@ export function normalizeEntry(raw) {
         mannerisms: castMannerisms(raw.mannerisms),
         withYou: clip(raw.withYou, WITH_YOU_MAX),
         portrait: clip(raw.portrait, 120),
+        ...(clip(raw.birthday, 80) ? { birthday: clip(raw.birthday, 80) } : {}),
         start: { place: clip(start.place, 300), goal: clip(start.goal, 500), routine: clip(start.routine, 300) },
         drawnTo: (Array.isArray(raw.drawnTo) ? raw.drawnTo : []).map(item => clip(item, 120)).filter(Boolean).slice(0, 8),
         meters,
@@ -330,6 +333,19 @@ export function parsePeople(raw) {
     return { species, gender: normalizeGender(head[2]), age, apparentAge: looks ? normalizeApparentAge(`about ${looks}`) : '' };
 }
 
+// The writer's birthday, "Month day" or "Month day, year" (Story Block checks it against the pack's calendar), read on the active
+// calendar: the date as established, or null when it does not fit that calendar (the dossier then keeps Delta's own date).
+// Skipped with a reason when Delta runs its own calendar (`calendarOwn`): the pack's date is in the pack's calendar, which is not
+// the active one then, so reading it here would give a wrong date. Delta's own date stands and the story can still state one.
+function castBirthday(text, calendarOwn = false) {
+    if (calendarOwn) return null;
+    const match = /^(.+?)\s+(\d{1,3})(?:,\s*(-?\d{1,9}))?$/u.exec(String(text ?? '').trim());
+    if (!match) return null;
+    const config = normalizeCalendarConfig(getActiveCalendarConfig(), { requireCurrentDate: false });
+    const year = match[3] === undefined ? null : Number(match[3]);
+    return normalizeBirthDate({ era: year === null || !config.calendarValid ? '' : config.config.era || '', year, month: match[1], day: Number(match[2]) });
+}
+
 const BUILT_IN_METERS = Object.freeze(['trust', 'affection', 'desire', 'tension']);
 
 /**
@@ -337,7 +353,7 @@ const BUILT_IN_METERS = Object.freeze(['trust', 'affection', 'desire', 'tension'
  * numbers, the hidden notes and `castFrom`. `packName` is the pack's name for the badge; `portrait` is the portrait record
  * ({ path, type, hash, … } or, when the file could not be written, { dataUrl, … }) or null. Returns a new record; null without an entry.
  */
-export function applyCastEntry(base, person, { packName = '', portrait = null } = {}) {
+export function applyCastEntry(base, person, { packName = '', portrait = null, calendarOwn = false } = {}) {
     const entry = person?.entry;
     if (!isObject(base) || !entry) return null;
     const npc = { ...base };
@@ -351,6 +367,10 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
     if (entry.behaviour?.length) npc.behaviorProfile = [...entry.behaviour];
     if (entry.mannerisms?.length) npc.mannerisms = [...entry.mannerisms];
     if (entry.withYou) npc.relationshipSummary = entry.withYou;
+    // A birthday the writer gave is the person's starting date, kept as 'established' (twins and calendar changes treat it so) but marked
+    // as the pack's: a birthday the story states later, 'establish' or 'correct', replaces it. Without one, Delta's date stands.
+    const birthDate = castBirthday(entry.birthday, calendarOwn);
+    if (birthDate) Object.assign(npc, { birthDate, birthDateSource: 'established', birthDateReason: PACK_BIRTHDAY_REASON, birthDatePrecision: birthDate.year === null ? 'month-day' : 'full', birthDateYearSource: birthDate.year === null ? '' : 'established' });
     if (entry.start.place) npc.homeBase = entry.start.place;
     if (entry.start.goal) npc.goal = entry.start.goal;
     if (person.met?.where) npc.location = person.met.where;
