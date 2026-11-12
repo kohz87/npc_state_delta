@@ -8,6 +8,7 @@ import { currentExchangeBodies } from './src/transcript.js';
 import { chatLineage, lineageCheckpointKey, ensureBranchParentAnchor, migrateLegacyLineage } from './branch.js';
 import { getSettings } from './runtime-settings.js';
 import { narrationCaptureEnabled, latestMessageId, notify, replayScope } from './runtime-scan-helpers.js';
+import { captureJournalEntry } from './runtime-narration.js';
 
 export function createAssistantHandlerPart(rt, deps, helpers) {
     const { commitBranchCheckpoint, ensureChatStateLoaded, getChatKey, getChatState, isHostSwipeActive, narrationCaptureKey, persist, queueSettledSwipeReconcile, renderDossier, scanAfterEveryReply, scheduleReplyBackfills, scanNow, staleHostActive, updateInjection } = deps;
@@ -80,8 +81,10 @@ export function createAssistantHandlerPart(rt, deps, helpers) {
             catchUp: settings.autoScan && (replay ? replay.catchUp : rt.catchUpChats).has(eventChatKey),
             replyChanges: settings.autoScan && !settings.fullScanEveryTurn && replyNamesSomeone(state, messageId),
         });
+        // A complete capture block is a scan already paid for, so it merges whatever Scan every says.
         // ONEPASSMISS-1: a hosted missing-capture marker and a paid-for block both own this reply, irrespective of cadence.
-        const captureDue = !replay && narrationCaptureEnabled(settings) && narrationCaptures.has(narrationCaptureKey(eventChatKey, messageId));
+        const captureDue = replay ? Boolean(captureJournalEntry(replay, getContext().chat || [], messageId)?.parsed)
+            : narrationCaptureEnabled(settings) && narrationCaptures.has(narrationCaptureKey(eventChatKey, messageId));
         const scanExpected = shouldForceBranchScan || autoScanDue || captureDue;
         // Receipt state belongs to this assistant even if scanning fails, skips or is busy.
         // A successful scan coalesces its changes into this same owned boundary.

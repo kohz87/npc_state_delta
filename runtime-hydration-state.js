@@ -121,6 +121,8 @@ export function installHydrationState(api, rt, deps) {
     function getChatState(key = getChatKey()) {
         if (key === 'no-chat') return freshChatState();
         if (replayScope()?.key === key) return replayScope().state;   // a history replay works on its private copy
+        // (ONEPASSCAPR2-6) Publish a deferred notice before a reopened chat's participant reads it for activation.
+        if (key === getChatKey() && !((participantWrites.get(key) || 0) > 0) && owedAnnouncements.delete(key)) notifyNativeChange(key);
         if (!chatStateCache.has(key)) chatStateCache.set(key, freshChatState());
         touchChatCache(key);
         const state = chatStateCache.get(key);
@@ -215,17 +217,39 @@ export function installHydrationState(api, rt, deps) {
         announceNativeChange(key);
     }
 
+    // (ONEPASSCAP-1) A participant write holds back announcements for its chat while it waits for its save. Its own change is made in its first,
+    // synchronous step (`ownStep`); a change Delta saves later in that window (a one-pass scan or a backfill committing) is owed and announced once
+    // the chat's last participant write ends. Unannounced, it was never published and the host's next activate installed the older checkpoint.
+    const owedAnnouncements = new Set();
+    let ownStep = null;
     function announceNativeChange(key) {
-        if ((participantWrites.get(key) || 0) > 0 || key !== getChatKey()) return;
+        if ((participantWrites.get(key) || 0) > 0) {
+            if (ownStep !== key) owedAnnouncements.add(key);
+            return;
+        }
+        if (key !== getChatKey()) { owedAnnouncements.add(key); return; }
+        notifyNativeChange(key);
+    }
+    function notifyNativeChange(key) {
         for (const listener of nativeChangeListeners) {
             try { listener({ key }); } catch (error) { console.debug('[NPC State Delta] a native-change listener failed', error); }
         }
     }
     async function quietly(key, task) {
         participantWrites.set(key, (participantWrites.get(key) || 0) + 1);
-        try { return await task(); } finally {
+        const was = ownStep;
+        try {
+            let running;
+            ownStep = key;
+            try { running = task(); } finally { ownStep = was; }
+            return await running;
+        } finally {
             const left = (participantWrites.get(key) || 1) - 1;
-            if (left > 0) participantWrites.set(key, left); else participantWrites.delete(key);
+            if (left > 0) participantWrites.set(key, left);
+            else {
+                participantWrites.delete(key);
+                if (key === getChatKey() && owedAnnouncements.delete(key)) notifyNativeChange(key);
+            }
         }
     }
 

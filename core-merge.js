@@ -107,7 +107,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
     };
 
     for (const raw of incomingList) {
-        const incoming = normalizeScanNpc(raw, { memoryInputLimit });
+        const incoming = normalizeScanNpc(raw, { memoryInputLimit, historicalRead: options.historicalRead });
         let existingIndex = incoming.id ? next.npcs.findIndex(existing => existing.id === incoming.id) : -1;
         if (existingIndex >= 0 && !incoming.name) incoming.name = next.npcs[existingIndex].name;
         const key = normalizeName(incoming.name);
@@ -209,6 +209,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         sourceMessageId,
         targeted: options.allowTargetedDurableSeed === true || options.developmentSingleTarget === true,
         customFieldNames: options.customFieldNames,
+        historicalRead: options.historicalRead,
     };
     if (Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext')) {
         profileUpdateOptions.userDevelopmentContext = String(options.userDevelopmentContext || '');
@@ -217,7 +218,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
 
     // Social edges are independent of NPC delta admission. This lets an explicit relationship
     // reveal update a stored dossier even when the scanner returned no ordinary NPC object.
-    applyKeyRelationshipEdges(next, scanResult, excludeNames, report);
+    applyKeyRelationshipEdges(next, scanResult, excludeNames, report, options);
 
     // Canonical identity promotion is global: once an interim label becomes a proper name,
     // structured references in neighboring dossiers and the hidden social graph must follow
@@ -229,6 +230,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         transcript: options.developmentContext || '',
         provenance: 'scanner',
         confidence: 'explicit',
+        historicalRead: options.historicalRead,
         sourceMessageId,
         turn,
     });

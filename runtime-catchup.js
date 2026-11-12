@@ -49,15 +49,14 @@ export function createCatchUpPart(rt, deps) {
             else taken.delete(chatKey);
             return;
         }
-        let meetsBackfill = false;
         const established = [];
         try {
             for (const id of ids) {
                 if (getChatKey() !== chatKey) return;
                 if (!getChatState(chatKey).npcs.some(npc => npc.id === id && !npc.archived)) continue;
                 const fresh = newlyMet(chatKey, id);
-                if (fresh) meetsBackfill = true; else established.push(id);
-                const refreshed = await refreshNpcFromChat(id, { automatic: true, fillLooks: fresh });
+                if (!fresh) established.push(id);
+                const refreshed = await refreshNpcFromChat(id, { automatic: true, fillLooks: false }); // (ONEPASSCAPR2-3) the admission backfill owns the single fill
                 // A Refresh that worked has covered an established person; the queued repair would only repeat it. A newly met one keeps its backfill.
                 if (refreshed && !fresh && getChatKey() === chatKey) {
                     const latest = getChatState(chatKey);
@@ -69,7 +68,7 @@ export function createCatchUpPart(rt, deps) {
             }
         } finally { taken.delete(chatKey); }
         // The reply's own backfill start finds the chat busy while the Refresh runs; a newly met NPC's backfill runs now (one call).
-        if (meetsBackfill && getChatKey() === chatKey) await processPendingBackfills(latestMessageId(true), { limit: 1, skipNpcIds: established });
+        if (getChatKey() === chatKey) await processPendingBackfills(latestMessageId(true), { limit: 0, skipNpcIds: established, admissions: true }); // (ONEPASSCAPR2-3) drain admissions queued during any refresh
     }
 
     return { noteCaptureCatchUp, runCaptureCatchUp };

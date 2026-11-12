@@ -1,7 +1,7 @@
 /* NPC State Delta targeted backfill (role: targeted-backfill). The history backfill for one NPC and the queue
    of pending backfills. Split from runtime-targeted.js; bodies are moved without change. */
 
-import { chatContext as getContext, awayFromReplay } from './runtime-scan-helpers.js';
+import { chatContext as getContext, awayFromReplay, replayScope } from './runtime-scan-helpers.js';
 import { isScannerRoutingError } from './scanner-routing.js';
 import { automaticBackfillStillRelevant, backfillNeedsRequest } from './scan-context.js';
 import { recentTranscript, recentUserDevelopmentContext, currentExchangeTranscript, refreshMessageGate } from './src/transcript.js';
@@ -9,6 +9,7 @@ import { IMPORTANT_MEMORY_LIMIT, inferNpcIdentityKind, npcCurrentlyAbsentInText,
 import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { fillAllowed, FILL_MERGE_OPTION } from './appearance-fill.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
+import { captureJournalEntry } from './runtime-narration.js';
 
 const { backfillScanMatchesTarget, rowContradictsTarget, soleRowMayBeTarget, transcriptMentionsBackfillTarget } = createTargetedScopePart();
 
@@ -67,7 +68,7 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
             ...targetNoteOptions(notes),
         });
         return runTargetedDossierPass({
-            chatKey, ctx, prompt, messageId, notes,
+            chatKey, ctx, prompt, messageId, notes, captureMessageId: request.requestedMessageId,
             id: request.npcId,
             label: `backfill for ${request.label}`,
             systemPrompt: "You are NPC State Delta's isolated dossier backfill scanner. Use only the supplied scanner payload. Return only the requested JSON object.",
@@ -150,19 +151,23 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
         });
     }
 
-    async function processPendingBackfillsInner(messageId = null, { limit = Infinity, skipNpcIds = [] } = {}) {
+    async function processPendingBackfillsInner(messageId = null, { limit = Infinity, skipNpcIds = [], admissions = false } = {}) {
         const chatKey = getChatKey();
         if (chatKey === 'no-chat' || !requireReadyChatMutation('process queued dossier backfills', chatKey, { notify: false }) || isScanBusy(chatKey) || isHostSwipeActive()) return 0;
         let processed = 0;
         // Model calls made (each backfill is one request, plus a compact retry at most).
         let calls = 0;
         const attemptedNpcIds = new Set(skipNpcIds);
-        while (getChatKey() === chatKey && !isScanBusy(chatKey) && calls < limit) {
+        while (getChatKey() === chatKey && !isScanBusy(chatKey)) {
             const state = getChatState(chatKey);
             if (!Array.isArray(state.pendingBackfills) || !state.pendingBackfills.length) break;
-            const request = state.pendingBackfills.find(item => item?.npcId && !attemptedNpcIds.has(item.npcId));
+            // (ONEPASSCAPR2-3) Hosted one-pass: each new admission owns its queued fill, once (the admission cap bounds it); the per-reply cap still limits other repairs.
+            const request = state.pendingBackfills.find(item => item?.npcId && !attemptedNpcIds.has(item.npcId)
+                && (calls < limit || (admissions && item.reason === 'new-admission')));
             if (!request) break;
             attemptedNpcIds.add(request.npcId);
+            const savedCapture = replayScope() && captureJournalEntry(replayScope(), getContext().chat || [], request.requestedMessageId);
+            if (savedCapture?.parsed && !savedCapture.fills?.[request.npcId]) continue; // (ONEPASSCAPR2-1) an unaccepted fill cannot be invented by replay
             const target = state.npcs.find(npc => npc.id === request.npcId);
             const owningExchange = Number.isInteger(request.requestedMessageId) ? currentExchangeTranscript(request.requestedMessageId) : '';
             if (!automaticBackfillStillRelevant(request, target, state.npcs, owningExchange)) {

@@ -108,7 +108,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
             ...targetNoteOptions(notes),
         });
         return runTargetedDossierPass({
-            chatKey, ctx, id, prompt, notes,
+            chatKey, ctx, id, prompt, notes, ...(automatic ? { captureMessageId: latestMessageId(true), captureKind: 'refreshes' } : {}),
             label: `chat refresh for ${existing.name}`,
             systemPrompt: "You are NPC State Delta's targeted dossier reconciliation scanner. Re-read the supplied recent-story window for exactly one existing NPC. Return only the requested JSON object.",
             indicator: 'refresh',
