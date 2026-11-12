@@ -11,7 +11,7 @@ import { cutToTier, eventSummary, nextEvent, pacingNote, readEvent } from '../sr
 import { FEATURE_GATE, FEATURE_MOOD_PULL, CONTEXT_BUDGET, readLeaf } from '../src/npc-meters-config.js';
 import { gateApproach, readApproachRing } from '../npc-meters-gate.js';
 import { createNpcPart } from '../src/npc-meters.js';
-import { applyEvents, easeAxis, eventsFromMoves, moodBars, moodWord, restMood, restingMood } from '../npc-mood.js';
+import { applyEvents, easeAxis, eventsFromMoves, moodBars, moodWord, storedMoodWord, restMood, restingMood } from '../npc-mood.js';
 import { stepPull, samePlace } from '../npc-instincts.js';
 import { diff } from './vendor/story-block/src/v2/ops/diff.js';
 import { DAY, dossiers, suite, major, newestFlatDay } from './helpers/pacing-suite.js';
@@ -1094,4 +1094,25 @@ test('a fifth event keeps the gate event: the next prompt\'s gate cue reads it',
     const kept = readEvent(text);
     assert.equal(kept.events.length, 4);
     assert.ok(kept.events.some(item => item.gate), 'the gate event is not the one dropped');
+});
+
+test('mood line: the person\'s stored word is printed as is (small numbers never turn it into a generic band word); the table word only when none is stored', () => {
+    const record = (name, mood) => ({ name, meters: { trust: 5, affection: 0, desire: 0, tension: 0 }, stages: {}, unlocked: [], turn: { reply: 2, from: {} }, day: 5, mood });
+    const make = names => createNpcPart({ settings: () => ({}), present: () => names, feature: id => (id === FEATURE_MOOD_PULL ? true : undefined) });
+    const lineFor = mood => {
+        const state = { domains: { npc: { problems: [], npcs: { hanne: record('Hanne', mood) } } } };
+        return make(['Hanne']).context.tail({ state, chat: { length: 3 } }).lines.map(line => line.text).find(text => /^Mood: /.test(text));
+    };
+    // The same small numbers (+-1, table word "steady"/"calm") with six different stored words: the line follows the word.
+    for (const word of ['pragmatic/amused', 'dry/watchful', 'blunt/exasperated', 'curt', 'brusque', 'grumpy']) {
+        assert.equal(lineFor({ v: 0, a: 0, d: 1, day: 5, cause: `now ${word} — she counts coins` }), `Mood: Hanne ${word}.`);
+    }
+    // Strong control (the numbers' only say) keeps the hint after the word.
+    assert.equal(lineFor({ v: -1, a: 1, d: -2, day: 5, cause: 'now Wary' }), 'Mood: Hanne wary, cornered.');
+    // No stored word (an event cause, or none): the table word as before.
+    assert.equal(lineFor({ v: 0, a: 0, d: 1, day: 5, cause: 'betrayed: Astra lied' }), 'Mood: Hanne steady.');
+    assert.equal(lineFor({ v: 0, a: 0, d: 1, day: 5, cause: 'now mood word not rated' }), 'Mood: Hanne steady.');
+    assert.equal(lineFor({ v: 0, a: 0, d: 0, day: 5, cause: 'now curt' }), undefined, 'all zeros still says nothing');
+    assert.equal(storedMoodWord({ cause: 'now ' + 'x'.repeat(80) }).length, 30);
+    assert.equal(storedMoodWord(null), '');
 });
