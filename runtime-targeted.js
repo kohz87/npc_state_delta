@@ -17,7 +17,7 @@ import { advanceCastAdmission } from './runtime-cast-sync.js';
 import { captureJournalEntry, recordAcceptedFill } from './runtime-narration.js';
 
 export function createTargetedPart(rt, deps) {
-    const { attachGeneratedSecrets, BACKFILL_MAX_ATTEMPTS, beginScanOperation, chatHydrationStatus, commitBranchCheckpoint, editorIsMounted, endScanOperation, ensureChatStateLoaded, ensureHydratedStateFresh, findMeguminDossierSources, flushStateFile, forwardRelationshipChangesToHost, forwardSecretEventsToHost, forwardTastesToHost, getChatKey, getChatState, hostedMeterView, hostedTargetNotes, isHostSwipeActive, isScanBusy, noteScanFailure, partyLevelList, persist, recordInlineCardsInState, recordScanDiagnostics, removeNpcInlineCardAtMessage, renderDossier, requireReadyChatMutation, runTargetedDossierPass, saveNpcEditor, scanCanonicalBaseCurrent, scanOperationCurrent, scenePresentAt, setChatState, settleStateFileWrite, staleHostActive, targetNoteOptions, updateInjection } = deps;
+    const { attachGeneratedSecrets, BACKFILL_MAX_ATTEMPTS, beginScanOperation, chatHydrationStatus, commitBranchCheckpoint, editorIsMounted, endScanOperation, ensureChatStateLoaded, ensureHydratedStateFresh, findMeguminDossierSources, flushStateFile, forwardRelationshipChangesToHost, forwardSecretEventsToHost, forwardTastesToHost, getChatKey, getChatState, hostedMeterView, hostedTargetNotes, isHostSwipeActive, isScanBusy, noteScanFailure, partyLevelList, persist, recordInlineCardsInState, recordScanDiagnostics, removeNpcInlineCardAtMessage, renderDossier, requireReadyChatMutation, runTargetedDossierPass, saveNpcEditor, scanCanonicalBaseCurrent, scanOperationCurrent, targetMoved, targetFingerprint, scenePresentAt, setChatState, settleStateFileWrite, staleHostActive, targetNoteOptions, updateInjection } = deps;
     const { stateVersions, runningTargetedPasses } = rt;
     const { backfillScanMatchesTarget, rowContradictsTarget, soleRowMayBeTarget, scopeProfileUpdatesToTarget, edgeTouchesResolvedTarget } = createTargetedScopePart();
 
@@ -79,13 +79,20 @@ export function createTargetedPart(rt, deps) {
         }
     }
 
+    // (REFRESHCANCEL) A pass is discarded for the chat's line moving (a delete, swipe, edit, Re-read: it cancels) but not for an unrelated dossier's write; when
+    // only its target changed while it ran, a job that can rebuild itself (`job.retry`) is run once more on the new record before anything is reported.
     async function runTargetedDossierPassInner(job) {
+        const outcome = await runTargetedDossierPassOnce(job);
+        return outcome === TARGET_CHANGED ? (job.retry ? job.retry() : (job.onStale(), false)) : outcome;
+    }
+    const TARGET_CHANGED = Symbol('target-changed');
+
+    async function runTargetedDossierPassOnce(job) {
         const { chatKey, ctx, id, label, prompt, systemPrompt, metricsLabel } = job;
         await refreshMessageGate();
         const lineage = chatLineage(ctx.chat || []);
         const boundMessageId = latestMessageId(true);
         const startedAt = performance.now?.() ?? Date.now();
-        const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
         const operation = beginScanOperation(chatKey, label, { npcId: id, indicator: job.indicator });
         if (!operation) {
             job.onBusy?.();
@@ -105,14 +112,15 @@ export function createTargetedPart(rt, deps) {
             });
             const acceptedInput = !replayScope() && Number.isInteger(job.captureMessageId) ? structuredClone(parsed) : null;
             if (!scanOperationCurrent(chatKey, operation) || !await scanCanonicalBaseCurrent(chatKey, operation, job.staleLabel)) {
+                if (targetMoved(chatKey, operation)) return TARGET_CHANGED;
                 console.info(`[NPC State Delta] discarded expired, superseded, or stale-canonical ${job.staleLabel}.`);
                 return false;
             }
-            if (getChatKey() !== chatKey || lineageMoved(lineage, chatLineage(getContext().chat || []), operation.sourceMessageId)
-                || Number(stateVersions.get(chatKey) || 0) !== scanStateVersion) {
+            if (getChatKey() !== chatKey || lineageMoved(lineage, chatLineage(getContext().chat || []), operation.sourceMessageId)) {
                 job.onStale();
                 return false;
             }
+            if (targetFingerprint(chatKey, id) !== operation.targetFingerprint) return TARGET_CHANGED;
             const latest = getChatState(chatKey);
             const liveBefore = latest.npcs.find(npc => npc.id === id) || null;
             // (v2 hidden notes) Story events the pass was told to look for, sent whatever else the answer holds, and a Refresh's tastes for this
@@ -168,6 +176,7 @@ export function createTargetedPart(rt, deps) {
             if (liveBefore) advanceCastAdmission(merged.state, liveBefore, result); // (ONEPASSCAPR2-2) an automatic fill is still subordinate to the pack
             if (liveBefore) Object.assign(result, protectTerminalNpc(liveBefore, result));
             if (!await scanCanonicalBaseCurrent(chatKey, operation, `${job.staleLabel} final commit`)) {
+                if (targetMoved(chatKey, operation)) return TARGET_CHANGED;
                 job.onLateStale?.();
                 return false;
             }
@@ -189,6 +198,7 @@ export function createTargetedPart(rt, deps) {
             console.info(`[NPC State Delta] ${metricsLabel} metrics`, metrics);
             return job.onDone(getChatState(chatKey).npcs.find(npc => npc.id === id));
         } catch (error) {
+            if (targetMoved(chatKey, operation)) return TARGET_CHANGED;   // cancelled mid-call only because its target's record changed
             return job.onError(error);
         } finally {
             runningTargetedPasses.delete(operation);

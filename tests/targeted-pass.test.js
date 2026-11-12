@@ -187,3 +187,66 @@ test('a Refresh cancelled or discarded mid-flight leaves the dossier state byte-
         mockState.quietResponder = null;
     });
 });
+
+// (owner, 12 Nov) A manual Refresh on an absent role-label person failed again and again with "The scan was cancelled or its chat/dossier source
+// changed": the scope stood on the whole dossier state version and the saved revision, so any unrelated write (another person, a save of an earlier
+// change, a Story Block forward) cancelled it. It now stands on its own person's record and the chat's line.
+test('REFRESHCANCEL: a Refresh survives an unrelated NPC write, retries once when its own person changed, and a delete still cancels', () => {
+    runEditorHostScenario('refresh-cancel-unrelated', async () => {
+        const runtime = globalThis.NPCStateDelta;
+        const chat = mockState.context.chat;
+        chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is at the door?' });
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'The inspector, a stern woman in grey, waits by the gate. She says she keeps the tax rolls and distrusts the guild.', swipe_id: 0, swipes: ['x'] });
+        mockState.quietResponder = async () => '{"npcs":[]}';
+        await manualAddNpc('The inspector');
+        await runtime.flush();
+        await sleep(300);
+        const id = runtime.getState().npcs.find(npc => npc.name === 'The inspector').id;
+        let calls = 0;
+        const held = (memory, onEnter) => {
+            let entered, release;
+            const inFlight = new Promise(resolve => { entered = resolve; });
+            const gate = new Promise(resolve => { release = resolve; });
+            mockState.quietResponder = async () => {
+                calls += 1;
+                if (calls % 2 === 1 || !onEnter) { entered(); await gate; }
+                return JSON.stringify({ npcs: [{ id, name: 'The inspector', role: 'tax inspector', memories: [memory] }] });
+            };
+            return { inFlight, release };
+        };
+        // 1. An unrelated person is added (state version and saved revision both move) while the Refresh waits for its model: it still lands.
+        let step = held('The inspector keeps the tax rolls.');
+        let refreshing = runtime.refreshFromChat(id);
+        await step.inFlight;
+        await manualAddNpc('Mira');
+        await runtime.flush();
+        step.release();
+        assert.equal(await refreshing, true, 'an unrelated write did not cancel the Refresh');
+        assert.ok(runtime.getNpc(id).memories.some(text => /tax rolls/.test(text)), 'its result was committed');
+        assert.ok(runtime.getState().npcs.some(npc => npc.name === 'Mira'), 'the unrelated person is kept');
+        // 2. Its own person is written meanwhile: one automatic retry on the new record, which then lands.
+        calls = 0;
+        step = held('The inspector distrusts the guild.', true);
+        refreshing = runtime.refreshFromChat(id);
+        await step.inFlight;
+        const edited = await runtime.updateAppearance(id, { overallAppearance: 'A stern woman in grey.', currentForm: '__none__', currentAppearance: '', formsText: '' }, { chatKey: runtime.uiStatus().chatKey, lockAppearance: true });
+        assert.equal(edited, true, 'the same person was written meanwhile');
+        step.release();
+        assert.equal(await refreshing, true, 'a change to the same person retried once and landed');
+        assert.equal(calls, 2, 'one retry, no more');
+        assert.ok(runtime.getNpc(id).memories.some(text => /distrusts/.test(text)));
+        // 3. A delete of the last reply (the chat's line) still cancels it, unrelated writes or not.
+        calls = 0;
+        step = held('The inspector never existed.');
+        const before = JSON.stringify(runtime.getState());
+        refreshing = runtime.refreshFromChat(id);
+        await step.inFlight;
+        const removed = chat.pop();
+        step.release();
+        assert.equal(await refreshing, false, 'a delete cancels the Refresh');
+        assert.equal(calls, 1, 'and it is not retried');
+        assert.equal(JSON.stringify(runtime.getState()), before, 'nothing was changed');
+        chat.push(removed);
+        mockState.quietResponder = null;
+    });
+});
