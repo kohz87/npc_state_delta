@@ -329,3 +329,25 @@ test('stats report counts by reason and sum to the entry count', () => {
     assert.equal(stats.packed, entries.filter(entry => Object.hasOwn(entry, 'packed')).length);
     assert.equal(Object.values(stats.reasons).reduce((a, b) => a + b, 0), stats.full);
 });
+
+test('applyJson shares unchanged parts with its base but never mutates it; unpacked snapshots own their data', () => {
+    const base = { a: { deep: [1, 2, { x: 1 }] }, b: { keep: [3] }, c: 'same' };
+    const frozen = text(base);
+    const result = applyJson(base, [{ op: 'replace', path: '/a/deep/2/x', value: 2 }, { op: 'add', path: '/a/deep/-', value: 9 }]);
+    assert.equal(text(base), frozen);
+    assert.equal(result.b, base.b, 'untouched branch is shared');
+    assert.notEqual(result.a, base.a);
+    assert.equal(text(result), text({ a: { deep: [1, 2, { x: 2 }, 9] }, b: { keep: [3] }, c: 'same' }));
+    const chain = makeChat(30);
+    const file = JSON.parse(text(packCheckpoints(chain).entries));
+    const back = unpackCheckpoints(file, { scheme: PACK_SCHEME });
+    assert.equal(text(back), text(chain));
+    const seen = new Set();
+    const walk = value => {
+        if (!value || typeof value !== 'object') return;
+        assert.equal(seen.has(value), false, 'no object is shared between two unpacked entries');
+        seen.add(value);
+        for (const child of Object.values(value)) walk(child);
+    };
+    for (const entry of back) walk(entry.snapshot);
+});

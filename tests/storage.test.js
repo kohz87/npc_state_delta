@@ -366,3 +366,221 @@ test('head decode: a retired flag written after the state is not missed (the who
     assert.equal(decodeStateFileHead(text), null);
     assert.equal(decodeStateFilePayload(text).retired, true);
 });
+
+// ---- sidecar format 2 (packed checkpoints), wired at the file boundary ----
+import { reconcileBranchState, recordBranchCheckpoint, ensureBranchParentAnchor, fingerprintMessage, BRANCH_LINEAGE_VERSION } from '../branch.js';
+import { NPC_STATE_FILE_FORMAT, NPC_STATE_FILE_FORMAT_VERSION } from '../storage.js';
+
+// Frozen copies of the format-1 behaviour: the text an older build writes and the decoder it reads with.
+const legacyEncodeV1 = (chatKey, state, revision = 1) => JSON.stringify({ format: NPC_STATE_FILE_FORMAT, formatVersion: 1, appVersion: 't', chatKey, updatedAt: 'u', revision, writerId: 'w', state: structuredClone(state) });
+function legacyDecode(text) {
+    const payload = JSON.parse(text);
+    if (!payload || payload.format !== 'npc_state_delta_chat_data') throw new Error('Not an NPC State Delta chat data file.');
+    if (payload.formatVersion !== 1) throw new Error(`Unsupported NPC State Delta data file version: ${payload.formatVersion}.`);
+    return payload;
+}
+const viaV1 = (state) => decodeStateFilePayload(legacyEncodeV1('chat:v2', state)).state;
+const viaV2 = (state) => decodeStateFilePayload(encodeStateFilePayload('chat:v2', state, 't')).state;
+const same = (a, b, note) => assert.equal(JSON.stringify(a), JSON.stringify(b), note);
+
+const msgU = text => ({ is_user: true, is_system: false, name: 'Kazuma', mes: text });
+const msgA = (text, swipe = 0) => ({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: swipe });
+
+// A chat of `replies` exchanges built through the production checkpoint writers: two checkpoints per reply (the
+// assistant-parent anchor and the scan), `npcCount` dossiers of about `noteChars` characters each that grow a little per reply.
+function buildChat(replies, { npcCount = 6, noteChars = 600, limit } = {}) {
+    const chat = [];
+    const state = { npcs: [], dismissed: [], inlineCards: [], checkpoints: [], lineage: [], portraitAssets: {}, formPortraitAssets: {}, branchLineageVersion: BRANCH_LINEAGE_VERSION, turn: 0, assistantSinceScan: 0, lastScanAt: 0, lastScannedMessageId: null, scanCount: 0 };
+    for (let i = 0; i < npcCount; i += 1) {
+        const npc = createNpcRecord(`Npc${i}`, state.npcs.map(n => n.id));
+        npc.mannerisms = [`${'seed '.repeat(Math.ceil(noteChars / 5))}`.slice(0, noteChars)];
+        state.npcs.push(npc);
+    }
+    for (let r = 0; r < replies; r += 1) {
+        chat.push(msgU(`user turn ${r}`));
+        ensureBranchParentAnchor(state, chat.concat(msgA(`reply ${r}`)), chat.length, 'assistant-parent', limit);
+        chat.push(msgA(`reply ${r}`));
+        state.turn += 1;
+        const npc = state.npcs[r % npcCount];
+        npc.relationship.trust = (npc.relationship.trust + 1) % 100;
+        npc.mannerisms.push(`beat ${r} of ${npc.name}`);
+        state.lastScannedMessageId = chat.length - 1;
+        recordBranchCheckpoint(state, chat, chat.length - 1, 'scan', limit);
+    }
+    return { state, chat };
+}
+
+test('v2: encode writes formatVersion 2 with the packing header before state; checkpoints round-trip stringify-identical', () => {
+    const { state } = buildChat(30);
+    const text = encodeStateFilePayload('chat:v2', state, 't');
+    const raw = JSON.parse(text);
+    assert.equal(raw.formatVersion, 2);
+    assert.equal(NPC_STATE_FILE_FORMAT_VERSION, 2);
+    assert.ok(text.indexOf('"packing"') < text.indexOf(',"state":{'));
+    assert.ok(raw.state.checkpoints.some(entry => entry.packed), 'a 30-reply chat has packed entries');
+    const decoded = decodeStateFilePayload(text);
+    assert.equal('packing' in decoded, false);
+    same(decoded.state, viaV1(state), 'v2 load == v1 load');
+    same(decoded.state, state);
+    assert.equal(decodeStateFileHead(text).formatVersion, 2);
+    assert.equal(decodeStateFileHead(text).revision, 0);
+});
+
+test('v2 migration: every state shape is read from v1, saved as v2, and read back equal (v1 -> v2 -> back)', () => {
+    const states = [
+        buildChat(0).state, buildChat(1).state, buildChat(7).state, buildChat(26).state, buildChat(60, { limit: 20 }).state,
+        { npcs: [createNpcRecord('Wiz')], portraitAssets: {}, formPortraitAssets: {} },
+        { npcs: [], portraitAssets: {}, formPortraitAssets: {}, checkpoints: [{ messageId: 9 }, { messageId: 10, pad: 'x' }, { messageId: 11, base: 0, patch: [] }] },
+    ];
+    for (const state of states) {
+        const v1Text = legacyEncodeV1('chat:v2', state);
+        const loaded = decodeStateFilePayload(v1Text);
+        assert.equal(loaded.formatVersion, 1);
+        const v2Text = encodeStateFilePayload('chat:v2', loaded.state, 't');
+        const again = decodeStateFilePayload(v2Text);
+        same(again.state, state);
+        same(again.state, loaded.state);
+        same(JSON.parse(v2Text).state.checkpoints?.length, state.checkpoints?.length);
+    }
+});
+
+test('v2 migration: a checkpoint that already carries a reserved key falls back to a whole v1 file; it still loads', () => {
+    const { state } = buildChat(8);
+    state.checkpoints[3].packed = { owner: 'hand-edit' };
+    const text = encodeStateFilePayload('chat:v2', state, 't');
+    assert.equal(JSON.parse(text).formatVersion, 1);
+    same(decodeStateFilePayload(text).state, state);
+});
+
+test('v2: a v1 file is read without any write; reading never converts it', async () => {
+    const { state } = buildChat(6);
+    const text = legacyEncodeV1('chat:v2', state);
+    let uploads = 0;
+    const fetchFn = async (url, options = {}) => {
+        if (url === '/api/files/upload') { uploads += 1; return { ok: true, status: 200, json: async () => ({}), text: async () => '' }; }
+        return { ok: true, status: 200, text: async () => text };
+    };
+    const loaded = await readNpcStateDataFile({ path: '/user/files/x.json', revision: 1 }, { fetchFn });
+    same(loaded.state, state);
+    assert.equal(uploads, 0);
+});
+
+test('v2 rollback: rolling back to every reply gives byte-identical results from the v1 and the v2 file', () => {
+    const { state, chat } = buildChat(30);
+    const a = viaV1(state);
+    const b = viaV2(state);
+    for (let k = 1; k <= 30; k += 1) {
+        const cut = chat.slice(0, k * 2);
+        const ra = reconcileBranchState(structuredClone(a), cut, { explicitDivergence: cut.length });
+        const rb = reconcileBranchState(structuredClone(b), cut, { explicitDivergence: cut.length });
+        same(rb, ra, `reply ${k}`);
+        const da = reconcileBranchState(structuredClone(a), cut, { explicitDivergence: cut.length - 1, operation: 'delete', rewindMidDelete: true });
+        const db = reconcileBranchState(structuredClone(b), cut, { explicitDivergence: cut.length - 1, operation: 'delete', rewindMidDelete: true });
+        same(db, da, `delete to ${k}`);
+    }
+});
+
+test('v2 reconcile: swipe, regenerate, edit and mid-chat delete give the same result on the v1 and v2 files', () => {
+    const { state, chat } = buildChat(30);
+    const a = viaV1(state);
+    const b = viaV2(state);
+    const swipe = chat.slice(0, 41).concat(msgA('reply 20 swiped', 1)).concat(chat.slice(42));
+    const edited = chat.map((m, i) => (i === 30 ? { ...m, mes: `${m.mes} (edited)` } : m));
+    const cases = [
+        [swipe, { explicitDivergence: 41, operation: 'swipe' }],
+        [chat.slice(0, 41), { explicitDivergence: 41, operation: 'regenerate' }],
+        [edited, { explicitDivergence: 30, operation: 'edit' }],
+        [chat.filter((_, i) => i !== 20), { explicitDivergence: 20, operation: 'delete', rewindMidDelete: true }],
+        [chat.filter((_, i) => i !== 20), { explicitDivergence: 20, operation: 'delete' }],
+    ];
+    for (const [live, options] of cases) {
+        const ra = reconcileBranchState(structuredClone(a), live, options);
+        const rb = reconcileBranchState(structuredClone(b), live, options);
+        same(rb, ra, options.operation);
+        // and back again: the re-saved result of one case reads back equal
+        same(viaV2(rb.state), viaV1(ra.state));
+    }
+});
+
+test('v2 crash mid-save: a failed or cut-off upload leaves the previous bytes; a truncated v2 file is refused, never half-read', async () => {
+    const chatKey = 'chat:v2:crash';
+    const name = makeNpcStateDataFileName(chatKey);
+    const path = `/user/files/${name}`;
+    const { state } = buildChat(20);
+    let server = encodeStateFilePayload(chatKey, state, 't', { revision: 1, writerId: 'w0' });
+    const before = server;
+    const failing = async (url) => (url === path ? { ok: true, status: 200, text: async () => server } : { ok: false, status: 413, text: async () => 'too large' });
+    await assert.rejects(writeNpcStateDataFile({ chatKey, state, appVersion: 't', pointer: { name, path, revision: 1, writerId: 'w0' }, fetchFn: failing, continuousRetry: false }), error => error.status === 413);
+    assert.equal(server, before);
+    cancelPendingNpcStateWrite(chatKey);
+    for (let i = 1; i < 16; i += 1) {
+        const cut = before.slice(0, Math.floor(before.length * i / 16));
+        assert.throws(() => decodeStateFilePayload(cut), /invalid JSON/, `cut at ${i}/16`);
+    }
+    assert.equal(decodeStateFileHead(before.slice(0, Math.floor(before.length / 2))), null, 'a cut-off file is decoded in full (and refused there)');
+});
+
+test('v2 refusal: tampered packed entries and a missing packing header are refused with no partial state', () => {
+    const { state } = buildChat(30);
+    const good = JSON.parse(encodeStateFilePayload('chat:v2', state, 't'));
+    const at = good.state.checkpoints.findIndex(entry => entry.packed);
+    const mutate = fn => { const copy = structuredClone(good); fn(copy); return JSON.stringify(copy); };
+    const bad = [
+        mutate(p => { delete p.packing; }),
+        mutate(p => { p.state.checkpoints[at].packed.base = at; }),
+        mutate(p => { p.state.checkpoints[at].packed.base = -1; }),
+        mutate(p => { p.state.checkpoints[at].packed.base = 0.5; }),
+        mutate(p => { p.state.checkpoints[at].packed.patch[0].op = 'move'; }),
+        mutate(p => { p.state.checkpoints[at].packed.patch[0].path = '/nope/nope'; }),
+        mutate(p => { p.state.checkpoints[at].snapshot = {}; }),
+    ];
+    for (const text of bad) assert.throws(() => decodeStateFilePayload(text), /could not be rebuilt|packing header/);
+});
+
+test('v2 older build: a v1 decoder refuses a v2 file and the file bytes are untouched; the newest build refuses format 3 without retrying', async () => {
+    const { state } = buildChat(12);
+    const v2 = encodeStateFilePayload('chat:v2', state, 't');
+    const before = v2;
+    assert.throws(() => legacyDecode(v2), /Unsupported NPC State Delta data file version: 2/);
+    assert.equal(before, v2);
+    // frozen old-build write path: the unsupported-version error carries no code, so an old build retries it (measured in review);
+    // the file stays unchanged either way. The new build marks the error, so a future format 3 is not retried.
+    const chatKey = 'chat:v2:future';
+    const name = makeNpcStateDataFileName(chatKey);
+    const path = `/user/files/${name}`;
+    const server = JSON.stringify({ ...JSON.parse(v2), formatVersion: 3 });
+    let gets = 0; let uploads = 0; let sleeps = 0;
+    const fetchFn = async (url) => {
+        if (url === path) { gets += 1; return { ok: true, status: 200, text: async () => server }; }
+        if (url === '/api/files/upload') uploads += 1;
+        return { ok: false, status: 404, text: async () => '' };
+    };
+    await assert.rejects(
+        writeNpcStateDataFile({ chatKey, state, appVersion: 't', pointer: { name, path, revision: 1 }, fetchFn, sleepFn: (fn) => { sleeps += 1; fn(); } }),
+        error => error.code === 'NPC_STATE_UNSUPPORTED_FORMAT' && /newer NPC State Delta; update the extension/.test(error.message),
+    );
+    assert.equal(uploads, 0);
+    assert.equal(sleeps, 0, 'no retry');
+    assert.ok(gets >= 1);
+    assert.equal(undurableNpcStateSnapshot(chatKey)?.state?.turn, state.turn, 'the unsaved copy is kept in memory');
+    assert.equal(cancelPendingNpcStateWrite(chatKey), true);
+});
+
+test('v2 size and cost: 28 / 100 / 500 replies, measured against the v1 text of the same state (numbers are printed)', () => {
+    const rows = [];
+    for (const replies of [28, 100, 500]) {
+        const { state } = buildChat(replies, { npcCount: 24, noteChars: 5000 });
+        const v1 = legacyEncodeV1('chat:v2', state);
+        const best = fn => { fn(); let min = Infinity; for (let i = 0; i < 5; i += 1) { const t = process.hrtime.bigint(); fn(); min = Math.min(min, Number(process.hrtime.bigint() - t) / 1e6); } return min; };
+        let v2 = '';
+        const encodeMs = best(() => { v2 = encodeStateFilePayload('chat:v2', state, 't'); });
+        let back;
+        const decodeMs = best(() => { back = decodeStateFilePayload(v2); });
+        const v1EncodeMs = best(() => JSON.stringify(structuredClone(state)));   // today's encode: one clone + one stringify
+        same(back.state, state);
+        rows.push({ replies, checkpoints: state.checkpoints.length, snapshotKB: Math.round(JSON.stringify(state.checkpoints[0].snapshot).length / 1024), v1KB: Math.round(v1.length / 1024), v2KB: Math.round(v2.length / 1024), ratio: +(v2.length / v1.length).toFixed(3), encodeMs, decodeMs, v1EncodeMs });
+        assert.ok(v2.length < v1.length * 0.5, `${replies} replies: ${v2.length} vs ${v1.length}`);
+        assert.ok(encodeMs <= 2 * v1EncodeMs, `v2 encode ${encodeMs} ms vs today's ${v1EncodeMs} ms (bound 2x)`);
+    }
+    console.log('V2-SIZE', JSON.stringify(rows));
+});

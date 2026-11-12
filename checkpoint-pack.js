@@ -46,8 +46,11 @@ function escapeToken(key) {
     return String(key).replace(/~/g, '~0').replace(/\//g, '~1');
 }
 
-function childPath(path, key) {
-    return `${path}/${escapeToken(key)}`;
+// RFC 6901 pointer for the token stack (plus one more token when given).
+function pointerOf(tokens, last) {
+    let out = '';
+    for (const token of tokens) out += `/${escapeToken(token)}`;
+    return last === undefined ? out : `${out}/${escapeToken(last)}`;
 }
 
 function parsePointer(path) {
@@ -101,22 +104,49 @@ function applyAt(parent, key, op) {
     setOwn(parent, key, operationValue(op));
 }
 
-// Applies a restricted RFC 6902 patch to a copy of `base`. Never mutates its inputs; throws PackError on any
-// operation, path or base that the generator would not produce.
+// Copy of a container, made at most once per applyJson call: the walk below copies only the containers on a patched path
+// and shares everything else with `base` (never mutated, so sharing is safe). Cost is the patch, not the snapshot.
+function ownCopy(container, copied) {
+    if (copied.has(container)) return container;
+    let copy;
+    if (Array.isArray(container)) copy = container.slice();
+    else {
+        copy = {};
+        for (const key of Object.keys(container)) setOwn(copy, key, container[key]);
+    }
+    copied.add(copy);
+    return copy;
+}
+
+// Applies a restricted RFC 6902 patch to `base` by path copying. Never mutates its inputs; throws PackError on any
+// operation, path or base that the generator would not produce. The result may share unchanged parts with `base`.
 export function applyJson(base, ops) {
     if (base === undefined) throw new PackError('patch base is missing');
     if (!Array.isArray(ops)) throw new PackError('patch must be an array');
-    let root = structuredClone(base);
+    const copied = new WeakSet();
+    let root = base;
     for (const op of ops) {
         if (!isObject(op) || !PATCH_OPS.has(op.op)) throw new PackError('unsupported patch operation');
         const tokens = parsePointer(op.path);
         if (tokens.length === 0) {
             if (op.op !== 'replace') throw new PackError(`"${op.op}" needs a path`);
             root = operationValue(op);
+            if (root !== null && typeof root === 'object') copied.add(root);
             continue;
         }
+        if (root === null || typeof root !== 'object') throw new PackError('patch path does not exist');
+        root = ownCopy(root, copied);
         let parent = root;
-        for (const token of tokens.slice(0, -1)) parent = childOf(parent, token);
+        for (const token of tokens.slice(0, -1)) {
+            const child = childOf(parent, token);
+            if (child === null || typeof child !== 'object') throw new PackError('patch path does not exist');
+            const own = ownCopy(child, copied);
+            if (own !== child) {
+                if (Array.isArray(parent)) parent[Number(token)] = own;
+                else setOwn(parent, token, own);
+            }
+            parent = own;
+        }
         applyAt(parent, tokens[tokens.length - 1], op);
     }
     return root;
@@ -126,16 +156,28 @@ export function applyJson(base, ops) {
 // order and every new key must come after them; then removals, recursion into kept keys, appended adds.
 // Arrays: a shorter target replaces the whole array; otherwise recurse per index and append the new tail with "-".
 // Anything else (type change, changed primitive, reordered keys) is a replace of that path.
-function diffImages(base, target, path, ops) {
-    if (isObject(base) && isObject(target)) diffObjects(base, target, path, ops);
-    else if (Array.isArray(base) && Array.isArray(target)) diffArrays(base, target, path, ops);
-    else if (base !== target) ops.push({ op: 'replace', path, value: target });
+function diffImages(base, target, tokens, ops) {
+    if (isObject(base) && isObject(target)) diffObjects(base, target, tokens, ops);
+    else if (Array.isArray(base) && Array.isArray(target)) diffArrays(base, target, tokens, ops);
+    else if (base !== target) ops.push({ op: 'replace', path: pointerOf(tokens), value: target });
     return ops;
 }
 
-function diffObjects(base, target, path, ops) {
+// Recurse into one child; the pointer string is only built when an operation is emitted.
+function diffChild(base, target, tokens, key, ops) {
+    tokens.push(key);
+    diffImages(base, target, tokens, ops);
+    tokens.pop();
+}
+
+function diffObjects(base, target, tokens, ops) {
     const baseKeys = Object.keys(base);
     const targetKeys = Object.keys(target);
+    // Common case, same keys in the same order: recurse per key with no set building.
+    if (baseKeys.length === targetKeys.length && baseKeys.every((key, index) => key === targetKeys[index])) {
+        for (const key of baseKeys) diffChild(base[key], target[key], tokens, key, ops);
+        return;
+    }
     const inBase = new Set(baseKeys);
     const inTarget = new Set(targetKeys);
     const kept = baseKeys.filter(key => inTarget.has(key));
@@ -143,30 +185,30 @@ function diffObjects(base, target, path, ops) {
     const sameOrder = kept.every((key, index) => key === keptInTarget[index]);
     const newKeysLast = targetKeys.slice(0, kept.length).every(key => inBase.has(key));
     if (!sameOrder || !newKeysLast) {
-        ops.push({ op: 'replace', path, value: target });
+        ops.push({ op: 'replace', path: pointerOf(tokens), value: target });
         return;
     }
     for (const key of baseKeys) {
-        if (!inTarget.has(key)) ops.push({ op: 'remove', path: childPath(path, key) });
+        if (!inTarget.has(key)) ops.push({ op: 'remove', path: pointerOf(tokens, key) });
     }
-    for (const key of kept) diffImages(base[key], target[key], childPath(path, key), ops);
+    for (const key of kept) diffChild(base[key], target[key], tokens, key, ops);
     for (const key of targetKeys) {
-        if (!inBase.has(key)) ops.push({ op: 'add', path: childPath(path, key), value: target[key] });
+        if (!inBase.has(key)) ops.push({ op: 'add', path: pointerOf(tokens, key), value: target[key] });
     }
 }
 
-function diffArrays(base, target, path, ops) {
+function diffArrays(base, target, tokens, ops) {
     if (target.length < base.length) {
-        ops.push({ op: 'replace', path, value: target });
+        ops.push({ op: 'replace', path: pointerOf(tokens), value: target });
         return;
     }
-    for (let index = 0; index < base.length; index++) diffImages(base[index], target[index], childPath(path, String(index)), ops);
-    for (let index = base.length; index < target.length; index++) ops.push({ op: 'add', path: `${path}/-`, value: target[index] });
+    for (let index = 0; index < base.length; index++) diffChild(base[index], target[index], tokens, String(index), ops);
+    for (let index = base.length; index < target.length; index++) ops.push({ op: 'add', path: pointerOf(tokens, '-'), value: target[index] });
 }
 
 // Patch between two JSON-like values. An undefined-valued key counts as absent (both sides go through JSON).
 export function diffJson(base, target) {
-    return diffImages(jsonImage(base), jsonImage(target), '', []);
+    return diffImages(jsonImage(base), jsonImage(target), [], []);
 }
 
 function fullReason(info, firstOfTurn, tailFrom, anchorEvery) {
@@ -193,7 +235,7 @@ function findBase(infos, index) {
 // Builds the patch and checks it the way the decoder will rebuild it. Null when it does not reproduce the
 // entry's own JSON byte for byte (the entry then stays full).
 function tryPatch(baseImage, info) {
-    const ops = diffImages(baseImage, info.image, '', []);
+    const ops = diffImages(baseImage, info.image, [], []);
     let rebuiltImage;
     try {
         rebuiltImage = applyJson(baseImage, ops);
@@ -331,10 +373,11 @@ export function unpackCheckpoints(entries, packing) {
         }
         if (!ready[packed.base]) throw new PackError(`checkpoint ${index} is based on an entry without a snapshot`);
         if (!Array.isArray(packed.patch)) throw new PackError(`checkpoint ${index} has no patch array`);
-        const snapshot = applyJson(rebuilt[packed.base], packed.patch);
-        rebuilt[index] = snapshot;
+        // applyJson shares unchanged parts with its base; the returned snapshot must own its data (hydration edits snapshots in place).
+        const image = applyJson(rebuilt[packed.base], packed.patch);
+        rebuilt[index] = image;
         ready[index] = true;
-        out[index] = withKey(entry, 'packed', 'snapshot', snapshot);
+        out[index] = withKey(entry, 'packed', 'snapshot', structuredClone(image));
     }
     return out;
 }
