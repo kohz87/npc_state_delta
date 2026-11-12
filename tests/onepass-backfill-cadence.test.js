@@ -107,7 +107,7 @@ try {
     return JSON.parse(line.slice(7));
 }
 
-/* global ZERO, FULL_FLAG */
+/* global ZERO */
 test('hosted, catch-up 8, one new admission: the backfill runs that reply, no Refresh', () => {
     const r = runCalls('cadence-8', true, async ({ reply, settings }) => {
         settings.narrationCaptureCatchUp = 8;
@@ -275,58 +275,77 @@ test('send-drop: a reply without a capture block starts its automatic scan but t
     assert.ok(r.names.includes('Yunyun'), 'its result was kept: ' + JSON.stringify(r.names));
 });
 
-// A Send during the scan, then a streamed reply that rewrites .mes every tick: the cancelled scan is not re-queued once the next reply
-// exists, so the scanner call count stays at what it was before this branch (the first scan and the next reply's own scan).
-for (const full of [true, false]) {
-    test(`send-drop: a Send during the scan then a streamed reply adds no repeated scanner calls (${full ? 'full window' : 'lean'})`, () => {
-        const scenario = async ({ settings, mockState, sleep, kinds }) => {
-            const emitAll = async (event, ...args) => { await Promise.all((mockState.listeners.get(event) || []).map(fn => fn(...args))); };
-            settings.autoScan = true; settings.fullScanEveryTurn = FULL_FLAG; settings.narrationCapture = false;
-            mockState.quietResponder = async () => { await sleep(500); return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] }); };
-            const chat = mockState.context.chat;
-            chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
-            await emitAll('message_sent', chat.length - 1);
-            await emitAll('generation_after_commands', 'normal', {}, false);
-            const mes = 'Yunyun waves at you from the gate.';
-            chat.push({ is_user: false, is_system: false, name: 'Megumin', mes, swipe_id: 0, swipes: [mes] });
-            await emitAll('message_received', chat.length - 1);
-            await sleep(150);
-            chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is she?' });
-            await emitAll('message_sent', chat.length - 1);
-            await emitAll('generation_after_commands', 'normal', {}, false);
-            await sleep(300);
-            const streamed = { is_user: false, is_system: false, name: 'Megumin', mes: '', swipe_id: 0, swipes: [''] };
-            chat.push(streamed);
-            const words = 'She is a crimson demon and a friend of Megumin who likes to compete'.split(' ');
-            for (let i = 0; i < 26; i += 1) { streamed.mes += words[i % words.length] + ' '; streamed.swipes[0] = streamed.mes; await sleep(150); }
-            await emitAll('message_received', chat.length - 1);
-            await sleep(3000);
-            return { total: kinds().scanner, names: globalThis.NPCStateDelta.getState().npcs.map(n => n.name) };
-        };
-        const r = runCalls('send-stream', false, eval('(' + scenario.toString().replace('FULL_FLAG', String(full)) + ')'));
-        assert.ok(r.total <= 3, `scanner calls: ${r.total}`);
-        assert.ok(r.names.includes('Yunyun'), 'the NPC was kept: ' + JSON.stringify(r.names));
-    });
-}
-
-test('send-drop: a scan cancelled by a Send while its reply is still the latest runs again, bounded, and lands', () => {
-    const r = runCalls('send-requeue', false, async ({ settings, mockState, sleep, kinds }) => {
-        const emitAll = async (event, ...args) => { await Promise.all((mockState.listeners.get(event) || []).map(fn => fn(...args))); };
-        settings.autoScan = true; settings.fullScanEveryTurn = true; settings.narrationCapture = false;
-        mockState.quietResponder = async () => { await sleep(500); return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] }); };
-        const chat = mockState.context.chat;
-        chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
-        await emitAll('message_sent', chat.length - 1);
-        await emitAll('generation_after_commands', 'normal', {}, false);
-        const mes = 'Yunyun waves at you from the gate.';
-        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes, swipe_id: 0, swipes: [mes] });
-        await emitAll('message_received', chat.length - 1);
-        await sleep(150);
+// A Send during the automatic scan costs no extra scanner call: the in-flight scan is dropped and the next reply's own scan reads the
+// window, so the count EQUALS the count when the reply and Send were held (the first scan and the next reply's scan = 2), in every
+// timing: the next reply's message appearing before the scan request ends, after it ends, a non-streaming reply, and a Send late in the
+// scan (during the full-window new-NPC relationship pass). The scenario reads its timings from the SR_OPTS environment variable.
+const sendScenario = async ({ settings, mockState, sleep, kinds }) => {
+    const o = JSON.parse(process.env.SR_OPTS);
+    const emitAll = async (event, ...args) => { await Promise.all((mockState.listeners.get(event) || []).map(fn => fn(...args))); };
+    settings.autoScan = true; settings.fullScanEveryTurn = o.full; settings.narrationCapture = false;
+    mockState.quietResponder = async () => { await sleep(500); return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] }); };
+    const chat = mockState.context.chat;
+    chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+    await emitAll('message_sent', chat.length - 1);
+    await emitAll('generation_after_commands', 'normal', {}, false);
+    const mes = 'Yunyun waves at you from the gate.';
+    chat.push({ is_user: false, is_system: false, name: 'Megumin', mes, swipe_id: 0, swipes: [mes] });
+    await emitAll('message_received', chat.length - 1);
+    await sleep(o.sendAt);
+    if (o.edit) {
+        chat[chat.length - 2].mes = 'And then, tell me more?';
+        await sleep(o.settle);
+    } else {
         chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is she?' });
         await emitAll('message_sent', chat.length - 1);
-        await sleep(4000);
-        return { total: kinds().scanner, names: globalThis.NPCStateDelta.getState().npcs.map(n => n.name) };
-    });
-    assert.ok(r.total >= 1 && r.total <= 3, `scanner calls: ${r.total}`);
+        await emitAll('generation_after_commands', 'normal', {}, false);
+        if (o.noReply) {
+            await sleep(o.settle);
+            o.callsBeforeReply = kinds().scanner; o.namesBeforeReply = globalThis.NPCStateDelta.getState().npcs.map(n => n.name);
+        }
+        await sleep(o.replyAfter);
+        const next = { is_user: false, is_system: false, name: 'Megumin', mes: '', swipe_id: 0, swipes: [''] };
+        chat.push(next);
+        if (o.stream) {
+            const words = 'She is a crimson demon and a friend of Megumin who likes to compete'.split(' ');
+            for (let i = 0; i < 26; i += 1) { next.mes += words[i % words.length] + ' '; next.swipes[0] = next.mes; await sleep(150); }
+        } else {
+            next.mes = 'She is a crimson demon and a friend of Megumin.'; next.swipes[0] = next.mes;
+        }
+        await emitAll('message_received', chat.length - 1);
+    }
+    await sleep(o.settle);
+    return { total: kinds().scanner, before: o.callsBeforeReply ?? null, namesBefore: o.namesBeforeReply ?? null, names: globalThis.NPCStateDelta.getState().npcs.map(n => n.name) };
+};
+const runSend = (name, opts) => {
+    process.env.SR_OPTS = JSON.stringify({ sendAt: 150, replyAfter: 300, stream: true, settle: 3000, ...opts });
+    try { return runCalls(name, false, sendScenario); } finally { delete process.env.SR_OPTS; }
+};
+const SEND_TIMINGS = [
+    ['the next reply message appears before the scan request ends (streamed)', { sendAt: 150, replyAfter: 300, stream: true }],
+    ['the next reply message appears after the scan request ends (slow prompt build or first chunk)', { sendAt: 150, replyAfter: 900, stream: true }],
+    ['a non-streaming reply that arrives 3 s after the Send', { sendAt: 150, replyAfter: 3000, stream: false, settle: 4000 }],
+    ['the Send lands late in the scan (the full-window new-NPC relationship pass)', { sendAt: 900, replyAfter: 300, stream: true }],
+];
+for (const full of [true, false]) {
+    for (const [label, timing] of SEND_TIMINGS) {
+        test(`send-drop: a Send during the scan makes exactly the same scanner calls as when it was held (${full ? 'full window' : 'lean'}; ${label})`, () => {
+            const r = runSend('send-count', { ...timing, full });
+            assert.equal(r.total, 2, `scanner calls: ${r.total}`);
+            assert.ok(r.names.includes('Yunyun'), 'the NPC was kept: ' + JSON.stringify(r.names));
+        });
+    }
+}
+
+test('send-drop: a Send with no reply makes no re-run (1 scanner call); the next reply\'s scan then lands the NPC (2 in total)', () => {
+    const r = runSend('send-noreply', { noReply: true, replyAfter: 100, stream: false, settle: 3000 });
+    assert.equal(r.before, 1, `scanner calls before the next reply: ${r.before}`);
+    assert.equal(r.total, 2, `scanner calls in total: ${r.total}`);
+    assert.ok(r.names.includes('Yunyun'), 'the NPC landed with the next reply: ' + JSON.stringify(r.names));
+});
+
+test('send-drop: an earlier message edited during the scan (nothing appended) runs the scan again once and lands on that reply', () => {
+    const r = runSend('send-edit', { edit: true, sendAt: 150, settle: 4000 });
+    assert.equal(r.total, 2, `scanner calls: ${r.total}`);
     assert.ok(r.names.includes('Yunyun'), 'its result landed: ' + JSON.stringify(r.names));
 });
