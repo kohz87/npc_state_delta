@@ -30,9 +30,9 @@ function returnShapeKeys(names, values = {}) {
     }).join(',');
 }
 /** The return shape of a targeted prompt ('refresh' | 'backfill' | 'import'); `values` replaces a key's value. */
-export function returnShape(kind, values = {}) {
+export function returnShape(kind, values = {}, extraNpcKeys = []) {
     const shape = RETURN_SHAPES[kind];
-    const parts = [`"npcs":[{${returnShapeKeys(shape.npcs, values)}}]`];
+    const parts = [`"npcs":[{${returnShapeKeys([...shape.npcs, ...extraNpcKeys], values)}}]`];
     if (shape.profileUpdates) parts.push(`"profileUpdates":[{${returnShapeKeys(shape.profileUpdates, values)}}]`);
     if (shape.edges) parts.push('"keyRelationshipEdges":[]');
     return `${RETURN_SHAPE_LEAD}\n{${parts.join(',')}}`;
@@ -161,6 +161,7 @@ export function buildProfileRefreshPrompt({
     turn = null,
     storyDay = null,
     fillLooks = false,
+    askTastes = false,
 }) {
     const npc = normalizeNpcRecord(targetNpc || {});
     const locked = Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : [];
@@ -243,7 +244,7 @@ Rules:
 
 Memory criteria: ${memoryRubric || '(none configured; store only clearly durable story-relevant events)'}
 
-${returnShape('refresh', { id: '"<target id>"', name: '"<target name>"' })}
+${returnShape('refresh', { id: '"<target id>"', name: '"<target name>"' }, askTastes ? ['tastes'] : [])}
 
 Recent story window (EVIDENCE ONLY; preserve [mN] order):
 ${String(transcript || '').trim()}
