@@ -13,7 +13,9 @@ export const TWO_PANE_MIN = PANE_HERO_MIN + PANE_SECTION_MIN;
 // Three panes (dial pane, tiles and a section): 230 + 290 + 420.
 export const THREE_PANE_MIN = PANE_HERO_SLIM_MIN + PANE_TILES_MIN + PANE_SECTION_WIDE_MIN;
 export const SWIPE_MIN_PX = 48;
-export const SECTION_KEYS = Object.freeze(['now', 'with', 'ties', 'past', 'secrets']);
+export const SECTION_KEYS = Object.freeze(['mood', 'now', 'with', 'ties', 'past', 'secrets']);
+// Saved screens from the five-section dossier read "section:<n>" with n = 0 Right now (mood and where, which is now Mood), 1 With, 2 Ties, 3 Past, 4 Secrets.
+const LEGACY_SECTIONS = Object.freeze([0, 2, 3, 4, 5]);
 const SCREEN_NAMES = Object.freeze(['library', 'board', 'profile', 'section']);
 const HISTORY_LIMIT = 24;
 const DESKTOP_PANES = Object.freeze({
@@ -23,22 +25,26 @@ const DESKTOP_PANES = Object.freeze({
     profile: Object.freeze(['portrait', 'profile']),
 });
 
-// Sections are 0-based: 0 Right now, 1 With {{user}} (key "with"), 2 Ties, 3 Past, 4 Secrets.
+// Sections are 0-based: 0 Mood, 1 Right now, 2 With {{user}} (key "with"), 3 Ties, 4 Past, 5 Secrets.
 export function normalizeSection(value) {
     const n = Number.parseInt(value, 10);
     return Number.isInteger(n) && n >= 0 && n < SECTION_KEYS.length ? n : 0;
 }
 
-// Parses 'library' | 'board' | 'profile' | 'section:n'; anything unknown is the library.
+// Parses 'library' | 'board' | 'profile' | 'section:<id>'; a saved 'section:<n>' from the five-section dossier opens the same place as before;
+// anything unknown is the library (an unknown section id or number opens the first section).
 export function parseScreen(text) {
     const raw = String(text ?? '').trim().toLowerCase();
-    const match = /^section:(\d+)$/.exec(raw);
-    if (match) return { name: 'section', section: normalizeSection(match[1]) };
+    const match = /^section:(\w+)$/.exec(raw);
+    if (match) {
+        const byId = SECTION_KEYS.indexOf(match[1]);
+        return { name: 'section', section: byId >= 0 ? byId : (/^\d+$/.test(match[1]) ? (LEGACY_SECTIONS[Number(match[1])] ?? 0) : 0) };
+    }
     return { name: SCREEN_NAMES.includes(raw) ? raw : 'library', section: 0 };
 }
 
 export function formatScreen(screen) {
-    return screen.name === 'section' ? `section:${normalizeSection(screen.section)}` : screen.name;
+    return screen.name === 'section' ? `section:${SECTION_KEYS[normalizeSection(screen.section)]}` : screen.name;
 }
 
 // A board, profile or section needs an NPC; without one the state falls back to the library.

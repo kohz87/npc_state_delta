@@ -6,7 +6,9 @@
 import { getContext } from '../../../extensions.js';
 import { storyDayAt } from './src/transcript.js';
 import { stampNpcChanges } from './src/relationship-pass.js';
-import { normalizeName } from './core.js';
+import { normalizeName, normalizeRelationshipBaseline, npcMatchesLabel } from './core.js';
+import { rejectedOverallLook } from './appearance-update.js';
+import { moodNumbers } from './npc-mood.js';
 import { chatLineage, firstLineageDivergence, lineageCheckpointKey, clearUserDismissedGroupsFor } from './branch.js';
 import { getSettings } from './runtime-settings.js';
 import { setScannerWaitAround } from './scanner-routing.js';
@@ -145,3 +147,43 @@ export function clearUserDismissedSuppression(state, target) {
     }
     return state;
 }
+
+// What a committed scan tells the slice, read from the people before and after it (moved from runtime-hosted.js, bodies unchanged).
+// Each person's relationship moves since the scan began, as npc.adjust payloads; the tier the scanner gave the scan's newest event rides along
+// (one event however many meters it moved); none known: sent without one, and not counted.
+export function relationshipChanges(prior, after, baseline, messageId) {
+    const changes = [];
+    for (const npc of after || []) {
+        if (!npc?.id || npc.archived) continue;
+        const from = prior.has(npc.id) ? normalizeRelationshipBaseline(prior.get(npc.id).relationship) : baseline;
+        const to = normalizeRelationshipBaseline(npc.relationship);
+        const meters = Object.fromEntries(Object.keys(to).filter(key => to[key] !== from[key]).map(key => [key, to[key] - from[key]]));
+        const last = npc.lastRelationshipChange;
+        const fresh = last && JSON.stringify(last) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange);
+        if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId, ...(fresh && typeof last.impact === 'string' ? { impact: last.impact } : {}) });
+    }
+    return changes;
+}
+
+// A durable look the scan refused (the story did not explain a change): one entry per person, for a Problem and a next-reply cue.
+export function refusedLooks(prior, after, updates = []) {
+    const refused = [];
+    const afterBy = new Map((after || []).map(npc => [npc?.id, npc]));
+    for (const row of Array.isArray(updates) ? updates : []) {
+        const was = prior.get(row?.id);
+        const now = afterBy.get(row?.id);
+        if (!was || !now || now.archived) continue;
+        const rejected = rejectedOverallLook(was.overallAppearance, now.overallAppearance, row);
+        if (rejected && !refused.some(item => item.id === now.id)) refused.push({ id: now.id, name: now.name, before: was.overallAppearance, incoming: rejected.incoming });
+    }
+    return refused;
+}
+
+// The three mood numbers the scan gave with a person's mood word (its row's moodV / moodA / moodD, only with a mood text), or null.
+export function scanMoodNumbers(rows, npc, moodOf) {
+    const row = (Array.isArray(rows) ? rows : []).find(item => item && ((item.id && item.id === npc.id) || (item.name && npcMatchesLabel(npc, item.name))));
+    return moodOf(row) ? moodNumbers(row) : null;
+}
+
+// A person worth a slice entry: not the dead and not incidental extras (the slice holds 80 people; a long chat must not fill it with people who never matter).
+export const worth = npc => !['dead', 'deceased'].includes(String(npc.lifeState ?? '').toLowerCase()) && npc.dossierSignal !== 'incidental';

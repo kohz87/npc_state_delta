@@ -85,7 +85,7 @@ export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
 // Story Block's lean RPG feature (its names.js LEAN_RPG_FEATURE); an extension cannot import Story Block.
 const RPG_FEATURE = 'story-block.rpg';
 export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity', 'npc.catchUp']);
-export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.open', 'npc.tick', 'npc.flag', 'npc.meet', 'npc.taste', 'npc.drives']);
+export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.open', 'npc.tick', 'npc.flag', 'npc.meet', 'npc.mood', 'npc.taste', 'npc.drives']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
 export const TICK_TURNS = Object.freeze(['normal', 'swipe', 'regenerate']);
@@ -219,6 +219,8 @@ export function createStorySuiteV2Adapter({
         adjust: ({ name, meters, start, reply, impact } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(typeof impact === 'string' ? { impact } : {}) }, { own: true, background: true }),
         /** While hosted: Delta's scan admitted a person → `npc.meet` (an entry with the dossier's meters, a resting mood and drives, like a cast meeting). */
         meet: ({ name, personality, about, reply } = {}) => send('npc.meet', { name, ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}), ...(personality ? { personality: String(personality).slice(0, 600) } : {}), ...(about ? { about: String(about).slice(0, 600) } : {}) }, { own: true, background: true }),
+        /** While hosted: Delta's scan wrote a new mood word for a person → `npc.mood` (its numbers: the three the scan gave, else the fixed word list; with the reason the scan recorded). */
+        mood: ({ name, word, vad, reason, reply, again, personality, about } = {}) => send('npc.mood', { name, word: String(word ?? '').slice(0, 220), ...(vad ? { vad } : {}), ...(personality ? { personality: String(personality).slice(0, 600) } : {}), ...(about ? { about: String(about).slice(0, 600) } : {}), ...(again === true ? { again: true } : {}), ...(reason ? { reason: String(reason).slice(0, 200) } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true, background: true }),
         /** While hosted: what a scan newly recorded for one person (plain strings) → `npc.drives` (drive growth, rule 1). Only with the notes feature on and for a person who already has meters; else null. */
         drives: ({ name, texts: given, before, after, reply } = {}) => ((texts) => !texts.length || part.featureOn(FEATURE_NOTES) !== true || !(() => { const entries = sliceEntries(); return Boolean(entries && entryFor(entries, dossierOf(name) ?? { name })); })() ? null
             : send('npc.drives', { name, texts: texts.slice(0, 12).map(text => String(text).slice(0, 200)), rule: 1, ...(after?.role ? { ignore: String(after.role).slice(0, 120) } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true, background: true }))(Array.isArray(given) ? given : driveEvidence(before, after)),

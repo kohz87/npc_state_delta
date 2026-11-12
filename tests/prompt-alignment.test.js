@@ -91,6 +91,9 @@ test('step 12 I-10: the one-pass rules always carry the Stage 4 and birthday rul
     const scanner = buildScannerPrompt({ transcript, existingNpcs: [rich()] });
     assert.match(scanner, /S4: forms\/current; confirmed death terminal\./);
     assert.doesNotMatch(scanner, /STAGE 4 DEATH|BIRTHDAY:/);
+    // VADFIX2: the scan writes three whole numbers (-3..3) with a new mood word, in the rules of the full scan and of the one-pass capture
+    assert.match(scanner, /With a new mood also moodV,moodA,moodD: whole -3\.\.3 \(unpleasant\.\.pleasant, slack\.\.keyed up, cornered\.\.in control\)\./);
+    assert.match(buildScannerPrompt({ transcript, existingNpcs: [rich()], narrationCapture: true }), /With a new mood also moodV,moodA,moodD: whole -3\.\.3/);
 });
 
 test('step 12 I-10: with a calendar the birthday rule keeps the era in the rules and the date in the context', () => {
@@ -127,6 +130,9 @@ test('step 12 I-12: backfill and import shapes carry the scan\'s *State keys for
     }
     for (const key of ['moodState:keep|clear', 'locationState:keep|clear', 'goalState:keep|clear', 'statusState:keep|clear']) assert.ok(backfill.includes(key), `backfill ${key}`);
     assert.match(backfill, /12\. A value the dossier already has changes only by its \*State, as in the scan/);
+    // the scan's mood numbers: the three keys follow `mood` in the shapes of the passes that write the mood word (not in the import)
+    assert.ok(backfill.includes('mood,moodState:keep|clear,moodV:-3..3,moodA:-3..3,moodD:-3..3,location'), 'backfill asks for the three mood numbers with the word');
+    assert.ok(!imported.includes('moodV'), 'the import writes no live state');
 });
 
 test('step 12 I-13: the dossier import names the configured custom fields', () => {
@@ -160,6 +166,7 @@ test('step 13: the targeted shapes are written from the registry and leave out w
     for (const kind of ['refresh', 'backfill', 'import']) {
         assert.doesNotMatch(returnShape(kind), /relationshipDelta|relationshipImpact/, `${kind}: every targeted pass zeroes the relationship numbers`);
     }
+    assert.match(refresh, /moodV:-3\.\.3,moodA:-3\.\.3,moodD:-3\.\.3/, 'Refresh asks for the mood numbers with the word');
     assert.doesNotMatch(refresh, /present|worldActive/, 'Refresh ignores presence');
     assert.match(returnShape('backfill'), /present:true\|false,worldActive:true\|false/);
     assert.ok(buildProfileRefreshPrompt({ transcript, targetNpc: rich() }).includes(refresh));

@@ -83,6 +83,16 @@ export function isRoleDescriptionLabel(label) {
     return content.length > 0 && content.every(word => word === word.toLowerCase());
 }
 
+// A phrase that describes someone instead of naming them ("leader in the gambeson", "Leader in the gambeson"): three or more words, none
+// capitalised after the first (a sentence may start it), one of them a linking word. Uncased scripts (no lowercase letter) never count, and a
+// role label ("old man", "the innkeeper") has no linking word, so it stays on the role path. A new person written this way is not admitted (core-merge.js).
+const LINKING_WORDS = new Set(['in', 'with', 'of', 'at', 'from', 'on', 'by', 'under', 'behind', 'beside', 'near', 'wearing', 'carrying', 'holding']);
+export function isDescriptivePhrase(label) {
+    const words = String(label ?? '').trim().split(/\s+/).filter(Boolean);
+    return words.length >= 3 && words.some(word => /\p{Ll}/u.test(word)) && words.slice(1).every(word => word === word.toLowerCase())
+        && words.some(word => LINKING_WORDS.has(word.toLowerCase()));
+}
+
 export function isInterimNpcLabel(name, explicit = '') {
     const text = normalizeName(name);
     const tokens = text.split(/\s+/).filter(Boolean);
