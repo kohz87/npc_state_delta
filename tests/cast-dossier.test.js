@@ -976,6 +976,69 @@ test('runtime: the other order (the host\'s turn makes the cast dossier first, t
     assert.deepEqual(out.secrets, ['pack:She saw who opened the gates.'], 'the authored hidden notes, no invented ones');
 });
 
+// (first meeting) The first reply on which a pack cast member is present with the player gives her ONE "I first met" memory, in either order
+// (the reply's scan admits her, or the host's turn step makes her dossier first), hosted (the move fact stays out), placed and dated from the meeting.
+const firstMeetingRun = (name, turnFirst, mention = false, castOnly = false) => {
+    // The host scenario runs as source text in its own process: the two switches are written into it.
+    const scenarioFn = async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const sdk = mockState.sdk;
+        sdk.people = [{ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: { on: 'Day 1', where: 'the gate' }, alive: true,
+            entry: { id: 'fenna', name: 'Fenna', about: 'Runs the night ferry.', look: 'Tall and weathered.', start: { place: 'Bluewatch docks', goal: 'Find who opened the weir' } } }];
+        if (turnFirst) { await sdk.handlers.turn?.({ type: 'normal' }); await sleep(300); }
+        mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+        await Promise.all((mockState.listeners.get('message_sent') || []).map(fn => fn(mockState.context.chat.length - 1)));
+        const text = 'Fenna poles the ferry in.';
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
+        const id = mockState.context.chat.length - 1;
+        mockState.quietResponder = async () => JSON.stringify({ npcs: castOnly ? [] : [{ name: 'Fenna', present: !mention, role: 'boatwoman', location: 'the gate', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: !mention,
+            relationshipImpact: 'none', relationshipReason: '' }] });
+        await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+        await Promise.all((mockState.listeners.get('character_message_rendered') || []).map(fn => fn(id)));
+        await sleep(300);
+        if (!turnFirst) { await sdk.handlers.turn?.({ type: 'normal' }); await sleep(300); }
+        const one = api.getState().npcs.find(npc => npc.name === 'Fenna') || {};
+        console.log('RESULT ' + JSON.stringify({ found: Boolean(one.name), memories: one.memories || [], stamps: one.memoryStamps || {}, facts: Object.values(one.memoryFacts?.entries || {}).map(entry => entry.k) }));
+    };
+    const scenario = { toString: () => scenarioFn.toString().replace(/\bturnFirst\b/g, String(turnFirst)).replace(/\bmention\b/g, String(mention)).replace(/\bcastOnly\b/g, String(castOnly)) };
+    const prelude = async () => {
+        const sdk = {
+            registered: [], people: [], made: {}, handlers: {},
+            registerModule(def) { sdk.registered.push(def); },
+            on(name, fn) { sdk.handlers[name] = fn; return () => {}; },
+            command: async type => {
+                if (type === 'npc.tick') for (const person of sdk.people) if (person.met && person.entry) sdk.made[person.key] = { name: person.name };
+                return { ok: true, receipt: { summary: '' } };
+            },
+            query: q => (q === 'director.cast' ? structuredClone(sdk.people) : q === 'npc.castMade' ? structuredClone(sdk.made)
+                : q === 'packs.list' ? [{ id: 'ersveil', name: 'Ersveil' }] : q === 'scene.present' ? [] : null),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    return scenarioOutput(runHostScenario(name, prelude, scenario));
+};
+test('first meeting: a pack cast member admitted by the reply that meets her gets one "I first met" memory (hosted)', () => {
+    const out = firstMeetingRun('first-meeting-admitted', false);
+    assert.deepEqual(out.memories.filter(text => /first met/.test(text)), ['I first met Kazuma at the gate.'], 'exactly one, placed from the reply');
+    assert.deepEqual(out.facts, ['met']);
+});
+test('first meeting: the host\'s turn step made the dossier (the scan did not admit her) at the meeting reply: one fact, dated and placed from the meeting', () => {
+    const out = firstMeetingRun('first-meeting-cast-only', false, false, true);
+    assert.deepEqual(out.memories.filter(text => /first met/.test(text)), ['I first met Kazuma at the gate.']);
+    assert.deepEqual(Object.values(out.stamps).map(stamp => stamp.d), ['Day 1'], 'the story date of the meeting');
+});
+test('first meeting: the turn step before the reply exists, then the reply\'s scan finds her present: still exactly one', () => {
+    const out = firstMeetingRun('first-meeting-turn-first', true);
+    assert.equal(out.memories.filter(text => /first met/.test(text)).length, 1, 'exactly one');
+});
+test('first meeting: a cast member only mentioned in the reply (not present) gets none', () => {
+    const out = firstMeetingRun('first-meeting-mention', false, true);
+    assert.deepEqual((out.memories || []).filter(text => /first met/.test(text)), []);
+});
+
 test('the cast box sits in Right now, and the "Next:" line has its own space under the meters', () => {
     const ui = dossierUiSource();
     // The section bar is gone with the one long page: the cast and away blocks head the Right now section.

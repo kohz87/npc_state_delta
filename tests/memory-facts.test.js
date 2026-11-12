@@ -100,11 +100,39 @@ test('memory facts §2: a move uses the applied delta, never the ask, and only m
     assert.equal(moveFact({ applied: { trust: 1 }, tier: 'meaningful', R: 4, source: 's', opId: 'op' }).cls, 'O');
     assert.equal(moveFact({ applied: { trust: 1 }, tier: 'major', R: null, source: 's', opId: 'op' }), null);
 });
-test('memory facts §2: a first meeting is never built from an admission, promotion, manual or cast creation', () => {
-    assert.deepEqual(Object.keys(events), ['moveFact'], 'only the wired source ships; no met/milestone/lie/quest/fight/party/gift builder');
-    const state = mergeScanResult({ npcs: [], turn: 1 }, { npcs: [{ name: 'Elke', role: 'Clerk', present: true, memories: [] }] }, { turn: 1, sourceMessageId: 1, memoryFacts: { source: 'k1', player: P } }).state;
-    assert.equal(state.npcs[0].memoryFacts, undefined, 'admission of a new dossier records no fact');
-    assert.deepEqual(state.npcs[0].memories, []);
+test('memory facts §2: only the move and the first meeting ship as builders; no milestone/lie/quest/fight/party/gift', () => {
+    assert.deepEqual(Object.keys(events), ['metFact', 'moveFact']);
+});
+// (first meeting) The first reply on which the scan finds the person present: created, promoted or seeded alike; once; never for a mention.
+const meet = (state, npcs, source, extra = {}) => mergeScanResult(state, { npcs }, { turn: 1, sourceMessageId: 1, memoryFacts: { source, player: P, ...extra } }).state;
+const firstMet = state => state.npcs[0].memories.filter(text => /first met/.test(text));
+test('first meeting: a new present person gets exactly one "I first met" fact, placed from that reply, once per reply lineage', () => {
+    const elke = { name: 'Elke', role: 'Clerk', present: true, location: 'the harbour', memories: [] };
+    const a = meet({ npcs: [], turn: 1 }, [elke], 'k1');
+    assert.deepEqual(firstMet(a), ['I first met Kazuma at the harbour.']);
+    assert.equal(a.npcs[0].memoryFacts.entries[Object.keys(a.npcs[0].memoryFacts.entries)[0]].k, 'met');
+    // The same reply read again (Re-read, same lineage key) and a later reply: still one, never a second line.
+    assert.equal(firstMet(meet(a, [elke], 'k1')).length, 1);
+    assert.equal(firstMet(meet(a, [elke], 'k2')).length, 1, 'a later reply with her present is not a first meeting');
+    // Regeneration: the branch rewinds to the state before the reply; the new reply (another key) gives one line, not two.
+    const regenerated = meet({ npcs: [], turn: 1 }, [elke], 'k1-regenerated');
+    assert.equal(firstMet(regenerated).length, 1);
+    assert.deepEqual(firstMet(regenerated), firstMet(a));
+});
+test('first meeting: never for a person only mentioned, an archived one, a mark-less reply, or one present before (an old dossier)', () => {
+    const elke = { name: 'Elke', role: 'Clerk', location: 'the harbour', memories: [] };
+    assert.deepEqual(meet({ npcs: [], turn: 1 }, [{ ...elke, present: false, worldActive: true }], 'k1').npcs[0]?.memories ?? [], [], 'mentioned only');
+    assert.deepEqual(mergeScanResult({ npcs: [], turn: 1 }, { npcs: [{ ...elke, present: true }] }, { turn: 1, sourceMessageId: 1 }).state.npcs[0].memories, [], 'no live mark, no fact');
+    const old = normalizeNpcRecord({ id: 'npc1', name: 'Elke', role: 'Clerk', seenCount: 4, lastSeenTurn: 3, memories: ['Elke sold me a ledger.'] });
+    const next = meet({ npcs: [old], turn: 5 }, [{ ...elke, present: true }], 'k9');
+    assert.deepEqual(next.npcs[0].memories, ['Elke sold me a ledger.'], 'an old dossier that was present before gets no "first met"');
+    assert.equal(next.npcs[0].memoryFacts, undefined);
+});
+test('first meeting: a dossier made earlier but never present (manual or cast) gets it on her first presence; hosted keeps the move fact out', () => {
+    const made = normalizeNpcRecord({ id: 'npc1', name: 'Elke', role: 'Clerk', seenCount: 0, lastSeenTurn: 2 });
+    const hosted = meet({ npcs: [made], turn: 3 }, [{ name: 'Elke', present: true, location: 'the gate', relationshipImpact: 'major', relationshipDelta: { trust: 3 }, relationshipReason: 'saved her', memories: [] }], 'k3', { hosted: true });
+    assert.deepEqual(firstMet(hosted), ['I first met Kazuma at the gate.']);
+    assert.ok(!hosted.npcs[0].memories.some(text => /trust/i.test(text)), 'hosted: no movement fact from this scan');
 });
 
 // ---- §6 retention ----
