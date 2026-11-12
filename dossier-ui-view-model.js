@@ -90,7 +90,9 @@ function tagTone(tags) {
 }
 
 function tiesModel(npc) {
-    const entries = stringList(npc.keyRelationships, 12).map(text => {
+    // The board lists the active ties in priority order (type, then most recent); older ones sit in the Older ties fold of the section.
+    const texts = Array.isArray(npc.tieRows) ? npc.tieRows.filter(row => row.state === 'active').map(row => row.entry) : stringList(npc.keyRelationships, 12);
+    const entries = texts.map(text => {
         const parsed = parseKeyRelationshipEntry(text);
         return {
             text,

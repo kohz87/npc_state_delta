@@ -5,6 +5,7 @@
 
 import { chatContext as getContext, replayScope, scopedAdapter } from './runtime-scan-helpers.js';
 import { replyScanned } from './scan-context.js';
+import { storyDayAt } from './src/transcript.js';
 import { normalizeRelationshipBaseline, isTerminalNpcDeath, npcMatchesLabel, storyMinuteText } from './core.js';
 import { defersArea, resolveDossierTarget } from './suite-handshake.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
@@ -193,7 +194,8 @@ export function createHostedPart(rt, deps) {
         const keyViews = dossierKeyViews(state);
         const castViews = dossierCastViews(state);
         const sheetLevels = dossierSheetLevels(state);
-        return { meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}), ...(sheetLevels ? { sheetLevels } : {}) };
+        const storyDay = storyDayAt();   // the story day now: older ties fade by it (core-keyrel.js)
+        return { meterViews, ...(Number.isInteger(storyDay) ? { storyDay } : {}), ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}), ...(sheetLevels ? { sheetLevels } : {}) };
     }
     // (perf) The dossiers as the views read them: a copy, except that a portrait's picture (its data URL, an immutable string of up to
     // a few hundred KB) is shared rather than copied; the portrait record itself is still a copy.

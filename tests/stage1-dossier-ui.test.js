@@ -454,7 +454,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.doesNotMatch(boardHtml(npc, { userName: 'Astra' }), /Reply #3/, 'no stamp line under the change');
   assert.match(boardHtml(npc, { userName: 'Astra' }), /tap the portrait for (?:her|his|their) profile/);
   const ties = sectionScreenHtml('ties', npc);
-  assert.match(ties, />ally</); assert.match(ties, />owes</); assert.match(ties, />owed by</);
+  assert.match(ties, />Ally</); assert.match(ties, />Owes</); assert.equal(ties.match(/data-tie-type="owes"/g).length, 2, 'a person who owes her is a debt tie too: Owes');
   assert.match(ties, /a lie you have not caught/);
   assert.doesNotMatch(ties, /SECRET WORDS|a secret about/);
   assert.match(ties, /I sold nothing/); assert.match(ties, /Y owes a debt/);
@@ -547,7 +547,7 @@ test('round 2 fix 2-4: Right now in groups with three bars and Pull last, Recent
   assert.match(withHtml, /Recent changes[\s\S]*delta-chg-when">Goldwane 21<br><small>#3<\/small>[\s\S]*data-good="no">Tension \+2[\s\S]*via praise: it backfired[\s\S]*Desire/);
   assert.doesNotMatch(withHtml, /Last relationship change/);
   const ties = sectionScreenHtml('ties', base, {});
-  assert.match(ties, /data-tone="bad"><span class="delta-bond-word">rival<\/span>/);
+  assert.match(ties, /data-tone="bad" data-tie-type="rival"><span class="delta-bond-word">Rival<\/span>/);
   assert.match(ties, /a lie you have not caught/, 'an uncaught lie never shows its words');
   const css = await builtCss();
   assert.doesNotMatch(css.match(/\.delta-bond-word \{[^}]*\}/g)?.join(' ') || '', /border:1px/, 'the relation word is plain coloured text, no pill');
