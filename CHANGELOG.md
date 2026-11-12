@@ -2,7 +2,7 @@
 
 ## 1.17.0
 
-Update Story Block, Story Director, NPC State Delta (and Story Studio for pack authors) together. Save format 2: a chat saved by 1.17.0 cannot be opened by older NPC State Delta builds (they refuse it safely) — update every device. Replies already written replay and Re-read as before; start a new chat to see the new dossier (mood numbers and reasons, Mood section, ties types and fading, drives) behaviour.
+Update Story Block, Story Director, NPC State Delta (and Story Studio for pack authors) together. Save format 2: a chat saved by 1.17.0 cannot be opened by older NPC State Delta builds (they refuse it safely) — update every device. If an older version shows this chat's dossier as unreadable, update the extension; do not use Detach Broken Sidecar (it would start a fresh empty dossier for the chat). Replies already written replay and Re-read as before; start a new chat to see the new dossier (mood numbers and reasons, Mood section, ties types and fading, drives) behaviour.
 
 **Storage changes (read these first)**
 
@@ -12,15 +12,19 @@ Update Story Block, Story Director, NPC State Delta (and Story Studio for pack a
 **Prompt changes (flagged; static prompt unchanged except where stated)**
 
 - **The scanner/Refresh schema grew.** The background Refresh now also returns likes, dislikes and things the person values, each with its source, so tastes fill in (they came only from the narrator's `~ taste` lines before, which were almost never written). A few schema lines were added to the Refresh prompt; no extra calls.
+- **The scanner and one-pass capture rules ask for mood numbers.** A schema line was added to both the scanner prompt and the one-pass capture rules (which ride in the narrator prompt when one-pass is on): with a new mood also `moodV,moodA,moodD`, whole numbers -3..3. The scanner request grew by 115 characters; no extra calls.
+- **Memories reach the narrator and the Refresh prompt at up to 400 characters.** The narrator injection clipped them at 220 and the Refresh prompt at 260.
+- **The narrator gets only active ties, strongest type first.** Folded Older ties are withheld from the narrator prompt (see Ties below).
+- **Stage 9 prompt fixtures were re-recorded** for the memory and mood-schema changes (request counts unchanged).
 - **The tail cue and the story-line cues changed.** Each of the lie, tie, taste, milestone and secret line kinds now says when to write it, with one generic example, and a short tail cue keeps the Changes block at the end (prompt text only; the static prompt is byte-stable).
 - **The Changes reminder reaches the narrator.** The reminder to end with the Changes block now reaches every main prompt it should, including quiet travel and rest replies, and only after Story Director's and Story Block's kept lines fit under the tail budget. Previously it was dropped first.
-- **Mood and Pull lines reach the narrator.** They were being dropped by the 550-token tail budget; within NPC State Delta's lines the Changes cue still comes first and Pull and Mood take the rest (optional on overflow), never displacing other modules' lines.
+- **Mood and Pull lines reach the narrator.** They were being dropped by a small tail budget (for example 550 tokens); within NPC State Delta's lines the Changes cue still comes first and Pull and Mood take the rest (optional on overflow), never displacing other modules' lines.
 
 **Dossier and play**
 
 - **Dossier polish: reasons, dated mood history, mood words that match the numbers.** A reason is missing only when none was recorded; every Mood history row carries its story date and reply number; the mood words are derived from the numbers shown.
 - **Mood numbers and reasons, a Mood section, the Pull line, admission gaps.** Feeling, Energy and Control move with every mood update (numbers from the scan, with a word-list fallback that understands negation) and are shown on their own coloured meter rows with this reply's change, on the board and in a new Mood section with Recent changes (last 3) and the Pull line (1-3 dots). Lies told moved to With, Knows about others to Secrets; meter changes show their reason. Missed people are admitted, description phrases never become named dossiers, role labels with linking words are kept, and scan people get meters.
-- **Pull and Mood reach the narrator; Pull signals fire correctly.** Closure now ages threads correctly, and Awe no longer fires on one place written two ways.
+- **Pull signals fire correctly.** Closure now ages threads correctly, and Awe no longer fires on one place written two ways.
 - **Ties: five types, priority and fading.** Ties are Ally, Rival, Owes, Interest or Passing, with the detail in the description. Priority is Ally/Rival/Owes, then Interest, then Passing for eviction (least recently mentioned first, hand-edited never), fading (Passing after 7, Interest after 14, the high types after 30 story days without a mention, by the story clock) and prompt order. Ties with someone who died or left fold into Older ties and are not sent to the narrator; a mention brings a tie back. Cap 8; only whole-name or alias mentions count.
 - **Drives: a word on a centred bar.** The middle of the bar is normal, with the source shown. People who are not from a pack are seeded from two cues, and drives step from story evidence already recorded (levers parsed structurally, prose cues with negation), one step per reply, recorded so replay equals live. No model calls.
 - **Past entries are longer and dated; Ties are stacked.** Past entries may run to 400 characters; each new memory records the story date and reply (old ones stay undated, also when re-worded); Ties show as type, name, description, with spacing.
