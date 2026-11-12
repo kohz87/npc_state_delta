@@ -9,6 +9,53 @@ import { portraitHasImage } from './src/portrait-file.js';
 import { applyCastEntry, applyCastPortrait, castPortraitWanted, dossierFor, findCastPerson, metWithEntry } from './src/cast-dossier.js';
 import { getSettings } from './runtime-settings.js';
 import { normalizeSourceOfTruth } from './suite-handshake.js';
+import { chatLineage, lineageCheckpointKey } from './branch.js';
+import { chatContext } from './runtime-scan-helpers.js';
+
+// (ONEPASSCAPR2-2) Keep the admission values until the host's meeting step can answer. A later manual edit or scan wins over this seed.
+const SEED_FIELDS = ['aliases', 'role', 'overallAppearance', 'appearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'speech', 'personality', 'background', 'behaviorProfile', 'mannerisms', 'relationshipSummary', 'homeBase', 'goal', 'location', 'customFields', 'species', 'gender', 'age', 'apparentAge', 'birthDate', 'birthDateSource', 'birthDateReason', 'birthDatePrecision', 'birthDateYearSource', 'relationship', 'meterSetup', 'secrets'];
+const seedValues = npc => Object.fromEntries(SEED_FIELDS.map(field => [field, structuredClone(npc[field] ?? null)]));
+const sameSeedValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+export function rememberCastAdmissions(state, ids, messageId, lineage) {
+    if (!ids.length || !Number.isInteger(messageId)) return;
+    state.castSeedPending = { ...(state.castSeedPending || {}) };
+    for (const npc of state.npcs || []) if (ids.includes(npc.id)) state.castSeedPending[npc.id] = {
+        messageId, lineageKey: lineageCheckpointKey(lineage, messageId), values: seedValues(npc),
+    };
+}
+export function seedCastAdmission(state, npc, person, options = {}) {
+    const pending = state.castSeedPending?.[npc?.id];
+    if (!pending || !person?.entry) return null;
+    const seeded = applyCastEntry(npc, person, options);
+    if (!seeded) return null;
+    const locked = new Set(npc.manualProfileFields || []);
+    for (const field of SEED_FIELDS) {
+        const group = ['overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown'].includes(field) ? 'appearance' : field;
+        if (locked.has(group) || !sameSeedValue(npc[field], pending.values[field])) {
+            if (Object.hasOwn(npc, field)) seeded[field] = npc[field]; else delete seeded[field];
+        }
+    }
+    if (!locked.has('secrets') && sameSeedValue(npc.secrets, pending.values.secrets)) seeded.secrets = person.entry.secrets || [];
+    if (!locked.has('appearance') && person.entry.look && sameSeedValue(npc.overallAppearance, pending.values.overallAppearance)
+        && sameSeedValue(npc.appearance, pending.values.appearance)) {
+        seeded.appearance = person.entry.wears || '';
+        seeded.unclassifiedAppearance = '';
+        seeded.appearanceForms = [];
+        seeded.currentForm = '';
+        seeded.currentFormUnknown = false;
+    }
+    delete state.castSeedPending[npc.id];
+    if (!Object.keys(state.castSeedPending).length) delete state.castSeedPending;
+    return normalizeNpcRecord(seeded);
+}
+export function advanceCastAdmission(state, before, after) {
+    const pending = state.castSeedPending?.[before?.id];
+    if (!pending || !after) return;
+    const locked = new Set(before.manualProfileFields || []);
+    for (const field of SEED_FIELDS) if (!locked.has(field) && sameSeedValue(before[field], pending.values[field])) {
+        pending.values[field] = structuredClone(after[field] ?? null);
+    }
+}
 
 export function createCastSyncPart(rt, deps) {
     const { castList, chatHeadMark, chatHeadUnchanged, chatHydrationStatus, commitBranchCheckpoint, ensureFreshMutationBoundary, getChatKey, getChatState, latestMessageId, persistCritical, renderDossier, requestHeaders, setChatState, storySuiteV2Meters, updateInjection } = deps;
@@ -78,8 +125,14 @@ export function createCastSyncPart(rt, deps) {
         const people = castList();
         if (!Array.isArray(people) || !people.length) return [];
         const made = adapter.castMade?.() ?? {};
-        return metWithEntry(people).filter(person => Object.hasOwn(made, person.key)
-            && !dossierFor(state.npcs, person) && !castPersonDismissed(state, person));
+        return metWithEntry(people).filter(person => {
+            if (!Object.hasOwn(made, person.key) || castPersonDismissed(state, person)) return false;
+            const matches = (state.npcs || []).filter(npc => dossierFor([npc], person));
+            if (!matches.length) return true;
+            const pending = matches.length === 1 && state.castSeedPending?.[matches[0].id];
+            return Boolean(pending && pending.messageId === latestMessageId(true) && metWithEntry(people).filter(other => dossierFor([matches[0]], other)).length === 1
+                && pending.lineageKey === lineageCheckpointKey(chatLineage(chatContext().chat || []), pending.messageId));
+        });
     }
     // The cast dossiers that may be given the pack's picture now (src/cast-dossier.js castPortraitWanted: made from the cast, no portrait of
     // their own, none removed on purpose) and for whom Story Block's `packs.portrait` now answers for their entry's `portrait`:
@@ -152,6 +205,12 @@ export function createCastSyncPart(rt, deps) {
         let working = getChatState(key);
         const made = [];
         for (const person of castDue(working, adapter)) {
+            const existing = dossierFor(working.npcs, person);
+            if (existing && working.castSeedPending?.[existing.id]) {
+                const seeded = seedCastAdmission(working, existing, person, { packName: names[person.pack] ?? '', calendarOwn: normalizeSourceOfTruth(settings.sourceOfTruth).calendar === 'mine' });
+                if (seeded) { working.npcs = working.npcs.map(npc => npc.id === seeded.id ? seeded : npc); made.push(seeded); }
+                continue;
+            }
             const added = applyNpcStateCommand(working, { action: 'add', name: person.entry.name || person.name }, {
                 maxNpcs: settings.maxNpcs, excludeNames: currentExclusions(), turn: working.turn, relationshipBaseline: settings.relationshipBaseline,
             });

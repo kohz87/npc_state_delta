@@ -8,6 +8,24 @@ import { chatLineage, lineageCheckpointKey } from './branch.js';
 import { getSettings } from './runtime-settings.js';
 import { narrationCaptureEnabled } from './runtime-scan-helpers.js';
 
+// (ONEPASSCAPR2-1) Accepted captures and admission fills are canonical reply-owned inputs, not diagnostic model responses.
+// The full lineage key prevents a swipe, edit or different parent from borrowing another reply's capture.
+export function captureJournalEntry(state, chat, messageId) {
+    if (!Number.isInteger(messageId) || messageId < 0 || messageId >= chat.length) return null;
+    const key = lineageCheckpointKey(chatLineage(chat), messageId);
+    return (state?.captureJournal || []).find(item => item?.messageId === messageId && item.key === key) || null;
+}
+export function recordAcceptedCapture(state, chat, messageId, capture) {
+    const key = lineageCheckpointKey(chatLineage(chat), messageId);
+    const entries = Array.isArray(state.captureJournal) ? state.captureJournal.filter(item => item?.key !== key) : [];
+    entries.push({ messageId, key, parsed: structuredClone(capture.parsed), watch: structuredClone(capture.watch || []), fills: {} });
+    state.captureJournal = entries;
+}
+export function recordAcceptedFill(state, chat, messageId, npcId, parsed, kind = 'fills') {
+    const entry = captureJournalEntry(state, chat, messageId);
+    if (entry) (entry[kind] ??= {})[npcId] = structuredClone(parsed);
+}
+
 export function createNarrationPart(rt, deps) {
     const { getChatKey, storySuiteV2Meters, updateInjection } = deps;
     const { narrationCaptures, captureRerenderPending, stateVersions } = rt;

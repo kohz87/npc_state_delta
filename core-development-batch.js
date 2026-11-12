@@ -6,7 +6,7 @@ import { cleanText, normalizeName } from './core-text.js';
 import { mergeLists, normalizeScanNpc, npcMatchesLabel } from './core-record.js';
 import { findInterimIdentityPromotionIndex, inferNpcIdentityKind } from './core-identity.js';
 import { applyDurableProfileUpdate } from './core-development-update.js';
-import { resolveNpcId } from './social.js';
+import { resolveNpcId, resolveNpcReference } from './social.js';
 
 export function applyDurableProfileUpdates(state, scanResult, excludeNames, report, options = {}) {
     const rawUpdates = Array.isArray(scanResult?.profileUpdates) ? scanResult.profileUpdates
@@ -19,9 +19,9 @@ export function applyDurableProfileUpdates(state, scanResult, excludeNames, repo
         const name = cleanText(raw.name, 120);
         // (ONEPASSCAP-3) The exact id, else the one dossier whose id matches with '-', '_' and case folded (a block keys a person it admits
         // in the same reply by the id the model guessed: "npc_sister_temiwa" for npc_sister-temiwa), then the name as before.
-        const byId = id ? resolveNpcId(state.npcs, id) : null;
+        const byId = id ? (options.historicalRead ? state.npcs.find(npc => npc.id === id) : resolveNpcId(state.npcs, id)) : null;
         let index = byId ? state.npcs.indexOf(byId) : -1;
-        if (index < 0 && name) index = state.npcs.findIndex(npc => npcMatchesLabel(npc, name));
+        if (index < 0 && name) index = options.historicalRead ? state.npcs.findIndex(npc => npcMatchesLabel(npc, name)) : state.npcs.indexOf(resolveNpcReference(state.npcs, name)); // (ONEPASSCAPR2-5) new work rejects ambiguous names
         if (index < 0) continue;
         const npc = state.npcs[index];
         if (excludeNames.has(normalizeName(npc.name))) continue;

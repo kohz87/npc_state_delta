@@ -23,10 +23,10 @@ export function resolveNpcId(npcs = [], id = '') {
     return folded.length === 1 ? folded[0] : null;
 }
 
-export function resolveNpcReference(npcs = [], labelOrId = '') {
+export function resolveNpcReference(npcs = [], labelOrId = '', { historicalRead = false } = {}) {
     const raw = clean(labelOrId, 120);
     if (!raw) return null;
-    const byId = resolveNpcId(npcs, raw);
+    const byId = historicalRead ? (npcs || []).find(npc => npc?.id === raw) : resolveNpcId(npcs, raw);
     if (byId) return byId;
     const key = norm(raw);
     if (!key) return null;

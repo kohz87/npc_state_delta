@@ -152,8 +152,8 @@ test('b6-soak-2: a crowd block admits at most 4 new people and runs at most 2 ba
     assert.equal(plain.queued, 0);
     const hosted = runCalls('hosted-crowd', true, crowd);
     assert.equal(hosted.admitted, 4);
-    assert.deepEqual([hosted.first.backfill, hosted.second.backfill], [1, 1], 'hosted one-pass: one backfill per reply (batch D)');
-    assert.equal(hosted.queued, 2, 'the rest wait their turn');
+    assert.deepEqual([hosted.first.backfill, hosted.second.backfill], [4, 0], '(ONEPASSCAPR2-3) hosted one-pass: each admitted person gets its one fill in its own reply');
+    assert.equal(hosted.queued, 0, 'none waits for another reply');
 });
 
 test('hosted one-pass: the backfill runs on the reply, the catch-up Refresh on its own schedule', () => {
@@ -207,7 +207,7 @@ const onePassCapture = async ({ reply, mockState, sleep }) => {
         keyRelationshipEdges: [],
     });
     await sleep(300);
-    const afterFirst = { sieke: pick('npc_sieke'), temiwa: pick('npc_sister-temiwa'), backfills: first.all.backfill };
+    const afterFirst = { sieke: pick('npc_sieke'), temiwa: pick('npc_sister-temiwa'), backfills: first.all.backfill, queued: globalThis.NPCStateDelta.getState().pendingBackfills.length };
     const second = await reply('Astra paid the fifty copper registration fee in silver coin without arguing. Sieke lunged for the coins and her bodice button snapped, exposing her bare breasts in front of Astra; she clutched the bodice shut with one arm and threw contracts at him in mortification. Sister Temiwa answered his polite question about the village\'s shortage of hands.', {
         npcs: [
             { id: 'npc_sieke', mood: 'mortified and flustered', moodState: 'replace', moodV: -2, moodA: 3, moodD: -2, present: true, relationshipImpact: 'ordinary',
@@ -232,7 +232,9 @@ test('ONEPASSCAP: a hosted one-pass reply\'s memory, appearance change and evide
     const { afterFirst, afterSecond } = result;
     const { fillWanted } = await import('../appearance-fill.js');
     assert.ok(afterFirst.sieke && afterFirst.temiwa, 'both admitted from the block');
-    assert.equal(afterFirst.backfills, 1, 'one backfill on the reply (hosted one-pass)');
+    assert.equal(afterFirst.backfills, 2, '(ONEPASSCAPR2-3) each of the two people admitted in one hosted reply gets its fill on that reply');
+    assert.equal(afterFirst.queued, 0, 'nothing waits for another reply');
+    assert.equal(afterSecond.calls.backfill, 0, 'and no one is filled twice: the next reply asks for nothing');
     assert.match(afterFirst.sieke.overallAppearance, /Dark hair, wide brown eyes\.$/, 'the fill\'s hair and eyes are stored after the base');
     assert.ok(afterFirst.sieke.memories.some(text => /guild desk/.test(text)), 'the backfill\'s memory is stored');
     assert.ok(afterFirst.sieke.keyRelationships.some(text => /Sister Temiwa/.test(text)), 'the one-string keyRelationships is read');
@@ -270,4 +272,31 @@ test('ONEPASSCAP-2/3: one keyRelationships string is one entry per line; an edge
     assert.deepEqual(unknown.state.npcs.find(npc => npc.id === 'npc_sieke').keyRelationships, [], 'an id that resolves to no one is never written as a tie\'s name');
     const named = mergeScanResult(state, { npcs: [], keyRelationshipEdges: [{ aId: 'npc_sieke', b: 'Marrit', aToB: 'employer' }] }, {});
     assert.ok(named.state.npcs.find(npc => npc.id === 'npc_sieke').keyRelationships.some(text => /^Marrit — employer/.test(text)), 'a person without a dossier is still written by name, as before');
+});
+
+// (ONEPASSCAPR2-4, -5 and the old-reply rule) The merge keeps an accepted detailed bond when the same reply's edge is only the short form,
+// rejects a name or alias two dossiers share, and a history re-read (historicalRead) keeps the readings it always had.
+test('ONEPASSCAPR2-4/5: a same-reply edge keeps the detailed bond; an ambiguous alias binds to nobody; a historical re-read is unchanged', async () => {
+    const { mergeScanResult } = await import('../core.js');
+    const detail = 'Sister Temiwa — Church novice who brings her supper | Drops off bread at the guild every evening';
+    const base = () => ({ npcs: [{ id: 'npc_sieke', name: 'Sieke', keyRelationships: [] }, { id: 'npc_sister-temiwa', name: 'Sister Temiwa', keyRelationships: [] }], candidates: [] });
+    const scan = { npcs: [{ id: 'npc_sieke', name: 'Sieke', keyRelationships: detail }], keyRelationshipEdges: [{ from: 'npc_sieke', to: 'npc_sister_temiwa', aToB: 'friend', bToA: 'friend' }] };
+    const live = mergeScanResult(base(), scan, {});
+    const kept = live.state.npcs.find(npc => npc.id === 'npc_sieke').keyRelationships;
+    assert.equal(kept.length, 1);
+    assert.ok(kept[0].startsWith('Sister Temiwa — Church novice who brings her supper') && kept[0].endsWith('| Drops off bread at the guild every evening'), `the accepted role and note survive the short edge: ${kept[0]}`);
+    assert.ok(live.state.npcs.find(npc => npc.id === 'npc_sister-temiwa').keyRelationships.some(text => /^Sieke — friend/.test(text)), 'the other side still gets the edge');
+    // A historical re-read reads the row as before: the one string is not split, the underscore id is not folded.
+    const old = mergeScanResult(base(), scan, { historicalRead: true });
+    assert.deepEqual(old.state.npcs.find(npc => npc.id === 'npc_sieke').keyRelationships, [], 'an old reply\'s string ties and folded id stay dropped (bytes unchanged)');
+    // A name two dossiers share is never guessed.
+    const twins = () => ({ npcs: [{ id: 'npc_alice', name: 'Alice', keyRelationships: [] }, { id: 'npc_brenda', name: 'Brenda', aliases: ['Sister'], keyRelationships: [] }, { id: 'npc_carla', name: 'Carla', aliases: ['Sister'], keyRelationships: [] }], candidates: [] });
+    const edge = mergeScanResult(twins(), { npcs: [], keyRelationshipEdges: [{ a: 'Alice', b: 'Sister', aToB: 'friend', bToA: 'friend' }] }, {});
+    for (const npc of edge.state.npcs) assert.deepEqual(npc.keyRelationships, [], `${npc.name} is not written by an ambiguous alias`);
+    const update = mergeScanResult(twins(), { npcs: [], profileUpdates: [{ name: 'Sister', evidence: { mannerisms: ['She hums.'] } }] }, {});
+    for (const npc of update.state.npcs) assert.equal(npc.profileEvidence?.mannerisms?.length || 0, 0, `${npc.name} gets no evidence from an ambiguous alias`);
+    const exact = mergeScanResult(twins(), { npcs: [], keyRelationshipEdges: [{ aId: 'npc_alice', bId: 'npc_carla', aToB: 'friend', bToA: 'friend' }] }, {});
+    assert.ok(exact.state.npcs.find(npc => npc.id === 'npc_carla').keyRelationships.some(text => /^Alice — friend/.test(text)), 'an exact id still wins');
+    const oldTwins = mergeScanResult(twins(), { npcs: [], keyRelationshipEdges: [{ a: 'Alice', b: 'Sister', aToB: 'friend', bToA: 'friend' }] }, { historicalRead: true });
+    assert.ok(oldTwins.state.npcs.find(npc => npc.id === 'npc_brenda').keyRelationships.length > 0, 'a historical re-read keeps its first-match reading');
 });

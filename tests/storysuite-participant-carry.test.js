@@ -169,4 +169,16 @@ test('ONEPASSCAP-1: a change Delta saves while a participant write is in flight 
     c.release();
     await away;
     assert.equal(heard, 2);
+
+    // (ONEPASSCAPR2-6) The change stays owed to its own chat: reopening it publishes it, once, before the participant reads it to activate.
+    open = 'chat-a';
+    api.getChatState('chat-a');
+    assert.equal(heard, 3, 'announced when the chat is open again');
+    api.getChatState('chat-a');
+    assert.equal(heard, 3, 'and only once');
+
+    // A task that throws before it returns a promise still releases its hold: announcements are not suppressed for good.
+    await assert.rejects(api.quietly('chat-a', () => { throw new Error('sync failure'); }), /sync failure/);
+    api.markStateDirty('chat-a');
+    assert.equal(heard, 4, 'the hold was released');
 });

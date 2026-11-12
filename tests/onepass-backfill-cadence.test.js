@@ -142,10 +142,11 @@ test('hosted, catch-up 1, new admissions: each new NPC gets the Refresh and a ba
     });
     // Changed (new-NPC rule): a newly met NPC gets the catch-up's targeted Refresh (it writes the structured appearance) AND its backfill.
     assert.deepEqual(r.one, { scanner: 0, relationship: 0, backfill: 1, refresh: 1 }, 'the new person: the Refresh and the backfill');
-    assert.equal(r.two.backfill, 1, 'two new people: one backfill this reply');
+    // (ONEPASSCAPR2-3) Every new admission gets its one fill in its own reply, none waits for another reply.
+    assert.equal(r.two.backfill, 2, 'two new people: each gets its backfill this reply');
     assert.equal(r.two.refresh, 2, 'both people in the reply are new admissions: each gets the Refresh');
-    assert.equal(r.queuedAfterTwo, 1, 'the other waits, not lost');
-    assert.equal(r.three.backfill, 1, 'the next reply takes it');
+    assert.equal(r.queuedAfterTwo, 0, 'nothing waits');
+    assert.equal(r.three.backfill, 0, 'the next reply owes nothing');
     assert.equal(r.queued, 0);
 });
 
@@ -208,7 +209,7 @@ test('an old saved state with pendingBackfills drains one per reply, the 100 cap
         for (let i = 0; i < 3; i += 1) { await reply('Quiet.', { npcs: [] }); sizes.push(globalThis.NPCStateDelta.getState().pendingBackfills.length); }
         return { sizes };
     });
-    assert.deepEqual(r.sizes, [2, 1, 0, 0]);
+    assert.deepEqual(r.sizes, [0, 0, 0, 0], '(ONEPASSCAPR2-3) every admission is filled in its own reply, none waits');
 });
 
 test('catch-up: every due NPC is held from the reply backfill; a newly met NPC keeps its queue entry and gets its backfill after the Refresh (established ones skipped)', async () => {
@@ -240,7 +241,7 @@ test('catch-up: every due NPC is held from the reply backfill; a newly met NPC k
     assert.deepEqual([...rt.catchUpTaken.get(key)].sort(), ['new1', 'old1'], 'the reply backfill start skips both');
     await part.runCaptureCatchUp(key, due);
     assert.deepEqual(calls.refresh.sort(), ['new1', 'old1'], 'one Refresh each');
-    assert.equal(calls.opts.new1.fillLooks, true, 'the newly met person\'s Refresh may fill the blank or partial looks (a partial description does not stop it)');
+    assert.equal(calls.opts.new1.fillLooks, false, '(ONEPASSCAPR2-3) the admission backfill owns the one fill, so the newly met person\'s Refresh does not fill');
     assert.equal(calls.opts.old1.fillLooks, false, 'an established person\'s Refresh never does');
     assert.deepEqual(state.pendingBackfills.map(i => i.npcId), ['new1'], 'the established entry is covered by its Refresh; the new one is kept');
     assert.equal(calls.backfill.length, 1, 'one backfill start after the Refreshes');

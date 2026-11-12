@@ -433,3 +433,54 @@ test('a publication that fails after a successful install: the catch-up is done,
         h.check(catchUp.canGenerate() === true, 'sending is back');
     });
 });
+
+// (ONEPASSCAPR2-1) A reply whose one-pass block was accepted is rebuilt from that accepted block, not from a model's answer: replay == live.
+test('parity: a captured one-pass reply (memory, tie string, edge) replays to the live dossiers; the old reply read again keeps its bytes', () => {
+    runScenario('captured-parity', async h => {
+        h.settings.narrationCapture = true;
+        const mockState = h.mockState;
+        const block = payload => `\n\n<!--npc_state_delta\n${JSON.stringify(payload)}\n-->`;
+        const ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
+        const scanner = mockState.quietResponder;
+        // An accepted admission fill: the backfill answers for the person asked, with a look.
+        mockState.quietResponder = async (args = {}) => {
+            const asked = String(args.prompt || '').match(/^Requested NPC: (.+)$/m)?.[1];
+            return asked ? JSON.stringify({ npcs: [{ name: asked, present: true, overallAppearance: 'Human woman. Dark hair, wide brown eyes.', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : scanner(args);
+        };
+        const row = { name: 'Sieke', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'clerk', directInteraction: true, present: true, role: 'Clerk', species: 'Human', gender: 'female',
+            memories: ['Registered Astra at the guild desk.'], keyRelationships: 'Sister Temiwa — novice | brings bread', relationshipImpact: 'none', relationshipDelta: ZERO };
+        await h.turn('Hello.', `Sieke, a clerk, sits at the guild desk. Sister Temiwa waits.${block({ npcs: [row, { ...row, name: 'Sister Temiwa', memories: [], keyRelationships: [] }], keyRelationshipEdges: [{ from: 'Sieke', to: 'Sister Temiwa', aToB: 'friend', bToA: 'friend' }] })}`);
+        await h.turn('Go on.', `Sieke stamps a form.${block({ npcs: [{ name: 'Sieke', present: true, memories: ['Stamped Astra\'s form while the novice watched.'], relationshipImpact: 'none', relationshipDelta: ZERO }] })}`);
+        const live = h.stable(h.runtime.getState());
+        h.check(live.npcs.find(npc => npc.name === 'Sieke')?.memories?.length >= 2, 'the live run kept both memories');
+        const catchUp = h.controller();
+        catchUp.rebuild({ replies: null });
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'the rebuild finished');
+        const replayed = h.stable(h.runtime.getState());
+        const moved = [];
+        for (const key of new Set([...Object.keys(live), ...Object.keys(replayed)])) {
+            if (key === 'npcs') for (const npc of live.npcs) { const other = replayed.npcs.find(item => item.id === npc.id) || {}; for (const field of Object.keys(npc)) if (JSON.stringify(npc[field]) !== JSON.stringify(other[field])) moved.push(`${npc.id}.${field}`); }
+            else if (JSON.stringify(live[key]) !== JSON.stringify(replayed[key])) moved.push(key);
+        }
+        if (moved.includes('pendingBackfills')) h.fail(`backfills ${JSON.stringify(live.pendingBackfills)} vs ${JSON.stringify(replayed.pendingBackfills)}`);
+        h.equal(moved, [], 'replay of captured replies == the live run (nothing lost)');
+    });
+});
+
+// (ONEPASSCAPR2-8) With Full scan every reply on, a deferred full scan of a reply the automatic scan already read is skipped: one read per reply.
+test('full scan: a reply the automatic scan covered is not read again by the full scan', () => {
+    runScenario('full-scan-once', async h => {
+        h.settings.fullScanEveryTurn = true;
+        // The first read is slow, so the same reply's second trigger finds the chat busy and is queued behind it.
+        h.mockState.holdWhen = async (prompt, n) => { if (n === 1) await h.sleep(250); };
+        h.mockState.context.chat.push(h.user('Hello.'));
+        await h.emitAsync('message_sent', h.mockState.context.chat.length - 1);
+        h.mockState.context.chat.push(h.reply('Yunyun speaks, mark-1.', 1));
+        const id = h.mockState.context.chat.length - 1;
+        await Promise.all([h.emitAsync('message_received', id), h.sleep(60).then(() => h.emitAsync('message_received', id))]);
+        await h.sleep(800);
+        h.equal(h.runtime.getState().lastScannedMessageId, id, 'the reply was read');
+        h.equal(h.scannerCalls().length, 1, 'once: the queued second trigger finds the reply already covered');
+    });
+});
