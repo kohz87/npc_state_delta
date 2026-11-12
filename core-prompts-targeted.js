@@ -187,7 +187,7 @@ export function buildProfileRefreshPrompt({
         status: cleanText(npc.status, 260),
         lifeState: normalizeLifeState(npc.lifeState),
         mannerisms: cleanWordsList(npc.mannerisms, 4, 240),
-        memories: cleanWordsList(npc.memories, IMPORTANT_MEMORY_LIMIT, 260),
+        memories: cleanWordsList(npc.memories, IMPORTANT_MEMORY_LIMIT, DURABLE_PROFILE_LIMITS.memory),
         currentRelationship: normalizeRelationshipBaseline(npc.relationship || DEFAULT_RELATIONSHIP),
         recentProfileEvidence: promptProfileEvidence(npc.profileEvidence),
         lockedProfileFields: locked,
