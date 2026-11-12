@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { NOTE_FIELDS, KINDS, noteKinds, runKind, validateNotes, notesTail, NOTES_TAIL_PER_NPC, NOTES_TAIL_MAX } from '../src/npc-notes-kinds.js';
 import { addLie } from '../src/npc-notes-lies.js';
 import { addKnow } from '../src/npc-notes-knows.js';
-import { tastesText } from '../src/npc-notes-tastes.js';
+import { tastesText, mergeRefreshTastes, readTastes } from '../src/npc-notes-tastes.js';
 import { tiesText } from '../src/npc-notes-ties.js';
 import { suite } from './helpers/pacing-suite.js';
 import { MODULE_ID } from '../src/storysuite-v2.js';
@@ -579,4 +579,78 @@ test('notes tail: under a tight tail budget (the run\'s 550 tokens, here 60 with
     const ours = built.parts.find(part => part.module === MODULE_ID && part.place === 'tail');
     assert.match(ours.text, /Whenever anything changed/);
     assert.ok(!/NPC meters now/.test(ours.text), 'the ordinary line was dropped, the kept cue stayed');
+});
+
+// The run's conditions: tailBudget 550, a crowded earlier section (Story Director's lines) with a kept Initiative line, a kept pulse prelude, nobody present.
+async function crowded(keptTokens) {
+    const { assemble, estimateTokens, KEPT_TAIL_TOKENS } = await import('./vendor/story-block/src/v2/prompt.js');
+    const s = await suite({ allowance: null, features: ON, present: [] });
+    await s.setDay(1);
+    const initiative = 'Initiative: Mira acts first, then the guards, then Oren.';
+    const filler = Array.from({ length: 11 }, (_, i) => `Scene note ${i + 1}: ${'the harbour street holds its breath '.repeat(5)}`.trim());
+    s.host.registry.register({ id: 'aa-crowd', name: 'Crowd', context: { tail: () => ({ lines: [{ text: initiative, keep: true }, ...filler, 'Guild: the last ordinary line.'] }) } });
+    const view = { state: s.host.head(), query: () => null, settings: {}, chat: { length: s.host.ctx.chat.length } };
+    const built = assemble({ registry: s.host.registry, view, settings: { tailBudget: 550 }, keptTokens });
+    return { built, initiative, estimateTokens, KEPT_TAIL_TOKENS };
+}
+
+test('notes tail: tailBudget 550, nobody present, a crowded section: the other module\'s kept line wins, the cue is kept when it fits after it, the tail is under budget', async () => {
+    const { built, initiative, estimateTokens } = await crowded(32);
+    assert.ok(built.tailText.includes(initiative), 'the Initiative kept line stays');
+    assert.ok(CUE.test(built.tailText.split('\n').find(line => CUE.test(line)) ?? ''), 'the cue is sent');
+    assert.ok(estimateTokens(built.tailText) <= 550, `tail ${estimateTokens(built.tailText)} tokens`);
+    assert.ok(!built.tailText.includes('Guild: the last'), 'ordinary lines go before the kept ones (the crowd was over budget)');
+});
+
+test('notes tail: when the shared kept cap is spent (past 120 tokens) the cue is an ordinary line: the other kept lines still stay, the tail is under budget', async () => {
+    const { built, initiative, estimateTokens } = await crowded(100);
+    assert.ok(built.tailText.includes(initiative), 'the kept line stays whatever happens to the cue');
+    assert.ok(estimateTokens(built.tailText) <= 550, `tail ${estimateTokens(built.tailText)} tokens`);
+    assert.ok(!/Whenever anything changed/.test(built.tailText), 'no room after the others\' kept lines: the cue goes first, as an ordinary line');
+});
+
+test('mergeRefreshTastes: new tastes merge like ~ taste lines; a taste already there (either sign) and a full sign are never changed or pushed out', () => {
+    const own = tastesText([{ sign: '+', item: 'Burnt Sugar', from: 'narrator', day: 1, r: 'r1' }, { sign: '-', item: 'Paperwork', day: 1, r: 'r1' }]);
+    const out = mergeRefreshTastes(own, [
+        { sign: '+', item: 'burnt  sugar', from: 'again' }, { sign: '+', item: 'paperwork', from: 'flip' }, { sign: '+', item: 'old maps', from: 'collects them [m4]' },
+        { sign: '-', item: 'loud bells', from: 'flinches' }, { sign: 'x', item: 'junk' }, { sign: '+', item: '' },
+    ], { name: 'Oren', day: 3, r: 'r9' });
+    assert.equal(out.added, 2);
+    const rows = readTastes(out.text);
+    assert.deepEqual(rows.map(row => [row.sign, row.item, row.from ?? null, row.r]), [['+', 'Burnt Sugar', 'narrator', 'r1'], ['-', 'Paperwork', null, 'r1'], ['+', 'old maps', 'collects them [m4]', 'r9'], ['-', 'loud bells', 'flinches', 'r9']]);
+    const full = tastesText(Array.from({ length: 6 }, (_, i) => ({ sign: '+', item: `like ${i}`, day: 0, r: 'r1' })));
+    const none = mergeRefreshTastes(full, [{ sign: '+', item: 'one more' }], { r: 'r2' });
+    assert.equal(none.added, 0, 'a full sign takes nothing');
+    assert.equal(none.text, full, 'and nothing is pushed out');
+    assert.equal(mergeRefreshTastes('', [{ sign: '+', item: 'tea' }], {}).added, 1);
+    assert.equal(mergeRefreshTastes(null, 'nope').added, 0);
+});
+
+test('notes host: npc.taste records a Refresh\'s tastes on its reply; the narrator\'s taste stays; a button, an unknown person and a repeat write nothing; swipe and rebuild equal live', async () => {
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.say(['~ taste Oren | likes: tea | from: the kettle']);
+    const head = () => s.host.store.headIndex();
+    assert.equal((await s.host.sdk.command('npc.taste', { name: 'Oren', tastes: [{ sign: '+', item: 'x' }] })).ok, false, 'not from a button');
+    assert.equal(await s.adapter.tastes({ name: 'Sister Temiwa', tastes: [{ sign: '+', item: 'x' }], reply: head() }), null, 'no entry is made by a Refresh');
+    assert.equal(await s.adapter.tastes({ name: 'Oren', tastes: [], reply: head() }), null);
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.adapter.tastes({ name: 'Oren', tastes: [{ sign: '+', item: 'Tea', from: 'refresh' }, { sign: '-', item: 'loud bells', from: 'flinches [m3]' }, { sign: '+', item: 'old maps', from: 'collects them' }], reply: head() });
+    const rows = () => readTastes(oren(s).tastes);
+    assert.deepEqual(rows().map(row => [row.sign, row.item, row.from ?? null]), [['+', 'tea', 'the kettle'], ['-', 'loud bells', 'flinches [m3]'], ['+', 'old maps', 'collects them']].map(([a, b, c]) => [a, b === 'tea' ? 'tea' : b, c]));
+    assert.ok(rows().slice(1).every(row => row.r), 'each Refresh taste carries its reply');
+    const before = JSON.stringify(oren(s).tastes);
+    await s.adapter.tastes({ name: 'Oren', tastes: [{ sign: '+', item: 'old maps', from: 'again' }], reply: head() });
+    assert.equal(JSON.stringify(oren(s).tastes), before, 'a repeat changes nothing');
+    const live = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), live, 'rebuild equals live');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+    await s.swipe(['~ npc Oren | trust: +1']);
+    assert.deepEqual(rows().map(row => row.item), ['tea'], 'a swipe of the reply that ran the Refresh takes its tastes back');
+    const swiped = JSON.stringify(s.host.head().domains.npc);
+    s.host.store.rebuild();
+    assert.equal(JSON.stringify(s.host.head().domains.npc), swiped, 'rebuild equals live after the swipe');
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });

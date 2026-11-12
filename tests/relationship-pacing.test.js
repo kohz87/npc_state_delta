@@ -761,7 +761,7 @@ test('pull trace (run 3): a hook names its giver, and the thread counts its own 
     assert.equal(stepPull({}, { day: 4, party: false, threads: [{ id: 'x', title: 't' }] }).track.threads.x, 4, 'a host that gives no opening day: the day first read, as before');
 });
 
-test('pull trace (run 3): Pull and Mood reach the prompt as kept lines (after the Changes cue), and survive a tight tail budget', async () => {
+test('pull trace (run 3): Pull and Mood reach the prompt as kept lines (before the Changes cue), and survive a tight tail budget', async () => {
     const { assemble } = await import('./vendor/story-block/src/v2/prompt.js');
     const s = await moodSuite();
     await s.setDay(1);
@@ -769,14 +769,41 @@ test('pull trace (run 3): Pull and Mood reach the prompt as kept lines (after th
     await s.say(['~ place Harbor | docks | Dunmere', '~ npc Oren | trust: -3 | impact: major | reason: a broken oath']);
     const tail = s.host.registry.module(MODULE_ID).context.tail({ state: s.host.head(), chat: { length: s.host.ctx.chat.length } });
     const kept = tail.lines.filter(line => typeof line === 'object' && line.keep === true).map(line => line.text);
-    assert.match(kept[0], /^Whenever anything changed/);
-    assert.match(kept[1], /^Pull: Oren: awe \(first time at Harbor\)\.$/);
-    assert.match(kept[2], /^Mood: Oren /);
+    assert.match(kept[0], /^Pull: Oren: awe \(first time at Harbor\)\.$/);
+    assert.match(kept[1], /^Mood: Oren /);
+    assert.match(kept[2], /^Whenever anything changed/, 'Pull and Mood change the scene, so they come before the cue');
     assert.ok(!tail.optional.some(line => /^(Pull|Mood): /.test(line)), 'not optional lines: the host drops those first');
     const view = { state: s.host.head(), query: () => null, settings: {}, chat: { length: s.host.ctx.chat.length } };
     const built = assemble({ registry: s.host.registry, view, settings: { tailBudget: 60 } });
     assert.match(built.tailText, /^Pull: Oren: awe/m, built.tailText);
     assert.match(built.tailText, /^Mood: Oren /m);
+});
+
+test('pull + mood + cue + another module\'s kept line, tailBudget 550: all reach the prompt, the other module\'s kept line stays, the tail is under budget; a spent cap drops the cue first', async () => {
+    const { assemble, estimateTokens } = await import('./vendor/story-block/src/v2/prompt.js');
+    async function run(keptTokens) {
+        const s = await moodSuite();
+        await s.setDay(1);
+        await s.say(['~ place Market | street | Dunmere', '~ npc Oren | trust: +1']);
+        await s.say(['~ place Harbor | docks | Dunmere', '~ npc Oren | trust: -3 | impact: major | reason: a broken oath']);
+        const initiative = 'Initiative: Mira acts first, then the guards, then Oren.';
+        const filler = Array.from({ length: 11 }, (_, i) => `Scene note ${i + 1}: ${'the harbour street holds its breath '.repeat(5)}`.trim());
+        s.host.registry.register({ id: 'aa-crowd', name: 'Crowd', context: { tail: () => ({ lines: [{ text: initiative, keep: true }, ...filler] }) } });
+        const view = { state: s.host.head(), query: () => null, settings: {}, chat: { length: s.host.ctx.chat.length } };
+        return { built: assemble({ registry: s.host.registry, view, settings: { tailBudget: 550 }, keptTokens }), initiative };
+    }
+    const roomy = await run(32);
+    assert.ok(roomy.built.tailText.includes(roomy.initiative), 'the other module\'s kept line stays');
+    assert.match(roomy.built.tailText, /^Pull: Oren: awe/m);
+    assert.match(roomy.built.tailText, /^Mood: Oren /m);
+    assert.match(roomy.built.tailText, /Whenever anything changed/);
+    const at = text => roomy.built.tailText.indexOf(text);
+    assert.ok(at('Pull: Oren') < at('Mood: Oren') && at('Mood: Oren') < at('Whenever anything changed'), 'Pull, Mood, then the cue');
+    assert.ok(estimateTokens(roomy.built.tailText) <= 550, `tail ${estimateTokens(roomy.built.tailText)} tokens`);
+    const tight = await run(100);
+    assert.ok(tight.built.tailText.includes(tight.initiative), 'a spent cap never costs the other module\'s kept line');
+    assert.ok(estimateTokens(tight.built.tailText) <= 550, `tail ${estimateTokens(tight.built.tailText)} tokens`);
+    assert.ok(!/Whenever anything changed/.test(tight.built.tailText) || /^Pull: /m.test(tight.built.tailText), 'if anything gives, the cue (last) goes before Pull');
 });
 
 test('pull: a person away (key people) feels left behind; a failing or missing query is no signal', async () => {
@@ -819,10 +846,14 @@ test('the tail tells mood and pull for present people only; feature off: the tai
     const on = make(true);
     assert.equal(on.context.static(), off.context.static(), 'the static prompt never changes');
     const told = on.context.tail(view);
-    assert.deepEqual(told.lines.slice(0, base.lines.length), base.lines, 'the meter lines and the cue are untouched');
-    // Kept lines (run 3: as optional lines the host's tail budget cut them): Pull first, then Mood, after the cue.
-    const felt = told.lines.slice(base.lines.length).map(line => line.text);
-    assert.ok(told.lines.slice(base.lines.length).every(line => line.keep === true));
+    // The cue stays last of the lines; Pull and Mood come just before it (they change the scene).
+    const cueAt = base.lines.length - 1;
+    assert.deepEqual(told.lines.slice(0, cueAt), base.lines.slice(0, cueAt), 'the meter lines are untouched');
+    assert.deepEqual(told.lines[told.lines.length - 1], base.lines[cueAt], 'the cue is still the last line');
+    // Kept lines (run 3: as optional lines the host's tail budget cut them): Pull first, then Mood, before the cue.
+    const feltLines = told.lines.slice(cueAt, -1);
+    const felt = feltLines.map(line => line.text);
+    assert.ok(feltLines.every(line => line.keep === true));
     assert.deepEqual(felt, ['Pull: Mira: closure (the stolen letter, 3 days).', 'Mood: Mira alarmed, cornered; Oren content.'], 'present people only: Tomas is not here');
     assert.deepEqual(noCue(told.optional), [], 'no mood or pull line is optional');
     const tokens = text => Math.ceil(text.length / 4);

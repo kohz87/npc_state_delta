@@ -51,7 +51,10 @@ export function createNpcPrompt({
     const HIDDEN_ONCE = 'Lines marked (hidden) are secrets: never state or reveal them; let them shape how that person acts.';
     // One short cue, with the notes feature on (whoever is in the scene): the block is written, just before <Blocks>, even when <Blocks> is empty.
     // Sent as a kept line ({ text, keep: true }): the host's tail budget (the run used 550 tokens) drops this module's optional lines first,
-    // and its section is last, so as an optional line the cue never reached a prompt. A host without kept lines takes the text as a line.
+    // and its section is last, so as an optional line the cue never reached a prompt. The host counts kept lines in tail order against one
+    // shared cap (120 tokens): Story Director's pulse and Initiative lines (counted first) and its pinned hook cues ([Earlier days], [Names]) and
+    // Story Block's own cues are never displaced, this section comes after them. What the cap leaves goes to Pull and Mood, then the cue; a kept
+    // line that no longer fits is an ordinary line (the first of this section's lines dropped). Needs Story Block 2.31.1+ (older hosts drop object lines).
     const CHANGES_CUE = 'Whenever anything changed, write the <Changes> block (just before <Blocks>, which still ends the reply), even if <Blocks> is empty; a lie, secret, taste, tie or turning point gets its own line.';
     const HIDDEN_LINE = new RegExp(`^(.+?)(?:, ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}| \\(hidden\\)): .*$`, 'gm');
 
@@ -145,13 +148,15 @@ export function createNpcPrompt({
             if (first >= 0) noted[first] = `${HIDDEN_ONCE}\n${noted[first]}`;
             optional.push(...noted);
         }
-        // Last of the per-reply parts: the model drifts into ending on an empty <Blocks> and drops <Changes> (the data of the live runs).
-        const cue = featureOn(FEATURE_NOTES) ? [{ text: CHANGES_CUE, keep: true }] : [];
-        // Pull then Mood, kept lines after the cue (feature mood-pull): as optional lines of this last-sorted section the host's tail budget
-        // cut them from every prompt of run 3. Kept lines share the host's one cap after Story Director's and Story Block's own, which come
-        // earlier in tail order and keep theirs; over the cap a line is an ordinary one, as before.
+        // The last required lines (the host writes this section's optional lines after them), in this order: Pull, Mood, then the cue. Pull and
+        // Mood come first because they change the scene (how a person acts now), so they take the shared kept cap before the cue; the cue is a
+        // reminder of the reply's form and the model drifts into ending on an empty <Blocks> and dropping <Changes> (the data of the live runs).
+        // As optional lines of this last-sorted section the host's tail budget cut Pull and Mood from every prompt of run 3. Kept lines share the
+        // host's one cap after Story Director's and Story Block's own, which come earlier in tail order and keep theirs; over the cap a line is
+        // an ordinary one, so these lines only ever displace ordinary lines, never another module's kept or pinned line.
         const felt = featureOn(FEATURE_MOOD_PULL) ? moodPullLines(npcs, here).reverse().map(text => ({ text, keep: true })) : [];
-        return { lines: [...lines, ...notes, ...cue, ...felt], optional };
+        const cue = featureOn(FEATURE_NOTES) ? [{ text: CHANGES_CUE, keep: true }] : [];
+        return { lines: [...lines, ...notes, ...felt, ...cue], optional };
     }
 
     /**
