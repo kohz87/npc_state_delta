@@ -59,9 +59,9 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-track { position:relative; height:8px; border-radius:4px; background:var(--dial); }
 #${ROOT_ID} .delta-sheet-track::before { content:""; position:absolute; left:50%; top:-1px; bottom:-1px; width:1px; background:var(--tick); }
 #${ROOT_ID} .delta-sheet-track b { position:absolute; top:0; bottom:0; border-radius:4px; background:var(--delta-accent); }
-#${ROOT_ID} .delta-sheet-trust .delta-sheet-track b { background:#8fb4d9; }
-#${ROOT_ID} .delta-sheet-affection .delta-sheet-track b { background:#d99aaa; }
-#${ROOT_ID} .delta-sheet-desire .delta-sheet-track b { background:#b7a3cf; }
+#${ROOT_ID} .delta-sheet-trust .delta-sheet-track b { background:var(--trust, #8fb4d9); }
+#${ROOT_ID} .delta-sheet-affection .delta-sheet-track b { background:var(--aff, #d99aaa); }
+#${ROOT_ID} .delta-sheet-desire .delta-sheet-track b { background:var(--des, #b7a3cf); }
 #${ROOT_ID} .delta-sheet-tension .delta-sheet-track b { background:var(--dsk-ten, #d9a273); }
 
 /* pills (board): the key and mood kinds take the gold and warm tones */

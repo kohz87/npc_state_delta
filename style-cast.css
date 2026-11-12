@@ -59,6 +59,8 @@
   background: var(--ss-glass-strong, rgba(0,0,0,.2));
   color: var(--ss-text, inherit);
 }
+/* The rows are <li> under a <div> (Story Block's list-style reset is on its own <ul class=ss-listcard-rows>): no bullet marks. */
+.npc-state-delta-v2-dossiers .npc-state-delta-story-list > .ss-listcard-row { list-style: none; }
 .npc-state-delta-v2-dossiers .npc-state-delta-story-row {
   appearance: none;
   -webkit-appearance: none;

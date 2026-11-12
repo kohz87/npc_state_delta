@@ -250,8 +250,7 @@ export function createTimelinePart(session, deps) {
 
     // ---- host lifecycle ----
 
-    // story-block-tabs.js and index.js take back (or offer again) what v1 gave Story Block, and the
-    // page flag (HOSTED_FLAG) follows.
+    // index.js takes back (or offers again) what v1 gave Story Block, and the page flag (HOSTED_FLAG) follows.
     function announceHosted(on) {
         try {
             const data = doc?.documentElement?.dataset;

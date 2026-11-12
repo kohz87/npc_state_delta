@@ -191,8 +191,11 @@ export function createEditorPart(session, deps) {
     // The meters' own net change on the four built-in axes over the entry's latest reply window (window start → now), or null
     // (no window, no reply number, no net movement). Read time only; nothing is stored.
     const BUILT_IN_AXES = ['trust', 'affection', 'desire', 'tension'];
-    function ownChangeOf(slice) {
+    // A window whose reply is past the head names a reply that is no longer there (an earlier message was deleted after it was
+    // recorded, and `turn.at` is not re-numbered on replay): the card is not shown rather than naming the wrong reply (#295).
+    function ownChangeOf(slice, head = null) {
         if (!slice?.window || !Number.isInteger(slice.reply) || slice.reply < 0) return null;
+        if (Number.isInteger(head) && slice.reply > head) return null;
         const delta = {};
         for (const axis of BUILT_IN_AXES) {
             const from = slice.window.from?.[axis];
@@ -216,8 +219,8 @@ export function createEditorPart(session, deps) {
     function dossierMeters(npcs) {
         if (!session.hosted || !Array.isArray(npcs) || typeof session.sdkRef?.query !== 'function') return {};
         let cast;
+        const head = headReply?.();
         try {
-            const head = headReply?.();
             cast = session.sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
         } catch {
             return {};
@@ -243,7 +246,7 @@ export function createEditorPart(session, deps) {
             // Someone with notes but no meters yet still has a Secrets section (every note hidden).
             const secrets = secretsViewOf(npc, slice);
             if (!entry && !secrets.length) continue;
-            const net = ownChangeOf(slice);
+            const net = ownChangeOf(slice, head);
             out[npc.id] = {
                 ...(net ? { relChange: net } : {}),
                 bars: (entry?.bars ?? []).map(bar => ({ ...bar, builtIn: builtIn.has(bar.id) })),

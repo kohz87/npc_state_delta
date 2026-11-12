@@ -22,7 +22,7 @@ export function createInlineCardsModePart(deps, inlineRosterHtml) {
         data.npcStateDeltaLauncherV2 = getSettings().launcherWithStoryBlockV2 === true ? 'keep' : 'auto';
     }
 
-    // Set by story-block-tabs.js once its Present NPCs and Dossiers tabs are registered with Story Block.
+    // Nothing sets this flag any more (the v1 Present NPCs / Dossiers tab registration was removed): it is always false. Kept as a dead reader.
     function storyBlockTabsActive() {
         return document?.documentElement?.dataset?.npcStateDeltaStoryBlock === '1';
     }
@@ -58,8 +58,8 @@ export function createInlineCardsModePart(deps, inlineRosterHtml) {
     }
 
     function inlineEntriesForRender(state) {
-        // Presentation only: Off renders nothing, while inlineCards history is still recorded below.
-        if (inChatCastMode() === 'off') return [];
+        // Presentation only: Off renders nothing, while inlineCards history is still recorded below. Switched off, Delta shows no cards.
+        if (getSettings().enabled === false || inChatCastMode() === 'off') return [];
         // Visible NPC State Delta is a live present-cast view, not a historical dossier timeline.
         // Keep inlineCards internally for branch/rollback safety, but render only the latest
         // assistant message and only NPCs physically present in the current merged state.

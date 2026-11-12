@@ -168,7 +168,9 @@ function inverseExplicitSocialRelation(relation) {
 }
 
 export function extractExplicitKeyRelationshipEdges(transcript, existingNpcs = [], excludeNames = []) {
-    const text = String(transcript || '').replace(/[\r\n]+/g, ' ');
+    // A run of 400+ characters with no space is not prose (a pasted blob, an encoded image): the name patterns below restart at
+    // every capital in it, which costs the square of its length, and no relationship statement can be in it. It reads as a space.
+    const text = String(transcript || '').replace(/[\r\n]+/g, ' ').replace(/\S{400,}/gu, ' ');
     if (!text.trim()) return [];
     const excluded = new Set((excludeNames || []).map(normalizeName).filter(Boolean));
     const proper = String.raw`([\p{Lu}][\p{L}\p{M}'’.-]*(?:\s+[\p{Lu}][\p{L}\p{M}'’.-]*){0,2})`;

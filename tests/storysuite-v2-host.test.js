@@ -50,7 +50,7 @@ try {
     }
 }
 
-test('with a Story Block v2 host, Delta registers through the sdk only, answers npc.portrait, and gives v1 back when the host leaves', () => {
+test('with a Story Block v2 host, Delta registers through the sdk only, answers npc.portrait, and gives v1 its announcement back when the host leaves', () => {
     runHostScenario('v2-host', async () => {
         // A v2 host that (wrongly) also offers v1's registerTab: Delta must still not use it.
         const sdk = { registered: [], registerModule(def) { sdk.registered.push(def); } };
@@ -101,13 +101,11 @@ test('with a Story Block v2 host, Delta registers through the sdk only, answers 
         }
         assert.equal(def.queries['npc.portrait']({}, { name: 'Nobody' }), null);
 
-        // The host goes away and a v1 Story Block takes its place: v1's tabs and announcement come back.
+        // The host goes away and a v1 Story Block takes its place: v1's announcement comes back (the v1 tabs were removed).
         globalThis.StoryBlock = { apiVersion: 1, registerTab: tab => mockState.storyBlockTabs.push(tab), unregisterTab() {}, refresh() {} };
         const v2 = await import(pathToFileURL(path.join(extRoot, 'src', 'storysuite-v2.js')).href);
         const adapter = v2.startStorySuiteV2();
         assert.equal(adapter.check(), false);
-        assert.ok(await waitFor(() => mockState.storyBlockTabs.length === 2), 'v1 tabs registered with the v1 host');
-        assert.deepEqual(mockState.storyBlockTabs.map(tab => tab.label), ['Present NPCs', 'Dossiers']);
         assert.equal(globalThis.StorySuite.has('npc-state-delta'), true, 'announced to v1\'s registry again');
         adapter.stop();
     });

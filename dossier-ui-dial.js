@@ -15,10 +15,10 @@ const TRACK_RADII = Object.freeze([104, 96]);
 // value, so the small numbers a story starts with are visible (+11 draws about a third of its quadrant, as the mockup's arcs do) and 100 still fills it.
 // Each label sits in the quadrant's outer corner (the mockup's spots): value centred over the axis name.
 const DIAL_AXES = Object.freeze([
-    { axis: 'trust', label: 'TRUST', start: 0, colour: '#8fb4d9', anchor: 'middle', x: 212, valueY: 20, keyY: 28 },
-    { axis: 'affection', label: 'AFFECTION', start: 90, colour: '#d99aaa', anchor: 'middle', x: 212, valueY: 207, keyY: 215 },
-    { axis: 'desire', label: 'DESIRE', start: 180, colour: '#b7a3cf', anchor: 'middle', x: 51, valueY: 231, keyY: 239 },
-    { axis: 'tension', label: 'TENSION', start: 270, colour: '#d9a273', anchor: 'middle', x: 21, valueY: 36, keyY: 44 },
+    { axis: 'trust', label: 'TRUST', start: 0, colour: 'var(--trust, #8fb4d9)', anchor: 'middle', x: 212, valueY: 20, keyY: 28 },
+    { axis: 'affection', label: 'AFFECTION', start: 90, colour: 'var(--aff, #d99aaa)', anchor: 'middle', x: 212, valueY: 207, keyY: 215 },
+    { axis: 'desire', label: 'DESIRE', start: 180, colour: 'var(--des, #b7a3cf)', anchor: 'middle', x: 51, valueY: 231, keyY: 239 },
+    { axis: 'tension', label: 'TENSION', start: 270, colour: 'var(--dsk-ten, #d9a273)', anchor: 'middle', x: 21, valueY: 36, keyY: 44 },
 ]);
 
 // Point on a circle of radius r at an angle measured clockwise from 12 o'clock.
