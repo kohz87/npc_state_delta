@@ -47,9 +47,17 @@ function tastesBody(notes) {
     return block('tastes', 'Tastes', `<ul class="delta-tastes">${notes.tastes.map(row => `<li><span class="delta-taste-sign" aria-label="${row.sign === '-' ? 'dislikes' : 'likes'}">${row.sign === '-' ? '✕' : '♥'}</span><b>${escapeHtml(row.item)}</b>${row.from || row.mirrored ? `<span class="delta-muted">${escapeHtml([row.from, row.mirrored ? 'echoes you' : ''].filter(Boolean).join(' · '))}</span>` : ''}</li>`).join('')}</ul>`);
 }
 
+// Each drive: its word on a bar whose middle is normal (high reaches right, low and off reach left), and a small source note when
+// it is not normal. The mockup's rows; the layout is fluid by the block's width.
+const DRIVE_BAR = ['off', 'low', 'normal', 'high'];
+function driveRow(row) {
+    const level = DRIVE_BAR[row.strength] ?? 'normal';
+    const note = row.note && row.strength !== 2 ? `<span class="delta-drive-note delta-muted">${escapeHtml(row.note)}</span>` : '';
+    return `<div class="delta-drive" data-level="${level}"><span>${escapeHtml(row.label)}</span><i title="${escapeHtml(row.word)}"><b class="${level}"></b></i><span class="delta-drive-word">${escapeHtml(row.word)}</span>${note}</div>`;
+}
 function drivesBody(notes) {
     if (!notes?.drives?.length) return '';
-    return block('drives', 'Drives', `<div class="delta-drives">${notes.drives.map(row => `<div class="delta-drive"><span>${escapeHtml(row.label)}</span><i title="${escapeHtml(row.word)}"><b style="width:${Math.round((row.strength / 3) * 100)}%"></b></i></div>`).join('')}</div>`);
+    return block('drives', 'Drives', `<div class="delta-drives">${notes.drives.map(driveRow).join('')}</div><span class="delta-muted delta-drive-key">The middle of each bar is normal; only real highs and lows reach out from it.</span>`);
 }
 
 // Flat rows as the mockup has them: Look (the enduring body), Wearing (what the current form or presentation is), Habits (mannerisms).

@@ -212,9 +212,20 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-tastes li { display:grid; grid-template-columns:22px minmax(0,1fr); column-gap:6px; }
 #${ROOT_ID} .delta-tastes li > .delta-muted { grid-column:2; font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-taste-sign { color:var(--trust, var(--delta-accent-soft)); }
-#${ROOT_ID} .delta-drive { display:grid; grid-template-columns:clamp(70px,8cqw,104px) minmax(0,1fr); align-items:center; gap:8px; font-size:var(--dt-meta); color:var(--delta-muted); }
-#${ROOT_ID} .delta-drive i { height:5px; border-radius:3px; background:var(--dial); overflow:hidden; }
-#${ROOT_ID} .delta-drive b { display:block; height:100%; background:var(--trust, var(--delta-accent)); }
+#${ROOT_ID} .delta-drives { display:grid; gap:6px; }
+#${ROOT_ID} .delta-drive { display:grid; grid-template-columns:clamp(70px,8cqw,104px) minmax(0,1fr) clamp(44px,6cqw,56px); align-items:center; gap:2px 8px; font-size:var(--dt-meta); color:var(--delta-muted); }
+#${ROOT_ID} .delta-drive i { position:relative; height:5px; border-radius:3px; background:var(--dial); }
+#${ROOT_ID} .delta-drive i::before { content:""; position:absolute; left:50%; top:-3px; width:1px; height:11px; background:var(--delta-line); }
+#${ROOT_ID} .delta-drive b { position:absolute; top:0; bottom:0; border-radius:3px; background:var(--trust, var(--delta-accent)); }
+#${ROOT_ID} .delta-drive b.high { left:50%; width:50%; }
+#${ROOT_ID} .delta-drive b.low { right:50%; width:25%; }
+#${ROOT_ID} .delta-drive b.off { right:50%; width:50%; }
+#${ROOT_ID} .delta-drive b.normal { left:calc(50% - 2px); width:4px; }
+#${ROOT_ID} .delta-drive-word { font-weight:700; text-align:right; }
+#${ROOT_ID} .delta-drive[data-level="high"] .delta-drive-word { color:var(--trust, var(--delta-accent)); }
+#${ROOT_ID} .delta-drive[data-level="low"] .delta-drive-word, #${ROOT_ID} .delta-drive[data-level="off"] .delta-drive-word { font-style:italic; }
+#${ROOT_ID} .delta-drive-note { grid-column:2 / 4; margin-top:-2px; font-size:var(--dt-kick); overflow-wrap:anywhere; }
+#${ROOT_ID} .delta-drive-key { display:block; margin-top:6px; font-size:var(--dt-kick); }
 #${ROOT_ID} .delta-rel-gate { margin:0; color:var(--delta-danger); font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-profile .delta-continuity-source { display:block; margin-top:2px; font-size:var(--dt-kick); color:var(--delta-muted); }
 

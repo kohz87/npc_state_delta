@@ -292,7 +292,10 @@ export function createHostedPart(rt, deps) {
         // and not incidental extras: the slice holds 80 people, and a long chat must not fill it with people who never matter.
         const worth = npc => !['dead', 'deceased'].includes(String(npc.lifeState ?? '').toLowerCase()) && npc.dossierSignal !== 'incidental';
         const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && !prior.has(npc.id) && worth(npc)) : [];
-        if (!changes.length && !looks.length && !refused.length && !met.length) return;
+        // (drive growth) The before and after of a person who already had a dossier: the adapter reads what is new in them (memories, behavior,
+        // mannerisms, the relationship reason) and the slice reads it for drive cues; a person the scan only just made has no earlier reply to count against.
+        const grown = typeof adapter.drives === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && prior.has(npc.id)).map(npc => ({ name: npc.name, before: prior.get(npc.id), after: npc })) : [];
+        if (!changes.length && !looks.length && !refused.length && !met.length && !grown.length) return;
         void (async () => {
             // The slice entry comes first (adjust, else meet): a look flag never makes one, so a new person's look lock needs it.
             for (const change of changes) {
@@ -304,6 +307,11 @@ export function createHostedPart(rt, deps) {
                 if (!chatHeadUnchanged(head)) return dropped();
                 await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId });
                 stage1Refresh();
+            }
+            for (const item of grown) {
+                if (!chatHeadUnchanged(head)) return dropped();
+                await adapter.drives({ name: item.name, before: item.before, after: item.after, reply: messageId });
+                stage1Refresh();   // an open dossier draws again when a drive stepped
             }
             for (const npc of looks) {
                 if (!chatHeadUnchanged(head)) return dropped();

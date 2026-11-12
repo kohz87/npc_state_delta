@@ -186,7 +186,7 @@ export function dossierNotes(record, { bonds = null, show = false } = {}) {
         knows: knowsView(source.knows ?? '', { show }),
         tastes: readTastes(source.tastes).map(({ sign, item, from, mirrored }) => ({ sign, item, from: from ?? '', mirrored: mirrored === true })),
         ties: Array.isArray(bonds) ? tieRows(readTies(source.ties) ?? {}, bonds, []) : (readTies(source.ties) ?? {}),
-        drives: driveRows(readDrives(source.drives) ?? undefined),
+        drives: driveRows(readDrives(source.drives) ?? undefined, source.drives),
         look: readLookStamp(source.lookLockedAt),
     };
 }
