@@ -265,19 +265,24 @@ const LEVEL_DOWN = /^(?:very |quite |fairly )?(?:low|none|weak|nil|minimal|absen
 const LABEL_DRIVE = Object.freeze({ candor: 'hone', candour: 'hone', truthfulness: 'hone', sincerity: 'hone', integrity: 'hone' });
 const LABEL_FLIP = Object.freeze({ deception: 'hone', deceit: 'hone', secrecy: 'hone' });
 
-// One lever line, "Label[/Alt] [(note)]: level - text" (also "level, text" or "level" alone), read the way core-behavior.js reads a
-// lever: the label is everything before the first colon (at most 40 characters, up to 3 words), the level is the 1-3 words after it.
+// One lever line, "Label[/Alt] [(note)]: level - text" (also "level, text", "level. text" or "level" alone), read the way core-behavior.js
+// reads a lever: the label is everything before the first colon (at most 40 characters, markdown * and _ ignored). A label that names a
+// drive (or the honesty family) makes the line a drive lever whatever follows the colon: the level is the 1-3 words after it, or '' when
+// none parses, and the text is never read as prose. Any other label is a lever only with up to 3 words and a parsed level.
 // Returns { label, parts, level, body } or null when the line is not lever-shaped (then it is free prose). `parts` are the label split
 // on / & , + ( ) and "and", lower-cased.
+const labelKey = part => DRIVES.find(drive => drive.label.toLowerCase() === part || drive.kind === part)?.key ?? LABEL_DRIVE[part] ?? LABEL_FLIP[part];
 export function parseLever(text) {
     const raw = String(text ?? '');
     const colon = raw.indexOf(':');
     if (colon < 1 || colon > 40) return null;
-    const label = raw.slice(0, colon).trim();
-    if (!label || label.split(/\s+/).length > 3 || /[.!?]/.test(label)) return null;
-    const rest = /^\s*([A-Za-z]+(?: [A-Za-z]+){0,2}?)\s*(?:[-\u2013\u2014,;:(]|$)(.*)$/s.exec(raw.slice(colon + 1));
-    if (!rest) return null;
+    const label = raw.slice(0, colon).replace(/[*_]/g, '').trim();
+    if (!label || /[.!?]/.test(label)) return null;
     const parts = label.split(/[/&,+()]|\band\b/i).map(part => part.trim().toLowerCase()).filter(Boolean);
+    const isDrive = parts.some(part => labelKey(part));
+    if (!isDrive && label.split(/\s+/).length > 3) return null;
+    const rest = /^[\s*_]*([A-Za-z]+(?: [A-Za-z]+){0,2}?)\s*(?:[-\u2013\u2014,;:(.]|$)(.*)$/s.exec(raw.slice(colon + 1));
+    if (!rest) return isDrive ? { label, parts, level: '', body: raw.slice(colon + 1).trim() } : null;
     return { label, parts, level: rest[1].toLowerCase(), body: rest[2].trim() };
 }
 // The direction a level word gives: 'u' (high), 'd' (low), '' (medium, or any other word).

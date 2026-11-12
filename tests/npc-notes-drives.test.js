@@ -393,6 +393,21 @@ test('levers: combined, bracketed and synonym labels use the level, never the la
     assert.deepEqual(parseLever('Honesty/Candor (to kin): very low - hides it').parts, ['honesty', 'candor', 'to kin']);
 });
 
+test('levers: a drive-labelled line without a parsed level counts for nothing and never reaches the cue words', () => {
+    const LEVELLESS = ['Honesty: Conceals the truth from strangers', 'Honesty: 1/5 - Conceals the truth', 'Honesty (with strangers only): lies to every stranger',
+        'Honesty / Candor (with strangers): lies', '**Honesty:** Conceals the truth from strangers', 'Conflict: avoids every fight and quarrel',
+        'Conflict/Assertiveness: Commands firm authority over every fight', 'Honesty: Conceals the truth, always honest about nothing'];
+    for (const text of LEVELLESS) {
+        assert.ok(parseLever(text), `${text} is a lever line`);
+        assert.equal(leverResult(text), null, text);
+        const twice = growDrives(growDrives(undefined, [text, text], 'r1')?.leaf, [text], 'r2');
+        assert.equal(twice, null, `${text} leaves the drives untouched`);
+    }
+    assert.deepEqual(leverResult('Honesty: low. Conceals the truth'), ['hone', 'd'], 'a period ends the level');
+    assert.deepEqual(leverResult('**Honesty:** high - speaks plainly'), ['hone', 'u'], 'markdown around the label is ignored');
+    assert.deepEqual(leverResult('Honesty (with strangers only): low - lies'), ['hone', 'd'], 'a long label still parses its level');
+});
+
 test('levers: cue words still read free prose, with negation', () => {
     const twice = (a, b) => readDrives(growDrives(growDrives(undefined, [a], 'r1').leaf, [b], 'r2').leaf);
     assert.equal(twice('she lied to the guard', 'a liar again').hone, 1);
