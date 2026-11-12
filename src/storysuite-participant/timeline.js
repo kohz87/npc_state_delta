@@ -17,7 +17,7 @@
 // live one so an id the dead timeline issued is not issued again).
 
 import { cleanApplied } from './checkpoint.js';
-import { firstLineageDivergence } from '../../branch-core.js';
+import { commonPrefixLength, firstLineageDivergence } from '../../branch-core.js';
 import { cleanIdentity } from './identity.js';
 
 export const TIMELINE_VERSION = 1;
@@ -110,4 +110,39 @@ export function selectionBehind({ saved, live, chat, max = selectionMaxBehind() 
     const at = divergence === -1 ? chat.length : divergence;
     const behind = at - saved.length;
     return behind > max ? { behind, at } : null;
+}
+
+/**
+ * Whether a head selection (the host's `hs_`) may replace the live dossiers with the selected state `saved` (its lineage: message fingerprints).
+ * Two rules, and only these can refuse: (i) the state must have a lineage and it must be a prefix of the chat now (a state that holds a message the
+ * chat lacks carries the effects of a removed reply; one with no lineage cannot be judged); (ii) the live state must equal what was last published
+ * (`liveHash` = `baseHash`): anything else is unpublished work, and an older state is never installed over it. → { install, why }.
+ */
+export function installGuard({ saved, chat, liveHash, baseHash }) {
+    if (!Array.isArray(saved) || !saved.length) return { install: false, why: 'no-lineage' };
+    if (commonPrefixLength(saved, chat) !== saved.length) return { install: false, why: 'not-in-chat' };
+    if (liveHash !== baseHash) return { install: false, why: 'unpublished' };
+    return { install: true, why: '' };
+}
+
+/** The message the story and the dossiers first part at: the live state's lineage against the chat; with no live lineage, the end of the selected state's. */
+export function changeAt({ saved, live, chat }) {
+    if (!Array.isArray(live) || !live.length) return Array.isArray(saved) ? saved.length : 0;
+    const divergence = firstLineageDivergence(live, chat);
+    return divergence === -1 ? chat.length : divergence;
+}
+
+/** The one-line note the reader keeps until dismissed: { kind: 'rebuilt' | 'refused', replyN, unread }. */
+export function restoreNoteText(note) {
+    if (!isRecord(note)) return '';
+    if (note.kind === 'refused') return `Dossiers were kept as they are. They may still hold what reply ${note.replyN} changed, because the earlier state could not be used safely. Use Refresh on anyone who looks wrong.`;
+    const unread = note.unread > 0 ? ` ${note.unread} earlier ${note.unread === 1 ? 'reply was' : 'replies were'} not re-read.` : '';
+    return `Dossiers were restored to before reply ${note.replyN} and rebuilt from the later replies; details may differ. People you added or edited yourself after that point are not restored. Use Refresh on anyone who looks wrong.${unread}`;
+}
+
+/** A note as stored, checked, or null. */
+export function cleanRestoreNote(raw) {
+    if (!isRecord(raw) || !['rebuilt', 'refused'].includes(raw.kind)) return null;
+    const count = value => (Number.isInteger(value) && value > 0 ? value : 0);
+    return { kind: raw.kind, replyN: Math.max(1, count(raw.replyN)), unread: count(raw.unread) };
 }

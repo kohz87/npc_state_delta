@@ -196,12 +196,14 @@ export function createSessionOps({
     const standsOnBytes = doc => {
         const live = port.readState();
         const wanted = restoredState(doc.state, live);
-        if (hashJson(wanted) === hashJson(live)) return true;
+        // The catch-up field is a quiet marker written beside an installed state: it is not part of the bytes.
+        const bare = ({ catchUp, ...rest }) => rest; // eslint-disable-line no-unused-vars
+        if (hashJson(bare(wanted)) === hashJson(bare(live))) return true;
         // Delta normalizes a state as it installs it (a milestone's missing turn becomes 0, ...), and a checkpoint made in the run that wrote a
         // record may hold it as written: compared raw, such a checkpoint never "stands" once installed, and its activation is refused for good.
         // The bytes are compared as Delta keeps them too.
         if (typeof port.normalize !== 'function') return false;
-        try { return hashJson(port.normalize(wanted)) === hashJson(live); } catch { return false; }
+        try { return hashJson(bare(port.normalize(wanted))) === hashJson(bare(live)); } catch { return false; }
     };
     const hand = (checkpoint, hash, stateHash) => {
         handed.set(checkpoint, { hash, stateHash });

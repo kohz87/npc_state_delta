@@ -5,12 +5,13 @@
 import { PARTICIPANT_SCHEMA } from '../checkpoint.js';
 import { isTerminalNpcDeath } from '../../../terminal-lifecycle.js';
 import { hashJson } from '../hash.js';
-import { restoredState, selectionBehind, selectionMaxBehind, storedTimeline, timelineOf } from '../timeline.js';
+import { changeAt, installGuard, restoredState, restoreNoteText, selectionBehind, selectionMaxBehind, storedTimeline, timelineOf } from '../timeline.js';
+import { HISTORY_REPLAY_CAP } from '../history-replay.js';
 import { fail, isRecord, plain, preparedId } from './support.js';
 
 export function createParticipantHandlers({
     abort, bounded, boundedCheckpoint, busy, confirmedDeath, getAnnounced, getHandle, getLast, hand, hostExclusive,
-    hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, verifyOnly, vault, warn,
+    getCatchUp, hydrate, made, now, port, preparedAt, quiet, restoreIndex, save, schedulePublish, setHandle, stands, standsOnBytes, verified, verifyOnly, vault, warn,
 }) {
     return {
         participant: {
@@ -116,23 +117,56 @@ export function createParticipantHandlers({
                     install = false;
                     schedulePublish(0);
                 }
-                // A head selection (the host's `hs_`) chosen outright (not walked back to, `fallback`) that installs a state far behind where the story and
-                // the dossiers part is installed all the same (after a quiet stretch it is the right one; a refusal would keep a swiped reply's facts), and
-                // said: `older`, which the host records as a Problem, so that a wrong selection that comes back is seen, not hidden.
-                const behind = install && entry.fallback !== true && String(input.return).startsWith('hs_') ? selectionBehind({ saved: got.doc.state?.lineage, live: live?.lineage, chat: port.chatLineage?.(), max: selectionMaxBehind(port.scanEvery?.()) }) : null;
-                const older = behind ? `Restored an older dossier state than expected: ${behind.behind} messages back from the change at message ${behind.at}.` : '';
+                // A head selection (the host's `hs_`) chosen outright (not walked back to, `fallback`) is the state saved just before the earliest
+                // changed reply: it is installed only when the guard allows (timeline.js `installGuard`), and the surviving later replies are read again
+                // by the catch-up (one `catchUp` field written with the install, one visible note saved with the base). A refusal keeps the live state.
+                const chosen = install && entry.fallback !== true && String(input.return).startsWith('hs_');
+                const chat = chosen ? port.chatLineage?.() : null;
+                const judged = chosen && Array.isArray(chat);
+                const savedLineage = got.doc.state?.lineage;
+                const at = judged ? changeAt({ saved: savedLineage, live: live?.lineage, chat }) : 0;
+                let plan = null;
+                let refused = false;
+                if (judged && !standsOnBytes(got.doc)) {
+                    const verdict = installGuard({ saved: savedLineage, chat, liveHash: hashJson(live), baseHash: idx.base?.stateHash });
+                    if (!verdict.install) { install = false; refused = true; }
+                }
+                if (judged) plan = port.live?.()?.pendingOf?.(restoredState(got.doc.state, live), at, Array.isArray(live?.lineage) && live.lineage.length > chat.length) ?? null;
+                // As before, for every head selection that installs: a state far behind the change is told (a Problem), unless a note replaces the line.
+                const behind = chosen && install ? selectionBehind({ saved: savedLineage, live: live?.lineage, chat: port.chatLineage?.(), max: selectionMaxBehind(port.scanEvery?.()) }) : null;
+                let older = behind ? `Restored an older dossier state than expected: ${behind.behind} messages back from the change at message ${behind.at}.` : '';
+                if (refused) {
+                    idx.restoreNote = { kind: 'refused', replyN: plan?.n ?? 1, unread: 0 };
+                    older = restoreNoteText(idx.restoreNote);
+                    schedulePublish(0);
+                }
+                let catching = false;
                 if (install) {
                     // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).
                     await port.installState(restoredState(got.doc.state, live));
                     // The state now is the selected bytes (the timeline block aside, which keeps both timelines' reserved ids): read back and compared,
                     // then recorded as handed over so the probe `current` answers for it like for any checkpoint. Not acknowledged otherwise.
-                    const now = port.readState();
-                    const nowHash = hashJson(now);
-                    hand(entry.checkpoint, entry.hash, nowHash);
+                    hand(entry.checkpoint, entry.hash, hashJson(port.readState()));
                     if (!standsOnBytes(got.doc) || !stands(entry.checkpoint, entry.hash)) {
                         return fail('STALE', 'NPC State Delta could not confirm that the selected native state is installed; it is tried again.');
                     }
+                    // The surviving later replies are read again: the field is written in this same step, before the answer, and the hold is set
+                    // before the host hears it (the catch-up waits for the host's barrier itself).
+                    const L = port.live?.();
+                    const cap = HISTORY_REPLAY_CAP;
+                    if (judged && plan?.ids.length && L && port.enabled?.() !== false) {
+                        const n = plan.ids.length;
+                        await L.writeCatchUp({ from: Math.max(0, n - cap), to: n - 1, reason: 'before-change', attempt: 0, ids: plan.ids, cap, since: plan.marker });
+                        idx.restoreNote = { kind: 'rebuilt', replyN: plan.n, unread: Math.max(0, n - cap) };
+                        older = restoreNoteText(idx.restoreNote);
+                        catching = true;
+                    }
+                    const nowHash = hashJson(port.readState());
+                    hand(entry.checkpoint, entry.hash, nowHash);
                     idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: nowHash };
+                } else if (refused) {
+                    // Nothing is installed; the host's selection is acknowledged and the live state is published next, on a base that is not it.
+                    idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: '' };
                 } else {
                     idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: entry.stateHash ?? idx.base?.stateHash ?? '' };
                 }
@@ -140,6 +174,7 @@ export function createParticipantHandlers({
                 idx.selected = entry.checkpoint;
                 entry.return = input.return;
                 idx.returns[input.return] = { ...ret, status: 'active' };
+                if (catching) getCatchUp()?.resume();
                 await save();
                 if (older) warn(older);
                 return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash, ...(older ? { older } : {}) };

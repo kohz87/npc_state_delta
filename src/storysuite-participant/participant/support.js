@@ -2,6 +2,7 @@
 // These are pure helpers used by the participant factory and its owner parts; no host state is read here.
 
 import { hashJson } from '../hash.js';
+import { cleanRestoreNote } from '../timeline.js';
 
 export const fail = (code, message) => ({ ok: false, code, message });
 export const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -34,5 +35,7 @@ export function cleanIndex(raw) {
     }
     index.selected = typeof raw.selected === 'string' ? raw.selected : null;
     if (isRecord(raw.base) && typeof raw.base.checkpoint === 'string' && HASH.test(String(raw.base.hash)) && typeof raw.base.stateHash === 'string') index.base = { checkpoint: raw.base.checkpoint, hash: raw.base.hash, stateHash: raw.base.stateHash };
+    const note = cleanRestoreNote(raw.restoreNote);
+    if (note) index.restoreNote = note;
     return index;
 }

@@ -191,7 +191,7 @@ export function createStorySuiteV2Adapter({
     };
     // The queries part reads the timeline participant's npc.identity query when it is called; the timeline part is built after it.
     let timelinePartRef = null;
-    deps.timeline = { get queries() { return timelinePartRef.timeline.queries; } };
+    deps.timeline = { get queries() { return timelinePartRef.timeline.queries; }, get catchUp() { return timelinePartRef.timeline.catchUp; } };
     const queriesPart = createQueriesPart(session, deps);
     Object.assign(deps, queriesPart);
     const castUiPart = createCastUiPart(session, deps);
