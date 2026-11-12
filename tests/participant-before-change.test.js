@@ -27,7 +27,7 @@ function build({ chat, replies, extra = {}, vault = memoryVault() }) {
         pendingOf: (state, at, deleted = false) => {
             const latest = replies.length ? replies[replies.length - 1] : -1;
             const after = Number.isInteger(state.lastScannedMessageId) ? state.lastScannedMessageId : -1;
-            return { ids: at >= latest && !deleted ? [] : replies.filter(id => id >= at && id > after), marker: after >= 0 ? after : null, n: replies.filter(id => id < at).length + 1 };
+            return { ids: (deleted ? replies.some(id => id >= at) : at < latest) ? replies.filter(id => id > after) : [], marker: after >= 0 ? after : null, n: replies.filter(id => id < at).length + 1 };
         },
     };
     const port = {
@@ -296,4 +296,43 @@ test('a deleted middle reply whose neighbour turns read the same: the change sho
     assert.match(answer.older, /^Dossiers were restored to before reply 3/);
     await made.catchUp.idle();
     assert.deepEqual(made.live.read, [5], 'the eighth reply (now message 5) is read again');
+});
+
+for (const kind of ['delete', 'edit']) {
+    test(`${kind} of a middle reply with "Scan every" 5: the still-valid replies between B's marker and the change are read, and a person first met there is kept`, async () => {
+        // B (4 messages) was published with its marker on reply 1: replies 3 is unscanned and lies before the change at message 5
+        const chat = kind === 'delete' ? without(names(12), 5) : names(12).map((entry, at) => (at === 5 ? 'm5 rewritten' : entry));
+        const replies = kind === 'delete' ? [1, 3, 5, 7, 9] : [1, 3, 5, 7, 9, 11];
+        const made = build({ chat, replies });
+        await made.hydrate();
+        const keep = async (length, marker) => {
+            made.live.state.lineage = names(length);
+            made.live.state.lastScannedMessageId = marker;
+            await made.hydrate();
+            return made.participant.checkpoint({ cursor: { sid: `sr_${length}` }, headHash: String(length % 10).repeat(64) });
+        };
+        const early = await keep(4, 1);
+        made.live.state.npcs.push(npc('npc_late', 'Late'));
+        await keep(12, 11);
+        const answer = await select(made, early);
+        assert.match(answer.older, /^Dossiers were restored to before reply 3 and rebuilt/);
+        assert.deepEqual(made.live.state.catchUp.ids, replies.filter(id => id > 1), 'from B\'s marker, not from the change');
+        assert.equal(made.live.state.catchUp.since, 1);
+        await made.catchUp.idle();
+        assert.deepEqual(made.live.read, replies.filter(id => id > 1), 'reply 3 (before the change, still valid) is read too');
+        assert.equal(made.live.state.npcs.some(item => item.id === 'npc_r3'), true, 'a person first met in the gap is kept');
+        assert.equal(made.live.state.npcs.some(item => item.id === 'npc_late'), false);
+        assert.equal(made.index().restoreNote.unread, 0);
+    });
+}
+
+test('a swipe in the unpublished window is refused with the "kept" note (pinned: the guard applies to swipe and delete-last too)', async () => {
+    const made = await story({ chat: [...names(11), 'swiped'], replies: [1, 3, 5, 7, 9, 11] });
+    made.live.state.npcs.push(npc('npc_scan', 'Scanned, not yet published'));
+    const answer = await select(made, made.early);
+    assert.equal(made.live.installs, 0, 'nothing installed');
+    assert.equal(made.live.state.npcs.some(item => item.id === 'npc_scan'), true, 'live work is kept');
+    assert.match(answer.older, /^Dossiers were kept as they are\. They may still hold what reply \d+ changed/);
+    assert.equal(made.index().restoreNote.kind, 'refused');
+    assert.equal(made.index().base.stateHash, '', 'published next');
 });

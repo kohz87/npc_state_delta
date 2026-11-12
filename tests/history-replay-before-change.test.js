@@ -208,3 +208,67 @@ test('run-4 shape: eight replies, the seventh is deleted: dossiers 1-6 come from
         h.equal(h.mockState.fakeCalls.length, 1, 'one reply read');
     });
 });
+
+test('latest reply edited or re-read, "Scan every" 1: B is installed, nothing is pending, and the normal scan reads the new text exactly once', () => {
+    runScenario('latest-edit-1', async h => {
+        h.settings.scanEvery = 1;
+        for (let i = 1; i <= 3; i += 1) await h.turn('We walk on.', i % 2 ? `Yunyun speaks, mark-${i}.` : `The road goes on, mark-${i}.`);
+        const before = structuredClone(h.runtime.getState());                     // after reply 3
+        await h.turn('We walk on.', 'Yunyun speaks, mark-4.');
+        const chat = h.mockState.context.chat;
+        chat[chat.length - 1].mes = 'Yunyun speaks, mark-9.';                      // the reader edits the latest reply (a Re-read leaves the same text change)
+        chat[chat.length - 1].swipes = ['Yunyun speaks, mark-9.'];
+        const { changeAt } = await import(h.timelineUrl);
+        const at = changeAt({ saved: before.lineage, live: h.runtime.getState().lineage, chat: h.runtime.chatLineage() });
+        h.equal(h.runtime.replay.pendingOf(before, at).ids, [], 'a changed latest reply: no catch-up, the normal path reads it');
+        await h.runtime.installState(before);
+        h.mockState.fakeCalls.length = 0;
+        await h.emitAsync('message_received', chat.length - 1);
+        await h.sleep(80);
+        h.equal(h.mockState.fakeCalls.length, 1, 'the new text is read exactly once');
+        h.check(/mark-9/.test(h.mockState.fakeCalls[0]) && !/mark-4/.test(h.mockState.fakeCalls[0]), 'the edited text, not the old one');
+    });
+});
+
+test('latest reply edited or re-read, "Scan every" 5: B is installed, nothing is pending, and the normal scan reads the new text exactly once', () => {
+    runScenario('latest-edit-5', async h => {
+        h.settings.scanEvery = 5;
+        for (let i = 1; i <= 3; i += 1) await h.turn('We walk on.', i % 2 ? `Yunyun speaks, mark-${i}.` : `The road goes on, mark-${i}.`);
+        const before = structuredClone(h.runtime.getState());                     // after reply 3
+        await h.turn('We walk on.', 'Yunyun speaks, mark-4.');
+        const chat = h.mockState.context.chat;
+        chat[chat.length - 1].mes = 'Yunyun speaks, mark-9.';                      // the reader edits the latest reply (a Re-read leaves the same text change)
+        chat[chat.length - 1].swipes = ['Yunyun speaks, mark-9.'];
+        const { changeAt } = await import(h.timelineUrl);
+        const at = changeAt({ saved: before.lineage, live: h.runtime.getState().lineage, chat: h.runtime.chatLineage() });
+        h.equal(h.runtime.replay.pendingOf(before, at).ids, [], 'a changed latest reply: no catch-up, the normal path reads it');
+        await h.runtime.installState(before);
+        h.mockState.fakeCalls.length = 0;
+        await h.emitAsync('message_received', chat.length - 1);
+        await h.sleep(80);
+        h.equal(h.mockState.fakeCalls.length, 1, 'the new text is read exactly once');
+        h.check(/mark-9/.test(h.mockState.fakeCalls[0]) && !/mark-4/.test(h.mockState.fakeCalls[0]), 'the edited text, not the old one');
+    });
+});
+
+test('B\'s marker behind the change: the replies in the gap are read too (install, field from the marker, catch-up)', () => {
+    runScenario('gap', async h => {
+        for (let i = 1; i <= 2; i += 1) await h.turn('We walk on.', i % 2 ? `Yunyun speaks, mark-${i}.` : `The road goes on, mark-${i}.`);
+        const before = structuredClone(h.runtime.getState());
+        before.lastScannedMessageId = 1;                                           // "Scan every" 5: reply 2 (message 3) is not read yet
+        for (let i = 3; i <= 5; i += 1) await h.turn('We walk on.', i % 2 ? `Yunyun speaks, mark-${i}.` : `The road goes on, mark-${i}.`);
+        const chat = h.mockState.context.chat;
+        chat.splice(4, 2);                                                         // delete reply 3
+        const plan = h.runtime.replay.pendingOf(before, 4);
+        h.equal([plan.ids, plan.marker, plan.n], [[3, 5, 7], 1, 3], 'from the marker: the gap reply 3 is included; the note still says reply 3');
+        await h.runtime.installState(before);
+        await h.runtime.replay.writeCatchUp({ from: 0, to: 2, reason: 'before-change', attempt: 0, ids: plan.ids, cap: 40, since: plan.marker });
+        h.mockState.fakeCalls.length = 0;
+        const catchUp = h.controller();
+        h.equal(catchUp.resume().started, true, 'resumes');
+        await catchUp.idle();
+        h.equal(h.mockState.fakeCalls.length, 3, 'three replies read: the gap one and the two after the change');
+        h.check(h.mockState.fakeCalls.some(prompt => prompt.includes('mark-2')), 'the gap reply is read');
+        h.check(h.mockState.fakeCalls.every(prompt => !prompt.includes('mark-3')), 'the removed reply never');
+    });
+});
