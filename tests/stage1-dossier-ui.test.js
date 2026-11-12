@@ -220,7 +220,7 @@ test('the board shows the tiles in order with the player\'s name, escapes text a
   // Mood tile: the word plus both bars, also for a person with no hosted mood (a mid-step rest) and no scanner word (the resting word).
   assert.match(html, /Energy[\s\S]*Control/);
   const rest = boardHtml({ ...rika, mood: '', v2Meters: undefined }, {});
-  assert.match(rest, /delta-mood-feel[^"]*"><span>Feeling<\/span>[\s\S]*delta-mood-energy[^"]*"><span>Energy<\/span>[\s\S]*delta-mood-control"><span>Control<\/span>/, 'the Mood tile shows all three rows, each with its number');
+  assert.match(rest, /delta-mood-feel[^"]*"><span>Feeling<\/span>[\s\S]*delta-mood-energy[^"]*"><span>Energy<\/span>[\s\S]*delta-mood-control[^"]*"><span>Control<\/span>/, 'the Mood tile shows all three rows, each with its number');
   assert.match(boardHtml({ id: 'x', name: 'Marrit', gender: 'male', role: 'bargemaster' }, {}), /Male · Bargemaster/);
 });
 
@@ -743,7 +743,8 @@ test('mood rows: Feeling / Energy / Control with their number on the -3..+3 scal
   const quiet = sectionScreenHtml('mood', base, { reply: 115 });
   assert.match(quiet, /<h4 class="delta-subhead">Recent changes<\/h4><ul class="delta-list"><li class="delta-chg"><span class="delta-chg-when"><small>#115<\/small><\/span><div><b><span class="delta-chg-d" data-good="muted">no change \u00b7 fading toward her calm/, 'a quiet reply starts the list');
   assert.equal((quiet.match(/class="delta-chg"/g) || []).length, 3, 'the quiet row counts in the three');
-  assert.doesNotMatch(quiet, /delta-sheet-chip/, 'no chip when the reply on show moved nothing');
+  assert.doesNotMatch(quiet, /delta-sheet-chip"/, 'no chip when the reply on show moved nothing');
+  assert.match(quiet, /<em class="delta-sheet-chip-slot"/, 'an empty chip slot keeps the bar columns aligned');
   const board = boardHtml(base, { reply: 112 });
   assert.match(board, /delta-mood-rows[\s\S]*Feeling[\s\S]*Energy[\s\S]*Control/, 'the board tile shows all three');
 });
