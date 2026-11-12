@@ -4,7 +4,7 @@
    exported before. Never imports core-mechanics.js or core.js. */
 import { cleanText, normalizeName } from './core-text.js';
 import { DEFAULT_RELATIONSHIP, DEFAULT_RELATIONSHIP_CAPS, normalizeRelationshipBaseline, normalizeRelationshipCaps } from './core-relationship.js';
-import { findInterimIdentityPromotionIndex, inferNpcIdentityKind, normalizeGender } from './core-identity.js';
+import { findInterimIdentityPromotionIndex, inferNpcIdentityKind, isDescriptivePhrase, normalizeGender } from './core-identity.js';
 import { applySheetLevels, withoutSheetLevels, candidateMatches, createNpcRecord, IMPORTANT_MEMORY_LIMIT, makeNpcCandidate, mergeLists, normalizeCustomFieldNames, normalizeNpcAdmissionMode, normalizeNpcCandidate, normalizeNpcRecord, normalizeScanNpc, NPC_CANDIDATE_LIMIT, NPC_CANDIDATE_TTL_TURNS, scanLabelsMatch, shouldCreateDossierImmediately, shouldPromoteCandidate } from './core-record.js';
 import { applyKeyRelationshipEdges, recordTieMentions, tieRoster } from './core-keyrel.js';
 import { canonicalizeNpcKeyRelationships, reconcileSocialState } from './social.js';
@@ -129,6 +129,14 @@ export function mergeScanResult(state, scanResult, options = {}) {
                 report.renamed.push({ id: next.npcs[existingIndex].id, from: previousName, to: next.npcs[existingIndex].name });
             }
             next.candidates = next.candidates.filter(candidate => !scanLabelsMatch(candidate, incoming));
+            continue;
+        }
+
+        // A description read as a proper name is not a person ("leader in the gambeson", live run 3): never admitted, as a dossier or a
+        // candidate. A real name and a role label, with or without a linking word ("the captain of the guard", "woman in red"), go on to the
+        // candidate and promotion path as before; people already in the registry were matched above.
+        if (inferNpcIdentityKind(incoming.name, incoming.identityKind) === 'proper_name' && isDescriptivePhrase(incoming.name)) {
+            report.skipped.push(incoming.name);
             continue;
         }
 

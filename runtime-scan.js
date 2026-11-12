@@ -372,7 +372,7 @@ export function createScanPart(rt, deps) {
             }
             if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'scan');
             setChatState(chatKey, nextState);
-            forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId, operation.chatHead, resolvedParsed?.profileUpdates);
+            forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId, operation.chatHead, resolvedParsed?.profileUpdates, resolvedParsed?.npcs);
             if (eventWatch.length) forwardSecretEventsToHost(eventWatch, resolvedParsed?.secretEvents ?? parsed?.secretEvents, operation.chatHead);
             persist();
             renderDossier();

@@ -1,11 +1,12 @@
 /* NPC State Delta dossier surface: the phase-1 board's view model (data only, no HTML) and the bond-tone / library-ring helpers. The section screens read the projection directly. */
-import { changeStamp, plain, RELATIONSHIP_AXES, relationshipValue, stringList } from './dossier-ui-model.js';
+import { changeStamp, plain, RELATIONSHIP_AXES, relationshipValue, stringList, wholeNumber } from './dossier-ui-model.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
 import { moodBars, moodWord } from './npc-mood.js';
 import { bondTone as bondToneOf, tieTone } from './dossier-ui-bond-tone.js';
 
 // Tile titles for the two sections the board names. The label "{{user}}" is kept literal here; the renderer substitutes the player's name.
 const SECTION_TITLES = Object.freeze({
+    mood: 'Mood',
     now: 'Right now',
     with: 'With {{user}}',
     ties: 'Ties',
@@ -42,6 +43,7 @@ function eventModel(event) {
         ask,
         date: plain(source.date),
         gate: plain(source.gate),
+        why: plain(source.why),
     };
 }
 
@@ -104,8 +106,7 @@ function tiesModel(npc) {
     // Tie tags (feature notes) tint a face by the bond: rival red, owes gold, ally green; else the relation word's tone.
     const tagged = new Map(object(npc.v2Meters).notes?.ties?.map(row => [String(row.name).toLowerCase(), row.tags]) ?? []);
     const faces = entries.slice(0, 3).map(entry => ({ name: entry.name, tone: tagTone(tagged.get(entry.name.toLowerCase())) || bondTone(entry.relation) }));
-    const lies = object(npc.v2Meters).notes?.lies?.length ?? 0;
-    return { count: entries.length, names: faces.map(face => face.name), faces, entries, lies };
+    return { count: entries.length, names: faces.map(face => face.name), faces, entries };
 }
 
 function pastModel(npc) {
@@ -135,13 +136,22 @@ function secretsModel(npc) {
     };
 }
 
-// Mood: the word with the Energy and Control bars, always (all three mood fields are kept). The meters' mood gives the word and the
-// bar steps; a person with none yet shows the scanner's word (or the resting word) with both bars at the middle step.
-export function moodTile(npc) {
+// Mood: the word (the scanner's own, which the numbers follow; the table word of the numbers when it wrote none), and Feeling / Energy / Control each as a row (value on the stored -3..+3 scale, and what it moved by in the reply on show), always
+// (all three mood fields are kept). The meters' mood gives the word, the numbers and the history of moves; a person with none yet shows the scanner's
+// word (or the resting word) with the three rows at 0. `reply`: the reply on show (a move recorded at it is "this reply"). `bars` and `max` keep the
+// step form (0..6, the middle neutral) the plain-words line reads.
+export const MOOD_AXES = Object.freeze([['v', 'Feeling', 'feel'], ['a', 'Energy', 'energy'], ['d', 'Control', 'control']]);
+export function moodTile(npc, reply = null) {
     const mood = object(npc.v2Meters).mood;
-    if (mood) return { title: 'Mood', text: mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause };
+    const now = wholeNumber(reply);
+    if (mood) {
+        const log = Array.isArray(mood.log) ? mood.log : [];
+        const latest = now !== null && log[0] && wholeNumber(log[0].n) === now ? log[0] : null;
+        const rows = MOOD_AXES.map(([key, label, tone]) => ({ key, label, tone, value: Math.round(Number(object(mood.axes)[key]) || 0), change: latest ? Math.round(Number(latest[key]) || 0) : 0 }));
+        return { title: 'Mood', text: plain(npc.mood) || mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause, rows, log, known: true, quiet: now !== null && !latest, atRest: ['v', 'a', 'd'].every(key => Math.round(Number(object(mood.axes)[key]) || 0) === Math.round(Number(object(mood.rest)[key]) || 0)) };
+    }
     const rest = moodBars(null);
-    return { title: 'Mood', text: plain(npc.mood) || moodWord(null), feeling: rest.max / 2, energy: rest.energy, control: rest.control, max: rest.max };
+    return { title: 'Mood', text: plain(npc.mood) || moodWord(null), feeling: rest.max / 2, energy: rest.energy, control: rest.control, max: rest.max, rows: MOOD_AXES.map(([key, label, tone]) => ({ key, label, tone, value: 0, change: 0 })), log: [], known: false, quiet: false };
 }
 
 // The few plain words under the mood word, from the three bars (a step 0..max, the middle is neutral): only a bar well off the
@@ -185,7 +195,7 @@ export function pullTile(npc) {
 }
 
 // The board: the dial's four arcs, name and status, and one tile per section. Pull is null until its data exists (phase 2).
-export function boardModel(npc = {}) {
+export function boardModel(npc = {}, { reply = null } = {}) {
     const source = object(npc);
     const key = object(source.key);
     const last = changeModel(source.lastRelationshipChange);
@@ -204,10 +214,10 @@ export function boardModel(npc = {}) {
         dial: dialAxesModel(source.relationship),
         tiles: {
             lastChange: { title: SECTION_TITLES.with, heading: 'Last change', hasChange: last.hasChange, moved: last.moved, reason: last.reason, gate: last.gate, when: last.when },
-            mood: moodTile(source),
+            mood: moodTile(source, reply),
             pull: pullTile(source),
             rightNow: { title: SECTION_TITLES.now, ...(({ place, doing, summary }) => ({ place, doing, summary }))(rightNowModel(source)) },
-            ties: { title: 'Ties', count: ties.count, names: ties.names, faces: ties.faces, lies: ties.lies },
+            ties: { title: 'Ties', count: ties.count, names: ties.names, faces: ties.faces },
             past: { title: 'Past', count: past.count, latest: past.latest, dots: past.dots },
             secrets: { title: 'Secrets', total: secrets.total, open: secrets.open, next: secrets.next, lastOpen: secrets.lastOpen },
         },

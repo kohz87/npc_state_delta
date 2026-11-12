@@ -1649,7 +1649,7 @@ test('scanner context includes mentioned/recent NPC details but not the whole ro
     const prompt = buildScannerPrompt({ transcript: 'Marris hands Aris the registration form.', existingNpcs: roster });
     assert.match(prompt, /MARRIS_VISUAL/);
     assert.doesNotMatch(prompt, /UNIQUE_VISUAL_1_/);
-    assert.ok(prompt.length < 11400, `scanner prompt should stay compact, got ${prompt.length} chars`);
+    assert.ok(prompt.length < 11500, `scanner prompt should stay compact, got ${prompt.length} chars`);
 });
 
 test('existing scanner deltas may use dossier id without repeating name or unchanged profile fields', () => {
@@ -1832,7 +1832,7 @@ test('routine scanner prompt has bounded overhead and delta/profile tiers', () =
     // 1.0.99 adds the user-authorized "if no named forms" qualifier to the Appearance rule; cleanup
     // Owner-approved profile style line (~350 chars) added to the routine scanner prompt.
     // step 12 the caps sentence at the stored limits (a few characters more).
-    assert.ok(overhead < 8300, `routine scanner overhead should stay below 8300 chars after the bounded Appearance clarifications and stored-limit caps, got ${overhead}`);
+    assert.ok(overhead < 8350, `routine scanner overhead should stay below 8350 chars after the bounded Appearance clarifications, stored-limit caps and the mood numbers (moodV/moodA/moodD, +115 chars), got ${overhead}`);
     assert.match(prompt, /Return compact JSON deltas/i);
     assert.match(prompt, /Existing relationship delta example/i);
     assert.match(prompt, /Relevant live context \(dynamic fields only\)/i);
@@ -3792,4 +3792,46 @@ test('an existing ghost dossier keeps updating, no storyTexts means no check', (
     assert.equal(base.state.npcs.length, 1);
     const again = mergeScanResult(base.state, ghostRow('Edda Rorke'), { turn: 2, storyTexts: ['someone'] });
     assert.equal(again.state.npcs.length, 1);
+});
+
+// Live run 3: "leader in the gambeson" (a description the scanner wrote for an unnamed man) became a dossier at the second sighting.
+import { isDescriptivePhrase } from '../core-identity.js';
+test('a descriptive phrase is not admitted as a person; names, role labels and uncased scripts are', () => {
+    const row = name => ({ npcs: [{ name, identityKind: 'proper_name', dossierSignal: 'meaningful', present: true, sameIndividual: true }] });
+    let state = { npcs: [], candidates: [], turn: 1 };
+    for (const turn of [1, 2, 3]) {
+        const merged = mergeScanResult(state, row('leader in the gambeson'), { turn, storyTexts: ['The leader in the gambeson shouts.'] });
+        state = merged.state;
+        assert.deepEqual(merged.report.skipped, ['leader in the gambeson']);
+    }
+    assert.equal(state.npcs.length, 0);
+    assert.equal(state.candidates.length, 0);
+    assert.equal(mergeScanResult({ npcs: [], candidates: [], turn: 1 }, row('Marda'), { turn: 1 }).state.npcs.length, 1);
+    assert.equal(mergeScanResult({ npcs: [], candidates: [], turn: 1 }, row('the Butcher of Vell'), { turn: 1 }).state.npcs.length, 1);
+    assert.equal(mergeScanResult({ npcs: [], candidates: [], turn: 1 }, row('老王'), { turn: 1 }).state.npcs.length, 1);
+    assert.equal(isDescriptivePhrase('the innkeeper'), false);
+    assert.equal(isDescriptivePhrase('old man'), false);
+    assert.equal(isDescriptivePhrase('woman with the scar'), true);
+    assert.equal(isDescriptivePhrase('Leader in the gambeson'), true, 'a sentence-cased start');
+    for (const name of ['Lady of the Lake', 'Sister Callow', 'Old Garvan of the Seven Stones']) assert.equal(isDescriptivePhrase(name), false, name);
+    assert.equal(isDescriptivePhrase('ライラ の 友人 で'), false);
+    // A role label with a linking word is admitted as before: a candidate at the first sighting, a dossier at the second.
+    for (const label of ['captain of the guard', 'woman in red', 'man with the scar']) {
+        const roleRow = { npcs: [{ name: label, identityKind: 'role_label', dossierSignal: 'meaningful', present: true, sameIndividual: true }] };
+        const first = mergeScanResult({ npcs: [], candidates: [], turn: 1 }, roleRow, { turn: 1, storyTexts: [`The ${label} waits.`] });
+        assert.equal(first.state.candidates.length, 1, `${label}: candidate at sighting 1`);
+        const second = mergeScanResult(first.state, roleRow, { turn: 2, storyTexts: [`The ${label} waits.`] });
+        assert.equal(second.state.npcs.length, 1, `${label}: dossier at sighting 2`);
+    }
+    // ...while "leader in the gambeson" stays out whatever kind the scanner gave it, with and without story texts.
+    for (const identityKind of ['role_label', 'proper_name']) for (const storyTexts of [['The leader in the gambeson shouts.'], undefined]) {
+        let st = { npcs: [], candidates: [], turn: 1 };
+        for (const turn of [1, 2, 3]) st = mergeScanResult(st, { npcs: [{ name: 'leader in the gambeson', identityKind, dossierSignal: 'meaningful', present: true, sameIndividual: true }] }, { turn, ...(storyTexts ? { storyTexts } : {}) }).state;
+        assert.equal(st.npcs.length + st.candidates.length, 0, `${identityKind} ${storyTexts ? 'with' : 'without'} texts`);
+    }
+    // A dossier that already exists (made before this rule) keeps updating.
+    const had = { npcs: [createNpcRecord('leader in the gambeson', [])], candidates: [], turn: 1 };
+    const again = mergeScanResult(had, row('leader in the gambeson'), { turn: 2 });
+    assert.equal(again.state.npcs.length, 1);
+    assert.deepEqual(again.report.skipped, []);
 });

@@ -41,9 +41,12 @@ function identityBody(npc) {
         + `</div>`;
 }
 
-// Tastes (likes, dislikes and who or what they come from) and Drives (the instinct strengths): only with data (feature notes).
+// A section with no data keeps its heading and says so in one muted line (so the two-column rhythm never breaks): the line has the height of a filled section's first line.
+const empty = text => `<p class="delta-muted delta-profile-empty">${escapeHtml(text)}</p>`;
+
+// Tastes (likes, dislikes and who or what they come from) and Drives (the instinct strengths), from the notes (feature notes).
 function tastesBody(notes) {
-    if (!notes?.tastes?.length) return '';
+    if (!notes?.tastes?.length) return block('tastes', 'Tastes', empty('No tastes yet: they appear when the story shows a like or dislike'));
     return block('tastes', 'Tastes', `<ul class="delta-tastes">${notes.tastes.map(row => `<li><span class="delta-taste-sign" aria-label="${row.sign === '-' ? 'dislikes' : 'likes'}">${row.sign === '-' ? '✕' : '♥'}</span><b>${escapeHtml(row.item)}</b>${row.from || row.mirrored ? `<span class="delta-muted">${escapeHtml([row.from, row.mirrored ? 'echoes you' : ''].filter(Boolean).join(' · '))}</span>` : ''}</li>`).join('')}</ul>`);
 }
 
@@ -56,7 +59,7 @@ function driveRow(row) {
     return `<div class="delta-drive" data-level="${level}"><span>${escapeHtml(row.label)}</span><i title="${escapeHtml(row.word)}"><b class="${level}"></b></i><span class="delta-drive-word">${escapeHtml(row.word)}</span>${note}</div>`;
 }
 function drivesBody(notes) {
-    if (!notes?.drives?.length) return '';
+    if (!notes?.drives?.length) return block('drives', 'Drives', empty('All normal so far'));
     return block('drives', 'Drives', `<div class="delta-drives">${notes.drives.map(driveRow).join('')}</div><span class="delta-muted delta-drive-key">The middle of each bar is normal; only real highs and lows reach out from it.</span>`);
 }
 
@@ -64,7 +67,7 @@ function drivesBody(notes) {
 // Named forms (each can take its own portrait) stay one tap away in a folded list, so no portrait control is lost.
 function appearanceBody(npc, portraitRefs) {
     const model = npc.appearanceModel;
-    if (!model || typeof model !== 'object') return '<p class="delta-muted">No appearance established yet.</p>';
+    if (!model || typeof model !== 'object') return empty('No appearance established yet');
     const locked = npc.v2Meters?.notes?.look;
     const forms = Array.isArray(model.appearanceForms) ? model.appearanceForms : [];
     const wearing = forms.find(form => form.name === model.currentForm)?.appearance || plain(model.unclassifiedAppearance) || plain(npc.currentPresentation);
@@ -74,7 +77,7 @@ function appearanceBody(npc, portraitRefs) {
     const rows = row('Look', model.overallAppearance)
         + row('Wearing', wearing, changedMark(npc, 'currentPresentation')) + row('Habits', habits, changedMark(npc, 'mannerisms'));
     const more = forms.length ? `<details class="delta-profile-forms"><summary>Forms and portraits · ${forms.length}</summary>${appearanceFormsHtml(npc, { portraitRefs })}</details>` : '';
-    return `${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : '<p class="delta-muted">No appearance established yet.</p>'}${note}${more}`;
+    return `${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : empty('No appearance established yet')}${note}${more}`;
 }
 
 // Personality as plain prose, then label / value rows (Speech, Levers) as the mockup draws it: no sub-headings.
@@ -82,7 +85,7 @@ function characterBody(npc) {
     const levers = Array.isArray(npc.behaviorProfile) ? npc.behaviorProfile.filter(Boolean).map(item => String(item).trim().replace(/[.;]+$/, '')).join('; ') : plain(npc.behaviorProfile);
     const row = (label, text, mark = '') => (plain(text) ? `<dt>${label}${mark}</dt><dd>${escapeHtml(plain(text))}</dd>` : '');
     const rows = row('Speech', npc.speech, changedMark(npc, 'speech')) + row('Levers', levers, changedMark(npc, 'behaviorProfile'));
-    return `${proseHtml(npc.personality)}${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : ''}`;
+    return `${proseHtml(npc.personality, 'Nothing known yet')}${rows ? `<dl class="delta-kv delta-profile-kv">${rows}</dl>` : ''}`;
 }
 
 // The portrait fills the top (phone) or the left column (desktop). The back control goes to the board; the
@@ -118,8 +121,8 @@ export function dossierProfileHtml(npc = {}, { layout = 'phone', portraitRefs = 
     const character = block('character', 'Character', characterBody(npc), { mark: opening ? '' : changedMark(npc, 'personality') });
     const notes = npc.v2Meters?.notes;
     const tastes = tastesBody(notes) + drivesBody(notes);
-    const background = block('background', 'Background', proseHtml(npc.background));
-    // The blocks run in the mockup's order: Identity | Appearance, Character | Tastes, Drives | Background (a block with no data is left out).
+    const background = block('background', 'Background', proseHtml(npc.background, 'Nothing known yet'));
+    // The blocks run in the mockup's order: Identity | Appearance, Character | Tastes, Drives | Background (a block with no data keeps its heading and a one-line placeholder).
     const body = `<div class="delta-profile-cols">${identity}${appearance}${character}${tastes}${background}</div>`;
     return `<div class="delta-profile delta-profile-${desktop ? 'desktop' : 'phone'}" data-delta-screen-body="profile">`
         + `${portraitBlock(npc, portraitRefs, desktop)}<div class="delta-profile-sheet">${headBlock(npc, desktop)}${body}</div></div>`;

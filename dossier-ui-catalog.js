@@ -124,14 +124,16 @@ function eventDetails(event) {
     const tier = ['ordinary', 'meaningful', 'major', 'extreme'].includes(event.tier) ? event.tier : null;
     if (!tier) return null;
     const ask = Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(event.ask?.[axis]) || 0)]).filter(([, value]) => value !== 0));
-    return { tier, held: event.held === true, note: plain(event.note).slice(0, 120), ask, date: plain(event.date).slice(0, 40), ...(plain(event.gate) ? { gate: plain(event.gate).slice(0, 80) } : {}) };
+    return { tier, held: event.held === true, note: plain(event.note).slice(0, 120), ask, date: plain(event.date).slice(0, 40), ...(plain(event.gate) ? { gate: plain(event.gate).slice(0, 80) } : {}), ...(plain(event.why) ? { why: plain(event.why).slice(0, 80) } : {}) };
 }
 
 function ownRelationshipChange(stored, net) {
     if (stored?.impact === 'manual' && (stored.message ?? -1) >= net.message) return stored;
     const delta = Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(net.delta?.[axis]) || 0)]));
     const event = eventDetails(net.event);
-    return { impact: 'net', delta, reason: '', turn: null, message: net.message, when: changeStamp({ message: net.message }).label, hosted: true, ...(event ? { event } : {}) };
+    // The reason: the story line's own (the event's why), else the scanner's reason for the same reply; none recorded stays empty (the views say so).
+    const reason = event?.why || (Number.isInteger(stored?.message) && stored.message === net.message ? plain(stored.reason) : '');
+    return { impact: 'net', delta, reason, turn: null, message: net.message, when: changeStamp({ message: net.message }).label, hosted: true, ...(event ? { event } : {}) };
 }
 
 export function projectDossierState(state = {}, status = {}) {
@@ -179,7 +181,7 @@ export function projectDossierState(state = {}, status = {}) {
             lifeState: npc.lifeState,
             bucket: npc.bucket,
             statusLabel: npc.statusLabel,
-            // The same word the board, its pill and Right now show (the meters' mood first), not the scanner's own.
+            // The same word the board, its pill and Right now show (the scanner's own word, which the mood numbers follow; the numbers' table word when it wrote none).
             mood: moodTile(npc).text,
             portrait: npc.portrait,
             updatedAt: npc.updatedAt,
