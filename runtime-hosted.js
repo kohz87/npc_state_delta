@@ -40,6 +40,10 @@ export function createHostedPart(rt, deps) {
     }
     // (v2) Story Director's clock while hosted ({ minutes, calendar }), for calendar.js; null otherwise (and
     // while the reader keeps the calendar here: the adapter's calendarOwn).
+    // The story's date after reply `index` as the dossier writes it ("Icewane 27"), '' with no host clock (calendar.js setStoryDateAtSource).
+    function hostedStoryDateAt(index) {
+        try { return String(storySuiteV2Meters()?.storyDateText?.(index) ?? ''); } catch { return ''; }
+    }
     function hostedStoryClock() {
         const adapter = storySuiteV2Meters();
         if (!adapter) return null;
@@ -115,13 +119,9 @@ export function createHostedPart(rt, deps) {
         const made = (state?.npcs || []).filter(npc => npc?.id && npc.castFrom?.key);
         if (!made.length) return null;
         const people = castList();
-        // The pin button: Story Director offers it (hosted) and the person is not a key person yet.
-        let offered = false;
-        try { offered = storySuiteV2Meters()?.keyPinOffered?.() === true; } catch { offered = false; }
-        const keyList = offered ? keyPeopleList() : null;
         const views = {};
         for (const npc of made) {
-            const view = castView(npc, findCastPerson(people, npc.castFrom.key), { pin: offered && !isKeyNpc(npc, keyList ?? []) });
+            const view = castView(npc, findCastPerson(people, npc.castFrom.key));
             if (view) views[npc.id] = view;
         }
         return Object.keys(views).length ? views : null;
@@ -338,17 +338,33 @@ export function createHostedPart(rt, deps) {
     // (v2 hidden notes) What a targeted pass (backfill, Refresh) is asked about hidden notes: { layered, watch } or null when
     // nothing is asked (not hosted, or no setting and no event note to look for). `layered`: this dossier is new (a backfill
     // queued at admission) and has no notes yet. `watch`: this one person's locked event notes, when they are present.
-    function hostedTargetNotes(npc, { newDossier = false, messageId = null } = {}) {
+    // `tastes` (Refresh only): the pass also asks for this person's tastes (the notes feature on) and forwards them (forwardTastesToHost).
+    function hostedTargetNotes(npc, { newDossier = false, messageId = null, tastes = false } = {}) {
         const adapter = storySuiteV2Meters();
         if (!adapter || !npc) return null;
         const layered = newDossier && getSettings().layeredSecrets !== false && !(Array.isArray(npc.secrets) && npc.secrets.length);
         const watch = hostedEventWatch({ npcs: [npc] }, messageId);
-        return layered || watch.length ? { layered, watch } : null;
+        const asked = tastes === true && adapter.asksTastes?.() === true;
+        return layered || watch.length || asked ? { layered, watch, ...(asked ? { tastes: true } : {}) } : null;
     }
     const targetNoteOptions = notes => ({
         ...(notes?.layered ? { layeredSecrets: true } : {}),
         ...(notes?.watch?.length ? { eventWatch: notes.watch } : {}),
+        ...(notes?.tastes ? { askTastes: true } : {}),
     });
+
+    // A Refresh's answered tastes (the target's row of `rows`: { tastes: [{ sign, item, from }] }) → npc.taste on the head reply the Refresh read, once the
+    // chat is known not to have moved (as forwardSecretEventsToHost). Nothing while replaying.
+    function forwardTastesToHost(npc, rows, head = null) {
+        if (replayScope()) return;
+        const adapter = storySuiteV2Meters();
+        const list = Array.isArray(rows) ? rows : [];
+        const row = list.find(item => String(item?.id || '') === npc?.id || (item?.name && npcMatchesLabel(npc, String(item.name)))) || (list.length === 1 ? list[0] : null);
+        if (!adapter || !npc || !Array.isArray(row?.tastes) || !row.tastes.length) return;
+        if (!chatHeadUnchanged(head)) return;
+        const reply = latestMessageId(true);
+        void adapter.tastes({ name: npc.name, tastes: row.tastes, ...(reply >= 0 ? { reply } : {}) });
+    }
 
     // A committed scan's `secretEvents` (the keys of the watched story events the current exchange showed) open those notes
     // as npc.open (cause ui, recorded on the head reply, so a swipe takes them back). Nothing is sent when the chat moved
@@ -422,5 +438,5 @@ export function createHostedPart(rt, deps) {
         return { text: 'The latest scan found no NPC in the scene.', scan: true };
     }
 
-    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason };
+    return { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedStoryDateAt, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, forwardTastesToHost, attachGeneratedSecrets, castEmptyReason };
 }

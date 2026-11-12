@@ -18,7 +18,7 @@ export { dossierFields, safeImageUrl, portraitUrl } from './queries-dossier.js';
 
 export function createQueriesPart(session, deps) {
     const {
-        calendarOwn, delta, doc, headReply, host, KEY_PIN_COMMAND, logger, MODULE_ID, panelId, PRESET_KIND, suiteApi, timeline, WORLD_FEATURE,
+        calendarOwn, delta, doc, headReply, host, logger, MODULE_ID, panelId, PRESET_KIND, suiteApi, timeline, WORLD_FEATURE,
     } = deps;
 
     // Delta's own commands on their way to the host, by type and payload: npc.adjust takes a reader's
@@ -332,8 +332,20 @@ export function createQueriesPart(session, deps) {
         return changed ? out : npcs;
     }
 
+    // The story's date after reply `index` (the reply a memory was recorded in), "Icewane 27"; '' without a clock. A replay's scoped
+    // adapter forces asOf to the replayed reply, which is this same index, so live and replay agree.
+    function storyDateText(index) {
+        if (!Number.isInteger(index) || index < 0) return '';
+        try { if (calendarOwn?.() === true) return ''; } catch { return ''; }   // the calendar kept in Delta: no Story Director date (as storyClock)
+        try {
+            const time = session.sdkRef?.query?.('director.time', { asOf: index });
+            const minutes = Number.isInteger(time) ? time : time?.minutes;
+            return Number.isInteger(minutes) ? storyMinuteText(minutes, director.directorCalendar()) : '';
+        } catch { return ''; }
+    }
+
     return {
-        warn, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
+        warn, storyDateText, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
         entryFor, queries, ...director, send, sliceView,
     };
 }

@@ -1,5 +1,6 @@
 /* NPC State Delta dossier surface: the five section screens (Right now, With {{user}}, Ties, Past, Secrets) and their header with arrows and dots. Escaped markup only; reads the existing dossier projection, no new data. */
 import { escapeHtml } from './src/util/html.js';
+import { normalizeName } from './core-text.js';
 import { changeStamp, plain, relationshipValue, RELATIONSHIP_AXES, wholeNumber } from './dossier-ui-model.js';
 import { recentChangeRowHtml } from './dossier-ui-relationship.js';
 import { parseKeyRelationshipEntry } from './social-bonds.js';
@@ -84,7 +85,7 @@ export function nowSectionHtml(npc = {}, { reply = null } = {}) {
         ['Condition', escapeHtml(plain(npc.status))],
         ...(pull ? [['Pull', `<b>${escapeHtml(pull.text)}</b>${[pull.cause, pull.note].filter(Boolean).map(part => ` · ${escapeHtml(part)}`).join('')}`, pull.fresh ? 'New' : '']] : []),
     ].filter(([, value]) => value);
-    const blocks = `${npc.key ? keyAwayHtml(npc.key) : ''}${npc.cast ? castFromHtml(npc.cast, npc.id) : ''}`;
+    const blocks = `${npc.key ? keyAwayHtml(npc.key) : ''}${npc.cast ? castFromHtml(npc.cast) : ''}`;
     const words = moodDescriptors(mood);
     const cause = plain(npc.v2Meters?.mood?.cause);
     const kv = list => `<dl class="delta-kv">${list.map(([label, value, badge]) => `<dt>${escapeHtml(label)}${badge ? ` <span class="delta-new-badge">${escapeHtml(badge)}</span>` : ''}</dt><dd>${value}</dd>`).join('')}</dl>`;
@@ -163,11 +164,18 @@ export function tiesSectionHtml(npc = {}) {
 
 const lieAndKnow = notes => (notes ? liesHtml(notes.lies) + knowsHtml(notes.knows) : '');
 
-// Past: the remembered events as written on a timeline of dots (the projection carries no timestamps for them).
+// Past: the remembered events as written on a timeline of dots. A memory recorded with a stamp (npc.memoryStamps: the reply and the story date
+// of that reply) carries "Icewane 27 · #12" as a small label; one recorded before stamps existed has no label (never a guessed date).
+const memoryWhen = (npc, memory) => {
+    const stamp = npc.memoryStamps?.[normalizeName(memory)];
+    const reply = wholeNumber(stamp?.m);
+    const label = [typeof stamp?.d === 'string' ? plain(stamp.d) : '', reply === null ? '' : `#${reply}`].filter(Boolean).join(' · ');
+    return label ? `<span class="delta-mem-when">${escapeHtml(label)}</span>` : '';
+};
 export function pastSectionHtml(npc = {}) {
     const memories = (Array.isArray(npc.memories) ? npc.memories : []).map(plain).filter(Boolean);
     if (!memories.length) return '<p class="delta-muted">Nothing remembered yet.</p>';
-    return `<ol class="delta-sheet delta-past delta-timeline">${memories.map(memory => `<li><i class="delta-dot-mem" aria-hidden="true"></i>${escapeHtml(memory)}</li>`).join('')}</ol>`;
+    return `<ol class="delta-sheet delta-past delta-timeline">${memories.map(memory => `<li><i class="delta-dot-mem" aria-hidden="true"></i>${memoryWhen(npc, memory)}<span>${escapeHtml(memory)}</span></li>`).join('')}</ol>`;
 }
 
 // Secrets: the hosted meters' notes (npc.v2Meters.secrets). An open note shows its title and text; a hidden note shows

@@ -1,11 +1,11 @@
-// The present cast and dossier views: action binding, the key-person pin, renderCast's cards/meters/notes and renderDossiers's
+// The present cast and dossier views: action binding, renderCast's cards/meters/notes and renderDossiers's
 // cast-or-list composition. The DOM is built with textContent and the same Story Block classes as the original view.
 
 import { elementOf, PANE_CLASS } from './dom.js';
 
-export function createCastRenderPart(session, deps, dossier, { notifyChange, portraitFill }) {
+export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
     const {
-        doc, enabled, KEY_PIN_COMMAND, keyPinOffered, npcList, part, runtime, send, worldShown,
+        doc, enabled, npcList, part, runtime, worldShown,
     } = deps;
 
     // ---- the Dossiers tab (once Cast) ----
@@ -31,18 +31,6 @@ export function createCastRenderPart(session, deps, dossier, { notifyChange, por
             if (list) list.replaceChildren(...dossier.dossierRowNodesFor(el.__npcStateDeltaV2Find, list.ownerDocument ?? doc));
         });
     }
-    // The reader pins a dossier's person as a key person: `keypeople.pin { name, aliases?, nsd: true }` as the reader's action (cause ui).
-    // → { ok, message } (Story Director's own answer, or why not).
-    async function pinKeyPerson({ name, aliases } = {}) {
-        const who = String(name ?? '').trim();
-        if (!who) return { ok: false, message: 'Nobody to pin.' };
-        if (!keyPinOffered()) return { ok: false, message: 'Story Director does not offer Key people here.' };
-        const list = (Array.isArray(aliases) ? aliases : []).map(alias => String(alias ?? '').trim()).filter(Boolean).slice(0, 8);
-        const out = await send(KEY_PIN_COMMAND, { name: who, ...(list.length ? { aliases: list } : {}), nsd: true });
-        if (out?.ok) notifyChange();
-        return { ok: out?.ok === true, message: String(out?.receipt?.summary ?? out?.message ?? (out ? '' : 'Story Director did not answer.')) };
-    }
-
     // Delta's own present-cast cards (the same markup as v1's Present NPCs tab; the cards' text is set by fillPresentCast),
     // each with its NPC's stage on the name line, its meters inside the row and its notes under it. Then the NPCs with meters
     // but no card (a block of their own), then the dossier list (`list`). `track: false` (the game view's screen, the World
@@ -157,5 +145,5 @@ export function createCastRenderPart(session, deps, dossier, { notifyChange, por
         portraitFill();
     }
 
-    return { bindCastActions, pinKeyPerson, renderCast, renderDossiers };
+    return { bindCastActions, renderCast, renderDossiers };
 }

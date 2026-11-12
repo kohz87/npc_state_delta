@@ -171,8 +171,6 @@ export class DossierUiPanel {
             if (step) return void this.setScreen(stepSection(this.screen, Number(step.dataset.deltaSectionStep) || 0));
             const go = event.target.closest('[data-delta-section-go]')?.dataset?.deltaSectionGo;
             if (go) return void this.setScreen(setSection(this.screen, normalizeSection(SECTION_KEYS.indexOf(go))));
-            const pin = event.target.closest('.delta-cast-pin');
-            if (pin) { void this.pinKeyPerson(pin); return; }
             const edit = event.target.closest('.delta-edit');
             if (edit) {
                 edit.closest('details.delta-header-menu')?.removeAttribute('open');
