@@ -13,7 +13,6 @@ import { getSettings, setRpgProbe } from './runtime-settings.js';
 import { sheetLevelOf } from './core-record.js';
 import { rejectedOverallLook } from './appearance-update.js';
 import { stage1Refresh } from './dossier-tools-core.js';
-import { driveEvidence } from './src/npc-notes-drives.js';
 
 export function createHostedPart(rt, deps) {
     const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex } = deps;
@@ -289,9 +288,9 @@ export function createHostedPart(rt, deps) {
         // and not incidental extras: the slice holds 80 people, and a long chat must not fill it with people who never matter.
         const worth = npc => !['dead', 'deceased'].includes(String(npc.lifeState ?? '').toLowerCase()) && npc.dossierSignal !== 'incidental';
         const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && !prior.has(npc.id) && worth(npc)) : [];
-        // (drive growth) What this scan newly recorded for a person who already had a dossier (memories, behavior, mannerisms, the relationship
-        // reason), read for drive cues by the slice; a person the scan only just made has no earlier reply to count against.
-        const grown = typeof adapter.drives === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && prior.has(npc.id)).map(npc => ({ name: npc.name, texts: driveEvidence(prior.get(npc.id), npc) })).filter(item => item.texts.length) : [];
+        // (drive growth) The before and after of a person who already had a dossier: the adapter reads what is new in them (memories, behavior,
+        // mannerisms, the relationship reason) and the slice reads it for drive cues; a person the scan only just made has no earlier reply to count against.
+        const grown = typeof adapter.drives === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && prior.has(npc.id)).map(npc => ({ name: npc.name, before: prior.get(npc.id), after: npc })) : [];
         if (!changes.length && !looks.length && !refused.length && !met.length && !grown.length) return;
         void (async () => {
             // The slice entry comes first (adjust, else meet): a look flag never makes one, so a new person's look lock needs it.
@@ -307,7 +306,7 @@ export function createHostedPart(rt, deps) {
             }
             for (const item of grown) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                await adapter.drives({ name: item.name, texts: item.texts, reply: messageId });
+                await adapter.drives({ name: item.name, before: item.before, after: item.after, reply: messageId });
             }
             for (const npc of looks) {
                 if (!chatHeadUnchanged(head)) return dropped();
