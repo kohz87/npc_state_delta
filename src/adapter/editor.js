@@ -255,6 +255,8 @@ export function createEditorPart(session, deps) {
                 // Mood and pull (feature mood-pull): only a person who has them (npc.cast's `mood` and `pull`).
                 ...(entry?.mood ? { mood: entry.mood } : {}),
                 ...(entry?.pull ? { pull: entry.pull } : {}),
+                // Dossier notes ON (npc.cast's `notesOn`): the Profile shows its Tastes and Drives placeholders only then.
+                ...(entry?.notesOn === true ? { notesOn: true } : {}),
                 // Dossier notes (feature notes): the rows, the Ties rows for this person's bonds and the tags by dossier id (the map's lines).
                 ...(entry?.notes ? { notes: { ...entry.notes, ties: tieRows(foldTies(entry.notes.ties, canon), npc.keyRelationships, owedBy(entry.key, allTies)) }, ties: Object.fromEntries(Object.entries(foldTies(entry.notes.ties, canon)).map(([key, tags]) => [idByKey[key] ?? key, tags])) } : {}),
                 milestones: Object.values(slice?.milestones ?? {}),

@@ -21,6 +21,7 @@ import { createPortraitRefs } from '../dossier-ui-html.js';
 import { dialArcs, dialSvg } from '../dossier-ui-dial.js';
 import { dossierMenuHtml } from '../dossier-ui-header.js';
 import { v2MetersProjection } from '../dossier-ui-meters.js';
+import { SECTIONS_STYLES as sectionsCss } from '../dossier-ui-styles-sections.js';
 import { dossierProfileHtml, profileMeterItems } from '../dossier-ui-profile.js';
 import { SECTION_KEYS, createScreenState, escapeAction, goBack, layoutFor, openNpc, openSection, parseScreen, screenSignature, setSection, showScreen, stepSection, swipeStep } from '../dossier-ui-screens.js';
 import { sectionHeaderHtml, sectionScreenHtml } from '../dossier-ui-sections.js';
@@ -272,6 +273,33 @@ test('the profile: portrait first, identity and appearance, phone and desktop la
   assert.doesNotMatch(marked, /<p class="delta-muted"> ?<em/, 'no stray marker line under Character');
 });
 
+test('profile polish: empty sections keep a heading and a muted line; one Age field; section caption meters in colour', () => {
+  const bare = dossierProfileHtml({ name: 'Ada', v2Meters: { bars: [], notesOn: true } }, { layout: 'phone' });
+  const off = dossierProfileHtml({ name: 'Ada', v2Meters: { bars: [] } }, { layout: 'phone' });
+  const standalone = dossierProfileHtml({ name: 'Ada' }, { layout: 'phone' });
+  for (const html of [off, standalone]) assert.doesNotMatch(html, /Tastes|Drives|No tastes yet|All normal so far/, 'notes off or no host: no placeholders');
+  for (const title of ['Appearance', 'Character', 'Tastes', 'Drives', 'Background']) assert.match(bare, new RegExp(`<h3>${title}</h3>`), `${title} keeps its heading`);
+  assert.match(bare, /No tastes yet: they appear when the story shows a like or dislike/);
+  assert.match(bare, /All normal so far/);
+  assert.equal(bare.match(/Nothing known yet/g).length, 2, 'Character and Background');
+  assert.match(bare, /No appearance established yet/, 'Appearance keeps main\'s own wording');
+  assert.doesNotMatch(bare, /Looks/);
+  const aged = dossierProfileHtml({ name: 'Ada', age: '19', apparentAge: '~25' }, {});
+  assert.match(aged, /<b>Age<\/b><span>19</);
+  const apparent = dossierProfileHtml({ name: 'Ada', apparentAge: '~25' }, {});
+  assert.match(apparent, /<b>Age<\/b><span>~25</);
+  assert.match(dossierProfileHtml({ name: 'Ada', apparentAge: '25' }, {}), /Age ~25/, 'a bare apparent age gets the tilde');
+  assert.doesNotMatch(apparent, /Looks/);
+  const fc = (field) => ({ fieldChanges: { latest: [field], latestTurn: 3, message: 12 } });
+  assert.doesNotMatch(dossierProfileHtml({ name: 'Ada', age: '19', apparentAge: '~25', ...fc('apparentAge') }, {}), /delta-changed-mark/, 'the mark follows the shown real age, which did not change');
+  assert.match(dossierProfileHtml({ name: 'Ada', apparentAge: '~25', ...fc('apparentAge') }, {}), /delta-changed-mark/, 'the shown apparent age changed: marked');
+  assert.match(dossierProfileHtml({ name: 'Ada', age: '19', ...fc('age') }, {}), /delta-changed-mark/);
+  assert.match(sectionsCss, /\.delta-board-meters \{ font-weight:700; \}/, 'the caption meter line is bold as in the mockup');
+  const caption = boardHtml({ ...rika, role: 'F-rank mage' }, {});
+  assert.match(caption, /delta-board-role[^>]*>F-rank mage</);
+  assert.match(caption, /<i data-axis="trust">Trust \+11<\/i><i data-axis="affection">Affection \+10<\/i><i data-axis="desire">Desire \+6<\/i><i data-axis="tension">Tension \+13<\/i>/);
+});
+
 test('screens: back, section arrows, Esc order, swipe, layout and the signature a refresh keeps', () => {
   let state = createScreenState();
   assert.equal(escapeAction(state), 'close', 'the library closes the panel');
@@ -486,7 +514,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
   assert.doesNotMatch(sectionScreenHtml('ties', bare), /Lies told|Knows about/);
   assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /look was set/);
-  assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /No tastes yet[\s\S]*All normal so far/, 'no data: the headings stay with a placeholder line');
+  assert.match(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: { ...bare.v2Meters, notesOn: true } }, { layout: 'phone' }), /No tastes yet[\s\S]*All normal so far/, 'no data: the headings stay with a placeholder line');
 });
 
 // The dossier's stylesheets as the page gets them (the template numbers filled in), plus the source for the pins that read it.
@@ -727,7 +755,7 @@ test('meters: the story line\'s reason shows on the Last change tile and the Rec
 });
 
 test('profile: every section keeps its heading and a muted one-line placeholder when empty; a thin line above every block but the first row', async () => {
-  const html = dossierProfileHtml({ id: 'r', name: 'Rika' }, { layout: 'desktop' });
+  const html = dossierProfileHtml({ id: 'r', name: 'Rika', v2Meters: { notesOn: true } }, { layout: 'desktop' });
   for (const key of ['appearance', 'character', 'tastes', 'drives', 'background']) assert.match(html, new RegExp(`data-delta-profile="${key}"`), key);
   assert.match(html, /No tastes yet: they appear when the story shows a like or dislike/);
   assert.match(html, /All normal so far/);
@@ -735,6 +763,7 @@ test('profile: every section keeps its heading and a muted one-line placeholder 
   const css = await builtCss();
   assert.match(css, /\.delta-profile-block \{ border-top:1px solid var\(--delta-line\)/);
   assert.match(css, /\.delta-profile-cols > \.delta-profile-block:nth-child\(2\) \{ border-top:0/, 'desktop: no line above the first row');
+  assert.doesNotMatch(css, /nth-child\(2\) \{ border-top:0; padding-top:0; \}/, 'the second column keeps main\'s 4px top padding so the top row lines up');
   assert.match(css, /--feel: #e2c46f; --energy: #e08a5b; --control: #7fb6ad/, 'the three mood axes are skin tokens, with light-theme variants');
   assert.match(css, /--feel: oklch\(from var\(--delta-text\)/);
 });

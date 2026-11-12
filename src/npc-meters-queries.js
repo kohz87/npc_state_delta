@@ -164,7 +164,7 @@ export function createNpcQueries({
             return Object.keys(npcs).sort().map(view);
         },
         /**
-         * npc.cast() → [{ key, name, present, bars, still, rank?, next?, locked, opened }], present
+         * npc.cast() → [{ key, name, present, bars, still, rank?, next?, notesOn?, locked, opened }], present
          * first. `bars`: [{ id, label, value, min, max, stage, text, tone, ceiling?, floor?, ticks?,
          * delta? }] (ss.meter's props; `delta` is the change of the entry's latest reply window),
          * `still`: the same without `delta`. `locked`: the hidden notes still locked, as teasers with no
@@ -189,6 +189,7 @@ export function createNpcQueries({
                         ...(ladder?.text ? { next: ladder.text } : {}),
                         ...(record.mood || record.pull ? moodPullView(record) : {}),
                         // Dossier notes (feature notes): lies, knows, tastes, ties map and drives; an uncaught lie and a secret read as hidden rows.
+                        ...(featureOn(FEATURE_NOTES) ? { notesOn: true } : {}),
                         ...(featureOn(FEATURE_NOTES) && NOTE_FIELDS.some(field => record[field]) ? { notes: dossierNotes(record) } : {}),
                         locked: notes.locked.map(({ id, meter, at, event, opens, text }) => ({ id, ...(meter ? { meter, at } : {}), event, opens, text })),
                         opened: notes.opened.map(({ id, title, text }) => ({ id, title, text })),
