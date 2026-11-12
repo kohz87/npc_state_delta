@@ -107,7 +107,7 @@ try {
     return JSON.parse(line.slice(7));
 }
 
-/* global ZERO */
+/* global ZERO, FULL_FLAG */
 test('hosted, catch-up 8, one new admission: the backfill runs that reply, no Refresh', () => {
     const r = runCalls('cadence-8', true, async ({ reply, settings }) => {
         settings.narrationCaptureCatchUp = 8;
@@ -264,12 +264,69 @@ test('send-drop: a reply without a capture block starts its automatic scan but t
         const t0 = Date.now();
         await emitAll('message_received', id);
         const heldMs = Date.now() - t0;
-        const busyAfter = Boolean(globalThis.NPCStateDelta.uiStatus?.().scanBusyForChat);
+        const busyAfter = Boolean(globalThis.NPCStateDelta.scanActive?.());
         await sleep(2500);
         mockState.quietResponder = orig;
         return { heldMs, busyAfter, scans: kinds().scanner, names: globalThis.NPCStateDelta.getState().npcs.map(n => n.name) };
     });
     assert.ok(r.heldMs < 400, `the listener returned in ${r.heldMs} ms`);
+    assert.equal(r.busyAfter, true, 'the scan was still pending when the listener returned');
     assert.ok(r.scans >= 1, 'the scan ran');
     assert.ok(r.names.includes('Yunyun'), 'its result was kept: ' + JSON.stringify(r.names));
+});
+
+// A Send during the scan, then a streamed reply that rewrites .mes every tick: the cancelled scan is not re-queued once the next reply
+// exists, so the scanner call count stays at what it was before this branch (the first scan and the next reply's own scan).
+for (const full of [true, false]) {
+    test(`send-drop: a Send during the scan then a streamed reply adds no repeated scanner calls (${full ? 'full window' : 'lean'})`, () => {
+        const scenario = async ({ settings, mockState, sleep, kinds }) => {
+            const emitAll = async (event, ...args) => { await Promise.all((mockState.listeners.get(event) || []).map(fn => fn(...args))); };
+            settings.autoScan = true; settings.fullScanEveryTurn = FULL_FLAG; settings.narrationCapture = false;
+            mockState.quietResponder = async () => { await sleep(500); return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] }); };
+            const chat = mockState.context.chat;
+            chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+            await emitAll('message_sent', chat.length - 1);
+            await emitAll('generation_after_commands', 'normal', {}, false);
+            const mes = 'Yunyun waves at you from the gate.';
+            chat.push({ is_user: false, is_system: false, name: 'Megumin', mes, swipe_id: 0, swipes: [mes] });
+            await emitAll('message_received', chat.length - 1);
+            await sleep(150);
+            chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is she?' });
+            await emitAll('message_sent', chat.length - 1);
+            await emitAll('generation_after_commands', 'normal', {}, false);
+            await sleep(300);
+            const streamed = { is_user: false, is_system: false, name: 'Megumin', mes: '', swipe_id: 0, swipes: [''] };
+            chat.push(streamed);
+            const words = 'She is a crimson demon and a friend of Megumin who likes to compete'.split(' ');
+            for (let i = 0; i < 26; i += 1) { streamed.mes += words[i % words.length] + ' '; streamed.swipes[0] = streamed.mes; await sleep(150); }
+            await emitAll('message_received', chat.length - 1);
+            await sleep(3000);
+            return { total: kinds().scanner, names: globalThis.NPCStateDelta.getState().npcs.map(n => n.name) };
+        };
+        const r = runCalls('send-stream', false, eval('(' + scenario.toString().replace('FULL_FLAG', String(full)) + ')'));
+        assert.ok(r.total <= 3, `scanner calls: ${r.total}`);
+        assert.ok(r.names.includes('Yunyun'), 'the NPC was kept: ' + JSON.stringify(r.names));
+    });
+}
+
+test('send-drop: a scan cancelled by a Send while its reply is still the latest runs again, bounded, and lands', () => {
+    const r = runCalls('send-requeue', false, async ({ settings, mockState, sleep, kinds }) => {
+        const emitAll = async (event, ...args) => { await Promise.all((mockState.listeners.get(event) || []).map(fn => fn(...args))); };
+        settings.autoScan = true; settings.fullScanEveryTurn = true; settings.narrationCapture = false;
+        mockState.quietResponder = async () => { await sleep(500); return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO }] }); };
+        const chat = mockState.context.chat;
+        chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+        await emitAll('message_sent', chat.length - 1);
+        await emitAll('generation_after_commands', 'normal', {}, false);
+        const mes = 'Yunyun waves at you from the gate.';
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes, swipe_id: 0, swipes: [mes] });
+        await emitAll('message_received', chat.length - 1);
+        await sleep(150);
+        chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is she?' });
+        await emitAll('message_sent', chat.length - 1);
+        await sleep(4000);
+        return { total: kinds().scanner, names: globalThis.NPCStateDelta.getState().npcs.map(n => n.name) };
+    });
+    assert.ok(r.total >= 1 && r.total <= 3, `scanner calls: ${r.total}`);
+    assert.ok(r.names.includes('Yunyun'), 'its result landed: ' + JSON.stringify(r.names));
 });
