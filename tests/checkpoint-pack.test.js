@@ -351,25 +351,3 @@ test('applyJson shares unchanged parts with its base but never mutates it; unpac
     };
     for (const entry of back) walk(entry.snapshot);
 });
-
-test('memo: a second pack of the same content hits the memo and gives identical bytes; a changed snapshot or base is never served from it', () => {
-    const chain = makeChat(30);
-    const first = packCheckpoints(chain);
-    assert.equal(first.stats.memoHits, 0);
-    const second = packCheckpoints(structuredClone(chain), { memo: first.memo });
-    assert.equal(second.stats.memoHits, second.stats.packed);
-    assert.equal(text(second.entries), text(first.entries));
-    // same lineage keys, changed content: the entry is packed from its own content
-    const changed = structuredClone(chain);
-    const victim = changed.findIndex((entry, index) => index > 10 && !first.entries[index].snapshot);
-    changed[victim].snapshot.meters = { trust: 99, extra: 'new' };
-    const third = packCheckpoints(changed, { memo: first.memo });
-    assert.equal(text(unpackCheckpoints(JSON.parse(text(third.entries)), third.packing ?? { scheme: PACK_SCHEME })), text(changed));
-    assert.ok(third.stats.memoHits < second.stats.memoHits, 'the changed entry was not served from the memo');
-    // the same target text under a different base text is a miss
-    const rebased = structuredClone(chain);
-    rebased[victim - 1].snapshot.meters = { trust: 55 };
-    const fourth = packCheckpoints(rebased, { memo: first.memo });
-    assert.equal(text(unpackCheckpoints(JSON.parse(text(fourth.entries)), { scheme: PACK_SCHEME })), text(rebased));
-    assert.throws(() => packCheckpoints(chain, { memo: {} }), PackError);
-});

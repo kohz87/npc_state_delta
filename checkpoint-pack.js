@@ -273,8 +273,8 @@ function packSettings(options) {
 // Returns { entries, packing, stats }. `entries` is the on-disk checkpoint array: full entries are the original
 // objects, packed entries have their `snapshot` key replaced in place by `packed: {base, patch}`. Options:
 // anchorEvery, fullTail, maxChainEntries (defaults PACK_DEFAULTS) and activeKeys (the active lineage's checkpoint
-// keys; empty or absent means every entry counts as active when choosing the newest reply) and memo (a Map from a
-// previous result's `memo`: unchanged snapshot pairs skip the diff and the check; the result's `memo` replaces it).
+// keys; empty or absent means every entry counts as active when choosing the newest reply). No cache: every packed
+// entry is rebuilt and compared byte for byte on every call.
 export function packCheckpoints(checkpoints, options = {}) {
     if (!Array.isArray(checkpoints)) throw new PackError('checkpoints must be an array');
     const settings = packSettings(options);
@@ -303,12 +303,9 @@ export function packCheckpoints(checkpoints, options = {}) {
     const tailFrom = newest === null ? null : newest - (settings.fullTail - 1);
     const count = checkpoints.length;
     const entries = new Array(count);
-    const memo = options.memo === undefined || options.memo === null ? null : options.memo;
-    if (memo !== null && !(memo instanceof Map)) throw new PackError('memo must be a Map');
-    const nextMemo = new Map();
     const chain = new Array(count).fill(0);
     const seenTurns = new Set();
-    const stats = { entries: count, full: 0, packed: 0, verbatim: 0, memoHits: 0, reasons: {}, snapshotChars: 0, patchChars: 0 };
+    const stats = { entries: count, full: 0, packed: 0, verbatim: 0, reasons: {}, snapshotChars: 0, patchChars: 0 };
     const countReason = reason => {
         stats.reasons[reason] = (stats.reasons[reason] || 0) + 1;
     };
@@ -329,12 +326,7 @@ export function packCheckpoints(checkpoints, options = {}) {
             if (base < 0) reason = 'no-base';
             else if (chain[base] + 1 > settings.maxChainEntries) reason = 'stall';
         }
-        // A memo entry is keyed by the exact target text and checked against the exact base text: the patch is a pure
-        // function of those two strings and was verified when it was made, so a hit cannot be stale.
-        const baseText = reason ? '' : infos[base].text;
-        const hit = reason || memo === null ? undefined : memo.get(info.text);
-        const patch = reason ? null : (hit !== undefined && hit.baseText === baseText ? hit : tryPatch(imageOf(infos[base]), info));
-        if (patch === hit && hit !== undefined) stats.memoHits++;
+        const patch = reason ? null : tryPatch(imageOf(infos[base]), info);
         if (!reason && !patch) reason = 'verify';
         if (!reason && patch.patchText.length >= info.text.length) reason = 'size';
         if (reason) {
@@ -344,7 +336,6 @@ export function packCheckpoints(checkpoints, options = {}) {
             continue;
         }
         entries[index] = withKey(info.entry, 'snapshot', 'packed', { base, patch: patch.ops });
-        nextMemo.set(info.text, { baseText, ops: patch.ops, patchText: patch.patchText });
         chain[index] = chain[base] + 1;
         stats.packed++;
         stats.patchChars += patch.patchText.length;
@@ -355,7 +346,7 @@ export function packCheckpoints(checkpoints, options = {}) {
         fullTail: settings.fullTail,
         maxChainEntries: settings.maxChainEntries,
     };
-    return { entries, packing, stats, memo: nextMemo };
+    return { entries, packing, stats };
 }
 
 // Inverse of packCheckpoints: one forward pass; every packed entry's base must be an earlier entry that rebuilt.
