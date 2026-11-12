@@ -228,6 +228,17 @@ export function moodWord(mood) {
   return MOOD_WORDS[bandOf(m.v) + 1][bandOf(m.a) + 1];
 }
 
+/**
+ * The word the scanner stored for a mood, read from its cause ("now pragmatic/amused" or "now curt — why", see applyWord), lower case, at most 30 characters;
+ * '' when the cause is not a word line (an event cause such as "trust dropped: ..." or none). The prompt line prints this word, never a band word of the numbers.
+ */
+export function storedMoodWord(mood) {
+  const cause = typeof mood?.cause === 'string' ? mood.cause : '';
+  const match = /^now (.+?)(?: — .*)?$/.exec(cause);
+  const word = match ? match[1].trim().toLowerCase().slice(0, 30).trim() : '';
+  return word && word !== 'mood word not rated' ? word : '';
+}
+
 /** The Energy (arousal) and Control (dominance) bars as steps 0..6, where 3 is the middle. */
 export function moodBars(mood) {
   const m = normalizeMood(mood) ?? neutralMood();
