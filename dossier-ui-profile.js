@@ -1,5 +1,6 @@
 /* NPC State Delta dossier surface: the profile screen (portrait with the four meter numbers, identity, appearance forms,
    character, background). Markup only, built from the detail projection; the screens module draws it and fills portraits. */
+import { storyDayText } from './calendar.js';
 import { escapeHtml } from './src/util/html.js';
 import { changeStamp, plain } from './dossier-ui-model.js';
 import { appearanceFormsHtml, birthdayCard, changedMark, currentCard, identityLine, ageText, portraitHtml, proseHtml } from './dossier-ui-html.js';
@@ -78,7 +79,7 @@ function appearanceBody(npc, portraitRefs) {
     const wearing = forms.find(form => form.name === model.currentForm)?.appearance || plain(model.unclassifiedAppearance) || plain(npc.currentPresentation);
     const habits = Array.isArray(npc.mannerisms) ? npc.mannerisms.filter(Boolean).join('; ') : plain(npc.mannerisms);
     const row = (label, text, mark = '') => (plain(text) ? `<dt>${label}${mark}</dt><dd>${escapeHtml(plain(text))}</dd>` : '');
-    const note = locked ? `<p class="delta-muted delta-look-lock">🔒 The look was set ${Number.isInteger(locked.day) ? `on day ${locked.day}` : 'when first seen'} and stays as it was; changes need an edit or a story event.</p>` : '';
+    const note = locked ? `<p class="delta-muted delta-look-lock">🔒 Look locked since ${storyDayText(locked.day) || 'it was first seen'}: it changes only when you edit it or the story changes it.</p>` : '';
     const rows = row('Look', model.overallAppearance)
         + row('Wearing', wearing, changedMark(npc, 'currentPresentation')) + row('Habits', habits, changedMark(npc, 'mannerisms'));
     const more = forms.length ? `<details class="delta-profile-forms"><summary>Forms and portraits · ${forms.length}</summary>${appearanceFormsHtml(npc, { portraitRefs })}</details>` : '';

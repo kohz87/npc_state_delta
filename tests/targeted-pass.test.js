@@ -126,3 +126,62 @@ test('a hosted scan scores relationship changes from the slice\'s numbers and fo
         globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
     } });
 });
+
+// (owner, 12 Nov) "Refresh failed for Sieke: the scan was cancelled or its chat/dossier source changed; ... then it wiped out everything from Sieke".
+// A Refresh that ends cancelled or discarded changes nothing: the chat's dossier state is byte-identical to before it was asked for, and the host is
+// told nothing (its tastes and story events are sent only with an accepted result).
+test('a Refresh cancelled or discarded mid-flight leaves the dossier state byte-identical (all or nothing)', () => {
+    const runner = index.slice(index.indexOf('async function runTargetedDossierPass'), index.indexOf('function scopeTargetedChannels'));
+    const at = text => runner.indexOf(text);
+    assert.ok(at('forwardTastesToHost(') > at('const forwardNotes = () =>'), 'tastes only inside forwardNotes');
+    assert.equal(runner.split('forwardTastesToHost(').length, 2, 'one tastes forward');
+    assert.equal(runner.split('forwardSecretEventsToHost(').length, 2, 'one story-event forward');
+    assert.ok(runner.lastIndexOf('forwardNotes();') > at('job.onLateStale?.();'), 'notes go to the host after the final commit check');
+    assert.ok(at('forwardNotes();') > at('if (scoped.noChange) {'), 'or with an accepted no-change result');
+    runEditorHostScenario('refresh-cancel-all-or-nothing', async () => {
+        const runtime = globalThis.NPCStateDelta;
+        const chat = mockState.context.chat;
+        chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who keeps the guild ledger?' });
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Sieke, the guild clerk, keeps the ledger. She lost a bet to Kazuma and still owes him a drink.', swipe_id: 0, swipes: ['x'] });
+        mockState.quietResponder = async () => '{"npcs":[]}';
+        await manualAddNpc('Sieke');
+        await runtime.flush();
+        await sleep(300);
+        const id = runtime.getState().npcs.find(npc => npc.name === 'Sieke').id;
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ id, name: 'Sieke', role: 'guild clerk', mood: 'wry', memories: ['Sieke lost a bet to Kazuma and owes him a drink.'] }] });
+        assert.equal(await runtime.refreshFromChat(id), true, 'a first Refresh gives her a memory');
+        await runtime.flush();
+        assert.ok(runtime.getNpc(id).memories.length >= 1);
+        const snapshot = () => JSON.stringify(runtime.getState());
+        // The answer that would empty her, held until the Refresh is cancelled or its source changed.
+        const held = () => {
+            let entered, release;
+            const inFlight = new Promise(resolve => { entered = resolve; });
+            const gate = new Promise(resolve => { release = resolve; });
+            mockState.quietResponder = async () => { entered(); await gate; return JSON.stringify({ npcs: [{ id, name: 'Sieke', role: '', mood: '', memories: [], memoryRetention: [], background: '' }] }); };
+            return { inFlight, release };
+        };
+        // 1. The reader (or a revision advance) cancels it mid-flight.
+        let step = held();
+        let before = snapshot();
+        let refreshing = runtime.refreshFromChat(id);
+        await step.inFlight;
+        assert.equal(runtime.cancelScan(), true);
+        step.release();
+        assert.equal(await refreshing, false, 'a cancelled Refresh reports failure');
+        await sleep(200);
+        assert.equal(snapshot(), before, 'a cancelled Refresh changed nothing');
+        // 2. The chat moves under it (the last reply is deleted) mid-flight.
+        step = held();
+        before = snapshot();
+        refreshing = runtime.refreshFromChat(id);
+        await step.inFlight;
+        const removed = chat.pop();
+        step.release();
+        assert.equal(await refreshing, false, 'a Refresh whose source changed is discarded');
+        await sleep(200);
+        assert.equal(snapshot(), before, 'a discarded Refresh changed nothing');
+        chat.push(removed);
+        mockState.quietResponder = null;
+    });
+});
