@@ -3752,6 +3752,16 @@ test('name collisions: the alias consolidation pass keeps a surname-alias pair o
     assert.equal(out.npcs.length, 2);
 });
 
+test('explicit key-relationship edges: a 400+ character run with no space is skipped, so a pasted blob costs nothing and the prose around it still counts (BH2)', () => {
+    const roster = [{ id: 'npc_mira', name: 'Mira', aliases: [] }, { id: 'npc_sera', name: 'Sera', aliases: [] }];
+    const blob = 'A'.repeat(30000);
+    const started = Date.now();
+    const edges = extractExplicitKeyRelationshipEdges(`${blob}\nSera is Mira's sister. ${blob}`, roster, []);
+    assert.ok(Date.now() - started < 2000, 'no quadratic scan of the blob');
+    assert.ok(edges.some(edge => edge.a === 'Mira' && edge.b === 'Sera' && edge.aToB === 'sister'), JSON.stringify(edges));
+    assert.deepEqual(extractExplicitKeyRelationshipEdges('Sera is Mira\'s sister.', roster, []).map(edge => edge.aToB), ['sister']);
+});
+
 // Card-only ghost: a name only the greeting's World State roster or a hidden Notebook note holds is never admitted.
 import { storyTextsForAdmission } from '../scan-context.js';
 const GREETING = 'Mist over Bluewatch, and Astra waits at the gate.\n<Blocks><World_State>\n**📡 Off-Screen:**\n* Watch-Captain Edda Rorke - Counting a short garrison\n</World_State></Blocks>';

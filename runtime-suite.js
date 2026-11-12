@@ -125,7 +125,9 @@ export function createSuitePart(rt, deps) {
         announceToSuite();
         updateInjection();
         renderDossier();
-        // (1.2.15) Story Block's Present NPCs and Dossiers tabs leave with Delta and come back with it.
+        // The in-chat cast leaves with Delta and comes back with it.
+        try { globalThis.NPCStateDelta?.renderInline?.(); } catch { /* the cards follow at the next render */ }
+        // (1.2.15) The enabled-changed event: Story Suite's own follow-ups listen for it.
         if (typeof CustomEvent === 'function') globalThis.document?.dispatchEvent?.(new CustomEvent('npc-state-delta:enabled-changed', { detail: { enabled: getSettings().enabled !== false } }));
     }
 

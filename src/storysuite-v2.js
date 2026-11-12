@@ -18,7 +18,7 @@
 //
 // Without a v2 host (no Story Block, or a v1 Story Block whose global has no `ready`/`sdk`) this
 // module does nothing: it looks for the host a bounded number of times and then stops. The v1
-// handshake (suite.js, suite-handshake.js, story-block-tabs.js) keeps working with v1 hosts; with a
+// handshake (suite.js, suite-handshake.js) keeps working with v1 hosts; with a
 // v2 host (`apiVersion: 2`) it offers nothing (suite-handshake.js storyBlockIsV2), and this adapter
 // sends V2_HOST_EVENT when it registers and when the host goes away so the v1 side can follow.
 //

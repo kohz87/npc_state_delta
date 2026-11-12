@@ -17,9 +17,9 @@ export const STYLES = `
   --delta-line-strong: rgba(218,193,148,.52);
   --delta-accent: var(--ss-accent, #d8bc78);
   --delta-accent-soft: var(--ss-text, #f0ddb0);
-  --delta-good: #9ed5b6;
-  --delta-warn: #e9c98d;
-  --delta-danger: #efaaaa;
+  --delta-good: var(--ss-good, #9ed5b6);
+  --delta-warn: var(--ss-warn-text, #e9c98d);
+  --delta-danger: var(--ss-bad-text, #efaaaa);
   position: relative;
   z-index: 10000;
   color: var(--delta-text);
@@ -114,8 +114,8 @@ export const STYLES = `
 #${ROOT_ID} .delta-rel-label { display:flex; justify-content:space-between; gap:8px; margin-bottom:4px; font-size:.78rem; }
 #${ROOT_ID} .delta-rel-label b { color:var(--delta-accent-soft); }
 #${ROOT_ID} .delta-rel-step { margin-left:6px; font-size:.72rem; font-weight:700; }
-#${ROOT_ID} .delta-rel-step-good { color:#9fd8b4; }
-#${ROOT_ID} .delta-rel-step-bad { color:#eba3a3; }
+#${ROOT_ID} .delta-rel-step-good { color:var(--good, #9fd8b4); }
+#${ROOT_ID} .delta-rel-step-bad { color:var(--bad, #eba3a3); }
 #${ROOT_ID} .delta-rel-track { position:relative; height:8px; border-radius:999px; background:rgba(0,0,0,.34); border:1px solid rgba(255,255,255,.07); }
 #${ROOT_ID} .delta-v2-meters { margin-top:9px; }
 #${ROOT_ID} .delta-rel-ceiling { position:absolute; top:-3px; bottom:-3px; width:2px; background:rgba(235,163,163,.8); }
@@ -167,12 +167,12 @@ export const STYLES = `
 #${ROOT_ID} .delta-rel-impact { display:inline-flex; padding:1px 7px; border:1px solid rgba(255,255,255,.14); border-radius:999px; font-size:.68rem; letter-spacing:.04em; text-transform:uppercase; color:var(--delta-muted); }
 #${ROOT_ID} .delta-rel-held { color:var(--ss-warn-text, var(--ss-warn, #e8c46a)); font-size:.78rem; margin:0; }
 #${ROOT_ID} .delta-rel-asked { font-size:.74rem; margin:0; }
-#${ROOT_ID} .delta-rel-impact-meaningful { color:#d7e6ff; border-color:rgba(138,163,200,.4); }
-#${ROOT_ID} .delta-rel-impact-major, #${ROOT_ID} .delta-rel-impact-extreme { color:#ffe2a8; border-color:rgba(216,188,120,.5); }
+#${ROOT_ID} .delta-rel-impact-meaningful { color:var(--trust, #d7e6ff); border-color:rgba(138,163,200,.4); }
+#${ROOT_ID} .delta-rel-impact-major, #${ROOT_ID} .delta-rel-impact-extreme { color:var(--held, #ffe2a8); border-color:rgba(216,188,120,.5); }
 #${ROOT_ID} .delta-rel-deltas { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:7px; }
 #${ROOT_ID} .delta-rel-delta { display:inline-flex; padding:2px 8px; border-radius:6px; font-size:.8rem; font-weight:700; background:rgba(0,0,0,.2); border:1px solid rgba(255,255,255,.08); }
-#${ROOT_ID} .delta-rel-delta-up { color:#bfe8cf; border-color:rgba(113,190,145,.3); }
-#${ROOT_ID} .delta-rel-delta-down { color:#f1bcbc; border-color:rgba(207,118,126,.32); }
+#${ROOT_ID} .delta-rel-delta-up { color:var(--good, #bfe8cf); border-color:rgba(113,190,145,.3); }
+#${ROOT_ID} .delta-rel-delta-down { color:var(--bad, #f1bcbc); border-color:rgba(207,118,126,.32); }
 #${ROOT_ID} .delta-rel-delta-progress { color:var(--delta-muted); font-weight:400; }
 #${ROOT_ID} .delta-rel-history { margin-top:12px; padding-top:10px; border-top:1px solid rgba(218,193,148,.12); }
 #${ROOT_ID} .delta-rel-history li .delta-rel-impact { margin-right:4px; }

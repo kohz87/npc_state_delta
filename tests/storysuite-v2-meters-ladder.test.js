@@ -867,7 +867,12 @@ test('event card: replay equals live, and the meters match a chat that never had
     // The event is the surviving reply's own whole record (the net amounts and the stamp's number are the window's, as on main).
     assert.deepEqual(eventOf(a).events, eventOf(b).events, 'the surviving reply\'s event');
     assert.equal(eventOf(a).date, eventOf(b).date);
-    assert.match(cardOf(a).html, /delta-rel-impact-ordinary">Ordinary<.*January 13/s);
+    // #295: the window's reply number is past the head now (the earlier message left), so the card is not drawn from it: the stored card
+    // shows, not a net change under the wrong "Reply #N" or the old window's amounts.
+    assert.ok(a.host.store.headIndex() < a.npc('Mira').reply, 'the window names a reply that is gone');
+    assert.match(cardOf(a).html, /Old sidecar reason/);
+    assert.doesNotMatch(cardOf(a).html, /January 13|Reply #(?!1<)/);
+    assert.match(cardOf(b).html, /delta-rel-impact-ordinary">Ordinary<.*January 13/s, 'a chat that never had the reply keeps its card');
     const head = JSON.stringify(a.host.head());
     a.host.store.rebuild();
     assert.equal(JSON.stringify(a.host.head()), head, 'replay equals the live state');
