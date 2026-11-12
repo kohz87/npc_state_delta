@@ -89,7 +89,8 @@ export function recentChangeRowHtml({ change = null, event = null } = {}) {
                 const good = axis === 'tension' ? value < 0 : value > 0;
                 return `<span class="delta-chg-d" data-good="${good ? 'yes' : 'no'}">${escapeHtml(label)} ${value > 0 ? '+' : '−'}${Math.abs(value)}</span>`;
             }).join(' · ') || '<span class="delta-chg-d" data-good="muted">Progress only</span>';
-        lines = [hosted?.held ? `Held: ${hosted.note || 'the day\'s allowance is used'}` : gateWords(hosted?.gate, { row: true }), change.reason || NO_REASON];
+        // as the mockup: how it came about and why on ONE muted line ("via help — Astra helped her cover up")
+        lines = [[hosted?.held ? `Held: ${hosted.note || 'the day\'s allowance is used'}` : gateWords(hosted?.gate, { row: true }), change.reason || NO_REASON].filter(Boolean).join(' — ')];
     } else {
         head = `<span class="delta-chg-d" data-good="muted">${escapeHtml((event.axes || []).length ? event.axes.join(' · ') : impactLabel(event.impact))}</span>`;
         lines = [event.reason || NO_REASON];

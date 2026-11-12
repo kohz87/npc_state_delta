@@ -68,6 +68,9 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-chip[data-good="yes"] { color:var(--good, var(--delta-good)); border-color:color-mix(in srgb, var(--good, var(--delta-good)) 50%, transparent); }
 #${ROOT_ID} .delta-sheet-chip[data-good="no"] { color:var(--bad, var(--delta-danger)); border-color:color-mix(in srgb, var(--bad, var(--delta-danger)) 50%, transparent); }
 #${ROOT_ID} .delta-mood-rows { margin-top:6px; }
+/* inside a tile (half width when the Pull tile sits beside it) the columns are tighter so the chip stays inside the tile and the bar keeps its length */
+#${ROOT_ID} .delta-tile .delta-sheet-meter.delta-sheet-meter-chip { grid-template-columns:clamp(40px,4.4cqw,64px) minmax(0,1fr) 22px auto; gap:5px; font-size:var(--dt-meta); }
+#${ROOT_ID} .delta-tile .delta-sheet-chip { padding:0 4px; }
 #${ROOT_ID} .delta-sheet-meter.delta-mood-feel > span { color:var(--feel, #e2c46f); font-weight:700; }
 #${ROOT_ID} .delta-sheet-meter.delta-mood-energy > span { color:var(--energy, #e08a5b); font-weight:700; }
 #${ROOT_ID} .delta-sheet-meter.delta-mood-control > span { color:var(--control, #7fb6ad); font-weight:700; }

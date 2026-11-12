@@ -243,6 +243,7 @@ export function createNpcCommands({
          * npc.mood { name, word, reason?, reply? }: the scanner wrote a new mood word for a person; its numbers (feeling, energy, control) are read from the
          * fixed word list (npc-mood.js moodFromWord; the scanner gives no numbers), set with the fade toward the resting mood anchored at once, and
          * the move is written on the reply with its reason (record.moodLog). Refused when no word of the text is a known mood word (nothing to read).
+         * `again: true` is the catch-up of a mood word kept from before the numbers existed: refused when the mood already follows a move (it has a cause or a history).
          * Only Delta's own scan sends it; recorded like any change, so a swipe takes it back; chats that never send it replay unchanged.
          */
         'npc.mood'(ctx, payload = {}) {
@@ -250,6 +251,8 @@ export function createNpcCommands({
             if (!featureOn(FEATURE_MOOD_PULL, ctx)) ctx.fail('FEATURE_OFF', 'Mood and pull are turned off.');
             const target = moodFromWord(payload?.word);
             if (!target) ctx.fail('REFUSED', 'The mood text holds no known mood word, so no numbers were set.');
+            const had = ctx.read(NPC_DOMAIN)?.npcs?.[identify(ctx.read(NPC_DOMAIN)?.npcs ?? {}, payload?.name)?.key];
+            if (payload?.again === true && had && (had.moodLog || readLeaf(had.mood)?.cause)) ctx.fail('REFUSED', 'The mood already follows a move.');
             let minutes = null;
             try { minutes = ctx.time(); } catch { minutes = null; }
             if (!isInt(minutes)) ctx.fail('REFUSED', 'The story clock is not known, so the mood was not set.');

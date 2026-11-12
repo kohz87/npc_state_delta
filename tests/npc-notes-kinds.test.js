@@ -590,7 +590,12 @@ test('notes host: npc.mood sets the three numbers from the scanner\'s word, logs
     assert.equal(log.length, 1);
     assert.deepEqual([log[0].n, log[0].v, log[0].a, log[0].d, log[0].why], [head, -2, 2, -3, 'now mortified and flustered — the wardrobe mishap']);
     assert.deepEqual(validateNpcSlice(slice()), []);
+    const view = (await cast(s)).mood;
+    assert.deepEqual([view.valence, view.energy, view.control], [-2, 2, -3], 'the query carries the raw axes');
+    assert.deepEqual(view.log.map(row => [row.n, row.v, row.a, row.d]), [[head, -2, 2, -3]], 'and the history');
     const before = JSON.stringify(slice());
+    assert.equal((await s.adapter.mood({ name: 'Oren', word: 'mortified and flustered', again: true })).ok, false, 'a catch-up is refused when the mood already follows a move');
+    assert.equal(JSON.stringify(slice()), before);
     assert.equal((await s.adapter.mood({ name: 'Oren', word: 'xyzzy' })).ok, false, 'no known word: refused');
     assert.equal(JSON.stringify(slice()), before, 'nothing written for an unknown word');
     s.host.store.rebuild();
@@ -640,4 +645,26 @@ test('replay: a Re-read of a reply the older code read writes no mood history an
     assert.equal(reasonKept({}, 'oren', 'because'), 'because');
     assert.equal(reasonKept({ standing: { domains: { npc: { npcs: { oren: { lastEvent: '{"at":1,"date":"","events":[]}' } } } } } }, 'oren', 'because'), '', 'the earlier read kept no reason');
     assert.equal(reasonKept({ standing: { domains: { npc: { npcs: { oren: { lastEvent: '{"events":[{"why":"x"}]}' } } } } } }, 'oren', 'because'), 'because');
+});
+
+test('notes host: the catch-up (again) gives a mood word kept from before the numbers existed its numbers, once', async () => {
+    const s = await suite({ allowance: null, features: { ...ON, 'npc-state-delta.mood-pull': true } });
+    await s.setDay(1);
+    await s.say(['~ npc Oren | trust: +1']);
+    await s.adapter.meet({ name: 'Oren', personality: 'quiet' });
+    const slice = () => s.host.head().domains.npc;
+    assert.deepEqual([readLeaf(slice().npcs.oren.mood).v, readLeaf(slice().npcs.oren.mood).a], [0, 0], 'at rest, no cause');
+    assert.equal((await s.adapter.mood({ name: 'Oren', word: 'wary', again: true })).ok, true);
+    assert.deepEqual([readLeaf(slice().npcs.oren.mood).v, readLeaf(slice().npcs.oren.mood).a, readLeaf(slice().npcs.oren.mood).d], [-1, 1, 0]);
+    assert.equal((await s.adapter.mood({ name: 'Oren', word: 'wary', again: true })).ok, false, 'the second catch-up finds a mood that already follows a move');
+    assert.deepEqual(validateNpcSlice(slice()), []);
+});
+
+test('display: a person with a scanner word and the numbers the command wrote shows the scanner\'s word', async () => {
+    const { moodTile } = await import('../dossier-ui-view-model.js');
+    const { v2MetersProjection } = await import('../dossier-ui-meters.js');
+    const view = { mood: { word: 'Alarmed', valence: -2, energy: 2, control: -3, bars: { energy: 5, control: 0, max: 6 }, cause: 'now mortified and flustered', log: [] }, bars: [], secrets: [] };
+    const tile = moodTile({ mood: 'Mortified and flustered', v2Meters: v2MetersProjection(view) }, 4);
+    assert.equal(tile.text, 'Mortified and flustered');
+    assert.deepEqual(tile.rows.map(row => row.value), [-2, 2, -3], 'the three rows hold the numbers');
 });

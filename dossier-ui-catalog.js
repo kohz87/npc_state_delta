@@ -176,7 +176,7 @@ export function projectDossierState(state = {}, status = {}) {
             lifeState: npc.lifeState,
             bucket: npc.bucket,
             statusLabel: npc.statusLabel,
-            // The same word the board, its pill and Right now show (the meters' mood first), not the scanner's own.
+            // The same word the board, its pill and Right now show (the scanner's own word, which the mood numbers follow; the numbers' table word when it wrote none).
             mood: moodTile(npc).text,
             portrait: npc.portrait,
             updatedAt: npc.updatedAt,

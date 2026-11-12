@@ -448,7 +448,8 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   };
   const tiles = boardTiles(boardModel(npc), { userName: 'Astra' });
   assert.equal((tiles.find(tile => tile.title === 'Mood').rowsHtml.match(/delta-sheet-meter /g) || []).length, 3, 'the Mood tile has Feeling, Energy and Control');
-  assert.equal(tiles.find(tile => tile.title === 'Mood').big, 'alarmed · tense');
+  assert.equal(tiles.find(tile => tile.title === 'Mood').big, 'old', 'the scanner\'s own word leads (the numbers follow it); the table word shows only when it wrote none');
+  assert.equal(boardTiles(boardModel({ ...npc, mood: '' }), { userName: 'Astra' }).find(tile => tile.title === 'Mood').big, 'alarmed · tense');
   assert.equal(tiles.find(tile => tile.title === 'Pull').note, 'high · 2 days');
   assert.match(boardHtml(npc, { userName: 'Astra' }), /praise, the 3rd time in 2 days, backfired/, 'the gate receipt in the mockup\'s words');
   assert.doesNotMatch(boardHtml(npc, { userName: 'Astra' }), /Reply #3/, 'no stamp line under the change');
@@ -568,7 +569,8 @@ test('round 2 fix 6-11: gate words, pronouns, the Pull ring at three quarters, t
   const { dossierIndexProjection } = await import('../dossier-ui-model.js');
   const { projectDossierState } = await import('../dossier-ui-catalog.js');
   const state = { npcs: [{ id: 'r', name: 'Rika', mood: 'Cautious', bucket: 'active' }], meterViews: { r: { bars: [], mood: { word: 'Alarmed', bars: { energy: 5, control: 1, max: 6 }, cause: '' } } } };
-  assert.equal(projectDossierState(state).index[0].mood, 'Alarmed', 'the library says what the board says');
+  assert.equal(projectDossierState(state).index[0].mood, 'Cautious', 'the library says what the board says: the scanner\'s own word leads');
+  assert.equal(projectDossierState({ npcs: [{ id: 'r', name: 'Rika', mood: '', bucket: 'active' }], meterViews: state.meterViews }).index[0].mood, 'Alarmed', 'the numbers\' table word when the scanner wrote none');
   assert.ok(dossierIndexProjection);
   const npc = { ...dossierDetailProjection({ id: 'r', name: 'Rika', personality: 'Proud', speech: 'Sharp', behaviorProfile: ['Bickers', 'Hides fear'] }, {}, {}), birthday: 'Emberwane 17', birthdaySource: 'established' };
   const phone = dossierProfileHtml(npc, { layout: 'phone' });
@@ -687,10 +689,10 @@ test('meters: the story line\'s reason shows on the Last change tile and the Rec
   const change = why => ({ impact: 'net', delta: { trust: 0, affection: 2, desire: 0, tension: 2 }, reason: why, turn: null, message: 3, hosted: true, event: { tier: 'meaningful', held: false, note: '', ask: [], date: 'Goldwane 21', gate: 'via help', why } });
   const withWhy = { ...base, lastRelationshipChange: change('Astra helped her cover up') };
   assert.match(boardHtml(withWhy, {}), /Affection \+2 \u00b7 Tension \+2<\/b> \u00b7 [^<]*<\/span><span class="delta-tile-small">Astra helped her cover up/);
-  assert.match(sectionScreenHtml('with', withWhy), /Astra helped her cover up/);
+  assert.match(sectionScreenHtml('with', withWhy), /delta-chg-via">via help — Astra helped her cover up/, 'how it came about and why on one line');
   const without = { ...base, lastRelationshipChange: change('') };
   assert.match(boardHtml(without, {}), /no reason given/);
-  assert.match(sectionScreenHtml('with', without), /delta-chg-via">no reason given/);
+  assert.match(sectionScreenHtml('with', without), /delta-chg-via">via help — no reason given/);
   const many = { ...without, recentRelationshipChanges: [1, 2, 3, 4].map(n => ({ impact: 'ordinary', reason: `r${n}`, axes: ['trust'], message: n })) };
   assert.equal((sectionScreenHtml('with', many).match(/class="delta-chg"/g) || []).length, 3, 'at most the last three, the latest among them');
 });

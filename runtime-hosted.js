@@ -18,7 +18,8 @@ export function createHostedPart(rt, deps) {
     const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex } = deps;
     // Meetings the host did not keep, `${chatKey}|${npcId}`: sent again with that person's next scan (forwardRelationshipChangesToHost).
     const meetOwed = new Set();
-    const meetTried = new Set();   // the entry-missing repeat is tried once a session: a host that never makes the entry is not asked at every scan
+    const meetTried = new Set();
+    const moodTried = new Set();   // the catch-up of a person's mood numbers is tried once a session (a mood word kept from before the numbers existed)   // the entry-missing repeat is tried once a session: a host that never makes the entry is not asked at every scan
     setRpgProbe(() => (storyBlockV2Hosted() && rt.storySuiteV2?.hosted?.() ? rt.storySuiteV2.rpgOn?.() === true : false));
 
     // Set by src/storysuite-v2.js while Delta is registered with a Story Block v2 host.
@@ -301,7 +302,7 @@ export function createHostedPart(rt, deps) {
         // recorded for the same reply: its relationship change reason). Not the dead and not incidental extras; after the meeting, which seeds the resting mood.
         const moodOf = npc => String(npc?.mood ?? '').trim();
         const reasonOf = npc => (JSON.stringify(npc.lastRelationshipChange) !== JSON.stringify(prior.get(npc.id)?.lastRelationshipChange) ? String(npc.lastRelationshipChange?.reason ?? '').trim() : '');
-        const moods = typeof adapter.mood === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && moodOf(npc) && moodOf(npc) !== moodOf(prior.get(npc.id))) : [];
+        const moods = typeof adapter.mood === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && moodOf(npc) && (moodOf(npc) !== moodOf(prior.get(npc.id)) || (prior.get(npc.id)?.updatedAt !== npc.updatedAt && !moodTried.has(`${getChatKey()}|${npc.id}`)))) : [];
         if (!changes.length && !looks.length && !refused.length && !met.length && !moods.length) return;
         void (async () => {
             // The slice entry comes first (adjust, else meet): a look flag never makes one, so a new person's look lock needs it.
@@ -322,7 +323,8 @@ export function createHostedPart(rt, deps) {
             }
             for (const npc of moods) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                await adapter.mood({ name: npc.name, word: moodOf(npc), reason: reasonOf(npc), reply: messageId });
+                moodTried.add(`${getChatKey()}|${npc.id}`);
+                await adapter.mood({ name: npc.name, word: moodOf(npc), reason: reasonOf(npc), reply: messageId, again: moodOf(npc) === moodOf(prior.get(npc.id)) });
                 stage1Refresh();
             }
             for (const npc of looks) {

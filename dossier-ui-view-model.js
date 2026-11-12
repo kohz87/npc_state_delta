@@ -134,7 +134,7 @@ function secretsModel(npc) {
     };
 }
 
-// Mood: the word, and Feeling / Energy / Control each as a row (value on the stored -3..+3 scale, and what it moved by in the reply on show), always
+// Mood: the word (the scanner's own, which the numbers follow; the table word of the numbers when it wrote none), and Feeling / Energy / Control each as a row (value on the stored -3..+3 scale, and what it moved by in the reply on show), always
 // (all three mood fields are kept). The meters' mood gives the word, the numbers and the history of moves; a person with none yet shows the scanner's
 // word (or the resting word) with the three rows at 0. `reply`: the reply on show (a move recorded at it is "this reply"). `bars` and `max` keep the
 // step form (0..6, the middle neutral) the plain-words line reads.
@@ -146,7 +146,7 @@ export function moodTile(npc, reply = null) {
         const log = Array.isArray(mood.log) ? mood.log : [];
         const latest = now !== null && log[0] && wholeNumber(log[0].n) === now ? log[0] : null;
         const rows = MOOD_AXES.map(([key, label, tone]) => ({ key, label, tone, value: Math.round(Number(object(mood.axes)[key]) || 0), change: latest ? Math.round(Number(latest[key]) || 0) : 0 }));
-        return { title: 'Mood', text: mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause, rows, log, known: true, quiet: now !== null && !latest };
+        return { title: 'Mood', text: plain(npc.mood) || mood.word, feeling: mood.feeling, energy: mood.energy, control: mood.control, max: mood.max, cause: mood.cause, rows, log, known: true, quiet: now !== null && !latest };
     }
     const rest = moodBars(null);
     return { title: 'Mood', text: plain(npc.mood) || moodWord(null), feeling: rest.max / 2, energy: rest.energy, control: rest.control, max: rest.max, rows: MOOD_AXES.map(([key, label, tone]) => ({ key, label, tone, value: 0, change: 0 })), log: [], known: false, quiet: false };
