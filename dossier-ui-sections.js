@@ -42,7 +42,8 @@ export function sectionHeaderHtml(id, { npcName = '', userName = '' } = {}) {
         const current = index === at;
         return `<button type="button" class="delta-section-dot${current ? ' on' : ''}" data-delta-section-go="${escapeHtml(other)}" aria-label="${escapeHtml(sectionTitle(other, userName))}"${current ? ' aria-current="step"' : ''}></button>`;
     }).join('');
-    return `<header class="delta-section-head" data-delta-section-head="${escapeHtml(id)}">
+    return `<button type="button" class="delta-section-back" data-delta-screen="board" aria-label="Back to the dossier">‹ Dossier</button>
+    <header class="delta-section-head" data-delta-section-head="${escapeHtml(id)}">
         <button type="button" class="delta-section-arrow" data-delta-section-step="-1" aria-label="Previous section"${prev ? '' : ' disabled'}>‹</button>
         <div class="delta-section-title">
             <b>${escapeHtml(sectionTitle(id, userName))}</b>

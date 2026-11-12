@@ -10,6 +10,7 @@ export class DeltaDossierUi extends DossierUiRender {
     async open() {
         if (!this.root) return;
         this.panelOpen = true;
+        this.syncNavEntries();
         this.root.querySelector('.delta-panel').hidden = false;
         this.root.querySelector('.delta-launcher')?.setAttribute('aria-expanded', 'true');
         try { await this.api?.ensureFresh?.({ reason: 'dossier-ui-open' }); }
@@ -43,6 +44,7 @@ export class DeltaDossierUi extends DossierUiRender {
         this.root?.querySelector('.delta-lightbox')?.remove();
         if (!this.root) return;
         this.panelOpen = false;
+        this.syncNavEntries();
         this.root.querySelector('.delta-panel').hidden = true;
         this.root.querySelector('.delta-launcher')?.setAttribute('aria-expanded', 'false');
         if (restoreFocus) this.root.querySelector('.delta-launcher')?.focus?.({ preventScroll: true });

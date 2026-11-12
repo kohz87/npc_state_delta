@@ -61,6 +61,7 @@ export class DossierUiRender extends DossierUiPanel {
         }
         const shown = this.renderScreen({ force: force || forceRail || forceDetail });
         this.setHeaderTitle();
+        this.syncNavEntries();
         panel?.setAttribute('data-has-results', shown ? 'true' : 'false');
         this.root.dispatchEvent?.(new CustomEvent('npc-state-delta:dossier-rendered', { bubbles: true }));
     }

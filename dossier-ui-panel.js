@@ -31,6 +31,30 @@ export class DossierUiPanel {
         this.renderedToken = '';
         this.boundEscape = event => this.onDocumentKeydown(event);
         this.boundFocus = () => { if (this.panelOpen) this.scheduleRefresh(); };
+        // The browser's back gesture steps one dossier screen back: one history entry per screen the dossier has pushed.
+        this.navEntries = 0;
+        this.ignorePop = false;
+        this.boundPop = () => this.onPopState();
+    }
+
+    // Keeps the browser history as deep as the dossier's own screen history (only while the panel is open).
+    syncNavEntries() {
+        if (typeof history === 'undefined' || typeof history.pushState !== 'function') return;
+        const want = this.panelOpen ? this.screen.history.length : 0;
+        while (this.navEntries < want) { history.pushState({ npcStateDeltaScreen: true }, ''); this.navEntries += 1; }
+        if (this.navEntries > want) {
+            const back = this.navEntries - want;
+            this.navEntries = want;
+            this.ignorePop = true;
+            history.go(-back);
+        }
+    }
+
+    onPopState() {
+        if (this.ignorePop) { this.ignorePop = false; return; }
+        if (!this.panelOpen || this.navEntries <= 0) return;
+        this.navEntries -= 1;
+        this.setScreen(goBack(this.screen));
     }
 
     mount() {
@@ -60,6 +84,7 @@ export class DossierUiPanel {
         this.sizeObserver?.disconnect?.();
         this.sizeObserver = null;
         window.removeEventListener?.('focus', this.boundFocus);
+        window.removeEventListener?.('popstate', this.boundPop);
         this.unbindSwipe?.();
         this.portraitRefs.release();
         this.root?.remove?.();
@@ -97,6 +122,7 @@ export class DossierUiPanel {
         if (!next || next === this.screen) return;
         this.screen = next;
         this.selectedNpcId = next.npcId || '';
+        this.syncNavEntries();
         this.renderFromProjection({ force: true });
     }
 
@@ -106,6 +132,9 @@ export class DossierUiPanel {
             const index = SECTION_KEYS.indexOf(target.dataset.deltaSection);
             return this.setScreen(openSection(this.screen, index < 0 ? 0 : index));
         }
+        // A control that names the screen we came from is a real step back (history and the browser's entries shrink, they do not pile up).
+        const last = this.screen.history[this.screen.history.length - 1];
+        if ((name === 'board' || name === 'library') && last?.name === name && (name === 'library' || last.npcId === this.screen.npcId)) return this.setScreen(goBack(this.screen));
         if (name === 'profile' || name === 'board' || name === 'library') this.setScreen(showScreen(this.screen, name));
     }
 
@@ -175,6 +204,7 @@ export class DossierUiPanel {
         }
         document.addEventListener('keydown', this.boundEscape);
         window.addEventListener('focus', this.boundFocus);
+        window.addEventListener('popstate', this.boundPop);
     }
 
     injectStyles() {
