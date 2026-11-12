@@ -91,7 +91,7 @@ function tastesOk(text) {
     if (typeof text !== 'string' || text.length > TASTE_LIMITS.text) return false;
     let list;
     try { list = JSON.parse(text); } catch { return false; }
-    return Array.isArray(list) && readTastes(text).length === list.length;
+    return Array.isArray(list) && readTastes(text, { cite: false }).length === list.length; // as stored: what main accepted stays valid
 }
 
 const CHECKS = Object.freeze({

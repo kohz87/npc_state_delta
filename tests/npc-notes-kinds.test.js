@@ -619,7 +619,7 @@ test('mergeRefreshTastes: new tastes merge like ~ taste lines; a taste already t
     ], { name: 'Oren', day: 3, r: 'r9' });
     assert.equal(out.added, 2);
     const rows = readTastes(out.text);
-    assert.deepEqual(rows.map(row => [row.sign, row.item, row.from ?? null, row.r]), [['+', 'Burnt Sugar', 'narrator', 'r1'], ['-', 'Paperwork', null, 'r1'], ['+', 'old maps', 'collects them [m4]', 'r9'], ['-', 'loud bells', 'flinches', 'r9']]);
+    assert.deepEqual(rows.map(row => [row.sign, row.item, row.from ?? null, row.r]), [['+', 'Burnt Sugar', 'narrator', 'r1'], ['-', 'Paperwork', null, 'r1'], ['+', 'old maps', 'collects them', 'r9'], ['-', 'loud bells', 'flinches', 'r9']]);
     const full = tastesText(Array.from({ length: 6 }, (_, i) => ({ sign: '+', item: `like ${i}`, day: 0, r: 'r1' })));
     const none = mergeRefreshTastes(full, [{ sign: '+', item: 'one more' }], { r: 'r2' });
     assert.equal(none.added, 0, 'a full sign takes nothing');
@@ -640,7 +640,7 @@ test('notes host: npc.taste records a Refresh\'s tastes on its reply; the narrat
     await s.say(['~ npc Oren | trust: +1']);
     await s.adapter.tastes({ name: 'Oren', tastes: [{ sign: '+', item: 'Tea', from: 'refresh' }, { sign: '-', item: 'loud bells', from: 'flinches [m3]' }, { sign: '+', item: 'old maps', from: 'collects them' }], reply: head() });
     const rows = () => readTastes(oren(s).tastes);
-    assert.deepEqual(rows().map(row => [row.sign, row.item, row.from ?? null]), [['+', 'tea', 'the kettle'], ['-', 'loud bells', 'flinches [m3]'], ['+', 'old maps', 'collects them']].map(([a, b, c]) => [a, b === 'tea' ? 'tea' : b, c]));
+    assert.deepEqual(rows().map(row => [row.sign, row.item, row.from ?? null]), [['+', 'tea', 'the kettle'], ['-', 'loud bells', 'flinches'], ['+', 'old maps', 'collects them']].map(([a, b, c]) => [a, b === 'tea' ? 'tea' : b, c]));
     assert.ok(rows().slice(1).every(row => row.r), 'each Refresh taste carries its reply');
     const before = JSON.stringify(oren(s).tastes);
     await s.adapter.tastes({ name: 'Oren', tastes: [{ sign: '+', item: 'old maps', from: 'again' }], reply: head() });
@@ -1031,4 +1031,22 @@ test('notes host: npc.mood for a person the meeting has not made (it was refused
     assert.deepEqual([mood.v, mood.a, mood.d], [2, 0, 0], 'the mood sits at the resting mood the words give');
     assert.deepEqual(mood.rest, { v: 2, a: 0, d: 0 }, 'so it fades toward the person\'s calm');
     assert.deepEqual(validateNpcSlice(slice()), []);
+});
+
+test('a stored taste leaf with "[m2]" citations (valid on main) still validates, displays clean, and a taste write keeps its old rows as stored', () => {
+    const leaves = [
+        [{ sign: '+', item: 'tea [m2]', day: 1, r: 'r1' }, { sign: '+', item: 'tea [m5]', day: 2, r: 'r2' }],
+        [{ sign: '+', item: 'tea', day: 1, r: 'r1' }, { sign: '-', item: 'tea [m5]', day: 2, r: 'r2' }],
+        [{ sign: '+', item: '[m2]', day: 1, r: 'r1' }],
+    ].map(rows => JSON.stringify(rows));
+    for (const leaf of leaves) {
+        assert.equal(validateNotes({ tastes: leaf }), '', 'what main accepted stays valid');
+        assert.doesNotMatch(JSON.stringify(dossierNotes({ tastes: leaf }).tastes), /\[m\d/, 'shown clean');
+    }
+    assert.deepEqual(dossierNotes({ tastes: leaves[0] }).tastes.map(row => row.item), ['tea']);
+    const out = runKind('taste', leaves[0], { sign: '+', item: 'coffee [m7]' }, { name: 'Oren', day: 3, r: 'r3', notes: { flag() {} } });
+    const written = JSON.parse(out.text);
+    assert.deepEqual(written.slice(0, 2), JSON.parse(leaves[0]), 'old rows stay byte-identical');
+    assert.equal(written[2].item, 'coffee', 'the new row is written clean');
+    assert.equal(validateNotes({ tastes: out.text }), '');
 });
