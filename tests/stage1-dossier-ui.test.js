@@ -454,7 +454,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   assert.doesNotMatch(boardHtml(npc, { userName: 'Astra' }), /Reply #3/, 'no stamp line under the change');
   assert.match(boardHtml(npc, { userName: 'Astra' }), /tap the portrait for (?:her|his|their) profile/);
   const ties = sectionScreenHtml('ties', npc);
-  assert.match(ties, />ally</); assert.match(ties, />owes</); assert.match(ties, />owed by</);
+  assert.match(ties, />Ally</); assert.match(ties, />Owes</); assert.equal(ties.match(/data-tie-type="owes"/g).length, 2, 'a person who owes her is a debt tie too: Owes');
   assert.match(ties, /a lie you have not caught/);
   assert.doesNotMatch(ties, /SECRET WORDS|a secret about/);
   assert.match(ties, /I sold nothing/); assert.match(ties, /Y owes a debt/);
@@ -553,7 +553,7 @@ test('round 2 fix 2-4: Right now in groups with three bars and Pull last, Recent
   assert.match(withHtml, /Recent changes[\s\S]*delta-chg-when">Goldwane 21<br><small>#3<\/small>[\s\S]*data-good="no">Tension \+2[\s\S]*via praise: it backfired[\s\S]*Desire/);
   assert.doesNotMatch(withHtml, /Last relationship change/);
   const ties = sectionScreenHtml('ties', base, {});
-  assert.match(ties, /data-tone="bad"><span class="delta-bond-word">rival<\/span>/);
+  assert.match(ties, /data-tone="bad" data-tie-type="rival"><span class="delta-bond-word">Rival<\/span>/);
   assert.match(ties, /a lie you have not caught/, 'an uncaught lie never shows its words');
   const css = await builtCss();
   assert.doesNotMatch(css.match(/\.delta-bond-word \{[^}]*\}/g)?.join(' ') || '', /border:1px/, 'the relation word is plain coloured text, no pill');
@@ -668,7 +668,7 @@ test('Ties: each tie is three stacked lines (type label, name, description); a l
   const ties = sectionScreenHtml('ties', { keyRelationships: ['Sister Temiwa — novice companion present at the counter | shares the cramped office and covered Sieke with an altar-cloth', 'Bregje — rival | clashes at the annex'] }, {});
   const rows = ties.match(/<div class="delta-bond"[\s\S]*?<\/div>/g) || [];
   assert.equal(rows.length, 2);
-  assert.match(rows[0], /<span class="delta-bond-word">novice companion present at the counter<\/span><b>Sister Temiwa<\/b><p>shares the cramped office/, 'type, then name, then description, in that order');
+  assert.match(rows[0], /<span class="delta-bond-word">Ally<\/span><b>Sister Temiwa<\/b><p>novice companion present at the counter — shares the cramped office/, 'tie type, then name, then description (relation as written, then dynamic), in that order');
   const css = SECTIONS_STYLES.replace(/\$\{ROOT_ID\}/g, '#r');
   const rule = selector => css.split('\n').filter(line => line.includes(selector)).join('\n');
   assert.doesNotMatch(rule('.delta-bond { grid-template-columns'), /auto minmax/, 'the type no longer sits beside the name');

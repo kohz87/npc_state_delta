@@ -2,7 +2,7 @@
 // (the latest reply and the user message it answers), the World State story day and the names that
 // are never NPCs. (cleanup step 10) Moved out of index.js unchanged; index.js wires in the host's
 // chat context and the Scan context setting once, with useTranscriptSource.
-import { storyDayFromText, storyProse, stripUiNoise } from '../core.js';
+import { storyClockDayAt, storyDayFromText, storyProse, stripUiNoise } from '../core.js';
 
 let readContext = () => ({ chat: [] });
 let readScanDepth = () => 6;
@@ -263,6 +263,16 @@ export function storyDayAt(messageId) {
         if (day !== null) return day;
     }
     return null;
+}
+
+// The day ties' last mention is kept in: Story Director's clock at that reply when hosted (v2, the source the dossier's dates use), else the
+// message's story day above. A separate reader, so the stamps and prompts that use storyDayAt keep their day scheme. A reply's own day: a
+// Re-read, swipe or replay gives the value live gave.
+export function tieDayAt(messageId) {
+    const chat = activeChat(readContext().chat || []);
+    const at = Number.isInteger(messageId) ? Math.min(messageId, chat.length - 1) : chat.length - 1;
+    const hosted = storyClockDayAt(at);
+    return hosted !== null ? hosted : storyDayAt(messageId);
 }
 
 export function storyDaysForTranscript(transcript) {

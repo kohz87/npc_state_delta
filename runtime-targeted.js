@@ -4,7 +4,7 @@
 
 import { chatContext as getContext } from './runtime-scan-helpers.js';
 import { REFRESH_CHANGED_FIELDS } from './src/fields/registry.js';
-import { storyDayAt, currentExclusions, refreshMessageGate, activeChat } from './src/transcript.js';
+import { storyDayAt, tieDayAt, currentExclusions, refreshMessageGate, activeChat } from './src/transcript.js';
 import { BACKFILL_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { buildDossierImportPrompt, mergeScanResult, protectTerminalNpc } from './core.js';
 import { chatLineage } from './branch.js';
@@ -133,6 +133,7 @@ export function createTargetedPart(rt, deps) {
                 scenePresent: scenePresentAt(targetMessageId),
                 calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
                 storyDay: storyDayAt(targetMessageId),
+                tieDay: tieDayAt(targetMessageId),
                 customFieldNames: effectiveCustomFieldNames(settings),
                 relationshipBaseline: settings.relationshipBaseline,
                 relationshipCaps: settings.relationshipCaps,

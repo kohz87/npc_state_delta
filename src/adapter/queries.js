@@ -344,8 +344,19 @@ export function createQueriesPart(session, deps) {
         } catch { return ''; }
     }
 
+    // The same clock as a whole story day after reply `index` (minutes / 1440; same asOf rules as storyDateText), null without a clock.
+    function storyDayNumber(index) {
+        if (!Number.isInteger(index) || index < 0) return null;
+        try { if (calendarOwn?.() === true) return null; } catch { return null; }
+        try {
+            const time = session.sdkRef?.query?.('director.time', { asOf: index });
+            const minutes = Number.isInteger(time) ? time : time?.minutes;
+            return Number.isSafeInteger(minutes) && minutes >= 0 ? Math.floor(minutes / 1440) : null;
+        } catch { return null; }
+    }
+
     return {
-        warn, storyDateText, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
+        warn, storyDateText, storyDayNumber, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
         entryFor, queries, ...director, send, sliceView,
     };
 }

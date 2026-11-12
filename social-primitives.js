@@ -128,6 +128,10 @@ function richer(a, b, max = SOCIAL_DYNAMIC_MAX_CHARS) {
     return cleanDynamic(right.length >= left.length ? `${right}; ${left}` : `${left}; ${right}`, max);
 }
 
+// How many ties a projected list keeps: 5 as ever, 8 for a person who records ties' last mentions (an object `tieSeen`, core-keyrel.js), so the
+// full-list rule of the merge (the new tie replaces the weakest) can act. The stored list comes first (it scores highest), so a mirrored edge never cuts it.
+export const projectedTieLimit = owner => (owner?.tieSeen && typeof owner.tieSeen === 'object' && !Array.isArray(owner.tieSeen) ? 8 : 5);
+
 export {
     clean, normalizedWhitespace, cleanBoundary, norm, uniq, slug, confidenceRank,
     SOCIAL_SEMANTIC_STOPWORDS, semanticWords, semanticOverlap, nearDuplicateText,
