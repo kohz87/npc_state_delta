@@ -16,6 +16,9 @@ import { stage1Refresh } from './dossier-tools-core.js';
 
 export function createHostedPart(rt, deps) {
     const { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex } = deps;
+    // Meetings the host did not keep, `${chatKey}|${npcId}`: sent again with that person's next scan (forwardRelationshipChangesToHost).
+    const meetOwed = new Set();
+    const meetTried = new Set();   // the entry-missing repeat is tried once a session: a host that never makes the entry is not asked at every scan
     setRpgProbe(() => (storyBlockV2Hosted() && rt.storySuiteV2?.hosted?.() ? rt.storySuiteV2.rpgOn?.() === true : false));
 
     // Set by src/storysuite-v2.js while Delta is registered with a Story Block v2 host.
@@ -291,7 +294,13 @@ export function createHostedPart(rt, deps) {
         // an adjust below has made it first when the scan moved its meters, and the meeting then only adds the mood and drives. Not the dead
         // and not incidental extras: the slice holds 80 people, and a long chat must not fill it with people who never matter.
         const worth = npc => !['dead', 'deceased'].includes(String(npc.lifeState ?? '').toLowerCase()) && npc.dossierSignal !== 'incidental';
-        const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && !prior.has(npc.id) && worth(npc)) : [];
+        // A meeting the host refused ("waiting: a native change is finishing", run 3: Pell, Harek, Theobald) is owed and sent again with the next
+        // scan of that person; so is a person this scan touched whose slice entry is still missing (a meeting lost with the page). Only a person a
+        // scan returns: dossiers no scan touches are left as they are.
+        const entries = typeof adapter.meterEntries === 'function' ? adapter.meterEntries() : null;
+        const hasEntry = npc => !Array.isArray(entries) || Boolean(adapter.meters?.(npc.name));
+        const owed = npc => meetOwed.has(`${getChatKey()}|${npc.id}`) || (prior.get(npc.id)?.updatedAt !== npc.updatedAt && !hasEntry(npc) && !meetTried.has(`${getChatKey()}|${npc.id}`));
+        const met = typeof adapter.meet === 'function' ? (after || []).filter(npc => npc?.id && !npc.archived && worth(npc) && (!prior.has(npc.id) || owed(npc))) : [];
         if (!changes.length && !looks.length && !refused.length && !met.length) return;
         void (async () => {
             // The slice entry comes first (adjust, else meet): a look flag never makes one, so a new person's look lock needs it.
@@ -302,7 +311,12 @@ export function createHostedPart(rt, deps) {
             }
             for (const npc of met) {
                 if (!chatHeadUnchanged(head)) return dropped();
-                await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId });
+                const out = await adapter.meet({ name: npc.name, personality: npc.personality, about: npc.background, reply: messageId });
+                const key = `${getChatKey()}|${npc.id}`;
+                meetTried.add(key);
+                // Kept when the host took it or says there is nothing to add (REFUSED); anything else is owed again.
+                if (!out || (out.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND')) meetOwed.add(key);
+                else meetOwed.delete(key);
                 stage1Refresh();
             }
             for (const npc of looks) {
