@@ -11,7 +11,7 @@ import { BEHAVIOR_PROFILE_LIMIT, normalizeBehaviorProfile } from './core-behavio
 import { PORTRAIT_NPC_PROMPT_LIMIT } from './core-portrait.js';
 import { emptyProfileEvidence, normalizeProfileEvidence } from './core-evidence.js';
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
-import { CAST_APPEARANCE_WIDE, castAppearanceKept, normalizeAppearanceCanon, normalizeLifeStateCertainty, normalizePortraitSeed, normalizeStoredMemories, stripRecordCitations } from './core-record-shared.js';
+import { CAST_APPEARANCE_WIDE, castAppearanceKept, normalizeAppearanceCanon, normalizeLifeStateCertainty, normalizeMemoryStamps, normalizePortraitSeed, normalizeStoredMemories, stripRecordCitations } from './core-record-shared.js';
 import { portraitHasImage } from './src/portrait-file.js';
 import { impactDayProblems } from './src/relationship-pacing.js';
 import { normalizeCustomFields } from './core-record-custom-fields.js';
@@ -111,6 +111,9 @@ export function normalizeNpcRecord(rawInput = {}) {
         : [];
     if (manualMemories.length) npc.manualMemories = [...new Set(manualMemories)];
     else delete npc.manualMemories;
+    const memoryStamps = normalizeMemoryStamps(raw.memoryStamps, npc.memories);
+    if (memoryStamps) npc.memoryStamps = memoryStamps;
+    else delete npc.memoryStamps;
     // A pack's levers and mannerisms are lists: whole while the stored list still is the pack's list (the cast builds them to pass the
     // normalizers unchanged; this keeps them if a normalizer ever changes).
     const packList = (field, max, chars) => {

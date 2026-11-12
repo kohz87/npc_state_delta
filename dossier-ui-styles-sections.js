@@ -149,13 +149,13 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-sheet-meter { grid-template-columns:clamp(62px,7cqw,92px) minmax(0,1fr) 38px; font-size:var(--dt-body); }
 #${ROOT_ID} .delta-sheet-meter > span { color:var(--delta-text); }
 #${ROOT_ID} .delta-secret-bar { height:12px; border-radius:3px; background:#0b0a0c; background-image:none; }
-/* Ties (mockup v22): type heading, name, description stacked; every entry has its own divider; Older ties fold last */
-#${ROOT_ID} .delta-bond { display:grid; grid-template-columns:minmax(0,1fr); gap:3px; padding:10px 0; border-top:1px solid var(--delta-line); }
-#${ROOT_ID} .delta-bond:first-child { border-top:1px solid var(--delta-line); padding-top:10px; }
+/* Ties (mockup v22): type heading, name, description stacked; every entry has its own divider; Older ties fold last. Sizes follow the container (cqw). */
+#${ROOT_ID} .delta-bond { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:clamp(4px,.6cqw,8px); padding:clamp(12px,1.6cqw,18px) 0; border-top:1px solid var(--delta-line); }
+#${ROOT_ID} .delta-bond:first-child { border-top:1px solid var(--delta-line); }
 #${ROOT_ID} .delta-bond[data-tone="rose"] { --c:var(--des, var(--delta-warn)); }
-#${ROOT_ID} .delta-bond-word { display:block; grid-column:1; grid-row:1; padding:0; border:0; border-radius:0; text-align:left; font-size:var(--dt-kick); letter-spacing:.06em; text-transform:uppercase; }
-#${ROOT_ID} .delta-bond > b { grid-column:1; grid-row:2; font-size:clamp(14px,.5cqw + 12px,17px); }
-#${ROOT_ID} .delta-bond > p { grid-column:1; grid-row:3; color:var(--delta-text); }
+#${ROOT_ID} .delta-bond-word { display:block; grid-column:1; grid-row:1; padding:0; border:0; border-radius:0; text-align:left; font-size:var(--dt-kick); letter-spacing:.06em; line-height:1.35; text-transform:uppercase; overflow-wrap:anywhere; }
+#${ROOT_ID} .delta-bond > b { grid-column:1; grid-row:2; font-size:clamp(14px,.5cqw + 12px,17px); line-height:1.3; }
+#${ROOT_ID} .delta-bond > p { grid-column:1; grid-row:3; color:var(--delta-text); line-height:1.5; }
 #${ROOT_ID} .delta-bond-why { font-weight:400; color:var(--delta-muted); font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-older-ties { margin-top:8px; border-top:1px solid var(--delta-line); }
 #${ROOT_ID} .delta-older-ties > summary { cursor:pointer; padding:10px 0; font-size:var(--dt-kick); letter-spacing:.06em; text-transform:uppercase; color:var(--delta-muted); }
@@ -207,6 +207,9 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-timeline { position:relative; }
 #${ROOT_ID} .delta-timeline li, #${ROOT_ID} .delta-timeline li:first-child { position:relative; padding:0 0 4px 22px; border-top:0; }
 #${ROOT_ID} .delta-timeline li > i { position:absolute; left:0; top:.45em; }
+/* a dated memory: the story date and reply as a small label on its dot, the memory under it (an older memory has no label) */
+#${ROOT_ID} .delta-timeline li, #${ROOT_ID} .delta-timeline li:first-child { display:grid; gap:clamp(2px,.4cqw,5px); padding-bottom:clamp(8px,1.1cqw,14px); }
+#${ROOT_ID} .delta-timeline li > .delta-mem-when { font-size:var(--dt-kick); letter-spacing:.06em; color:var(--delta-muted); line-height:1.3; }
 #${ROOT_ID} .delta-timeline::before { content:""; position:absolute; left:4px; top:8px; bottom:8px; width:1px; background:var(--delta-line); }
 #${ROOT_ID} .delta-tastes { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
 #${ROOT_ID} .delta-tastes li { display:grid; grid-template-columns:22px minmax(0,1fr); column-gap:6px; }

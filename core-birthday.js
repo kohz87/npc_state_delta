@@ -3,7 +3,8 @@
    reference and NPC projection the prompt builders use. A pure part of core.js (same owner, moved without change); core.js
    re-exports every name it exported before. Never imports core.js. */
 import { effectiveChronologicalAge, normalizeBirthDate, normalizeNpcBirthday, reanchorDerivedBirthYearFromAge } from './birthday.js';
-import { currentCalendarDate, extractStructuredWorldDate, getActiveCalendarConfig, hostedStoryDate, migrateLegacyStoryDay, normalizeCalendarDate, STORY_DAY_SCHEME } from './calendar.js';
+import { currentCalendarDate, extractStructuredWorldDate, getActiveCalendarConfig, hostedStoryDate, migrateLegacyStoryDay, normalizeCalendarDate, STORY_DAY_SCHEME, storyDateTextAt } from './calendar.js';
+import { stampMemories } from './core-record-shared.js';
 import * as mechanics from './core-mechanics.js';
 import { CHANGE_TRACKED_FIELDS, DAY_TRACKED_FIELDS } from './src/fields/registry.js';
 import { resolveNpcAppearance } from './appearance.js';
@@ -255,8 +256,11 @@ export function stampFieldChanges(before, after, turn, storyDay = null, message 
     const changes = normalizeFieldChanges(after?.fieldChanges ?? before?.fieldChanges);
     const days = normalizeFieldChangeDays(after?.fieldChangeDays ?? before?.fieldChangeDays);
     const messages = normalizeFieldChangeMessages(after?.fieldChangeMessages ?? before?.fieldChangeMessages);
+    const memoryStamps = stampMemories(before, after, message, storyDateTextAt);
     const withExtras = next => {
         const out = Object.keys(days).length ? { ...next, fieldChangeDays: days } : next;
+        if (memoryStamps) out.memoryStamps = memoryStamps;
+        else delete out.memoryStamps;
         if (Object.keys(messages).length) out.fieldChangeMessages = messages;
         else delete out.fieldChangeMessages;
         return out;
