@@ -83,10 +83,10 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-past li:first-child { border-top:0; padding-top:0; }
 
 /* profile: portrait beside the sheet on desktop; the portrait fills the top on phone */
-#${ROOT_ID} .delta-profile { display:grid; gap:14px; min-height:0; padding:12px 14px 16px; align-items:start; }
+#${ROOT_ID} .delta-profile { --pk:clamp(62px,7.5cqw,92px); display:grid; gap:14px; min-height:0; padding:12px 14px 16px; align-items:start; }
 #${ROOT_ID} .delta-profile-portrait { position:relative; overflow:hidden; aspect-ratio:4 / 5; max-height:72dvh; border-radius:14px; background:var(--delta-surface); }
 #${ROOT_ID} .delta-profile-image { display:block; width:100%; height:100%; object-fit:cover; object-position:50% 10%; }
-#${ROOT_ID} .delta-profile-back { position:absolute; top:10px; left:10px; min-height:34px; padding:4px 10px; border:1px solid var(--delta-line); border-radius:999px; background:color-mix(in srgb, var(--delta-floor) 80%, transparent); color:var(--delta-text); font-size:var(--dt-pill); font-weight:700; cursor:pointer; }
+#${ROOT_ID} .delta-profile-back { position:absolute; z-index:2; top:10px; left:10px; min-height:40px; padding:4px 14px; border:1px solid var(--delta-line); border-radius:999px; background:color-mix(in srgb, var(--delta-floor) 80%, transparent); color:var(--delta-text); font-size:var(--dt-pill); font-weight:700; cursor:pointer; }
 #${ROOT_ID} .delta-profile-caption { position:absolute; left:0; right:0; bottom:0; display:grid; gap:2px; padding:24px 12px 10px; background:linear-gradient(transparent, rgba(0,0,0,.6)); color:#fff; }
 #${ROOT_ID} .delta-profile-caption b { font-size:clamp(16px,.6cqw + 12px,20px); }
 #${ROOT_ID} .delta-profile-caption span { font-size:var(--dt-meta); opacity:.85; }
@@ -94,7 +94,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-profile-head h2 { margin:0; font-size:clamp(17px,.8cqw + 11px,22px); color:var(--delta-accent-soft); }
 #${ROOT_ID} .delta-profile-line { margin:2px 0 0; font-size:var(--dt-meta); color:var(--delta-muted); }
 #${ROOT_ID} .delta-profile-cols { display:grid; gap:12px 22px; min-width:0; align-items:start; }
-#${ROOT_ID} .delta-profile-kv { grid-template-columns:clamp(56px,6cqw,82px) minmax(0,1fr); }
+#${ROOT_ID} .delta-profile-kv { grid-template-columns:var(--pk) minmax(0,1fr); }
 #${ROOT_ID} .delta-profile-forms { margin-top:6px; font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-profile-forms > summary { cursor:pointer; color:var(--delta-muted); }
 #${ROOT_ID} .delta-profile-col { display:grid; gap:12px; min-width:0; align-content:start; }
@@ -184,7 +184,7 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-profile-block { border-top:0; padding-top:0; }
 #${ROOT_ID} .delta-profile-block h3 { font-size:var(--dt-kick); letter-spacing:.12em; color:var(--trust, var(--delta-accent-soft)); }
 #${ROOT_ID} .delta-profile .delta-current-grid { grid-template-columns:minmax(0,1fr); gap:5px; }
-#${ROOT_ID} .delta-profile .delta-current-card { display:grid; grid-template-columns:82px minmax(0,1fr); gap:12px; padding:0; border:0; background:none; }
+#${ROOT_ID} .delta-profile .delta-current-card { display:grid; grid-template-columns:var(--pk) minmax(0,1fr); gap:5px 12px; padding:0; border:0; background:none; }
 #${ROOT_ID} .delta-profile .delta-current-card b { margin:0; font-size:var(--dt-meta); font-weight:400; letter-spacing:0; text-transform:none; }
 #${ROOT_ID} .delta-profile-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px; }
 #${ROOT_ID} .delta-profile-head .delta-profile-title { margin:0; padding:0; border:0; text-align:inherit; text-transform:none; letter-spacing:0; font-size:clamp(22px,2.4cqw + 14px,32px); line-height:1.05; }
@@ -212,4 +212,27 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-drive b { display:block; height:100%; background:var(--trust, var(--delta-accent)); }
 #${ROOT_ID} .delta-rel-gate { margin:0; color:var(--delta-danger); font-size:var(--dt-meta); }
 #${ROOT_ID} .delta-profile .delta-continuity-source { display:block; margin-top:2px; font-size:var(--dt-kick); color:var(--delta-muted); }
+
+/* profile alignment: one label column (--pk) for every block, headings flush with their rows (no host indent), dt and dd on one baseline */
+#${ROOT_ID} .delta-profile-block h3 { margin:0; padding:0; text-indent:0; text-align:left; }
+#${ROOT_ID} .delta-profile-block > :is(p, dl, ul, div) { margin:0; padding:0; text-indent:0; text-align:left; }
+#${ROOT_ID} .delta-profile .delta-kv { gap:5px 12px; align-items:baseline; }
+#${ROOT_ID} .delta-profile .delta-kv dt, #${ROOT_ID} .delta-profile .delta-current-card b { min-width:0; margin:0; padding:0; overflow-wrap:anywhere; line-height:1.45; }
+#${ROOT_ID} .delta-profile .delta-kv dd, #${ROOT_ID} .delta-profile .delta-current-card span { margin:0; padding:0; line-height:1.45; }
+#${ROOT_ID} .delta-profile .delta-current-card { align-items:baseline; }
+
+/* no portrait: the initials fill the pane as the picture would, in the suite font, centred; the Back pill floats over the corner, never over them */
+#${ROOT_ID} .delta-profile-image.delta-portrait-placeholder { display:grid; place-items:center; width:100%; height:100%; min-height:0; overflow:hidden; background:radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--delta-accent) 20%, transparent), color-mix(in srgb, var(--delta-floor) 70%, #000)); color:var(--delta-muted); font-family:var(--ss-font, system-ui, -apple-system, "Segoe UI", sans-serif); font-weight:700; font-size:clamp(64px,min(22cqw, 24dvh),180px); line-height:1; letter-spacing:.04em; padding:56px 8px 72px; }
+#${ROOT_ID} .delta-profile-image.delta-portrait-placeholder > span { display:block; max-width:100%; text-align:center; }
+@container dsr (max-width: ${TWO_PANE_MIN - 0.02}px) { #${ROOT_ID} .delta-profile-image.delta-portrait-placeholder { font-size:clamp(64px,min(34cqw, 24dvh),180px); } }
+
+/* the four meters under the name: whole items that wrap, the dot after each but the last */
+#${ROOT_ID} .delta-profile-meters { display:flex; flex-wrap:wrap; gap:0 .5em; }
+#${ROOT_ID} .delta-profile-meters > i { font-style:normal; white-space:nowrap; }
+#${ROOT_ID} .delta-profile-meters > i:not(:last-child)::after { content:" ·"; }
+
+/* ‹ Dossier: the way back from a section (and the profile) to the board, always visible */
+#${ROOT_ID} .delta-section-back { justify-self:start; display:inline-flex; align-items:center; min-height:40px; margin:10px 12px 0; padding:4px 14px; border:1px solid var(--delta-line); border-radius:999px; background:transparent; color:var(--delta-text); font-size:var(--dt-pill); font-weight:700; cursor:pointer; }
+#${ROOT_ID} .delta-section-back:hover { background:color-mix(in srgb, var(--delta-accent) 12%, transparent); }
+#${ROOT_ID} .delta-section-head { margin-top:2px; }
 `;

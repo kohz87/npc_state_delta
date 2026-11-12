@@ -21,7 +21,7 @@ import { createPortraitRefs } from '../dossier-ui-html.js';
 import { dialArcs, dialSvg } from '../dossier-ui-dial.js';
 import { dossierMenuHtml } from '../dossier-ui-header.js';
 import { v2MetersProjection } from '../dossier-ui-meters.js';
-import { dossierProfileHtml } from '../dossier-ui-profile.js';
+import { dossierProfileHtml, profileMeterItems } from '../dossier-ui-profile.js';
 import { SECTION_KEYS, createScreenState, escapeAction, goBack, layoutFor, openNpc, openSection, parseScreen, screenSignature, setSection, showScreen, stepSection, swipeStep } from '../dossier-ui-screens.js';
 import { sectionHeaderHtml, sectionScreenHtml } from '../dossier-ui-sections.js';
 import { boardModel, bondTone, libraryTone } from '../dossier-ui-view-model.js';
@@ -230,6 +230,7 @@ test('sections: five screens with arrows and dots; hidden secrets never show the
   assert.doesNotMatch(sectionHeaderHtml('secrets', {}), /data-delta-section-step="1"[^>]*aria-label="Next section"><|data-delta-section-step="1"[^>]*>(?!›)/);
   assert.match(sectionHeaderHtml('secrets', {}), /data-delta-section-step="1"[^>]*disabled/, 'no next after the last');
   assert.match(sectionHeaderHtml('with', { userName: 'Astra' }), /With Astra/);
+  assert.match(head, /class="delta-section-back" data-delta-screen="board"[^>]*>‹ Dossier<\/button>/, 'every section has a visible way back to the board');
   const now = sectionScreenHtml('now', rika, {});
   assert.match(now, /mending a net/);
   const ties = sectionScreenHtml('ties', rika, {});
@@ -252,13 +253,20 @@ test('sections: five screens with arrows and dots; hidden secrets never show the
 test('the profile: portrait first, identity and appearance, phone and desktop layouts, stale-portrait note', () => {
   const phone = dossierProfileHtml({ ...dossierDetailProjection({ id: 'rika', name: 'Rika', age: '19', homeBase: 'Bluewatch' }), portraitAppearanceChanged: true }, { layout: 'phone' });
   assert.match(phone, /delta-profile-phone/);
-  assert.match(phone, /data-delta-screen="board"[^>]*>‹ Board/);
+  assert.match(phone, /data-delta-screen="board"[^>]*>‹ Dossier</);
   assert.match(phone, /Appearance changed since portrait/);
   const desktop = dossierProfileHtml(rika, { layout: 'desktop' });
   assert.match(desktop, /delta-profile-desktop/);
-  assert.match(desktop, /T \+11 · A \+10 · D \+6 · Te \+13/);
+  assert.match(desktop, /<i>Trust \+11<\/i><i>Affection \+10<\/i><i>Desire \+6<\/i><i>Tension \+13<\/i>/);
+  assert.deepEqual(profileMeterItems({ relationship: { trust: 0, affection: 0, desire: 0, tension: 0 } }), ['Trust 0', 'Affection 0', 'Desire 0', 'Tension 0']);
+  assert.doesNotMatch(desktop, /(?:>|\s)Te \+|\bT \+11/);
+  assert.match(desktop, /‹ Dossier<\/button>/);
   assert.match(desktop, /delta-profile-cols/);
   assert.doesNotMatch(dossierProfileHtml({ name: '<i>x' }, {}), /<i>x/);
+  assert.match(dossierProfileHtml({ name: 'Ada Vale' }, { layout: 'desktop' }), /delta-portrait-placeholder[^>]*><span>AV<\/span>/, 'no portrait: two initials');
+  const marked = dossierProfileHtml({ name: 'Ada', personality: 'Calm.', fieldChanges: { latest: ['personality'], latestTurn: 0, message: 0 } }, {});
+  assert.match(marked, /<h3>Character <em class="delta-changed-mark[^>]*>• #0<\/em><\/h3>/, 'the personality change mark sits in the Character heading, not on a line of its own');
+  assert.doesNotMatch(marked, /<p class="delta-muted"> ?<em/, 'no stray marker line under Character');
 });
 
 test('screens: back, section arrows, Esc order, swipe, layout and the signature a refresh keeps', () => {
