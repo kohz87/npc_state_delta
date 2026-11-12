@@ -220,3 +220,8 @@ test('a Refresh\'s tastes merge without citations', () => {
     assert.deepEqual(readTastes(text).map(({ item, from }) => ({ item, from })), [{ item: 'tea', from: 'every morning' }, { item: 'loud music', from: undefined }]);
     assert.doesNotMatch(text, /\[m\d/);
 });
+
+test('a citation-only why: counts as a reason exactly as before (a sign change is allowed)', () => {
+    const list = addTaste([], { sign: '+', item: 'tea', day: 1, r: 'r1' }).tastes;
+    assert.equal(addTaste(list, { sign: '-', item: 'tea', why: '[m3]', day: 2, r: 'r2' }).status, 'changed');
+});
