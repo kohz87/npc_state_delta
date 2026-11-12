@@ -117,6 +117,15 @@ export function latestReplyIndex() {
     return -1;
 }
 
+// Whether the message a chatHeadMark was taken at is still there: the same object at the same place with the same swipe (a reply taken back by a
+// swipe, a delete or another chat is not). The reply a held host command was meant for (src/adapter/queries.js), unlike chatHeadUnchanged it stays
+// true when later replies come.
+export function markStands(mark) {
+    const chat = chatContext().chat || [];
+    const message = mark ? chat[(mark.length ?? 0) - 1] ?? null : null;
+    return Boolean(mark) && message === mark.message && (Number.isInteger(message?.swipe_id) ? message.swipe_id : null) === mark.swipe;
+}
+
 export function latestMessageId(preferAssistant = false) {
     const chat = chatContext().chat || [];
     if (preferAssistant) {

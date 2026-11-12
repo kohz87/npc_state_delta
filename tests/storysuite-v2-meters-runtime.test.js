@@ -213,7 +213,7 @@ test('hosted: a scan that finishes after a swipe sends no npc.adjust onto the ne
 
 // (live run 3) Pell, Harek and Theobald were admitted while the host said "A native change is finishing": their npc.meet was not kept and was never
 // sent again, so two of them had no slice entry for the rest of the chat. The refused meeting is owed and goes out with the person's next scan.
-test('hosted: a meeting the host did not keep is sent again with the next scan of that person', () => {
+test('hosted: a meeting the host did not keep (a native change finishing) is held and sent again once, in order', () => {
     const output = runHostScenario('meters-meet-owed', async () => {
         const sdk = {
             registered: [], sent: [], meets: 0,
@@ -237,15 +237,77 @@ test('hosted: a meeting the host did not keep is sent again with the next scan o
         await sleep(300);
         mockState.quietResponder = async () => JSON.stringify({ npcs: [{ ...harek, mood: 'Bored and watchful', moodV: 1, moodA: -2, moodD: '2' }] });
         await turn('Harek shrugs and spits into the dust beside the wagon.');
-        await sleep(300);
+        await sleep(1500);   // the held retry (1 s) has gone out by now
         console.log('RESULT ' + JSON.stringify({ total: mockState.sdk.sent.filter(item => item.type === 'npc.meet' && item.payload.name === 'Harek').length, moods: mockState.sdk.sent.filter(item => item.type === 'npc.mood').map(item => item.payload), names: api.getState().npcs.map(npc => npc.name) }));
     });
     const result = scenarioOutput(output);
-    assert.equal(result.total, 2, 'the meeting the host did not keep was sent again with a later scan of Harek, and once kept never again');
+    assert.equal(result.total, 2, 'the meeting the host did not keep was held and sent again once it settled, and once kept never again');
     // each mood word the scan wrote for Harek goes to the slice as npc.mood (its numbers are read there from the fixed word list), once per change
     assert.deepEqual(result.moods.map(item => [item.name, item.word]), [['Harek', 'Cynical and indifferent'], ['Harek', 'Bored and watchful']]);
     // the three numbers the scan gave with a word travel with it (whole, -3..3); a scan that gave none sends none (the word list reads it)
     assert.deepEqual(result.moods.map(item => item.vad), [undefined, { v: 1, a: -2, d: 2 }]);
+});
+
+// (live run 4) 30 npc.mood and 20 npc.meet were refused "A native change is finishing" and dropped. A scan's command refused that way is kept in order (the
+// ones after it wait behind it, the host is not asked again out of order), sent again once the change settles, never twice, and never for a reply taken back.
+function heldScenario(name, takeBack) {
+    process.env.NSD_TAKE_BACK = takeBack ? '1' : '';   // the scenario runs in a child process that inherits it
+    return scenarioOutput(runHostScenario(name, async () => {
+        const sdk = {
+            registered: [], sent: [], kept: [], refusals: 0,
+            registerModule(def) { sdk.registered.push(def); },
+            command: async (type, payload) => {
+                sdk.sent.push({ type, payload });
+                if (['npc.meet', 'npc.mood'].includes(type) && (sdk.refusals += 1) <= 1) return { ok: false, code: 'RESTORE_PENDING', message: 'NPC State Delta is waiting: A native change is finishing; every part must agree before the story goes on.' };
+                sdk.kept.push(type + ':' + payload.name);
+                return { ok: true };
+            },
+            query: queryName => (queryName === 'npc.meters' ? [] : null),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    }, async () => {
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const brant = { name: 'Brant', present: true, role: 'quartermaster', identityKind: 'proper_name', dossierSignal: 'meaningful', dossierReason: 'named officer', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 }, relationshipEvidence: { trust: '', affection: '', desire: '', tension: '' }, mood: 'Curt and tired' };
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [brant] });
+        const id = await turn('Brant counts crates by the gate, curt and tired.');
+        await sleep(200);
+        const heldAfterScan = mockState.sdk.kept.length;
+        if (process.env.NSD_TAKE_BACK === '1') {
+            const message = mockState.context.chat[id];
+            message.swipes.push('Another reply entirely.');
+            message.swipe_id = 1;
+            message.mes = 'Another reply entirely.';
+        }
+        await sleep(1600);
+        console.log('RESULT ' + JSON.stringify({ heldAfterScan, kept: mockState.sdk.kept, sent: mockState.sdk.sent.map(item => item.type) }));
+    }));
+}
+test('hosted: a meeting and a mood refused while a native change finishes are held in order and sent once it settles', () => {
+    const result = heldScenario('meters-held-order', false);
+    assert.equal(result.heldAfterScan, 0, 'nothing was kept while the host was refusing');
+    assert.deepEqual(result.kept, ['npc.meet:Brant', 'npc.mood:Brant'], 'the meeting first, then the mood, each once');
+    assert.equal(result.sent.filter(type => type === 'npc.meet').length, 2, 'asked, refused, asked again: the meeting reached the host twice and was applied once');
+    assert.equal(result.sent.filter(type => type === 'npc.mood').length, 1, 'the mood waited behind the meeting and was asked once');
+});
+test('hosted: a held command is not applied when its reply was taken back (swiped) before the change settled', () => {
+    const result = heldScenario('meters-held-takenback', true);
+    assert.deepEqual(result.kept, [], 'neither the meeting nor the mood reached the slice for the reply that was taken back');
+    assert.equal(result.sent.filter(type => type === 'npc.meet').length, 1, 'only the refused first try');
+});
+
+// (live run 4) A scan cancelled because the saved state advanced under it (not by the reader, not by a chat change) is asked for again, once per reply.
+test('a scan cancelled by "server revision advanced" is queued again once; a reader\'s cancel or a chat change is not', () => {
+    const scan = fs.readFileSync(new URL('../runtime-scan.js', import.meta.url), 'utf8');
+    const ops = fs.readFileSync(new URL('../runtime-scan-ops.js', import.meta.url), 'utf8');
+    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    assert.match(index, /cancelScanOperation\(key, dirtyConflict \? 'cross-session conflict' : 'server revision advanced'\)/, 'the reason the scan is cancelled with');
+    assert.match(ops, /operation\.cancelReason|scanOperations\.cancel\(key, reason\)/, 'the registry keeps the reason');
+    const line = scan.split('\n').find(text => text.includes("queuePendingAutoScan(scanChatKey, messageId, 'stale-auto-scan')"));
+    assert.ok(line, 'the stale scan is queued again');
+    assert.match(line, /!operation\?\.cancelled \|\| \(operation\.cancelReason === 'server revision advanced' && !rerunOnce\.has\(/, 'only that cancel reason, and only once per chat and reply');
+    assert.doesNotMatch(line, /user cancelled|chat changed|cross-session/, 'no other cancel is re-run');
 });
 
 test('without a v2 host the same turns send nothing, and the sidecar and the injection are the same as hosted', () => {

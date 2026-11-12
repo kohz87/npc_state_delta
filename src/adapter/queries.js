@@ -18,7 +18,7 @@ export { dossierFields, safeImageUrl, portraitUrl } from './queries-dossier.js';
 
 export function createQueriesPart(session, deps) {
     const {
-        calendarOwn, delta, doc, headReply, host, logger, MODULE_ID, panelId, PRESET_KIND, suiteApi, timeline, WORLD_FEATURE,
+        calendarOwn, delta, doc, headReply, host, logger, MODULE_ID, panelId, PRESET_KIND, suiteApi, timeline, timers, WORLD_FEATURE,
     } = deps;
 
     // Delta's own commands on their way to the host, by type and payload: npc.adjust takes a reader's
@@ -285,23 +285,70 @@ export function createQueriesPart(session, deps) {
     // `own`: the command is one npc.adjust takes only from Delta itself (ownSends, while it runs).
     // `background`: a change Delta's own scan makes on its own (not the reader's action): Story Block saves it in its late window, one
     // write for a burst instead of one per command. A Story Block that does not know the option ignores it and saves as before.
-    async function send(type, payload, { own = false, background = false } = {}) {
-        if (!session.hosted || typeof session.sdkRef?.command !== 'function') return null;
+    // `guard`: () => whether the scan's reply is still the head (a swipe, a delete or another chat takes it back). A scan's command the host refused
+    // only because a native change is finishing (RESTORE_PENDING, live run 4: 30 moods and 20 meetings lost) is kept in `held`, in order, and sent
+    // again once the change settles; the caller is told ok (queued), so nothing sends it a second time. Bounded: HELD_MAX commands, HELD_RETRY_MS tries.
+    const HELD_RETRY_MS = [1000, 2000, 4000, 8000, 15000, 30000], HELD_MAX = 64;
+    const held = [];
+    let heldTimer = null, heldBusy = false;
+    const settling = out => out?.ok === false && out.code === 'RESTORE_PENDING';
+    const raw = (type, payload, background) => (background ? session.sdkRef.command(type, payload, { background: true }) : session.sdkRef.command(type, payload));
+    async function sendOnce(type, payload, background, own) {
         const key = own ? sendKey(type, payload) : null;
         if (key) ownSends.set(key, (ownSends.get(key) ?? 0) + 1);
         try {
-            const out = background ? await session.sdkRef.command(type, payload, { background: true }) : await session.sdkRef.command(type, payload);
-            if (out && out.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') warn(`Story Suite v2 ${type} was not kept: ${out.message ?? out.code}`);
-            return out ?? null;
-        } catch (error) {
-            warn(`Story Suite v2 ${type} failed`, error);
-            return null;
+            return await raw(type, payload, background);
         } finally {
             if (key) {
                 const left = (ownSends.get(key) ?? 1) - 1;
                 if (left > 0) ownSends.set(key, left);
                 else ownSends.delete(key);
             }
+        }
+    }
+    function drainHeld() {
+        heldTimer = null;
+        if (heldBusy || !held.length) return;
+        heldBusy = true;
+        void (async () => {
+            try {
+                while (held.length) {
+                    const item = held[0];
+                    let wanted = false;
+                    try { wanted = session.hosted && item.guard() !== false; } catch { wanted = false; }
+                    if (!wanted) { held.shift(); continue; }   // the reply was taken back (or the chat left): never applied
+                    let out = null;
+                    try { out = await sendOnce(item.type, item.payload, true, true); } catch (error) { warn(`Story Suite v2 ${item.type} failed`, error); }
+                    if (settling(out)) {
+                        item.tries += 1;
+                        if (item.tries >= HELD_RETRY_MS.length) { held.shift(); warn(`Story Suite v2 ${item.type} was not kept: the native change did not settle`); continue; }
+                        heldTimer = timers?.setTimeout?.(drainHeld, HELD_RETRY_MS[item.tries]) ?? null;
+                        return;   // later commands wait behind it (order)
+                    }
+                    held.shift();   // kept, or refused for another reason (not retried)
+                    if (out?.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') warn(`Story Suite v2 ${item.type} was not kept: ${out.message ?? out.code}`);
+                }
+            } finally { heldBusy = false; }
+        })();
+    }
+    function hold(type, payload, guard) {
+        if (held.length >= HELD_MAX) return false;
+        held.push({ type, payload, guard, tries: 0 });
+        if (!heldTimer && !heldBusy) heldTimer = timers?.setTimeout?.(drainHeld, HELD_RETRY_MS[0]) ?? null;
+        return true;
+    }
+    async function send(type, payload, { own = false, background = false, guard = null } = {}) {
+        if (!session.hosted || typeof session.sdkRef?.command !== 'function') return null;
+        const holdable = own && background && typeof guard === 'function';
+        if (holdable && held.length && hold(type, payload, guard)) return { ok: true, queued: true };   // behind the ones already waiting
+        try {
+            const out = await sendOnce(type, payload, background, own);
+            if (holdable && settling(out) && hold(type, payload, guard)) return { ok: true, queued: true };
+            if (out && out.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') warn(`Story Suite v2 ${type} was not kept: ${out.message ?? out.code}`);
+            return out ?? null;
+        } catch (error) {
+            warn(`Story Suite v2 ${type} failed`, error);
+            return null;
         }
     }
 
