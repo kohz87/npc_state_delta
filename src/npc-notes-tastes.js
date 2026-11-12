@@ -147,6 +147,25 @@ export function addTaste(current, { name = '', sign, item, from = '', why = '', 
     return outcome(tastes, status, wording.problem, wording.cue, entry);
 }
 
+/**
+ * A Refresh's tastes (rows { sign, item, from }) merged into the stored list like `~ taste` lines: same caps and dedupe, first mention
+ * wins. A taste already there (either sign) is kept as it is, and a sign whose list is full takes nothing more, so a narrator's or the
+ * player's taste is never changed or pushed out. → { text, added } (`added`: how many rows were new; `text` is the whole new leaf).
+ */
+export function mergeRefreshTastes(current, rows, { name = '', day = 0, r = null } = {}) {
+    let list = readTastes(current);
+    let added = 0;
+    for (const row of (Array.isArray(rows) ? rows : []).slice(0, TASTE_LIMITS.likes + TASTE_LIMITS.dislikes)) {
+        const sign = row?.sign === 'like' ? LIKE : (row?.sign === 'dislike' ? DISLIKE : row?.sign);
+        if (!isSign(sign) || list.filter(item => item.sign === sign).length >= limitOf(sign)) continue;
+        const out = addTaste(list, { name, sign, item: row.item, from: row.from, day, r });
+        if (out.status !== 'added') continue;
+        list = out.tastes;
+        added += 1;
+    }
+    return { text: tastesText(list), added };
+}
+
 /** The optional tail line for a present NPC: the newest like and the newest dislike, mirrored ones left out. '' when none. */
 export function tasteTail(name, tastes) {
     const list = readTastes(tastes).filter(row => !row.mirrored);

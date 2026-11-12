@@ -148,6 +148,8 @@ export const RETURN_KEYS = Object.freeze({
     status: { states: 'keep|clear' },
     agenda: { key: 'goal' },
     lifeState: { value: 'unknown|alive|deceased' }, lifeStateCertainty: { value: 'explicit|inferred|""' }, lifeStateReason: {},
+    // Refresh's optional tastes (asked only while hosted with the notes feature on): the stored taste shape (src/npc-notes-tastes.js).
+    tastes: { value: '[{sign:+ likes, values or collects|- dislikes,item,from:short source from the scenes}]' },
     memories: { value: '[]' }, memoryRetention: { value: '[]' },
     present: { value: 'true|false' }, worldActive: { value: 'true|false' },
     // Refresh's profile channel, with the Stage 4 form keys.
