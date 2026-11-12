@@ -272,6 +272,24 @@ test('the profile: portrait first, identity and appearance, phone and desktop la
   assert.doesNotMatch(marked, /<p class="delta-muted"> ?<em/, 'no stray marker line under Character');
 });
 
+test('profile polish: empty sections keep a heading and a muted line; one Age field; section caption meters in colour', () => {
+  const bare = dossierProfileHtml({ name: 'Ada' }, { layout: 'phone' });
+  for (const title of ['Appearance', 'Character', 'Tastes', 'Drives', 'Background']) assert.match(bare, new RegExp(`<h3>${title}</h3>`), `${title} keeps its heading`);
+  assert.match(bare, /No tastes yet: they appear when the story shows a like or dislike/);
+  assert.match(bare, /All normal so far/);
+  assert.equal(bare.match(/Nothing known yet/g).length, 3, 'Appearance, Character and Background');
+  assert.doesNotMatch(bare, /Looks/);
+  const aged = dossierProfileHtml({ name: 'Ada', age: '19', apparentAge: '~25' }, {});
+  assert.match(aged, /<b>Age<\/b><span>19</);
+  const apparent = dossierProfileHtml({ name: 'Ada', apparentAge: '~25' }, {});
+  assert.match(apparent, /<b>Age<\/b><span>~25</);
+  assert.match(dossierProfileHtml({ name: 'Ada', apparentAge: '25' }, {}), /Age ~25/, 'a bare apparent age gets the tilde');
+  assert.doesNotMatch(apparent, /Looks/);
+  const caption = boardHtml({ ...rika, role: 'F-rank mage' }, {});
+  assert.match(caption, /delta-board-role[^>]*>F-rank mage</);
+  assert.match(caption, /<i data-axis="trust">Trust \+11<\/i><i data-axis="affection">Affection \+10<\/i><i data-axis="desire">Desire \+6<\/i><i data-axis="tension">Tension \+13<\/i>/);
+});
+
 test('screens: back, section arrows, Esc order, swipe, layout and the signature a refresh keeps', () => {
   let state = createScreenState();
   assert.equal(escapeAction(state), 'close', 'the library closes the panel');
@@ -465,7 +483,7 @@ test('phase 2 UI: mood bars, pull ring, gate wording, tags, redacted lies and se
   const none = boardTiles(boardModel(bare), { userName: 'Astra' });
   assert.equal(none.find(tile => tile.title === 'Pull'), undefined, 'no pull tile without data');
   assert.doesNotMatch(sectionScreenHtml('ties', bare), /Lies told|Knows about/);
-  assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /Tastes|Drives|look was set/);
+  assert.doesNotMatch(dossierProfileHtml({ ...dossierDetailProjection({ id: 'r', name: 'Rika' }, {}, {}), v2Meters: bare.v2Meters }, { layout: 'phone' }), /look was set/);
 });
 
 // The dossier's stylesheets as the page gets them (the template numbers filled in), plus the source for the pins that read it.

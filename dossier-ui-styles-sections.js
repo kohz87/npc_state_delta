@@ -183,7 +183,10 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-chg-via { font-size:var(--dt-meta); color:var(--delta-muted); }
 
 /* profile as the mockup draws it: flat label/value rows, small coloured headings */
-#${ROOT_ID} .delta-profile-block { border-top:0; padding-top:0; }
+/* a thin divider between the sections (v12): none above the first row (one column: the first block; two columns: the first two) */
+#${ROOT_ID} .delta-profile-block { border-top:1px solid var(--delta-line); padding-top:12px; }
+#${ROOT_ID} .delta-profile-block:first-child { border-top:0; padding-top:0; }
+#${ROOT_ID} .delta-profile-empty { color:var(--delta-muted); font-size:var(--dt-meta); line-height:1.45; }
 #${ROOT_ID} .delta-profile-block h3 { font-size:var(--dt-kick); letter-spacing:.12em; color:var(--trust, var(--delta-accent-soft)); }
 #${ROOT_ID} .delta-profile .delta-current-grid { grid-template-columns:minmax(0,1fr); gap:5px; }
 #${ROOT_ID} .delta-profile .delta-current-card { display:grid; grid-template-columns:var(--pk) minmax(0,1fr); gap:5px 12px; padding:0; border:0; background:none; }
@@ -242,4 +245,17 @@ export const SECTIONS_STYLES = `
 #${ROOT_ID} .delta-section-back:hover { background:color-mix(in srgb, var(--delta-accent) 12%, transparent); }
 #${ROOT_ID} .delta-section-head { margin-top:2px; }
 @container dsr (min-width: ${THREE_PANE_MIN}px) { #${ROOT_ID} .delta-section-back { display:none; } }
+
+@container dsr (min-width: ${TWO_PANE_MIN}px) { #${ROOT_ID} .delta-profile-cols > .delta-profile-block:nth-child(2) { border-top:0; padding-top:0; } }
+/* desktop section views: the left column's name block shows the role on its own line, then the meters (each value in its colour) */
+#${ROOT_ID} .delta-board-role, #${ROOT_ID} .delta-board-meters { display:none; }
+#${ROOT_ID} .delta-board-meters > i { font-style:normal; white-space:nowrap; }
+#${ROOT_ID} .delta-board-meters > i:not(:last-child)::after { content:" ·"; color:var(--delta-muted); }
+#${ROOT_ID} .delta-board-meters > i[data-axis="trust"] { color:var(--trust); }
+#${ROOT_ID} .delta-board-meters > i[data-axis="affection"] { color:var(--aff); }
+#${ROOT_ID} .delta-board-meters > i[data-axis="desire"] { color:var(--des); }
+#${ROOT_ID} .delta-board-meters > i[data-axis="tension"] { color:var(--dsk-ten); }
+#${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="section"] .delta-board-ident { display:none; }
+#${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="section"] .delta-board-role { display:block; }
+#${ROOT_ID} .delta-panes[data-layout="desktop"][data-screen="section"] .delta-board-meters { display:flex; flex-wrap:wrap; justify-content:center; gap:0 .5em; }
 `;

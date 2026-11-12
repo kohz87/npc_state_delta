@@ -2,6 +2,7 @@
 import { escapeHtml } from './src/util/html.js';
 import { initialsOf, portraitHtml } from './dossier-ui-html.js';
 import { dialHtml } from './dossier-ui-dial.js';
+import { profileMeterAxes } from './dossier-ui-profile.js';
 import { boardModel, gateWords, possessiveWord } from './dossier-ui-view-model.js';
 
 // Tone keys → the --delta-* tokens the skins define. Anything else gets no tone, so a model value can never inject CSS.
@@ -113,6 +114,15 @@ function tieFacesHtml(faces = [], { peers = null, refs = null } = {}) {
     return `<span class="delta-tile-faces">${faces.map(face => `<span class="delta-tile-face-ring" style="--r:${ring[face.tone] || 'var(--dial)'}" title="${esc(face.name)}">${peers?.get(String(face.name).toLowerCase()) ? portraitHtml({ name: face.name, portrait: peers.get(String(face.name).toLowerCase()) }, 'delta-tile-face', { alt: false, refs }) : `<span class="delta-tile-face delta-tile-initials">${esc(initialsOf(face.name))}</span>`}</span>`).join('')}</span>`;
 }
 
+// Desktop section views only (CSS shows it; the board and the phone keep the identity line): the role on its own line, then the four
+// meters on a new line, each value in its meter's colour.
+function sectionCaptionHtml(role, npc) {
+    const meters = profileMeterAxes(npc).map(item => `<i data-axis="${item.axis}">${esc(item.text)}</i>`).join('');
+    const line = String(role ?? '').trim();
+    return (line ? `<p class="delta-muted delta-board-role">${esc(`${[...line][0].toUpperCase()}${[...line].slice(1).join('')}`)}</p>` : '')
+        + (meters ? `<p class="delta-board-meters">${meters}</p>` : '');
+}
+
 // The Board screen for one NPC: the dial (portrait inside; a tap opens the profile), the name, identity
 // and status, the pills (key person, mood), then the tiles. `refs` is the panel's createPortraitRefs()
 // (refs.fill is the caller's job, after the markup is in the DOM).
@@ -129,7 +139,8 @@ export function boardHtml(npc = {}, { refs = null, userName = 'you', peers = nul
     const profile = `<div class="delta-board-dial" role="button" tabindex="0" data-delta-screen="profile" aria-label="${esc(name)} profile">${dialHtml(npc, { refs })}</div>`;
     const nameBlock = `<div class="delta-board-name"><h3 class="delta-board-title">${esc(name)}</h3>`
         + (pills.length ? `<div class="delta-board-pills">${pills.map(pill => `<span class="delta-pill delta-pill-${pill.kind}">${esc(pill.text)}</span>`).join('')}</div>` : '')
-        + `<p class="delta-muted">${esc([identity, `tap the portrait for ${possessiveWord(npc.gender, { lower: true })} profile`].filter(Boolean).join(' · '))}</p>`
+        + `<p class="delta-muted delta-board-ident">${esc([identity, `tap the portrait for ${possessiveWord(npc.gender, { lower: true })} profile`].filter(Boolean).join(' · '))}</p>`
+        + sectionCaptionHtml(model.role, npc)
         + (model.status ? `<p class="delta-board-status">${esc(model.status)}</p>` : '')
         + '</div>';
     // Desktop puts the dial and name in a pane of their own beside the tiles (the mockup's left pane); phone stacks them.
