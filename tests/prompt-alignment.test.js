@@ -212,3 +212,7 @@ test('Refresh tastes: the schema line is asked only when askTastes is set; witho
     assert.ok(asked.length - plain.length <= 120);
     assert.equal(returnShape('backfill'), returnShape('backfill', {}, []), 'backfill and import shapes are untouched');
 });
+
+test('the dossier import rule lets an empty background be filled from stated facts', () => {
+    assert.match(buildDossierImportPrompt({ dossierText: 'Role: clerk', targetName: 'Sieke', existingNpc: { id: 'sieke', name: 'Sieke' } }), /an empty background is filled from stated role, workplace, history or circumstances/);
+});

@@ -226,7 +226,7 @@ test('a citation-only why: counts as a reason exactly as before (a sign change i
     assert.equal(addTaste(list, { sign: '-', item: 'tea', why: '[m3]', day: 2, r: 'r2' }).status, 'changed');
 });
 
-test('taste words: preserve 160 characters of reason, cut longer item and reason at word ends, and never split Unicode', () => {
+test('taste words: preserve 240 characters of reason, cut longer item and reason at word ends, and never split Unicode', () => {
     const reason = 'beamed at the gift and ate her warm piece eagerly at the desk, then asked for another slice after finishing the honey-oat cake';
     const item = 'warm honey oat cake with toasted almonds and candied orange peel from the guild kitchen';
     assert.equal(addTaste([], { sign: '+', item: 'honey-oat cake', from: reason }).entry.from, reason);
@@ -235,7 +235,7 @@ test('taste words: preserve 160 characters of reason, cut longer item and reason
     const refreshed = readTastes(mergeRefreshTastes('', [{ sign: 'like', item, from: `${longReason} [m3]` }]).text)[0];
     assert.equal(refreshed.item, fromLine.item);
     assert.equal(refreshed.from, fromLine.from);
-    for (const [value, max] of [[fromLine.item, 60], [fromLine.from, 160]]) {
+    for (const [value, max] of [[fromLine.item, 60], [fromLine.from, 240]]) {
         assert.ok([...value].length <= max);
         assert.match(value, /\S…$/u);
         assert.ok((value === fromLine.item ? item : longReason).startsWith(value.slice(0, -1)));
@@ -272,10 +272,10 @@ test('the full taste list fits the storage envelope with maximum-length Unicode 
     let list = [];
     for (let i = 0; i < TASTE_LIMITS.likes + TASTE_LIMITS.dislikes; i += 1) {
         list = addTaste(list, { sign: i < TASTE_LIMITS.likes ? '+' : '-', item: `${'🍰'.repeat(59)}${i}`,
-            from: '🍯'.repeat(160), r: '🔖'.repeat(80) }).tastes;
+            from: '🍯'.repeat(240), r: '🔖'.repeat(80) }).tastes;
     }
     const text = tastesText(list);
-    assert.ok(text.length > 4000 && text.length <= TASTE_LIMITS.text);
+    assert.ok(text.length > 6000 && text.length <= TASTE_LIMITS.text);
     assert.equal(readTastes(text, { cite: false }).length, 10);
     assert.equal(tastesText(readTastes(text, { cite: false })), text);
 });

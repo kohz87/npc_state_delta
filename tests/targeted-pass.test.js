@@ -329,3 +329,32 @@ test('REFRESHCANCEL2: the revision is re-based only for this session\'s own writ
     assert.ok(runner.indexOf('final commit') < runner.indexOf('const latest = getChatState(chatKey);'), 'no await between reading the state and committing it');
     assert.match(runner, /!committed && isScannerRoutingError\(error\)/);
 });
+
+// (owner, 13 Nov) A manual Refresh on a chat-made clerk never gave her a Background: only the new-admission follow-up asked for a gap. Every
+// Refresh now names an unlocked blank background as a gap, applies a grounded one, and stops asking once it is filled.
+test('a manual Refresh asks for an empty background, applies a grounded one, then stops asking', () => {
+    runEditorHostScenario('refresh-background-gap', async () => {
+        const runtime = globalThis.NPCStateDelta;
+        const chat = mockState.context.chat;
+        chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who keeps the guild ledger?' });
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Sieke is a Guild clerk at the Guild hall. The Watch-Captain pressures her about stalled culling contracts.', swipe_id: 0, swipes: ['x'] });
+        mockState.quietResponder = async () => '{"npcs":[]}';
+        await manualAddNpc('Sieke');
+        await runtime.flush();
+        await sleep(300);
+        const id = runtime.getState().npcs.find(npc => npc.name === 'Sieke').id;
+        const prompts = [];
+        const text = 'Guild clerk at the Guild hall; the Watch-Captain pressures her about stalled culling contracts.';
+        mockState.quietResponder = async (args = {}) => {
+            prompts.push(String(args.prompt || ''));
+            return JSON.stringify({ npcs: [{ id, name: 'Sieke', role: 'Guild clerk', background: text }] });
+        };
+        assert.equal(await runtime.refreshFromChat(id), true);
+        await runtime.flush();
+        assert.match(prompts[0], /FILL BACKGROUND:/);
+        assert.equal(runtime.getNpc(id).background, text);
+        assert.equal(await runtime.refreshFromChat(id), true);
+        assert.doesNotMatch(prompts[1], /FILL BACKGROUND/, 'a filled background is not a gap');
+        mockState.quietResponder = null;
+    });
+});

@@ -105,6 +105,7 @@ export function createTargetedRefreshPart(rt, deps, { prepareCanonicalScanBase, 
             storyDay: storyDayAt(latestMessageId(true)),
             customFieldNames: effectiveCustomFieldNames(settings),
             fillLooks: fillBlankLooks,
+            fillBackground: true, // An unlocked blank background is a gap on every Refresh (manual or automatic); filled only from stated story facts.
             ...targetNoteOptions(notes),
         });
         return runTargetedDossierPass({

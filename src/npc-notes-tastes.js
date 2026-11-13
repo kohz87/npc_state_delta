@@ -4,7 +4,7 @@
 import { clean, slug } from './npc-meters-config.js';
 import { stripMessageCitations } from '../core-text.js';
 
-export const TASTE_LIMITS = Object.freeze({ likes: 6, dislikes: 4, item: 60, from: 160, why: 120, text: 8000, reply: 80 });
+export const TASTE_LIMITS = Object.freeze({ likes: 6, dislikes: 4, item: 60, from: 240, why: 120, text: 12000, reply: 80 });
 export const TASTE_RULE = 1;
 const LIKE = '+';
 const DISLIKE = '-';
@@ -164,7 +164,7 @@ export function addTaste(current, { name = '', sign, item, from = '', why = '', 
     if (same && !clean(why, TASTE_LIMITS.why)) {
         return outcome(list, 'refused', `${who} already ${verb(same.sign)} ${tidy(same.item, TASTE_LIMITS.item)}; a change needs a why: reason.`);
     }
-    const fromText = words(from, rule === TASTE_RULE ? TASTE_LIMITS.from : 60);
+    const fromText = words(from, rule === TASTE_RULE ? TASTE_LIMITS.from : 60); // old rule: the original 60 cut
     const mirror = mirrorCheck({ userText, item: text, from: fromText, why, existing: list });
     const entry = {
         sign,
