@@ -9,7 +9,7 @@ import { IMPORTANT_MEMORY_LIMIT, DEFAULT_RELATIONSHIP, inferNpcIdentityKind, npc
 import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { fillAllowed, FILL_MERGE_OPTION } from './appearance-fill.js';
 import { createTargetedScopePart } from './runtime-targeted-scope.js';
-import { captureJournalEntry } from './runtime-narration.js';
+import { backgroundRuleOn, captureJournalEntry } from './runtime-narration.js';
 
 const { backfillScanMatchesTarget, rowContradictsTarget, soleRowMayBeTarget, transcriptMentionsBackfillTarget, edgeTouchesResolvedTarget } = createTargetedScopePart();
 
@@ -72,6 +72,8 @@ export function createTargetedBackfillPart(rt, deps, { prepareCanonicalScanBase,
         const prompt = refreshLike
             ? buildProfileRefreshPrompt({
                 ...common,
+                fillBackground: true, // The new admission's one follow-up fills a grounded blank, never a locked or established background.
+                backgroundRule: backgroundRuleOn(Boolean(replayScope()), replayScope() && captureJournalEntry(replayScope(), ctx.chat || [], request.requestedMessageId)),
                 targetNpc: hostedMeterView([existing])[0],
                 turn: Number.isInteger(state.turn) ? state.turn : null,
                 storyDay: storyDayAt(latestMessageId(true)),

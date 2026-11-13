@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-    TASTE_LIMITS, addTaste, contentWords, mirrorCheck, mirrorWording, mergeRefreshTastes, readTastes, tasteKey, tasteTail, tastesText,
+    TASTE_LIMITS, TASTE_RULE, addTaste, contentWords, mirrorCheck, mirrorWording, mergeRefreshTastes, readTastes, tasteKey, tasteRuleFor, tasteTail, tastesText, tasteWords,
 } from '../src/npc-notes-tastes.js';
 
 const row = (sign, item, extra = {}) => ({ sign, item, day: 1, r: 'r1', ...extra });
@@ -53,9 +53,9 @@ test('readTastes caps each sign and keeps the newest rows', () => {
 });
 
 test('readTastes cleans text, bounds the item and the from, and keeps mirrored and from', () => {
-    const long = `${'x'.repeat(80)}\u0007`;
+    const long = `${'longword '.repeat(10)}\u0007`;
     const [entry] = readTastes([{ sign: '+', item: `  ${long}\n`, from: 'barge\tcrews', day: 3, r: 7, mirrored: true }]);
-    assert.equal(entry.item.length, TASTE_LIMITS.item);
+    assert.ok(entry.item.length <= TASTE_LIMITS.item && entry.item.endsWith('…'));
     assert.equal(entry.from, 'barge crews');
     assert.equal(entry.day, 3);
     assert.equal(entry.r, '7');
@@ -67,7 +67,7 @@ test('addTaste stores a new taste with its day, reply tag and from', () => {
     assert.equal(out.status, 'added');
     assert.equal(out.problem, '');
     assert.equal(out.cue, '');
-    assert.deepEqual(out.tastes, [{ sign: '+', item: 'burnt-sugar toffee', from: 'barge crews', day: 4, r: 'r9' }]);
+    assert.deepEqual(out.tastes, [{ sign: '+', item: 'burnt-sugar toffee', from: 'barge crews', day: 4, r: 'r9', rule: TASTE_RULE }]);
     assert.deepEqual(out.entry, out.tastes[0]);
 });
 
@@ -91,7 +91,7 @@ test('addTaste: the opposite sign with why: replaces the old taste', () => {
     const first = addTaste([], { name: 'Mira', sign: '+', item: 'toffee', day: 1, r: 'a' });
     const out = addTaste(first.tastes, { name: 'Mira', sign: '-', item: 'toffee', why: 'the sugar riot', day: 2, r: 'b' });
     assert.equal(out.status, 'changed');
-    assert.deepEqual(out.tastes, [{ sign: '-', item: 'toffee', day: 2, r: 'b' }]);
+    assert.deepEqual(out.tastes, [{ sign: '-', item: 'toffee', day: 2, r: 'b', rule: TASTE_RULE }]);
 });
 
 test('addTaste refuses a missing item or a sign that is not + or -', () => {
@@ -169,7 +169,7 @@ test('mirrorCheck never throws without arguments', () => {
 test('addTaste stores a mirrored taste, marks it, and returns its problem and cue (never refused)', () => {
     const out = addTaste([], { name: 'Mira', sign: '+', item: 'toffee', userText: 'Have some toffee!', day: 5, r: 'm' });
     assert.equal(out.status, 'added');
-    assert.deepEqual(out.tastes, [{ sign: '+', item: 'toffee', day: 5, r: 'm', mirrored: true }]);
+    assert.deepEqual(out.tastes, [{ sign: '+', item: 'toffee', day: 5, r: 'm', mirrored: true, rule: TASTE_RULE }]);
     assert.equal(out.problem, "Mira's liking for toffee echoes {{user}}'s words; kept and marked.");
     assert.equal(out.cue, "Mira's liking for toffee echoes {{user}}'s words; keep Mira's own taste unless the story gives a reason.");
 });
@@ -224,4 +224,58 @@ test('a Refresh\'s tastes merge without citations', () => {
 test('a citation-only why: counts as a reason exactly as before (a sign change is allowed)', () => {
     const list = addTaste([], { sign: '+', item: 'tea', day: 1, r: 'r1' }).tastes;
     assert.equal(addTaste(list, { sign: '-', item: 'tea', why: '[m3]', day: 2, r: 'r2' }).status, 'changed');
+});
+
+test('taste words: preserve 160 characters of reason, cut longer item and reason at word ends, and never split Unicode', () => {
+    const reason = 'beamed at the gift and ate her warm piece eagerly at the desk, then asked for another slice after finishing the honey-oat cake';
+    const item = 'warm honey oat cake with toasted almonds and candied orange peel from the guild kitchen';
+    assert.equal(addTaste([], { sign: '+', item: 'honey-oat cake', from: reason }).entry.from, reason);
+    const longReason = `${reason} ${'more cake 🍰 '.repeat(12)}`;
+    const fromLine = addTaste([], { sign: '+', item, from: longReason }).entry;
+    const refreshed = readTastes(mergeRefreshTastes('', [{ sign: 'like', item, from: `${longReason} [m3]` }]).text)[0];
+    assert.equal(refreshed.item, fromLine.item);
+    assert.equal(refreshed.from, fromLine.from);
+    for (const [value, max] of [[fromLine.item, 60], [fromLine.from, 160]]) {
+        assert.ok([...value].length <= max);
+        assert.match(value, /\S…$/u);
+        assert.ok((value === fromLine.item ? item : longReason).startsWith(value.slice(0, -1)));
+        assert.match((value === fromLine.item ? item : longReason).slice(value.length - 1), /^\s/u);
+    }
+    assert.equal(tasteWords('a'.repeat(80), 60), '…');
+    assert.equal(addTaste([], { sign: '+', item: 'a'.repeat(80) }).status, 'refused');
+    assert.equal(tasteWords('a'.repeat(60), 60), 'a'.repeat(60));
+    assert.equal(tasteWords('😀 '.repeat(100), 60).includes('\ufffd'), false);
+});
+
+test('taste rule mark: old rows and old Re-reads keep the exact original bytes; new Re-reads use the new rule', () => {
+    const item = 'honey-oat cake';
+    const from = 'beamed at the gift and ate her warm piece eagerly at the desk while the clerk watched';
+    const old = addTaste([], { sign: '+', item, from, day: 1, r: 'r1', rule: 0 });
+    const legacy = tastesText(old.tastes);
+    const standing = text => ({ domains: { npc: { npcs: { sieke: { tastes: text } } } } });
+    assert.equal(JSON.parse(legacy)[0].from, from.slice(0, 60).trim());
+    assert.equal(tastesText(readTastes(legacy, { cite: false })), legacy);
+    const oldRule = tasteRuleFor(standing(legacy), 'sieke', 'r1', item);
+    assert.equal(oldRule, 0);
+    assert.equal(tastesText(addTaste([], { sign: '+', item, from, day: 1, r: 'r1', rule: oldRule }).tastes), legacy);
+    const fresh = tastesText(addTaste([], { sign: '+', item, from, day: 1, r: 'r2' }).tastes);
+    assert.equal(tasteRuleFor(standing(fresh), 'sieke', 'r2', item), TASTE_RULE);
+    assert.equal(tasteRuleFor(standing(fresh), 'sieke', 'r2', 'another item'), 0);
+    assert.equal(tasteRuleFor(standing(fresh), 'sieke', 'old-reply', item), 0);
+    const receipt = { type: 'capture.taste', data: { key: 'sieke', tasteRule: TASTE_RULE, tasteItem: tasteKey(item) } };
+    assert.equal(tasteRuleFor(standing(fresh), 'sieke', 'r3', item, [receipt]), TASTE_RULE, 'a no-op line keeps its own receipt mark');
+    assert.equal(tastesText(addTaste([], { sign: '+', item, from, day: 1, r: 'r2', rule: TASTE_RULE }).tastes), fresh);
+    assert.equal(mergeRefreshTastes(legacy, [{ sign: '-', item: 'paperwork', from }], { day: 2, r: 'r2' }).text.startsWith(legacy.slice(0, -1)), true);
+});
+
+test('the full taste list fits the storage envelope with maximum-length Unicode text', () => {
+    let list = [];
+    for (let i = 0; i < TASTE_LIMITS.likes + TASTE_LIMITS.dislikes; i += 1) {
+        list = addTaste(list, { sign: i < TASTE_LIMITS.likes ? '+' : '-', item: `${'🍰'.repeat(59)}${i}`,
+            from: '🍯'.repeat(160), r: '🔖'.repeat(80) }).tastes;
+    }
+    const text = tastesText(list);
+    assert.ok(text.length > 4000 && text.length <= TASTE_LIMITS.text);
+    assert.equal(readTastes(text, { cite: false }).length, 10);
+    assert.equal(tastesText(readTastes(text, { cite: false })), text);
 });

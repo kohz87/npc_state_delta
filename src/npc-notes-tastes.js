@@ -4,7 +4,8 @@
 import { clean, slug } from './npc-meters-config.js';
 import { stripMessageCitations } from '../core-text.js';
 
-export const TASTE_LIMITS = Object.freeze({ likes: 6, dislikes: 4, item: 60, from: 60, why: 120, text: 4000, reply: 80 });
+export const TASTE_LIMITS = Object.freeze({ likes: 6, dislikes: 4, item: 60, from: 160, why: 120, text: 8000, reply: 80 });
+export const TASTE_RULE = 1;
 const LIKE = '+';
 const DISLIKE = '-';
 const STOP_WORDS = new Set([
@@ -16,6 +17,13 @@ const STOP_WORDS = new Set([
 // read is clean (readTastes), but the stored leaf is never reshaped: the write path reads with { cite: false }, which keeps each old
 // row exactly as stored, so a leaf valid before stays valid (tastesOk) and replay and Re-read keep old rows byte-identical.
 const tidy = (value, max) => clean(stripMessageCitations(clean(value, Infinity)), max);
+// Cut only newly written or displayed words. An unbroken word longer than the limit contributes no fragment.
+export function tasteWords(value, max) {
+    const chars = [...tidy(value, Infinity)];
+    if (chars.length <= max) return chars.join('');
+    const head = chars.slice(0, max - 1).join('');
+    return `${(/\s/u.test(chars[max - 1]) ? head : head.replace(/\S+$/u, '')).trimEnd()}…`;
+}
 const isSign = sign => sign === LIKE || sign === DISLIKE;
 const verb = sign => (sign === LIKE ? 'likes' : 'dislikes');
 const noun = sign => (sign === LIKE ? 'liking' : 'dislike');
@@ -34,7 +42,7 @@ export function contentWords(text) {
 
 // One stored row, or null when it is not a valid taste.
 function readRow(entry, cite) {
-    const words = cite ? tidy : clean;
+    const words = cite ? tasteWords : clean;
     if (!entry || typeof entry !== 'object' || !isSign(entry.sign)) return null;
     const item = words(entry.item, TASTE_LIMITS.item);
     if (!tasteKey(item)) return null;
@@ -46,6 +54,7 @@ function readRow(entry, cite) {
     row.day = day;
     row.r = replyTag(entry.r);
     if (entry.mirrored === true) row.mirrored = true;
+    if (entry.rule === TASTE_RULE) row.rule = TASTE_RULE;
     return row;
 }
 
@@ -95,6 +104,20 @@ export function tastesText(list) {
     return JSON.stringify(readTastes(list, { cite: false }));
 }
 
+// Rule marks: rows mark writes; receipts also mark no-op lines, so a Re-read of a duplicate uses the same item rule.
+export function tasteRuleFor(standing, key, reply, item, receipts = []) {
+    if (!standing) return TASTE_RULE;
+    const raw = tidy(item, Infinity);
+    const keys = [tasteKey(clean(raw, TASTE_LIMITS.item)), tasteKey(tasteWords(raw, TASTE_LIMITS.item))];
+    if (Array.isArray(receipts) && receipts.some(receipt => receipt?.type === 'capture.taste' && receipt.data?.key === key
+        && receipt.data?.tasteRule === TASTE_RULE && receipt.data?.tasteItem === keys[1])) return TASTE_RULE;
+    const rows = readTastes(standing.domains?.npc?.npcs?.[key]?.tastes, { cite: false });
+    return rows.some(row => row.r === reply && row.rule === TASTE_RULE && keys.includes(tasteKey(tidy(row.item, Infinity)))) ? TASTE_RULE : 0;
+}
+
+export const markTasteResult = (result, item, rule) => rule === TASTE_RULE
+    ? { ...result, data: { ...result.data, tasteRule: TASTE_RULE, tasteItem: tasteKey(tasteWords(item, TASTE_LIMITS.item)) } } : result;
+
 /**
  * The deterministic echo check. True when the taste's words (at least half of them) appear in the user's last message, the taste
  * has no why: or from:, and no earlier taste shares a word with it (so an area she already had is not "new"). Never blocks.
@@ -128,18 +151,20 @@ const outcome = (tastes, status, problem = '', cue = '', entry = null) => ({ tas
  * there, a no-op), 'refused' (no item or sign, or an opposite sign without why:; the list is unchanged and problem says why).
  * A mirrored taste is still stored (mirrored: true) with its problem and cue. The entry keeps its reply tag r, so a re-read replaces it.
  */
-export function addTaste(current, { name = '', sign, item, from = '', why = '', day = 0, r = null, userText = '' } = {}) {
+export function addTaste(current, { name = '', sign, item, from = '', why = '', day = 0, r = null, userText = '', rule = TASTE_RULE } = {}) {
     const list = readTastes(current, { cite: false });
-    const text = tidy(item, TASTE_LIMITS.item);
+    const words = rule === TASTE_RULE ? tasteWords : tidy;
+    const text = words(item, TASTE_LIMITS.item);
     const key = tasteKey(text);
     const who = clean(name, 60) || 'The NPC';
     if (!isSign(sign) || !key) return outcome(list, 'refused', 'A taste line needs a likes: or dislikes: item.');
-    const same = list.find(row => tasteKey(tidy(row.item, TASTE_LIMITS.item)) === key);
+    const oldKey = tasteKey(tidy(item, TASTE_LIMITS.item));
+    const same = list.find(row => [key, oldKey].includes(tasteKey(tidy(row.item, TASTE_LIMITS.item))));
     if (same?.sign === sign) return outcome(list, 'same');
     if (same && !clean(why, TASTE_LIMITS.why)) {
         return outcome(list, 'refused', `${who} already ${verb(same.sign)} ${tidy(same.item, TASTE_LIMITS.item)}; a change needs a why: reason.`);
     }
-    const fromText = tidy(from, TASTE_LIMITS.from);
+    const fromText = words(from, rule === TASTE_RULE ? TASTE_LIMITS.from : 60);
     const mirror = mirrorCheck({ userText, item: text, from: fromText, why, existing: list });
     const entry = {
         sign,
@@ -148,6 +173,7 @@ export function addTaste(current, { name = '', sign, item, from = '', why = '', 
         day: wholeDay(day),
         r: replyTag(r),
         ...(mirror.mirrored ? { mirrored: true } : {}),
+        ...(rule === TASTE_RULE ? { rule: TASTE_RULE } : {}),
     };
     const tastes = capped([...list.filter(row => row !== same), entry]);
     const status = same ? 'changed' : 'added';

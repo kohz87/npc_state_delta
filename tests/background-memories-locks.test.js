@@ -40,6 +40,20 @@ for (const channel of ['npcs', 'profileUpdates']) {
     });
 }
 
+test('a new scanner dossier and a follow-up fill grounded circumstances, obey the 320 cap and a blank lock', () => {
+    const story = 'Sieke is a Guild clerk at the Guild hall. The Watch-Captain pressures her about stalled culling contracts.';
+    const text = 'Guild clerk at the Guild hall; the Watch-Captain pressures her about stalled culling contracts.';
+    const row = { name: 'Sieke', role: 'Guild clerk', present: true, identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, background: text };
+    const created = mergeScanResult({ turn: 1, npcs: [], candidates: [] }, { npcs: [row] }, { turn: 2, developmentContext: story, storyTexts: [story] }).state.npcs[0];
+    assert.equal(created.background, text);
+    const blank = normalizeNpcRecord({ id: 'sieke', name: 'Sieke', background: '' });
+    const follow = (npc, background) => mergeScanResult({ turn: 1, npcs: [npc], candidates: [] }, { npcs: [{ id: 'sieke', name: 'Sieke', background }] }, { turn: 2, developmentContext: story, allowTargetedDurableSeed: true }).state.npcs[0].background;
+    assert.equal(follow(blank, text), text);
+    assert.equal(follow(blank, 'Born a princess of the sky kingdom.'), '');
+    assert.equal(follow({ ...blank, manualProfileFields: ['background'], manualProfileLocksExplicit: true }, text), '');
+    assert.ok(follow(blank, `${text} ${'Guild clerk at the Guild hall. '.repeat(30)}`).length <= 320);
+});
+
 test('live fields and Player Dynamic: a lock keeps them through a scan, a clear and a relationship event', () => {
     const locked = { mood: 'Wary', location: 'Archive', goal: 'Find the ledger', status: 'Tired', relationshipSummary: 'Hand-written: trusts Ari with her life.',
         manualProfileFields: ['mood', 'location', 'goal', 'status', 'relationshipSummary'] };

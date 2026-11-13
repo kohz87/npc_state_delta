@@ -265,6 +265,30 @@ test('notes host: replay equals live: rebuild, a swipe, a Re-read, a middle dele
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
 });
 
+test('notes host: long taste reasons and items survive Changes, Refresh, display, Re-read and replay', async () => {
+    const s = await suite({ allowance: null, features: ON });
+    await s.setDay(1);
+    const reason = 'beamed at the gift and ate her warm piece eagerly at the desk before asking for another slice';
+    const item = 'warm honey oat cake with toasted almonds and candied orange peel from the guild kitchen';
+    const index = await s.say([`~ taste Oren | likes: ${item} | from: ${reason}`]);
+    const first = oren(s).tastes;
+    const written = readTastes(first)[0];
+    assert.equal(written.from, reason);
+    assert.match(written.item, /…$/u);
+    assert.deepEqual((await cast(s)).notes.tastes[0], { sign: '+', item: written.item, from: reason, mirrored: false });
+    assert.equal((await s.host.sdk.reread(index)).ok, true);
+    assert.equal(oren(s).tastes, first, 'Re-read keeps new rule and the same bytes');
+    const duplicate = await s.say([`~ taste Oren | likes: ${item} | from: ${reason}`]);
+    assert.equal(oren(s).tastes, first, 'a repeated long item is a no-op');
+    assert.equal((await s.host.sdk.reread(duplicate)).ok, true);
+    assert.equal(oren(s).tastes, first, 'Re-reading the no-op does not introduce a second truncated item');
+    await s.adapter.tastes({ name: 'Oren', tastes: [{ sign: '-', item: 'cold tea', from: reason }], reply: s.host.store.headIndex() });
+    assert.equal(readTastes(oren(s).tastes)[1].from, reason);
+    const live = oren(s).tastes;
+    s.host.store.rebuild();
+    assert.equal(oren(s).tastes, live);
+});
+
 test('notes host: npc.flag stamps the first look once and the reader\'s button is refused', async () => {
     const s = await suite({ allowance: null, features: ON });
     await s.setDay(1);

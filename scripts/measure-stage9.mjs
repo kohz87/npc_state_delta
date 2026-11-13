@@ -69,6 +69,25 @@ report.reasoning = 'No Delta reasoning/thinking parameter; host/profile preset s
 report.providerUsage = 'Unavailable; these are character counts, hashes, options and actual mocked dispatcher invocations, not paid provider usage.';
 if (!process.argv[2]) {
     const baselinePath = new URL('../tests/fixtures/stage9-budgets.json', import.meta.url);
-    if (fs.existsSync(baselinePath)) assert.deepEqual(report, JSON.parse(fs.readFileSync(baselinePath)), 'Accepted prompt/request budget changed; investigate before publishing.');
+    if (fs.existsSync(baselinePath)) {
+        const expected = JSON.parse(fs.readFileSync(baselinePath));
+        // Approved background clarification: preserve the original baseline and pin only the changed request bytes.
+        // Scanner/full-window +127 characters, Refresh +98 (+100 serialized); no change to calls, caps or injection.
+        const amendments = {
+            scanner: [[127, 127, '81e413626d3cb9a5b62edf8a5638c1c72806da2253c8fd8b9d0662dc53133a10']],
+            'full-window': [[127, 127, '18988dc4450c5d20ca19c72dbe51c0a471872d30f1cd37d8b89daeef782ae003']],
+            refresh: [[98, 100, '339fb1c665ea73bb280dff126b65f194f1b97924e660972190d07ce3e92dc353']],
+            'scanner-retry': [[127, 127, '81e413626d3cb9a5b62edf8a5638c1c72806da2253c8fd8b9d0662dc53133a10'], [127, 127, 'fbd16410db720a03be4b13dd739d225ac098cfad64f3dde7d62069e8bf374dc4']],
+        };
+        for (const rows of Object.values(expected.routes)) for (const row of rows) {
+            for (const [index, [chars, serialized, sha]] of (amendments[row.label] || []).entries()) {
+                const capture = row.captures[index];
+                capture.charsIncludingSystem += chars;
+                capture.serializedMessagesChars += serialized;
+                capture.inputSha256 = sha;
+            }
+        }
+        assert.deepEqual(report, expected, 'Accepted prompt/request budget changed; investigate before publishing.');
+    }
 }
 console.log(JSON.stringify(report, null, 2));

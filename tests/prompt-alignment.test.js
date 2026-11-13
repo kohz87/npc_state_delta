@@ -119,6 +119,36 @@ test('b5b r2-8: the one-pass rules name roles; the people are named in the conte
     }
 });
 
+test('new dossier backgrounds are requested from grounded facts in both capture sizes and scanner', () => {
+    for (const compactCapture of [false, true]) {
+        const { rules } = buildNarrationCaptureParts({ transcript, compactCapture });
+        assert.match(rules, /background in npcs\[\].*role, workplace, history or ongoing circumstances/);
+        assert.match(rules, /omit if (?:the story gives )?none, never invent/i);
+    }
+    const scan = buildScannerPrompt({ transcript });
+    assert.match(scan, /background in npcs\[\].*role, workplace, history or ongoing circumstances/);
+    assert.match(scan, /omit if none, never invent/i);
+});
+
+test('only an unlocked blank new-admission background receives the follow-up gap instruction', () => {
+    const npc = normalizeNpcRecord({ id: 'sieke', name: 'Sieke', role: 'clerk' });
+    const prompt = extra => buildProfileRefreshPrompt({ transcript, targetNpc: { ...npc, ...extra }, fillBackground: true });
+    assert.match(prompt({}), /FILL BACKGROUND:.*facts the supplied story establishes.*omit it if none are established\. Never invent/);
+    assert.doesNotMatch(prompt({ background: 'A clerk.' }), /FILL BACKGROUND/);
+    assert.doesNotMatch(prompt({ manualProfileFields: ['background'] }), /FILL BACKGROUND/);
+    assert.doesNotMatch(buildProfileRefreshPrompt({ transcript, targetNpc: npc }), /FILL BACKGROUND/);
+});
+
+test('an old replay uses the original scanner and follow-up background instructions', () => {
+    const freshScan = buildScannerPrompt({ transcript });
+    const oldScan = buildScannerPrompt({ transcript, backgroundRule: false });
+    assert.equal(freshScan.replace(', including background in npcs[] from established role, workplace, history or ongoing circumstances; omit if none, never invent.', ';'), oldScan);
+    const npc = normalizeNpcRecord({ id: 'sieke', name: 'Sieke' });
+    const oldFollow = buildProfileRefreshPrompt({ transcript, targetNpc: npc, backgroundRule: false, fillBackground: true });
+    assert.match(oldFollow, /Background is durable history, not current mood\/status\./);
+    assert.doesNotMatch(oldFollow, /FILL BACKGROUND/);
+});
+
 test('step 12 I-12: backfill and import shapes carry the scan\'s *State keys for values a dossier already has', () => {
     const backfill = buildBackfillPrompt({ transcript, targetName: 'Myla Venn', existingNpc: rich() });
     const imported = buildDossierImportPrompt({ dossierText: 'Name: Myla', targetName: 'Myla Venn', existingNpc: rich() });
