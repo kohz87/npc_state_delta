@@ -29,7 +29,10 @@ export const backgroundRuleOn = (replaying, entry) => !replaying || entry?.backg
 export function recordAcceptedCapture(state, chat, messageId, capture) {
     const key = lineageCheckpointKey(chatLineage(chat), messageId);
     const entries = Array.isArray(state.captureJournal) ? state.captureJournal.filter(item => item?.key !== key) : [];
-    entries.push({ messageId, key, backgroundRule: 1, parsed: structuredClone(capture.parsed), watch: structuredClone(capture.watch || []), fills: {} });
+    // (EDITKEEP3) A capture re-applied after an edit brings the fills and refreshes its reply had accepted (no model call).
+    const entry = { messageId, key, backgroundRule: 1, parsed: structuredClone(capture.parsed), watch: structuredClone(capture.watch || []), fills: structuredClone(capture.fills || {}) };
+    if (capture.refreshes) entry.refreshes = structuredClone(capture.refreshes);
+    entries.push(entry);
     state.captureJournal = entries;
 }
 // A reply read live under the current reading rules (a scanner read has no payload to keep): replay reads it under the same rules, while a

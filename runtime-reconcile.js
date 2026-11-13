@@ -5,7 +5,7 @@
 
 import { getContext } from '../../../extensions.js';
 import { messageGateSettled } from './src/transcript.js';
-import { BRANCH_SNAPSHOT_BUDGET_BYTES, BRANCH_SNAPSHOT_MAX_BYTES, ROLLBACK_JOURNAL_BUDGET_BYTES, chatLineage, firstLineageDivergence, onlyStorySuiteBlocksChanged, reconcileBranchState, remapLineageKeys, snapshotBranchState } from './branch.js';
+import { BRANCH_SNAPSHOT_BUDGET_BYTES, BRANCH_SNAPSHOT_MAX_BYTES, ROLLBACK_JOURNAL_BUDGET_BYTES, chatLineage, firstLineageDivergence, lineageCheckpointKeys, priorCaptureFor, onlyStorySuiteBlocksChanged, reconcileBranchState, remapLineageKeys, snapshotBranchState } from './branch.js';
 import { getSettings } from './runtime-settings.js';
 import { textCapture } from './runtime-narration.js';
 
@@ -338,6 +338,9 @@ export function createReconcilePart(rt, deps) {
             });
             return null;
         }
+        // (EDITKEEP3) What NSD kept of each reply's capture, and the keys before the edit, for the rebuild below (the rollback may drop the entries).
+        const priorJournal = String(operation || '').toLowerCase() === 'edit' && Array.isArray(before.captureJournal) ? [...before.captureJournal] : [];
+        const priorKeys = priorJournal.length ? lineageCheckpointKeys(before.lineage) : [];
         const result = reconcileBranchState(before, ctx.chat || [], { explicitDivergence, operation, rewindMidDelete: getSettings().midDeleteRewind === true });
         if (getChatKey() !== key || firstLineageDivergence(lineageBefore, chatLineage(getContext().chat || [])) !== -1) return null;
         recordBranchReconciliationEvent({
@@ -383,7 +386,7 @@ export function createReconcilePart(rt, deps) {
             // live capture did (the scan records it in the journal under the new key); the catch-up covers only what the block does not. Held only
             // here, where the scan is certain to run.
             if (operation === 'edit' && hostedOnePass()) {
-                const found = textCapture(ctx.chat?.[targetAssistant]);
+                const found = textCapture(ctx.chat?.[targetAssistant]) || priorCaptureFor(priorJournal, targetAssistant, priorKeys, lineageCheckpointKeys(lineageBefore));
                 if (found) rt.narrationCaptures.set(narrationCaptureKey(key, targetAssistant), found);
             }
             if (isScanBusy(key)) queueBranchRescan(targetAssistant, 0, key);
