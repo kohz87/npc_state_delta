@@ -20,6 +20,8 @@ export {
     chatLineage,
     lineageCheckpointKeys,
     lineageCheckpointKey,
+    stripStorySuiteBlocks,
+    onlyStorySuiteBlocksChanged,
 } from './branch-lineage.js';
 export { buildRollbackUndo, applyRollbackUndo } from './branch-rollback-undo.js';
 export { pruneRollbackJournal, ensureRollbackJournalBaseline } from './branch-rollback-journal.js';

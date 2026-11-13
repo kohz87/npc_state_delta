@@ -14,7 +14,19 @@ import { salvageScannerJson } from './src/scanner-request.js';
 export function captureJournalEntry(state, chat, messageId) {
     if (!Number.isInteger(messageId) || messageId < 0 || messageId >= chat.length) return null;
     const key = lineageCheckpointKey(chatLineage(chat), messageId);
-    return (state?.captureJournal || []).find(item => item?.messageId === messageId && item.key === key) || null;
+    return (state?.captureJournal || []).find(item => item?.messageId === messageId && item.key === key) || textCaptureEntry(chat, messageId, key);
+}
+// (EDITKEEP) The one-pass block a reply still carries in its own text (a real edit changed its key, so the journal has no entry
+// under the new one): read it the way the live capture did. Only a complete, parseable block counts; none in the text, none here.
+export function textCapture(message) {
+    if (!message || message.is_user || !narrationCaptureEnabled()) return null;
+    const extracted = extractNarrationCapture(message.mes);
+    const parsed = extracted.status === 'found' ? parseNarrationCapture(extracted.raw) : null;
+    return parsed ? { parsed, raw: extracted.raw, watch: [] } : null;
+}
+function textCaptureEntry(chat, messageId, key) {
+    const found = textCapture(chat[messageId]);
+    return found ? { messageId, key, parsed: found.parsed, watch: [], fills: {} } : null;
 }
 export function recordAcceptedCapture(state, chat, messageId, capture) {
     const key = lineageCheckpointKey(chatLineage(chat), messageId);
