@@ -14,6 +14,7 @@ import { chatContext } from './runtime-scan-helpers.js';
 import { applyNpcMemories, firstMeetingCandidates } from './src/memory-fact-apply.js';
 import { scanMemoryFacts } from './src/memory-fact-scan.js';
 import { stampMemories } from './core-record-shared.js';
+import { storyDateTextAt } from './calendar.js';
 
 // (ONEPASSCAPR2-2) Keep the admission values until the host's meeting step can answer. A later manual edit or scan wins over this seed.
 const SEED_FIELDS = ['aliases', 'role', 'overallAppearance', 'appearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'speech', 'personality', 'background', 'behaviorProfile', 'mannerisms', 'relationshipSummary', 'homeBase', 'goal', 'location', 'customFields', 'species', 'gender', 'age', 'apparentAge', 'birthDate', 'birthDateSource', 'birthDateReason', 'birthDatePrecision', 'birthDateYearSource', 'relationship', 'meterSetup', 'secrets'];
@@ -226,9 +227,13 @@ export function createCastSyncPart(rt, deps) {
             const facts = scanMemoryFacts(working, settings, chatLineage(chatContext().chat || []), messageId, chatContext().name1, { hosted: true });
             const meeting = firstMeetingCandidates(base, { ...filled, present: true, location: person.met?.where || filled.location }, { facts, R: messageId, player: facts?.player });
             if (meeting.length) {
-                if (person.met?.on) meeting[0].date = person.met.on;
+                // (memory dates) `met.on` is story minutes, never text: the date is the first-meeting reply's own story date, the same words every other
+                // automatic memory carries (a string `on` from an older host is kept as given).
+                const metOn = typeof person.met?.on === 'string' ? person.met.on.trim().slice(0, 40) : '';
+                const metDate = metOn || storyDateTextAt(messageId);
+                if (metDate) meeting[0].date = metDate;
                 applyNpcMemories(filled, filled, {}, { candidates: meeting });
-                filled.memoryStamps = stampMemories(filled, filled, messageId, () => person.met?.on ?? '');
+                filled.memoryStamps = stampMemories(filled, filled, messageId, () => metDate);
             }
             const record = normalizeNpcRecord(filled);
             if (portraitHasImage(record.portrait)) {
