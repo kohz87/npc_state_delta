@@ -24,17 +24,19 @@ export function textCapture(message) {
     const parsed = extracted.status === 'found' ? parseNarrationCapture(extracted.raw) : null;
     return parsed ? { parsed, raw: extracted.raw, watch: [] } : null;
 }
+// Rule mark: historical replies without this mark keep the prompt rules under which they were read.
+export const backgroundRuleOn = (replaying, entry) => !replaying || entry?.backgroundRule === 1;
 export function recordAcceptedCapture(state, chat, messageId, capture) {
     const key = lineageCheckpointKey(chatLineage(chat), messageId);
     const entries = Array.isArray(state.captureJournal) ? state.captureJournal.filter(item => item?.key !== key) : [];
-    entries.push({ messageId, key, parsed: structuredClone(capture.parsed), watch: structuredClone(capture.watch || []), fills: {} });
+    entries.push({ messageId, key, backgroundRule: 1, parsed: structuredClone(capture.parsed), watch: structuredClone(capture.watch || []), fills: {} });
     state.captureJournal = entries;
 }
 // A reply read live under the current reading rules (a scanner read has no payload to keep): replay reads it under the same rules, while a
 // reply with no entry (read before this existed) is a historical re-read and keeps its old bytes.
 export function recordReadMark(state, chat, messageId) {
     if (!Number.isInteger(messageId) || messageId < 0 || messageId >= chat.length || captureJournalEntry(state, chat, messageId)) return;
-    state.captureJournal = [...(Array.isArray(state.captureJournal) ? state.captureJournal : []), { messageId, key: lineageCheckpointKey(chatLineage(chat), messageId), fills: {} }];
+    state.captureJournal = [...(Array.isArray(state.captureJournal) ? state.captureJournal : []), { messageId, key: lineageCheckpointKey(chatLineage(chat), messageId), backgroundRule: 1, fills: {} }];
 }
 export function recordAcceptedFill(state, chat, messageId, npcId, parsed, kind = 'fills') {
     const entry = captureJournalEntry(state, chat, messageId);
