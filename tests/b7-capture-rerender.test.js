@@ -77,6 +77,14 @@ test('an edit of only the hidden Changes block is not a branch rollback; a prose
         if (marked.captureJournal.length !== 1 || marked.captureJournal[0].parsed) throw new Error('the read mark was not written plain: ' + JSON.stringify(marked));
         narration.recordAcceptedFill(marked, chat, 1, 'n1', { role: 'x' });
         if (marked.captureJournal[0].fills?.n1?.role !== 'x') throw new Error('a fill was not kept in the journal');
+        // (EDITKEEP3) A capture re-applied after an edit (block no longer in the text) brings its fills into the new journal entry.
+        const carried = { captureJournal: [] };
+        narration.recordAcceptedCapture(carried, chat, 1, { parsed: { npcs: [{ name: 'Fenna' }] }, watch: [], fills: { n1: { role: 'x' } }, refreshes: { n1: { mood: 'calm' } } });
+        const carriedEntry = carried.captureJournal[0];
+        if (carriedEntry.fills?.n1?.role !== "x" || carriedEntry.refreshes?.n1?.mood !== "calm") throw new Error("carried fills were lost: " + JSON.stringify(carriedEntry));
+        const plain = { captureJournal: [] };
+        narration.recordAcceptedCapture(plain, chat, 1, { parsed: { npcs: [] }, watch: [] });
+        if (Object.keys(plain.captureJournal[0].fills).length || 'refreshes' in plain.captureJournal[0]) throw new Error('a live capture entry changed shape');
         chat[1].mes = `Fenna bows low.\n<!--npc_state_delta {"npcs":[{"name":"Fe`;
         if (narration.textCapture(chat[1])) throw new Error('a cut-off block was read');
     });

@@ -22,6 +22,7 @@ export {
     lineageCheckpointKey,
     stripStorySuiteBlocks,
     onlyStorySuiteBlocksChanged,
+    priorCaptureFor,
 } from './branch-lineage.js';
 export { buildRollbackUndo, applyRollbackUndo } from './branch-rollback-undo.js';
 export { pruneRollbackJournal, ensureRollbackJournalBaseline } from './branch-rollback-journal.js';

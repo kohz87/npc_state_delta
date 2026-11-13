@@ -58,20 +58,26 @@ const STORY_SUITE_CHANGES = /<(Changes(?:-[a-z]+)*)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
 export function stripStorySuiteBlocks(text) {
     return String(text ?? '').replace(STORY_SUITE_COMMENT, '').replace(STORY_SUITE_CHANGES, '').replace(/\s+$/, '');
 }
-// What each message object said before its last change. fingerprintMessage notes the text every time a lineage is computed (it runs at every
-// receipt, load and event), so when a reply is edited in place the previous text is still known when the edit is reconciled.
+// What is left of a reply once Story Suite's blocks are out, compared without line-ending style or trailing-space differences.
+function storyTextOf(text) {
+    return stripStorySuiteBlocks(text).replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '');
+}
+// The texts each message object has said, newest last. fingerprintMessage notes the text every time a lineage is computed (it runs at every
+// receipt, load and event), so when a reply is edited in place its earlier texts are still known when the edit is reconciled. Several saves (or a
+// block rewritten by its owner right after a save) can pass before the reconcile runs, so more than the last one is kept.
 const seenText = new WeakMap();
+const SEEN_TEXT_LIMIT = 8;
 function noteMessageText(message) {
     if (!message || typeof message !== 'object') return;
     const mes = String(message.mes ?? '');
     const seen = seenText.get(message);
-    if (!seen) seenText.set(message, { mes, prev: null });
-    else if (seen.mes !== mes) { seen.prev = seen.mes; seen.mes = mes; }
+    if (!seen) seenText.set(message, { mes, past: [] });
+    else if (seen.mes !== mes) { seen.past.push(seen.mes); if (seen.past.length > SEEN_TEXT_LIMIT) seen.past.shift(); seen.mes = mes; }
 }
 
 // True when the live chat differs from the stored lineage only in Story Suite's own hidden blocks: same length, at least one reply
-// differs, and each differing reply's previous text (the one the stored lineage hashed) is the same without them. A reply whose
-// previous text is not known (a replaced message object, a first sight) is not proven, so it counts as a real edit.
+// differs, and each differing reply has an earlier text (the one the stored lineage hashed) that is the same without them, line endings and
+// trailing spaces aside. A reply whose earlier text is not known (a replaced message object, a first sight) is not proven, so it counts as a real edit.
 export function onlyStorySuiteBlocksChanged(stored, chat) {
     const messages = Array.isArray(chat) ? chat : [];
     if (!Array.isArray(stored) || stored.length !== messages.length) return false;
@@ -79,14 +85,23 @@ export function onlyStorySuiteBlocksChanged(stored, chat) {
     for (let i = 0; i < stored.length; i += 1) {
         const message = messages[i];
         if (stored[i] === fingerprintMessage(message)) continue;
-        const prev = seenText.get(message)?.prev;
-        if (prev == null || stored[i] !== messageFingerprint({ is_user: message?.is_user, mes: prev }, false)) return false;
-        if (stripStorySuiteBlocks(prev) !== stripStorySuiteBlocks(message?.mes)) return false;
+        const past = seenText.get(message)?.past || [];
+        const was = past.findLast(text => stored[i] === messageFingerprint({ is_user: message?.is_user, mes: text }, false));
+        if (was == null || storyTextOf(was) !== storyTextOf(message?.mes)) return false;
         changed = true;
     }
     return changed;
 }
 
+// (EDITKEEP3) A real edit moved a reply to a new key and its block is no longer in its text (NSD removed it on receipt): the capture NSD kept for that
+// same reply (same position, key before the edit, same parents) is applied again. `oldKeys`/`newKeys` are the lineage keys before and after the edit.
+// Any other reply (a different parent, a swipe, another position) gets nothing.
+export function priorCaptureFor(journal, messageId, oldKeys, newKeys) {
+    if (!Array.isArray(journal) || !Number.isInteger(messageId) || messageId < 0 || !oldKeys?.[messageId] || !newKeys?.[messageId]) return null;
+    if (messageId > 0 && oldKeys[messageId - 1] !== newKeys[messageId - 1]) return null;
+    const entry = journal.find(item => item?.parsed && item.messageId === messageId && item.key === oldKeys[messageId]);
+    return entry ? { parsed: structuredClone(entry.parsed), raw: '', watch: structuredClone(entry.watch || []), fills: structuredClone(entry.fills || {}), ...(entry.refreshes ? { refreshes: structuredClone(entry.refreshes) } : {}) } : null;
+}
 // Rewrites every stored lineage key from one lineage to another, in every persisted structure that
 // carries one, so checkpoints, the rollback journal and inline cards keep matching the chat.
 export function remapLineageKeys(state, fromLineage, toLineage) {

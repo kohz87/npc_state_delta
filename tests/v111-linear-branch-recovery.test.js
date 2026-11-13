@@ -9,6 +9,7 @@ import {
     ensureBranchParentAnchor,
     ensureRollbackJournalBaseline,
     lineageCheckpointKey,
+    lineageCheckpointKeys,
     recordBranchCheckpoint,
     reconcileBranchState,
 } from '../branch.js';
@@ -281,4 +282,36 @@ test('EDITKEEP remapping lineage keys carries the capture journal to the reply\'
     const state = { captureJournal: [{ messageId: 1, key: lineageCheckpointKey(from, 1), parsed: { npcs: [] }, fills: {} }] };
     remapLineageKeys(state, from, to);
     assert.equal(state.captureJournal[0].key, lineageCheckpointKey(to, 1));
+});
+
+// (EDITKEEP3) The owner's reply form (13 Nov): NSD removed the one-pass block on receipt, the text holds only Story Block's `cap:` comment.
+const ownerReply = lines => `Sieke flinched. "Wait. You're asking to register?"\n\nTemiwa stepped in.\n\n<!-- STORY_SUITE_V2 cap:chatter=8\n<Changes>\n+ person Sieke | temper: Anxious\n+ person Sister Temiwa | temper: Gentle\n${lines}\n</Changes>\n-->`;
+
+test('EDITKEEP3 several saves before the reconcile, or line endings and trailing spaces, still count as a hidden-blocks-only edit', async () => {
+    const { onlyStorySuiteBlocksChanged } = await import('../branch.js');
+    const chat = [user(0), { ...bot(1, 'x'), mes: ownerReply('- item Cane Sword | qty: 1') }];
+    const stored = chatLineage(chat);
+    chat[1].mes = ownerReply('- item Cane Sword | qty: 1\n+ item Oak Stick Dagger | qty: 1');
+    chatLineage(chat);                                  // an event computes the lineage after the first save
+    chat[1].mes = ownerReply('- item Cane Sword | qty: 1\n+ item Oak Cane Blade | qty: 1').replace(/\n/g, '\r\n') + '  \n';
+    assert.equal(onlyStorySuiteBlocksChanged(stored, chat), true);
+    chat[1].mes = chat[1].mes.replace('Temiwa stepped', 'Temiwa left');
+    assert.equal(onlyStorySuiteBlocksChanged(stored, chat), false, 'a prose change on top is a real edit');
+});
+
+test('EDITKEEP3 priorCaptureFor returns the same reply\'s stored capture only', async () => {
+    const { priorCaptureFor } = await import('../branch.js');
+    const before = chatLineage([user(0), bot(1, 'A')]);
+    const after = chatLineage([user(0), bot(1, 'B')]);
+    const keys = lineageCheckpointKeys;
+    const entry = { messageId: 1, key: keys(before)[1], parsed: { npcs: [{ name: 'Sieke' }] }, watch: ['w'], fills: { n1: { role: 'clerk' } } };
+    const got = priorCaptureFor([entry], 1, keys(before), keys(after));
+    assert.equal(got.parsed.npcs[0].name, 'Sieke');
+    assert.equal(got.fills.n1.role, 'clerk');
+    assert.notEqual(got.parsed, entry.parsed, 'a copy');
+    assert.equal(priorCaptureFor([{ ...entry, key: 'other' }], 1, keys(before), keys(after)), null, 'another reply\'s key');
+    assert.equal(priorCaptureFor([{ ...entry, parsed: undefined }], 1, keys(before), keys(after)), null, 'a plain read mark has no capture');
+    const earlier = chatLineage([user(0), bot(1, 'A'), user(2), bot(3, 'C')]);
+    const earlierEdited = chatLineage([user(0), bot(1, 'A2'), user(2), bot(3, 'C')]);
+    assert.equal(priorCaptureFor([{ ...entry, messageId: 3, key: keys(earlier)[3] }], 3, keys(earlier), keys(earlierEdited)), null, 'parents changed: not the same reply');
 });
