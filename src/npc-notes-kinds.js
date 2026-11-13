@@ -48,7 +48,7 @@ function knowKind(current, line, ctx) {
 // taste: `~ taste` captures a likes/dislikes item. A refused change keeps the list; a mirrored one is kept and flagged.
 function tasteKind(current, line, ctx) {
     const out = addTaste(current, {
-        name: ctx.name, sign: line.sign, item: line.item, from: line.from, why: line.why, day: ctx.day, r: ctx.r, userText: ctx.userText,
+        name: ctx.name, sign: line.sign, item: line.item, from: line.from, why: line.why, day: ctx.day, r: ctx.r, userText: ctx.userText, rule: ctx.tasteRule,
     });
     if (out.status === 'refused') return { text: current, problem: out.problem };
     if (out.problem) ctx.notes.flag(out.problem, out.cue);

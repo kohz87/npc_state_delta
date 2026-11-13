@@ -20,7 +20,7 @@ import { normalizeAllowance } from './src/relationship-pacing.js';
 import { rememberCastAdmissions, seedCastAdmission } from './runtime-cast-sync.js';
 import { dossierFor, metWithEntry } from './src/cast-dossier.js';
 import { normalizeSourceOfTruth } from './suite-handshake.js';
-import { captureJournalEntry, recordAcceptedCapture, recordReadMark } from './runtime-narration.js';
+import { backgroundRuleOn, captureJournalEntry, recordAcceptedCapture, recordReadMark } from './runtime-narration.js';
 import { phraseMerged, scanMemoryFacts, scanMemoryParagraph } from './src/memory-fact-scan.js';
 export function createScanPart(rt, deps) {
     const { attachGeneratedSecrets, beginScanOperation, castList, clearInlineCardsAtMessage, commitBranchCheckpoint, drainPendingAutoScan, endScanOperation, ensureChatStateLoaded, forwardRelationshipChangesToHost, forwardSecretEventsToHost, getChatKey, getChatState, hostedMeters, hostedNotePromptOptions, hostedOnePass, hostedScanState, isHostSwipeActive, isScanBusy, keyAwayScanOptions, partyLevelList, keyKeepIds, hostedReadsFailed, narrationCaptureKey, narrationCaptureStats, noteScanFailure, persist, prepareCanonicalScanBase, processPendingBackfills, queuePendingAutoScan, recordInlineCardsInState, recordScanDiagnostics, refreshNpcFromChat, renderDossier, scanCanonicalBaseCurrent, scanInlineNpcIds, scannerPromptOptions, scanOperationCurrent, scanScenePresent, scenePresentAt, setChatState, storySuiteV2Meters, takeNarrationCapture, updateInjection } = deps;
@@ -119,6 +119,7 @@ export function createScanPart(rt, deps) {
         // prompt otherwise.
         const hostedNotes = hostedMeters();
         const noteOptions = hostedNotes && !capture ? hostedNotePromptOptions(state, settings, messageId) : {};
+        noteOptions.backgroundRule = backgroundRuleOn(Boolean(replayScope()), journaled);
         const eventWatch = capture ? (Array.isArray(capture.watch) ? capture.watch : []) : (noteOptions.eventWatch || []);
         // (memory facts) Pending facts of replies inside this call's own window may be phrased in it; a one-pass capture sends none.
         const memoryAsk = capture ? { text: '', handles: [] } : scanMemoryParagraph(state, settings, skippedWindow ? skippedWindow.readIds : ((manual || fullWindowScan) ? recentReplyIds(settings.scanDepth) : [messageId]), ctx.chat);
@@ -444,6 +445,5 @@ export function createScanPart(rt, deps) {
             for (const id of replayRefreshIds) await refreshNpcFromChat(id, { automatic: true, fillLooks: false }); // (ONEPASSCAPR2-1) replay accepted catch-up work in order
         }
     }
-
     return { scanNowInner, handleAssistantMessageReceivedInner };
 }

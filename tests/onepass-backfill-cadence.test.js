@@ -378,3 +378,27 @@ test('FOLLOWREFRESH: a new person\'s follow-up is read like a Refresh (memories,
     assert.deepEqual(r.live, { present: true, mood: 'calm', goal: 'guard the gate', status: 'standing watch', location: 'the gate' }, 'the same reply\'s one-pass live fields are kept');
     assert.deepEqual({ ...r.relationship }, { trust: 0, affection: 0, desire: 0, tension: 0 }, 'meters never move');
 });
+
+test('new-admission follow-up fills a grounded blank background once and refuses an unsupported one', () => {
+    const r = runCalls('background-gap', true, async ({ reply, mockState }) => {
+        const prompts = [];
+        mockState.quietResponder = async (args = {}) => {
+            if (!/backfill scanner/i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            const prompt = String(args.prompt || '');
+            prompts.push(prompt);
+            if (prompt.includes('Target NPC: Sieke ')) return JSON.stringify({ npcs: [{ name: 'Sieke', background: 'Guild clerk at the Guild hall; the Watch-Captain pressures her about stalled culling contracts.' }] });
+            return JSON.stringify({ npcs: [{ name: 'Nara', background: 'Born a princess of the sky kingdom.' }] });
+        };
+        const row = name => ({ name, present: true, identityKind: 'proper_name', dossierSignal: 'persistent', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO });
+        const first = await reply('Sieke is a Guild clerk at the Guild hall. The Watch-Captain pressures her about stalled culling contracts.', { npcs: [{ ...row('Sieke'), role: 'Guild clerk' }] });
+        const second = await reply('Nara waves.', { npcs: [row('Nara')] });
+        const state = globalThis.NPCStateDelta.getState();
+        return { first: first.all, second: second.all, prompts, sieke: state.npcs.find(n => n.name === 'Sieke')?.background, nara: state.npcs.find(n => n.name === 'Nara')?.background };
+    });
+    assert.equal(r.first.backfill, 1);
+    assert.equal(r.second.backfill, 1);
+    assert.equal(r.prompts.length, 2, 'one existing follow-up per admitted person');
+    assert.ok(r.prompts.every(prompt => /FILL BACKGROUND/.test(prompt)));
+    assert.match(r.sieke, /Guild clerk.*Guild hall.*Watch-Captain.*stalled culling contracts/);
+    assert.equal(r.nara || '', '', 'unsupported facts cannot establish a background');
+});

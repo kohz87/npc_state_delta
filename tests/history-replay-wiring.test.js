@@ -448,7 +448,7 @@ test('parity: a captured one-pass reply (memory, tie string, edge) replays to th
         // An accepted admission fill: the backfill answers for the person asked, with a look.
         mockState.quietResponder = async (args = {}) => {
             const asked = (/backfill scanner/i.test(String(args.systemPrompt || '')) ? String(args.prompt || '').match(/^(?:Requested|Target) NPC: (.+?)(?: [(].*)?$/m)?.[1] : undefined);
-            return asked ? JSON.stringify({ npcs: [{ name: asked, present: true, overallAppearance: 'Human woman. Dark hair, wide brown eyes.', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : scanner(args);
+            return asked ? JSON.stringify({ npcs: [{ name: asked, present: true, ...(asked === 'Sieke' ? { background: 'A clerk at the guild desk.' } : {}), overallAppearance: 'Human woman. Dark hair, wide brown eyes.', relationshipImpact: 'none', relationshipDelta: ZERO }] }) : scanner(args);
         };
         const row = { name: 'Sieke', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'clerk', directInteraction: true, present: true, role: 'Clerk', species: 'Human', gender: 'female',
             memories: ['Registered Astra at the guild desk.'], keyRelationships: 'Sister Temiwa — novice | brings bread', relationshipImpact: 'none', relationshipDelta: ZERO };
@@ -456,6 +456,8 @@ test('parity: a captured one-pass reply (memory, tie string, edge) replays to th
         await h.turn('Go on.', `Sieke stamps a form.${block({ npcs: [{ name: 'Sieke', present: true, memories: ['Stamped Astra\'s form while the novice watched.'], relationshipImpact: 'none', relationshipDelta: ZERO }] })}`);
         const live = h.stable(h.runtime.getState());
         h.check(live.npcs.find(npc => npc.name === 'Sieke')?.memories?.length >= 2, 'the live run kept both memories');
+        h.equal(live.npcs.find(npc => npc.name === 'Sieke')?.background, 'A clerk at the guild desk.', 'the grounded admission follow-up filled background');
+        h.check(h.runtime.getState().captureJournal.some(entry => entry.backgroundRule === 1), 'the reply carries the background rule mark');
         const catchUp = h.controller();
         catchUp.rebuild({ replies: null });
         await catchUp.idle();
@@ -492,12 +494,16 @@ test('parity: a scanner-read reply with a string tie and an underscore-id edge r
     runScenario('scanner-new-shapes', async h => {
         const ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
         const row = (name, extra = {}) => ({ name, present: true, role: 'regular', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO, ...extra });
+        const prompts = [];
         h.mockState.quietResponder = async (args = {}) => {
             if (!/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            prompts.push(String(args.prompt || ''));
             return JSON.stringify({ npcs: [row('Sister Chris'), row('Sieke', { keyRelationships: 'Sister Chris — novice | brings bread' })], keyRelationshipEdges: [{ from: 'npc_sieke', to: 'npc_sister_chris', aToB: 'friend', bToA: 'friend' }] });
         };
         await h.turn('Hello.', 'Sieke and Sister Chris talk at the desk, mark-1.');
         const live = h.stable(h.runtime.getState());
+        h.check(prompts[0].includes('background in npcs[]'), 'the live scan used the new instruction');
+        h.check(h.runtime.getState().captureJournal.some(entry => entry.backgroundRule === 1), 'the scanner read has the new rule mark');
         const sieke = live.npcs.find(npc => npc.name === 'Sieke');
         h.check(sieke?.keyRelationships?.some(text => /^Sister Chris — /.test(text)), `the live run read the string tie: ${JSON.stringify(sieke?.keyRelationships)}`);
         const catchUp = h.controller();
@@ -511,9 +517,11 @@ test('parity: a scanner-read reply with a string tie and an underscore-id edge r
         delete saved.captureJournal;
         await h.runtime.installState(saved);
         h.check(!h.runtime.getState().captureJournal?.length, 'the journal is gone, like an old save');
+        const beforeOld = prompts.length;
         const old = h.controller();
         old.rebuild({ replies: null });
         await old.idle();
+        h.check(prompts.slice(beforeOld).every(prompt => !prompt.includes('background in npcs[]')), 'the old reply uses the old scanner wording');
         h.equal(h.runtime.getState().npcs.find(npc => npc.name === 'Sieke').keyRelationships, [], 'an old reply keeps its old bytes: the string tie is still not read');
     });
 });

@@ -36,6 +36,7 @@ export function buildScannerPrompt({
     layeredSecrets = false,
     eventWatch = null,
     earlierOnly = false,
+    backgroundRule = true,
 }) {
     const baseline = normalizeRelationshipBaseline(relationshipBaseline);
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -244,7 +245,7 @@ Admission: ${admissionPolicy}${fullScanRule}
 Rules:
 1. ${narrationCapture ? 'Exclude the player, the character you play, extras.' : `Exclude player (${userName}), main speaker (${charName}), extras.`}
 2. EXISTING: match id/name/alias/role. Return compact JSON deltas: changed fields only; omitted persist. Identity promotion: role/interim dossier + grounded proper name => MUST reuse id; old label in aliases; identityKind:"proper_name"; never duplicate/downgrade.
-3. NEW/CANDIDATE: include name,identityKind,dossierSignal,dossierReason,sameIndividual,directInteraction,present,worldActive. Dossier-worthy NEW: populate every grounded field now; directInteraction affects admission/relationship only, NEVER enrichment. Incidental role candidates may stay lightweight.
+3. NEW/CANDIDATE: include name,identityKind,dossierSignal,dossierReason,sameIndividual,directInteraction,present,worldActive. Dossier-worthy NEW: populate every grounded field now${backgroundRule ? ', including background in npcs[] from established role, workplace, history or ongoing circumstances; omit if none, never invent.' : ';'} directInteraction affects admission/relationship only, NEVER enrichment. Incidental role candidates may stay lightweight.
 4. Candidates are not dossiers. sameIndividual=true only when proven. Use narration, World State, durable Inner Chatter; proper names there MUST be returned even when prose uses role.
 5. Return ONLY observed/new/meaningfully changed NPCs; new grounded durable profile facts count as changes. present=true only latest-scene physical presence; World State/Inner Chatter alone never presence. worldActive=true only explicit current off-screen activity. Inner Chatter supports durable facts, not transient monologue.
 6. Goal/status/mood/location are LIVE: output goal,goalState,status,statusState,mood,moodState,location,locationState as needed; actively reassess each returned EXISTING NPC every scan. Unchanged -> omit; changed -> replace; ended mood/goal/status -> matching *State:"clear". Location=current/last reliable; locationState:"clear" only when old place explicitly obsolete and replacement unknown. Off-screen/no evidence alone never clears it. Never use "Unknown". With a new mood also moodV,moodA,moodD: whole -3..3 (unpleasant..pleasant, slack..keyed up, cornered..in control).

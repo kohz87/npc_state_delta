@@ -1649,7 +1649,7 @@ test('scanner context includes mentioned/recent NPC details but not the whole ro
     const prompt = buildScannerPrompt({ transcript: 'Marris hands Aris the registration form.', existingNpcs: roster });
     assert.match(prompt, /MARRIS_VISUAL/);
     assert.doesNotMatch(prompt, /UNIQUE_VISUAL_1_/);
-    assert.ok(prompt.length < 11500, `scanner prompt should stay compact, got ${prompt.length} chars`);
+    assert.ok(prompt.length < 11500 + 127, `scanner prompt should stay compact with the approved background rule (+127), got ${prompt.length} chars`);
 });
 
 test('existing scanner deltas may use dossier id without repeating name or unchanged profile fields', () => {
@@ -1832,7 +1832,7 @@ test('routine scanner prompt has bounded overhead and delta/profile tiers', () =
     // 1.0.99 adds the user-authorized "if no named forms" qualifier to the Appearance rule; cleanup
     // Owner-approved profile style line (~350 chars) added to the routine scanner prompt.
     // step 12 the caps sentence at the stored limits (a few characters more).
-    assert.ok(overhead < 8350, `routine scanner overhead should stay below 8350 chars after the bounded Appearance clarifications, stored-limit caps and the mood numbers (moodV/moodA/moodD, +115 chars), got ${overhead}`);
+    assert.ok(overhead < 8350 + 127, `routine scanner overhead includes the approved background rule (+127 chars), got ${overhead}`);
     assert.match(prompt, /Return compact JSON deltas/i);
     assert.match(prompt, /Existing relationship delta example/i);
     assert.match(prompt, /Relevant live context \(dynamic fields only\)/i);
