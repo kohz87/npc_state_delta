@@ -135,7 +135,7 @@ test('editor through the synthetic host: Player Dynamic, mood and memories lock;
 
 // Past length and dated memories (owner 12 Nov): a memory keeps up to 400 characters everywhere it applies; each NEW memory gets the reply and the
 // story date of that reply in a parallel map (memoryStamps), the memories list keeps its string shape, and live == replay.
-import { setStoryDateAtSource, buildInjection, buildScannerPrompt, DURABLE_PROFILE_LIMITS, stampChangedFields } from '../core.js';
+import { setStoryDateAtSource, storyDateTextAt, buildInjection, buildScannerPrompt, DURABLE_PROFILE_LIMITS, stampChangedFields } from '../core.js';
 
 const LONG = `${'Held the guild door against the flood crowd while Sister Temiwa carried the registry out, '.repeat(4)}and never spoke of it`.slice(0, 380);
 const clockAt = { 5: 'Icewane 27', 9: 'Icewane 29' };
@@ -204,5 +204,45 @@ test('Dated memories: live and replay give the same stamp (the date comes from t
         const edited = stampChangedFields(live, { ...live, memories: [...live.memories, 'Wrote a letter home'] }, { turn: 5, message: 9 });
         assert.deepEqual(edited.memoryStamps[Object.keys(live.memoryStamps)[0]], { m: 5, d: 'Icewane 27' });
         assert.deepEqual(Object.values(edited.memoryStamps).map(stamp => stamp.d).sort(), ['Icewane 27', 'Icewane 29']);
+    } finally { setStoryDateAtSource(null); }
+});
+
+// (memory dates, every path) The cast first meeting, the reader's own memory edit and a Refresh/follow-up merge all stamp a new memory with its
+// reply and that reply's story date; a memory already stored undated stays undated on every one of them.
+import { applyNpcMemories, firstMeetingCandidates } from '../src/memory-fact-apply.js';
+import { stampMemories } from '../core-record-shared.js';
+
+test('Dated memories: the cast first meeting carries the first-meeting reply and its story date (met.on is minutes, never the date text)', () => {
+    setStoryDateAtSource(index => clockAt[index] ?? '');
+    try {
+        const filled = { id: 'npc_yun', name: 'Yunyun', present: true, memories: [] };
+        const meeting = firstMeetingCandidates({ ...filled }, { ...filled, present: true, location: 'Axel' }, { facts: { source: 'chat-1' }, R: 9, player: 'Kazuma' });
+        assert.equal(meeting.length, 1);
+        const date = storyDateTextAt(9);   // what runtime-cast-sync.js now passes: the reply's date, not person.met.on (a number of minutes)
+        assert.equal(date, 'Icewane 29');
+        meeting[0].date = date;
+        applyNpcMemories(filled, filled, {}, { candidates: meeting });
+        const stamps = stampMemories(filled, filled, 9, () => date);
+        assert.deepEqual(Object.values(stamps), [{ m: 9, d: 'Icewane 29' }]);
+        assert.equal(Object.values(filled.memoryFacts.entries)[0].d, 'Icewane 29');
+    } finally { setStoryDateAtSource(null); }
+});
+
+test('Dated memories: the reader\'s own memory edit is stamped with the latest reply and its date; an undated old memory stays undated', () => {
+    setStoryDateAtSource(index => clockAt[index] ?? '');
+    try {
+        const old = normalizeNpcRecord({ id: 'npc_myla', name: 'Myla', present: true, memories: ['Crossed the border at night with forged papers'] });
+        const edited = stampChangedFields(old, normalizeNpcRecord({ ...old, memories: [...old.memories, 'Promised to teach the boy letters'] }), { turn: 6, message: 9 });
+        assert.deepEqual(Object.values(edited.memoryStamps), [{ m: 9, d: 'Icewane 29' }], 'only the new one; the old undated one gets nothing');
+    } finally { setStoryDateAtSource(null); }
+});
+
+test('Dated memories: a Refresh / follow-up merge (a profileUpdates memory, sourceMessageId = the latest reply read) is stamped', () => {
+    setStoryDateAtSource(index => clockAt[index] ?? '');
+    try {
+        const base = normalizeNpcRecord({ id: 'npc_myla', name: 'Myla', present: true, memories: ['Crossed the border at night with forged papers'] });
+        const refreshed = mergeScanResult({ turn: 3, npcs: [base], candidates: [] }, { npcs: [], profileUpdates: [{ id: 'npc_myla', name: 'Myla', memories: ['Swore the archive oath in front of the tide court'] }] },
+            { turn: 4, sourceMessageId: 9, developmentContext: context }).state.npcs[0];
+        assert.deepEqual(Object.values(refreshed.memoryStamps), [{ m: 9, d: 'Icewane 29' }]);
     } finally { setStoryDateAtSource(null); }
 });
