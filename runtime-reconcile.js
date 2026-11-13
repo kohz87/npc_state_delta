@@ -376,15 +376,16 @@ export function createReconcilePart(rt, deps) {
         }
 
         const targetAssistant = findLatestAssistantAtOrAfter(result.divergence);
-        // (EDITKEEP) A real edit rolled the reply back: its hosted one-pass block, if the text still holds a valid one, is applied again the way the live
-        // capture did, so a dossier it created comes back; the catch-up scan below covers only what the block does not.
-        if (operation === 'edit' && targetAssistant >= 0 && hostedOnePass()) {
-            const found = textCapture(ctx.chat?.[targetAssistant]);
-            if (found) rt.narrationCaptures.set(narrationCaptureKey(key, targetAssistant), found);
-        }
         const shouldRescan = result.requiresRescan !== undefined ? Boolean(result.requiresRescan) : !result.exactRestored;
         if (rescan && shouldRescan && getSettings().branchRescan !== false && targetAssistant >= 0) {
             if (getChatKey() !== key) return result;
+            // (EDITKEEP) A real edit rolled the reply back: its hosted one-pass block, if the text still holds a valid one, is applied again the way the
+            // live capture did (the scan records it in the journal under the new key); the catch-up covers only what the block does not. Held only
+            // here, where the scan is certain to run.
+            if (operation === 'edit' && hostedOnePass()) {
+                const found = textCapture(ctx.chat?.[targetAssistant]);
+                if (found) rt.narrationCaptures.set(narrationCaptureKey(key, targetAssistant), found);
+            }
             if (isScanBusy(key)) queueBranchRescan(targetAssistant, 0, key);
             else await scanNow({ manual: false, messageId: targetAssistant });
         }

@@ -70,7 +70,13 @@ test('an edit of only the hidden Changes block is not a branch rollback; a prose
         chat[1].mes = `Fenna bows low.\n${block}\n${hidden('~ npc Fenna trust +1')}`;
         const found = narration.textCapture(chat[1]);
         if (found?.parsed?.npcs?.[0]?.name !== 'Fenna') throw new Error('the block in the edited text was not read: ' + JSON.stringify(found));
-        if (narration.captureJournalEntry({ captureJournal: [] }, chat, 1)?.parsed?.npcs?.[0]?.role !== 'innkeeper') throw new Error('the replay finds no capture for the edited reply');
+        // An old or swiped reply with a block in its text and no journal entry replays as before (historical read): no invented capture.
+        if (narration.captureJournalEntry({ captureJournal: [] }, chat, 1)) throw new Error('the journal invented a capture from the text');
+        const marked = { captureJournal: [] };
+        narration.recordReadMark(marked, chat, 1);
+        if (marked.captureJournal.length !== 1 || marked.captureJournal[0].parsed) throw new Error('the read mark was not written plain: ' + JSON.stringify(marked));
+        narration.recordAcceptedFill(marked, chat, 1, 'n1', { role: 'x' });
+        if (marked.captureJournal[0].fills?.n1?.role !== 'x') throw new Error('a fill was not kept in the journal');
         chat[1].mes = `Fenna bows low.\n<!--npc_state_delta {"npcs":[{"name":"Fe`;
         if (narration.textCapture(chat[1])) throw new Error('a cut-off block was read');
     });
