@@ -35,6 +35,7 @@ function messageFingerprint(message = {}, system = false) {
 }
 
 export function fingerprintMessage(message = {}) {
+    noteMessageText(message);
     // Destructive lineage is narrative-content based. SillyTavern send dates, generation IDs,
     // swipe indexes, and speaker labels are mutable host metadata and never define durable state.
     // So is the system flag: hiding a message (MemoryBooks and similar extensions set is_system on
@@ -47,6 +48,43 @@ export function fingerprintMessage(message = {}) {
 // The value earlier versions stored for a message whose system flag was set (hidden or system).
 export function legacySystemFingerprint(message = {}) {
     return messageFingerprint(message, true);
+}
+
+// Story Suite's own hidden blocks in a reply: the STORY_SUITE_V2 comment and Story Block's <Changes> family
+// (Changes, Changes-assist, Changes-assist-next, -story, -cut, -echo). Taken out, what is left is the story text
+// and any other extension's block (the hosted npc_state_delta one-pass block included).
+const STORY_SUITE_COMMENT = /<!--\s*STORY_SUITE_V2\b[\s\S]*?-->/gi;
+const STORY_SUITE_CHANGES = /<(Changes(?:-[a-z]+)*)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+export function stripStorySuiteBlocks(text) {
+    return String(text ?? '').replace(STORY_SUITE_COMMENT, '').replace(STORY_SUITE_CHANGES, '').replace(/\s+$/, '');
+}
+// What each message object said before its last change. fingerprintMessage notes the text every time a lineage is computed (it runs at every
+// receipt, load and event), so when a reply is edited in place the previous text is still known when the edit is reconciled.
+const seenText = new WeakMap();
+function noteMessageText(message) {
+    if (!message || typeof message !== 'object') return;
+    const mes = String(message.mes ?? '');
+    const seen = seenText.get(message);
+    if (!seen) seenText.set(message, { mes, prev: null });
+    else if (seen.mes !== mes) { seen.prev = seen.mes; seen.mes = mes; }
+}
+
+// True when the live chat differs from the stored lineage only in Story Suite's own hidden blocks: same length, at least one reply
+// differs, and each differing reply's previous text (the one the stored lineage hashed) is the same without them. A reply whose
+// previous text is not known (a replaced message object, a first sight) is not proven, so it counts as a real edit.
+export function onlyStorySuiteBlocksChanged(stored, chat) {
+    const messages = Array.isArray(chat) ? chat : [];
+    if (!Array.isArray(stored) || stored.length !== messages.length) return false;
+    let changed = false;
+    for (let i = 0; i < stored.length; i += 1) {
+        const message = messages[i];
+        if (stored[i] === fingerprintMessage(message)) continue;
+        const prev = seenText.get(message)?.prev;
+        if (prev == null || stored[i] !== messageFingerprint({ is_user: message?.is_user, mes: prev }, false)) return false;
+        if (stripStorySuiteBlocks(prev) !== stripStorySuiteBlocks(message?.mes)) return false;
+        changed = true;
+    }
+    return changed;
 }
 
 // Rewrites every stored lineage key from one lineage to another, in every persisted structure that
@@ -67,6 +105,8 @@ export function remapLineageKeys(state, fromLineage, toLineage) {
         entry.parentLineageKey = remap(entry.parentLineageKey);
     }
     if (state.rollbackHead && typeof state.rollbackHead === 'object') state.rollbackHead.lineageKey = remap(state.rollbackHead.lineageKey);
+    // Reply-owned capture inputs (the one-pass block a reply carried) follow their reply to its new key.
+    for (const entry of Array.isArray(state.captureJournal) ? state.captureJournal : []) if (entry) entry.key = remap(entry.key);
     for (const card of Array.isArray(state.inlineCards) ? state.inlineCards : []) {
         card.lineageKey = remap(card.lineageKey);
         if (Number.isInteger(card.messageId) && toLineage[card.messageId] && map.has(fromKeys[card.messageId])) card.fingerprint = toLineage[card.messageId];

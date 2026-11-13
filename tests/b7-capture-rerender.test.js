@@ -37,3 +37,47 @@ test('removing a capture block re-renders only a message that is already drawn',
         }
     });
 });
+
+// (EDITKEEP) The owner's shape: a reply with Story Block's hidden Changes block and a one-pass block; the edit changes only the Changes lines.
+test('an edit of only the hidden Changes block is not a branch rollback; a prose edit is still reconciled', () => {
+    runEditorHostScenario('edit-keeps-state', async () => {
+        const chat = mockState.context.chat;
+        const hidden = lines => `<!-- STORY_SUITE_V2\n<Changes>\n${lines}\n</Changes>\n-->`;
+        chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Hello?' });
+        chat.push({ is_user: false, is_system: false, name: 'Narrator', mes: `Fenna waves.\n${hidden('~ npc Fenna trust +1')}`, swipe_id: 0, swipes: [] });
+        eventSource.emit('message_received', 1);
+        await sleep(700);
+        const api = globalThis.NPCStateDelta;
+        const events = () => api.uiStatus().branchReconciliations || [];
+        const before = api.getState().lineage.slice();
+        chat[1].mes = `Fenna waves.\n${hidden('~ npc Fenna trust +1\n~ npc Fenna mood calm')}`;
+        eventSource.emit('message_edited', 1);
+        await sleep(600);
+        const after = api.getState().lineage;
+        if (JSON.stringify(after) === JSON.stringify(before) || after.length !== before.length) throw new Error('the stored lineage did not follow the edited text');
+        const kept = events().filter(event => event.operation === 'edit').at(-1);
+        if (!kept) throw new Error('no edit reconciliation was recorded: ' + JSON.stringify(events()));
+        if ((kept.invalidated || kept.action !== 'content-unchanged')) throw new Error('a Changes-only edit was treated as a rollback: ' + JSON.stringify(kept));
+        chat[1].mes = `Fenna bows.\n${hidden('~ npc Fenna trust +1')}`;
+        eventSource.emit('message_edited', 1);
+        await sleep(600);
+        const real = events().filter(event => event.operation === 'edit').at(-1);
+        if (!real || real.action === 'content-unchanged') throw new Error('a prose edit was not reconciled: ' + JSON.stringify(real));
+        // The rebuild after a real edit re-reads the reply's one-pass block from its text (valid and complete only), as the live capture did.
+        const narration = await import(pathToFileURL(path.join(extRoot, 'runtime-narration.js')).href);
+        mockState.extensionSettings.npc_state_delta.narrationCapture = true;
+        const block = '<!--npc_state_delta {"npcs":[{"name":"Fenna","present":true,"role":"innkeeper"}]} -->';
+        chat[1].mes = `Fenna bows low.\n${block}\n${hidden('~ npc Fenna trust +1')}`;
+        const found = narration.textCapture(chat[1]);
+        if (found?.parsed?.npcs?.[0]?.name !== 'Fenna') throw new Error('the block in the edited text was not read: ' + JSON.stringify(found));
+        // An old or swiped reply with a block in its text and no journal entry replays as before (historical read): no invented capture.
+        if (narration.captureJournalEntry({ captureJournal: [] }, chat, 1)) throw new Error('the journal invented a capture from the text');
+        const marked = { captureJournal: [] };
+        narration.recordReadMark(marked, chat, 1);
+        if (marked.captureJournal.length !== 1 || marked.captureJournal[0].parsed) throw new Error('the read mark was not written plain: ' + JSON.stringify(marked));
+        narration.recordAcceptedFill(marked, chat, 1, 'n1', { role: 'x' });
+        if (marked.captureJournal[0].fills?.n1?.role !== 'x') throw new Error('a fill was not kept in the journal');
+        chat[1].mes = `Fenna bows low.\n<!--npc_state_delta {"npcs":[{"name":"Fe`;
+        if (narration.textCapture(chat[1])) throw new Error('a cut-off block was read');
+    });
+});

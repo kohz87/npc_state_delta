@@ -5,11 +5,12 @@
 
 import { getContext } from '../../../extensions.js';
 import { messageGateSettled } from './src/transcript.js';
-import { BRANCH_SNAPSHOT_BUDGET_BYTES, BRANCH_SNAPSHOT_MAX_BYTES, ROLLBACK_JOURNAL_BUDGET_BYTES, chatLineage, firstLineageDivergence, reconcileBranchState, snapshotBranchState } from './branch.js';
+import { BRANCH_SNAPSHOT_BUDGET_BYTES, BRANCH_SNAPSHOT_MAX_BYTES, ROLLBACK_JOURNAL_BUDGET_BYTES, chatLineage, firstLineageDivergence, onlyStorySuiteBlocksChanged, reconcileBranchState, remapLineageKeys, snapshotBranchState } from './branch.js';
 import { getSettings } from './runtime-settings.js';
+import { textCapture } from './runtime-narration.js';
 
 export function createReconcilePart(rt, deps) {
-    const { branchInheritancePending, cancelScanOperation, deferUntilSettled, drainPendingAutoScan, ensureChatStateLoaded, getChatKey, getChatState, handleAssistantMessageReceived, hostChatComplete, isHostSwipeActive, isScanBusy, maybeInheritKnownBranch, persist, queuePendingAutoScan, renderDossier, scanNow, seedBranchTracking, setChatState, staleHostPrefix, updateInjection } = deps;
+    const { branchInheritancePending, cancelScanOperation, deferUntilSettled, drainPendingAutoScan, ensureChatStateLoaded, getChatKey, getChatState, handleAssistantMessageReceived, hostChatComplete, hostedOnePass, narrationCaptureKey, isHostSwipeActive, isScanBusy, maybeInheritKnownBranch, persist, queuePendingAutoScan, renderDossier, scanNow, seedBranchTracking, setChatState, staleHostPrefix, updateInjection } = deps;
     const { branchReconciliationEvents, assistantReceipts } = rt;
 
     const BRANCH_RECONCILIATION_EVENT_LIMIT = 16;
@@ -317,6 +318,15 @@ export function createReconcilePart(rt, deps) {
         }
         clearLoadingRetry(key);
         seedBranchTracking(before);
+        // (EDITKEEP) An edit that only touched Story Suite's own hidden blocks (<Changes>, <Changes-assist>, the STORY_SUITE_V2 comment) left the
+        // story and every other block as they were: nothing to roll back. The stored keys follow the new text and the dossiers stay.
+        if (String(operation || '').toLowerCase() === 'edit' && onlyStorySuiteBlocksChanged(before.lineage, ctx.chat || [])) {
+            remapLineageKeys(before, before.lineage, lineageBefore);
+            recordBranchReconciliationEvent({ key, reason, operation, result: { recoveryOperation: operation, lineageRelation: 'hidden-blocks-only', recoveryAction: 'content-unchanged', invalidated: false, divergence: -1 }, beforeNpcCount, previousLength, currentLength: lineageBefore.length });
+            persist(key);
+            await deliverLoadingReceipts(key, sequence);
+            return { state: before, divergence: -1, lineageRelation: 'hidden-blocks-only', recoveryOperation: 'edit', recoveryAction: 'content-unchanged', requiresRescan: false, invalidated: false, exactRestored: false, failClosed: false };
+        }
         // The dossier can be newer than this browser's chat: another session wrote it after messages
         // this chat has not loaded yet. Until the host reloads the chat, a local chat that is only a
         // shorter prefix of that dossier is stale, not a deletion, so it must not roll the dossier back.
@@ -369,6 +379,13 @@ export function createReconcilePart(rt, deps) {
         const shouldRescan = result.requiresRescan !== undefined ? Boolean(result.requiresRescan) : !result.exactRestored;
         if (rescan && shouldRescan && getSettings().branchRescan !== false && targetAssistant >= 0) {
             if (getChatKey() !== key) return result;
+            // (EDITKEEP) A real edit rolled the reply back: its hosted one-pass block, if the text still holds a valid one, is applied again the way the
+            // live capture did (the scan records it in the journal under the new key); the catch-up covers only what the block does not. Held only
+            // here, where the scan is certain to run.
+            if (operation === 'edit' && hostedOnePass()) {
+                const found = textCapture(ctx.chat?.[targetAssistant]);
+                if (found) rt.narrationCaptures.set(narrationCaptureKey(key, targetAssistant), found);
+            }
             if (isScanBusy(key)) queueBranchRescan(targetAssistant, 0, key);
             else await scanNow({ manual: false, messageId: targetAssistant });
         }

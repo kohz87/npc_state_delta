@@ -237,3 +237,48 @@ test('v1.0.11 production host events classify only swipes as sibling branching',
     assert.match(index, /branchReconciliations:/);
     assert.match(index, /failClosed: Boolean\(result\.failClosed\)/);
 });
+
+// (EDITKEEP) An edit that touches only Story Suite's own hidden blocks must not roll anything back; a real edit still does.
+const ONE_PASS = '<!--npc_state_delta {"npcs":[{"name":"Fenna","present":true}]} -->';
+const withChanges = lines => `The gate creaks open.\n${ONE_PASS}\n<!-- STORY_SUITE_V2\n<Changes>\n${lines}\n</Changes>\n<Changes-assist>\n${lines}\n</Changes-assist>\n-->`;
+
+test('EDITKEEP strip helper removes Story Suite blocks and keeps the story and the one-pass block', async () => {
+    const { stripStorySuiteBlocks } = await import('../branch.js');
+    const a = stripStorySuiteBlocks(withChanges('~ npc Fenna trust +1'));
+    assert.equal(a, stripStorySuiteBlocks(withChanges('~ npc Fenna trust +2\n+ item rope')));
+    assert.match(a, /The gate creaks open\./);
+    assert.match(a, /npc_state_delta/);
+    assert.doesNotMatch(a, /Changes|STORY_SUITE_V2/);
+    assert.equal(stripStorySuiteBlocks('x\n<Changes>\n~ a\n</Changes>\n<Changes-assist-next>\n~ b\n</Changes-assist-next>'), 'x');
+});
+
+test('EDITKEEP only Changes lines edited: no invalidation; prose or one-pass block edited: still diverges', async () => {
+    const { onlyStorySuiteBlocksChanged } = await import('../branch.js');
+    const edit = (mes, change) => {
+        const chat = [user(0), { ...bot(1, 'x'), mes: withChanges('~ npc Fenna trust +1') }];
+        const stored = chatLineage(chat);
+        chat[1].mes = change(mes);   // edited in place, as the host does
+        return { stored, chat };
+    };
+    let t = edit('', () => withChanges('~ npc Fenna trust +1\n~ npc Fenna mood calm'));
+    assert.equal(onlyStorySuiteBlocksChanged(t.stored, t.chat), true);
+    t = edit('', () => withChanges('~ npc Fenna trust +1'));
+    assert.equal(onlyStorySuiteBlocksChanged(t.stored, t.chat), false, 'nothing changed');
+    t = edit('', () => withChanges('~ x').replace('creaks', 'slams'));
+    assert.equal(onlyStorySuiteBlocksChanged(t.stored, t.chat), false, 'real prose edit');
+    t = edit('', () => withChanges('~ x').replace('present":true', 'present":false'));
+    assert.equal(onlyStorySuiteBlocksChanged(t.stored, t.chat), false, 'one-pass block edit');
+    t = edit('', () => withChanges('~ x'));
+    assert.equal(onlyStorySuiteBlocksChanged(t.stored, [...t.chat, user(2)]), false, 'length differs');
+    const unseen = [user(0), { ...bot(1, 'x'), mes: withChanges('~ other') }];
+    assert.equal(onlyStorySuiteBlocksChanged(chatLineage([user(0), { ...bot(1, 'x'), mes: withChanges('~ a') }]), unseen), false, 'previous text unknown: keep the protection');
+});
+
+test('EDITKEEP remapping lineage keys carries the capture journal to the reply\'s new key', async () => {
+    const { remapLineageKeys } = await import('../branch.js');
+    const from = chatLineage([user(0), bot(0, 'A')]);
+    const to = chatLineage([user(0), bot(0, 'B')]);
+    const state = { captureJournal: [{ messageId: 1, key: lineageCheckpointKey(from, 1), parsed: { npcs: [] }, fills: {} }] };
+    remapLineageKeys(state, from, to);
+    assert.equal(state.captureJournal[0].key, lineageCheckpointKey(to, 1));
+});
