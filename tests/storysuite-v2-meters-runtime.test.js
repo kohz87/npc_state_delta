@@ -579,7 +579,7 @@ test('hosted: the scan watches present people\'s event notes, and a story event 
         const prompts = [];
         mockState.quietResponder = async options => {
             { const text = String(options?.prompt ?? ''); if (text.startsWith('Private NPC dossier scanner.')) prompts.push(text); }
-            return JSON.stringify({ npcs: [{ ...row('Yunyun'), id }], secretEvents: ['s1', 's9'] });
+            return JSON.stringify({ npcs: [{ ...row('Yunyun'), id }], secretEvents: ['s1', 's9'], secretEventEvidence: { s1: 'dragged out in chains', s9: 'never said' } });
         };
         const sentBefore = mockState.sdk.sent.length;
         await turn('The duke is dragged out in chains.');

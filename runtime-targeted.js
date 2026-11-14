@@ -7,6 +7,7 @@ import { REFRESH_CHANGED_FIELDS } from './src/fields/registry.js';
 import { storyDayAt, tieDayAt, currentExclusions, refreshMessageGate, activeChat } from './src/transcript.js';
 import { BACKFILL_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { buildDossierImportPrompt, mergeScanResult, protectTerminalNpc } from './core.js';
+import { secretEventsShown } from './core-prompts-capture.js';
 import { chatLineage } from './branch.js';
 import { isScannerRoutingError } from './scanner-routing.js';
 import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
@@ -137,7 +138,7 @@ export function createTargetedPart(rt, deps) {
             // Sent only once the result is accepted (all or nothing): a pass discarded below tells the host nothing.
             const returnedRows = parsed?.npcs;
             const forwardNotes = () => {
-                if (job.notes?.watch?.length) forwardSecretEventsToHost(job.notes.watch, parsed?.secretEvents, operation.chatHead);
+                if (job.notes?.watch?.length) forwardSecretEventsToHost(job.notes.watch, secretEventsShown(parsed, prompt), operation.chatHead);
                 if (job.notes?.tastes && liveBefore) forwardTastesToHost(liveBefore, returnedRows, operation.chatHead);
             };
             const scoped = job.scope(parsed, { latest, liveBefore });

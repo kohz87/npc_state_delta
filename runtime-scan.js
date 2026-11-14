@@ -8,6 +8,7 @@ import { recentTranscript, recentUserDevelopmentContext, currentExchangeUserDeve
 import { FULL_SCAN_RESPONSE_LENGTH, SCAN_RESPONSE_LENGTH, generateParsedNpcJson } from './src/scanner-request.js';
 import { applyFocusedRelationshipDecisions, runFocusedRelationshipPass, suppressPrimaryRelationshipForFocusedDecisions } from './src/relationship-pass.js';
 import { prepareFullWindowRelationshipPayload, buildScannerPrompt, mergeScanResult, tagScanEvidence, resolveInterimIdentityPromotions, hasCompactMeguminWorldState, extractExplicitKeyRelationshipEdges } from './core.js';
+import { secretEventsShown } from './core-prompts-capture.js';
 import { chatLineage, fingerprintMessage, lineageCheckpointKey } from './branch.js';
 import { getSettings, effectiveCustomFieldNames } from './runtime-settings.js';
 import { clockNow, lineageMoved, notify, replayScope, setScanIndicator, latestMessageId } from './runtime-scan-helpers.js';
@@ -407,7 +408,7 @@ export function createScanPart(rt, deps) {
             // ONEPASSMISS-1: this notice describes a completed fallback, never a stale or failed scan.
             rt.lastCaptureFallback = fallback ? { chatKey, messageId } : null;   // the notice follows the latest committed scan only
             forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId, operation.chatHead, resolvedParsed?.profileUpdates, resolvedParsed?.npcs, Boolean(capture));
-            if (eventWatch.length) forwardSecretEventsToHost(eventWatch, resolvedParsed?.secretEvents ?? parsed?.secretEvents, operation.chatHead);
+            if (eventWatch.length) forwardSecretEventsToHost(eventWatch, secretEventsShown(resolvedParsed?.secretEvents ? resolvedParsed : parsed, transcript), operation.chatHead);
             persist();
             renderDossier();
             updateInjection();
