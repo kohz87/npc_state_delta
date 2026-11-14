@@ -1,6 +1,6 @@
 /* NPC State Delta dossier surface: panel lifecycle, shell, events, observers and portrait lightbox. */
 import { escapeHtml } from './src/util/html.js';
-import { OBSERVER_RETRY_LIMIT, OBSERVER_RETRY_MS, ROOT_ID, SETTINGS_ID, STYLE_ID } from './dossier-ui-constants.js';
+import { OBSERVER_RETRY_LIMIT, OBSERVER_RETRY_MS, REFRESH_DEBOUNCE_MS, REFRESH_MAX_WAIT_MS, REFRESH_STREAM_RECHECK_MS, ROOT_ID, SETTINGS_ID, STYLE_ID } from './dossier-ui-constants.js';
 import { createPortraitRefs } from './dossier-ui-html.js';
 import { STYLES } from './dossier-ui-styles.js';
 import { BOARD_STYLES } from './dossier-ui-styles-board.js';
@@ -23,6 +23,8 @@ export class DossierUiPanel {
         this.lastScreenSignature = '';
         this.dirtyWhileClosed = true;
         this.refreshQueued = false;
+        this.refreshTimer = null;
+        this.refreshFirstAsk = 0;
         this.legacyObserver = null;
         this.observerRetryTimer = null;
         this.observerAttempts = 0;
@@ -82,6 +84,8 @@ export class DossierUiPanel {
     }
 
     destroy() {
+        if (this.refreshTimer) clearTimeout(this.refreshTimer);
+        this.refreshTimer = null;
         this.legacyObserver?.disconnect?.();
         this.legacyObserver = null;
         if (this.observerRetryTimer) clearInterval(this.observerRetryTimer);
@@ -251,17 +255,37 @@ export class DossierUiPanel {
         catch { return ''; }
     }
 
-    // A window focus, a settings-panel mutation or a pin asks for a refresh; it draws only when the view token moved since the
-    // panel last drew (opening the panel always draws).
+    // A window focus, a settings-panel mutation or a pin asks for a refresh. The asks are coalesced: one check REFRESH_DEBOUNCE_MS after the
+    // last ask (but at most REFRESH_MAX_WAIT_MS after the first), and none while a reply is streaming (it is retried when the stream ends).
+    // The check (viewToken) is the costly part (host queries), so it runs once per burst, not once per DOM mutation or streamed token.
+    // The panel draws only when the view token moved since it last drew (opening the panel always draws).
     scheduleRefresh() {
-        if (this.refreshQueued) return;
+        const now = Date.now();
+        if (!this.refreshFirstAsk) this.refreshFirstAsk = now;
+        if (this.refreshTimer) clearTimeout(this.refreshTimer);
+        const wait = Math.max(0, Math.min(REFRESH_DEBOUNCE_MS, this.refreshFirstAsk + REFRESH_MAX_WAIT_MS - now));
         this.refreshQueued = true;
-        queueMicrotask(() => {
-            this.refreshQueued = false;
-            const token = this.viewToken();
-            if (token && token === this.renderedToken) return;
-            void this.refresh();
-        });
+        this.refreshTimer = setTimeout(() => this.runScheduledRefresh(), wait);
+    }
+
+    generationActive() {
+        try { return typeof this.api?.generationActive === 'function' && Boolean(this.api.generationActive()); }
+        catch { return false; }
+    }
+
+    runScheduledRefresh() {
+        this.refreshTimer = null;
+        if (!this.panelOpen) { this.refreshQueued = false; this.refreshFirstAsk = 0; this.dirtyWhileClosed = true; return; }
+        if (this.generationActive()) {   // streaming: look again later, draw nothing now
+            this.refreshFirstAsk = Date.now();
+            this.refreshTimer = setTimeout(() => this.runScheduledRefresh(), REFRESH_STREAM_RECHECK_MS);
+            return;
+        }
+        this.refreshQueued = false;
+        this.refreshFirstAsk = 0;
+        const token = this.viewToken();
+        if (token && token === this.renderedToken) return;
+        void this.refresh();
     }
 
     // After a draw: remember what it was drawn from, let go of pictures no dossier in the view shows any more, and drop the
