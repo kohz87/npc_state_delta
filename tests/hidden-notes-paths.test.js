@@ -7,6 +7,7 @@ import {
     NARRATION_CAPTURE_CONTEXT_MARKER, buildBackfillPrompt, buildNarrationCaptureParts, buildNarrationCapturePrompt, buildProfileRefreshPrompt, buildScannerPrompt,
 } from '../core.js';
 import { appendHiddenNotePrompt } from '../core-mechanics.js';
+import { secretEventsShown } from '../core-prompts-capture.js';
 
 // Hidden notes (layered notes for a new dossier, the story events of present people's locked notes) in every path that
 // builds a dossier or scans a present person, not only the ordinary scan: the one-pass block (full and compact rules),
@@ -167,7 +168,7 @@ const onePassScenario = async ({ reply, mockState }) => {
     const first = await reply('Yunyun, a young woman with crimson eyes, waves from the gate.', { npcs: [yunyun({ secrets: withEvent })] });
     const dossier = globalThis.NPCStateDelta.getState().npcs.find(npc => npc.name === 'Yunyun');
     const noteId = (dossier?.secrets ?? []).find(note => note.when)?.id ?? null;
-    const second = await reply('The duke is dragged out in chains.', { npcs: [{ ...yunyun(), id: dossier?.id }], secretEvents: ['s1', 's9'] });
+    const second = await reply('The duke is dragged out in chains.', { npcs: [{ ...yunyun(), id: dossier?.id }], secretEvents: ['s1', 's9'], secretEventEvidence: { s1: 'dragged out in chains', s9: 'never said' } });
     return {
         first, second, noteId,
         secrets: (dossier?.secrets ?? []).map(note => ({ meter: note.meter ?? null, when: note.when ?? null, id: /^sec_[0-9a-z]{8}$/.test(note.id) })),
@@ -217,7 +218,7 @@ test('hosted: a backfill of a new dossier asks for layered notes and keeps them;
             if (/reconciliation scanner/i.test(system)) {
                 asked.push({ kind: 'refresh', prompt });
                 // The answer holds no dossier change at all, only the event the story showed.
-                return JSON.stringify({ npcs: [], secretEvents: /s1 = Yunyun/.test(prompt) ? ['s1'] : [] });
+                return JSON.stringify({ npcs: [], secretEvents: /s1 = Yunyun/.test(prompt) ? ['s1'] : [], secretEventEvidence: { s1: 'dragged out in chains' } });
             }
             return '{"npcs":[]}';
         };
@@ -246,8 +247,8 @@ test('hosted: a backfill of a new dossier asks for layered notes and keeps them;
     assert.equal(refreshes[0].events, true, 'the backfill now runs on the first reply (own cadence), so the first Refresh already sees the event note');
     assert.equal(refreshes[0].layered, false, 'a Refresh never asks for layers');
     assert.equal(refreshes.at(-1).events, true, 'the later Refresh lists the event');
-    // The fake host never marks the note open, so each of the two Refreshes that now see the event sends the same open once.
-    assert.equal(out.opened.length, refreshes.length, 'each Refresh answer held only the event, and it was sent');
+    // The fake answers s1 every time, but only the later Refresh's window holds its quote ("dragged out in chains"): the earlier one is refused.
+    assert.equal(out.opened.length, refreshes.length - 1, 'only the Refresh whose window shows the quote sends the open');
     for (const sent of out.opened) {
         assert.deepEqual(sent.payload, { name: 'Yunyun', open: [out.noteId], by: 'story' });
         assert.deepEqual(sent.options, { background: true });
@@ -282,4 +283,61 @@ test('a backfill of a dossier that already has notes, and any pass without a hos
     });
     assert.ok(alone.calls >= 1, 'unhosted, the backfill still runs');
     assert.equal(alone.any, false, 'and has no word about hidden notes');
+});
+
+// ---- strict story events: the event as written, with a quote the code finds ----
+
+const PRESS = 'Sieke: Pressed about Auvoth\'s threats or why she is desperate';
+const LETTER = 'USER: I wait by the fire.\nASSISTANT: Sieke unfolds an Auvoth letter and reads it aloud: "He swears he will burn the dock if the debt is not paid."';
+const PRESSED = 'USER: "Why are you so desperate, Sieke? What did Auvoth threaten you with?"\nASSISTANT: Sieke flinches. "He swore he would burn the dock," she whispers.';
+
+test('the events rule asks for the event as written by its actor, with a quote per key; the schema text is the same in every path', () => {
+    for (const rule of [buildNarrationCaptureParts({ ...base, eventWatch: WATCH }).context, appendHiddenNotePrompt('P', { eventWatch: WATCH })]) {
+        assert.match(rule, /happens as written, by the actor it names \("pressed" needs someone to press that person on it\)/);
+        assert.match(rule, /the person raising the topic themselves, a mention, a hint or something about to happen does not/);
+        assert.match(rule, /"secretEventEvidence":\{"<key>":"short exact quote showing the event"\} for every key; no quote, no key\./);
+    }
+});
+
+test('secretEventsShown: the Sieke case (letter read aloud, nobody pressing) is refused by its quote; a real pressing is kept', () => {
+    assert.ok(PRESS);
+    // The model matched the topic: the quote it gives for "pressed" is not a pressing, and the line it names is not in the letter exchange.
+    assert.deepEqual(secretEventsShown({ secretEvents: ['s4'], secretEventEvidence: { s4: 'Why are you so desperate, Sieke?' } }, LETTER), []);
+    // A quote that is in the text but shows no pressing is the model's to get wrong; the prompt forbids it. A quote that IS the pressing line passes.
+    assert.deepEqual(secretEventsShown({ secretEvents: ['s4'], secretEventEvidence: { s4: 'Why are you so desperate, Sieke?' } }, PRESSED), ['s4']);
+});
+
+test('secretEventsShown: no evidence, a short or made-up quote, a non-string quote or a non-list answer is dropped; small punctuation differences and "..." parts are tolerated', () => {
+    const logged = [];
+    const original = console.debug;
+    console.debug = line => logged.push(String(line));
+    try {
+        assert.deepEqual(secretEventsShown({ secretEvents: ['s1'] }, PRESSED), [], 'no evidence at all');
+        assert.deepEqual(secretEventsShown({ secretEvents: ['s1'], secretEventEvidence: {} }, PRESSED), [], 'no quote for the key');
+        assert.deepEqual(secretEventsShown({ secretEvents: ['s1'], secretEventEvidence: { s1: 'Sieke slams the table' } }, PRESSED), [], 'made-up quote');
+        assert.deepEqual(secretEventsShown({ secretEvents: ['s1'], secretEventEvidence: { s1: 'Sieke' } }, PRESSED), [], 'too short to be a quote');
+        assert.deepEqual(secretEventsShown({ secretEvents: ['s1'], secretEventEvidence: { s1: 42 } }, PRESSED), [], 'not a string');
+        assert.deepEqual(secretEventsShown({ secretEvents: 's1', secretEventEvidence: { s1: 'Why are you so desperate' } }, PRESSED), [], 'not a list');
+        assert.deepEqual(secretEventsShown(null, PRESSED), []);
+        assert.equal(logged.filter(line => /refused/.test(line)).length, 5, 'each refused key is logged');
+        assert.deepEqual(secretEventsShown({ secretEvents: ['s1', 's2'], secretEventEvidence: { s1: '\u201cwhy are you so   desperate, sieke\u201d', s2: 'He swore\u2026 burn the dock' } }, PRESSED), ['s1', 's2'], 'quotes, case, spacing and an ellipsis are not mismatches');
+    } finally {
+        console.debug = original;
+    }
+});
+
+test('hosted one-pass: a key with no evidence quote, or a made-up one, opens no note; the same key with a real quote opens it', () => {
+    const out = runPath('onepass-evidence', {}, async ({ reply, mockState }) => {
+        await reply('Yunyun, a young woman with crimson eyes, waves from the gate.', { npcs: [yunyun({ secrets: withEvent })] });
+        const dossier = globalThis.NPCStateDelta.getState().npcs.find(npc => npc.name === 'Yunyun');
+        const sentOpens = () => mockState.sdk.sent.filter(item => item.type === 'npc.open').length;
+        const row = { ...yunyun(), id: dossier?.id };
+        await reply('The duke is dragged out in chains.', { npcs: [row], secretEvents: ['s1'] });
+        const bare = sentOpens();
+        await reply('The duke is dragged out in chains.', { npcs: [row], secretEvents: ['s1'], secretEventEvidence: { s1: 'the duke confesses to treason' } });
+        const made = sentOpens();
+        await reply('The duke is dragged out in chains.', { npcs: [row], secretEvents: ['s1'], secretEventEvidence: { s1: 'The duke is dragged out in chains.' } });
+        return { bare, made, real: sentOpens() };
+    });
+    assert.deepEqual(out, { bare: 0, made: 0, real: 1 });
 });

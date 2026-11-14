@@ -43,7 +43,33 @@ function eventWatchRule(eventWatch, { window = false } = {}) {
     const watch = watchItems(eventWatch);
     if (!watch.length) return '';
     const where = window ? 'the supplied story shows happened' : 'the CURRENT exchange clearly shows happened (never from earlier history, never a guess)';
-    return `STORY EVENTS to look for (present NPCs' hidden notes): ${watch.map(item => `${item.key} = ${item.name}: ${item.event}`).join(' | ')}. Return top-level "secretEvents":["<key>",...] with ONLY the keys whose event ${window ? where + ' (clearly, never a guess)' : where}; [] or omit when none.`;
+    return `STORY EVENTS to look for (present NPCs' hidden notes): ${watch.map(item => `${item.key} = ${item.name}: ${item.event}`).join(' | ')}. Return top-level "secretEvents":["<key>",...] with ONLY the keys whose event ${window ? where + ' (clearly, never a guess)' : where}; [] or omit when none. ${EVENT_STRICT_RULE}`;
+}
+
+// The event must happen as written, by the actor it names; each returned key carries a quote the code checks (secretEventsShown).
+const EVENT_STRICT_RULE = 'An event counts only when it happens as written, by the actor it names ("pressed" needs someone to press that person on it); the person raising the topic themselves, a mention, a hint or something about to happen does not. Also return "secretEventEvidence":{"<key>":"short exact quote showing the event"} for every key; no quote, no key.';
+
+// Lowercase letters and digits only: curly quotes, dashes, spacing and other punctuation never decide a match.
+const quoteForm = text => String(text ?? '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, '');
+const QUOTE_MIN = 8;   // fewer letters than this is not a quote
+
+/**
+ * The keys of a scan's `secretEvents` that are backed up: each needs a `secretEventEvidence` quote in the story text the scan
+ * read (user message + reply, or the window of a targeted pass), compared without case, spacing or punctuation; "..." in a
+ * quote joins parts that each must be found. A key with no quote, a short one or one not in the text is refused (debug log),
+ * so its note stays closed. `parsed` is the scan answer; returns the accepted keys.
+ */
+export function secretEventsShown(parsed, text) {
+    const keys = Array.isArray(parsed?.secretEvents) ? parsed.secretEvents.map(item => String(item ?? '')) : [];
+    const evidence = parsed?.secretEventEvidence && typeof parsed.secretEventEvidence === 'object' ? parsed.secretEventEvidence : {};
+    const haystack = quoteForm(text);
+    return keys.filter(key => {
+        const quote = evidence[key];
+        const parts = typeof quote === 'string' ? quote.split(/\.{3}|\u2026/).map(quoteForm).filter(Boolean) : [];
+        const shown = parts.length > 0 && parts.join('').length >= QUOTE_MIN && parts.every(part => haystack.includes(part));
+        if (!shown) console.debug(`[NPC State Delta] story event ${key} refused: ${typeof quote === 'string' && quote ? 'its quote is not in the exchange' : 'no evidence quote'}.`);
+        return shown;
+    });
 }
 
 /**
