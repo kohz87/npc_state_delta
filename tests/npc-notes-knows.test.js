@@ -166,3 +166,27 @@ test('knowRuleFor: a new line reads by the rule; a Re-read keeps a refused line 
     assert.equal(markKnowResult({ data: {} }, labels, KNOW_RULE).data.knowId, 'astra|fact 0');
     assert.deepEqual(markKnowResult({ data: {} }, labels, 0), { data: {} });
 });
+
+test('a how: already exactly saw/heard carries no mark: old kept lines keep their bytes on a Re-read', () => {
+    const standing = text => ({ domains: { npc: { npcs: { roeland: { knows: text } } } } });
+    const labels = { about: 'Astra', fact: 'fact 1', how: 'saw' };
+    const old = addKnow('', 'r1', [labels]).text;
+    assert.ok(!old.includes('rule'), 'a strict line stores no mark');
+    assert.equal(knowRuleFor(null, 'roeland', 'r1', labels), 0, 'new, exact word: no mark');
+    assert.equal(knowRuleFor(standing(old), 'roeland', 'r1', labels), 0, 'Re-read of an old kept line: no mark');
+    assert.equal(knowRuleFor(standing(old), 'roeland', 'r1', { ...labels, how: 'heard' }), 0);
+    assert.equal(addKnow(old, 'r1', [labels], { tolerant: knowRuleFor(standing(old), 'roeland', 'r1', labels) === KNOW_RULE }).text, old, 'same bytes');
+    assert.deepEqual(markKnowResult({ data: { a: 1 } }, labels, knowRuleFor(standing(old), 'roeland', 'r1', labels)), { data: { a: 1 } });
+});
+
+test('same reply: an exact line then a wordy line for the same fact: the Re-read does not widen the refused one', () => {
+    const standing = text => ({ domains: { npc: { npcs: { roeland: { knows: text } } } } });
+    const strict = { about: 'Astra', fact: 'fact 2', how: 'saw' };
+    const wordy = { about: 'Astra', fact: 'fact 2', how: 'seen and verified' };
+    const stored = addKnow('', 'r1', [strict]).text; // the old read kept the first and refused the second
+    assert.equal(knowRuleFor(standing(stored), 'roeland', 'r1', wordy), 0, 'the entry is the strict line, not a tolerant one');
+    const marked = addKnow('', 'r1', [wordy], { tolerant: true }).text;
+    assert.equal(knowRuleFor(standing(marked), 'roeland', 'r1', wordy), KNOW_RULE, 'a tolerant entry replays tolerant');
+    const both = addKnow(marked, 'r1', [{ about: 'Astra', fact: 'other', how: 'saw', rule: undefined }, ...readKnows(marked)], {}).text;
+    assert.equal(knowRuleFor(standing(both), 'roeland', 'r1', wordy), KNOW_RULE, 'the mark survives a passed-through same-reply set');
+});

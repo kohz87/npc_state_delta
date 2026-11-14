@@ -151,7 +151,6 @@ const GRAMMAR = Object.freeze({
     tie: '~ tie Name | with: Other | tag: +ally, +rival or +owes (-tag drops it; write it when two people ally, rival or owe; e.g. ~ tie Person A | with: Person B | tag: +owes)',
 });
 
-/** The `kinds` entries for the host: every note kind handled by `capture` and behind the notes feature. */
 /** The rule marks of a note line: `rule` (taste or know, 0 when strict) and the matching mark for the result. */
 export function noteRule(kind, ctx, key, reply, labels) {
     return kind === 'taste' ? tasteRuleFor(ctx.standing, key, reply, labels.likes ?? labels.dislikes, ctx.standingReceipts)
@@ -160,6 +159,7 @@ export function noteRule(kind, ctx, key, reply, labels) {
 export function markNote(kind, result, labels, rule) {
     return kind === 'taste' ? markTasteResult(result, labels.likes ?? labels.dislikes, rule) : kind === 'know' ? markKnowResult(result, labels, rule) : result;
 }
+/** The `kinds` entries for the host: every note kind handled by `capture` and behind the notes feature. */
 export const noteKinds = capture => Object.fromEntries(Object.keys(KINDS).map(kind => [kind, { grammar: GRAMMAR[kind], apply: capture, feature: FEATURE_NOTES }]));
 export const isNoteKind = kind => Object.hasOwn(KINDS, kind);
 export const noteField = kind => KINDS[kind]?.field ?? null;
@@ -172,7 +172,7 @@ export function noteLine(kind, labels, { current = '', r = null, day = null } = 
     if (kind === 'know') {
         if (yes(labels.told)) return { open: true, about: labels.about, fact: labels.fact };
         // One call per line, but addKnow keeps one reply's entries as a set: hand it the reply's earlier lines too.
-        const same = readKnows(current).filter(entry => entry.r === r).map(({ about, fact, how, day: at, secret }) => ({ about, fact, how, day: at, secret }));
+        const same = readKnows(current).filter(entry => entry.r === r).map(({ about, fact, how, day: at, secret, rule }) => ({ about, fact, how, day: at, secret, rule }));
         return { lines: [...same, { about: labels.about, fact: labels.fact, how: labels.how, day, secret: yes(labels.secret) }] };
     }
     if (kind === 'taste') {
