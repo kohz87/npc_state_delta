@@ -483,7 +483,7 @@ test('parity: a captured one-pass reply (memory, tie string, edge) replays to th
     runScenario('captured-parity', capturedParity);
 });
 
-test('hosted (a Story Block v2 host and the adapter loaded): parity: a captured one-pass reply (memory, tie string, edge) replays to the live dossiers; the old reply read again keeps its bytes', { todo: 'blocked: a hosted replay scan reads a Proxy over the frozen adapter (runtime-scan-helpers.js:44, src/storysuite-v2.js:212): its own fix task' }, () => {
+test('hosted (a Story Block v2 host and the adapter loaded): parity: a captured one-pass reply (memory, tie string, edge) replays to the live dossiers; the old reply read again keeps its bytes', () => {
     runScenario('captured-parity-hosted', capturedParity, { hosted: true });
 });
 
@@ -541,8 +541,30 @@ test('parity: a scanner-read reply with a string tie and an underscore-id edge r
     runScenario('scanner-new-shapes', scannerNewShapes);
 });
 
-test('hosted (a Story Block v2 host and the adapter loaded): parity: a scanner-read reply with a string tie and an underscore-id edge replays to the live dossier; an old reply (no journal entry) keeps its old reading', { todo: 'blocked: a hosted replay scan reads a Proxy over the frozen adapter (runtime-scan-helpers.js:44, src/storysuite-v2.js:212): its own fix task' }, () => {
+test('hosted (a Story Block v2 host and the adapter loaded): parity: a scanner-read reply with a string tie and an underscore-id edge replays to the live dossier; an old reply (no journal entry) keeps its old reading', () => {
     runScenario('scanner-new-shapes-hosted', scannerNewShapes, { hosted: true });
+});
+
+// A hosted replay (Story Block host + adapter loaded; the adapter is frozen) whose scan admits a new person must finish `done` and keep the dossier:
+// the replay's adapter view used to be a Proxy over the frozen adapter, which threw on packNames ("dossier scan failed").
+test('hosted replay: a replayed scan that admits a new person finishes done and keeps the dossier; the frozen adapter is read as of the reply', () => {
+    runScenario('hosted-replay-admits', async h => {
+        const ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
+        h.mockState.quietResponder = async (args = {}) => {
+            if (!/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            return JSON.stringify({ npcs: [{ name: 'Mara', present: true, role: 'regular', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO, personality: 'dry, watchful', about: 'keeps the ferry' }] });
+        };
+        await h.turn('Hello.', 'Mara keeps the ferry and nods at you.');
+        const live = h.stable(h.runtime.getState());
+        h.check(live.npcs.some(npc => npc.name === 'Mara'), 'the live scan admitted Mara');
+        const catchUp = h.controller();
+        catchUp.rebuild({ replies: null });
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'the hosted replay finished done, not failed');
+        const replayed = h.stable(h.runtime.getState());
+        h.check(replayed.npcs.some(npc => npc.name === 'Mara'), 'the dossier is kept after the replay');
+        h.equal(replayed.npcs.map(npc => npc.name), live.npcs.map(npc => npc.name), 'same people live and replayed');
+    }, { hosted: true });
 });
 
 test('ONEPASSMISS-1: replay does not invent missing-capture fallbacks for old replies', () => {

@@ -57,8 +57,23 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
         const size = (parts.length ? parts : [element]).reduce((sum, node) => sum + String(node?.textContent ?? '').length, 0);
         const before = growth.id === id ? growth.size : null;
         if (inside) growth = { id, size };
-        const grew = inside && before !== null && size > before && mutations.some(m => m.addedNodes?.length > 0);
+        const grew = inside && before !== null && size > before && mutations.some(m => m.addedNodes?.length > 0) && onlyAppends(mutations);
         return grew ? id : null;
+    }
+
+    // True growth: per changed parent, whatever was removed is the start of what was added (the host re-sets a text node while appending: "Hel" out,
+    // "Hello" in). A longer replacement with other text, or a removal of something else in the same delivery, is not growth.
+    function onlyAppends(mutations) {
+        const text = list => Array.from(list || [], node => String(node?.textContent ?? '')).join('');
+        const perTarget = new Map();
+        for (const m of mutations) {
+            const entry = perTarget.get(m.target) || { added: '', removed: '', bare: false };
+            entry.added += text(m.addedNodes);
+            entry.removed += text(m.removedNodes);
+            if (Array.from(m.removedNodes || []).some(node => node?.nodeType !== 3 && !String(node?.textContent ?? ''))) entry.bare = true;   // an element without text went away
+            perTarget.set(m.target, entry);
+        }
+        return [...perTarget.values()].every(e => !e.bare && e.added.startsWith(e.removed));
     }
 
     function inlineMountNeedsRepair() {
