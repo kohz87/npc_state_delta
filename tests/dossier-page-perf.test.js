@@ -8,6 +8,7 @@ import { runHostScenario } from './helpers/host-scenario.js';
 // runtime's read), and a focus or a settings-panel mutation draws again only when something the panel shows changed.
 
 const picture = tag => `data:image/jpeg;base64,${Buffer.from(`${tag}:${'x'.repeat(3000)}`).toString('base64')}`;
+const settle = () => new Promise(resolve => setTimeout(resolve, 320));   // past the refresh debounce
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 // Images in markup the stub DOM was given, as the browser would hold them: keyed ones with no src until the controller sets it.
@@ -124,31 +125,31 @@ test('a focus or a settings-panel mutation draws the dossier panel again only wh
         assert.equal(observer.taken, 1, 'the mutations queued up to the draw (its own included) are dropped');
 
         ui.boundFocus();
-        await flush();
+        await settle();
         observer.callback([{ type: 'childList' }]);
-        await flush();
+        await settle();
         observer.callback([{ type: 'attributes' }]);
-        await flush();
+        await settle();
         assert.deepEqual([draws, counts.reads], [1, 1], 'nothing changed: no state read, no draw');
 
         token = 'chat-1|2';
         ui.boundFocus();
-        await flush();
+        await settle();
         assert.deepEqual([draws, counts.reads], [2, 2], 'a focus after a change draws');
         token = 'chat-1|3';
         observer.callback([{ type: 'childList' }]);
-        await flush();
+        await settle();
         assert.deepEqual([draws, counts.reads], [3, 3], 'so does a settings mutation after a change');
         observer.callback([{ type: 'childList' }]);
-        await flush();
+        await settle();
         assert.equal(draws, 3);
 
         // A runtime without the token (an older one) draws on every request, as before.
         delete api.dossierViewToken;
         ui.boundFocus();
-        await flush();
+        await settle();
         ui.boundFocus();
-        await flush();
+        await settle();
         assert.equal(draws, 5);
     } finally {
         globalThis.document = saved.document;
@@ -210,4 +211,35 @@ test('runtime: getDossierState copies no portrait picture; dossierViewToken hold
     assert.equal(out.tokenStable, true, 'reads do not move the token');
     assert.equal(out.tokenMovesOnSettings, true, 'the configured fields are part of it');
     assert.equal(out.tokenMovesOnWrite, true, 'a state write moves it');
+});
+
+test('refresh asks coalesce: a burst of mutations costs one token check, and none while a reply streams', async () => {
+    const saved = { document: globalThis.document, MutationObserver: globalThis.MutationObserver };
+    globalThis.document = { getElementById: () => null };
+    try {
+        let tokenReads = 0;
+        let streaming = true;
+        const api = {
+            dossierViewStatus: () => ({ chatKey: 'chat-1', hydrationStatus: 'ready' }),
+            dossierViewToken: () => { tokenReads += 1; return `t${tokenReads}`; },
+            generationActive: () => streaming,
+            getDossierState: () => ({ npcs: [{ id: 'a', name: 'Aster' }] }),
+        };
+        const ui = new DeltaDossierUi(api);
+        let draws = 0;
+        ui.root = { querySelector: () => null };
+        ui.renderFromProjection = () => { draws += 1; };
+        ui.panelOpen = true;
+        for (let i = 0; i < 200; i += 1) ui.scheduleRefresh();   // 200 streamed tokens / keystrokes
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        assert.deepEqual([tokenReads, draws], [0, 0], 'streaming: no token check, no draw');
+        streaming = false;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        assert.equal(draws, 1, 'one draw once the stream ended');
+        assert.ok(tokenReads <= 2, `one burst, about one token check (${tokenReads})`);
+        clearTimeout(ui.refreshTimer);
+    } finally {
+        globalThis.document = saved.document;
+        globalThis.MutationObserver = saved.MutationObserver;
+    }
 });

@@ -193,6 +193,8 @@ export function createPublicApiStatePart(deps) {
         }
         return { turn: state.turn, reply: latestReplyIndex(), npcs: viewNpcCopies(scenePresenceView(hostedMeterView(state.npcs))), portraitAssets: {}, formPortraits, customFieldNames: [...effectiveCustomFieldNames()], ...dossierHostViews(state) };
     },
+    /** (perf) True while a reply is streaming: the dossier panel draws nothing then and catches up when it ends. */
+    generationActive: () => Boolean(chatContext()?.streamingProcessor),
     /** (perf) What the dossier panel needs before it draws: the chat and its load state (uiStatus also builds branch diagnostics). */
     dossierViewStatus: () => {
         const key = getChatKey();
