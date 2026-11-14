@@ -1,6 +1,7 @@
 // What the hosted slice does with a held event: the reader's words for the receipt and the cut of a forwarded scanner change to a
 // lower tier, and the reply's last-event record (lastEvent: readEvent, nextEvent, eventSummary, askedOf). A pure part of the pacing rule (src/relationship-pacing.js, which holds the count); never imports npc-meters.js.
 import { RELATIONSHIP_KEYS, RELATIONSHIP_MILESTONE_REQUIREMENTS, RELATIONSHIP_MILESTONE_THRESHOLDS } from '../core-relationship-model.js';
+import { DAY_MINUTES } from './npc-meters-config.js';
 import { PACING_TIERS } from './relationship-pacing.js';
 import { describeGate, gateEventProblems, normalizeApproachKind } from '../npc-meters-gate.js';
 
@@ -13,10 +14,22 @@ const list = words => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and 
  */
 export const dayRuleFor = (ctx, key) => (!ctx?.standing || (Array.isArray(ctx.standingReceipts) && ctx.standingReceipts.some(item => item?.data?.key === key && item.data.dayRule === 1)) ? 1 : 0);
 
+/**
+ * The clock readers of one npc part: `now` is the story minute in effect at the line (the day rule); without it, the minute before the reply
+ * (hooks.startTime). clockDay is null without a clock or when Delta owns the calendar; dateOf is the dossier's words for that day ('' without).
+ */
+export function clockReaders(hooks, call) {
+    const clockMinutes = (at, now = null) => (call(hooks.calendarOwn, false) === true ? null : Number.isInteger(now) ? now : (m => (Number.isInteger(m) ? m : null))(call(hooks.startTime, null, at)));
+    const clockDay = (at, now = null) => { const minutes = clockMinutes(at, now); return minutes === null ? null : Math.floor(minutes / DAY_MINUTES); };
+    const dateOf = (at, now = null) => (clockDay(at, now) === null ? '' : Number.isInteger(now) ? call(hooks.dateAt, '', now) : call(hooks.startDate, '', at));
+    return { clockMinutes, clockDay, dateOf };
+}
+
 /** The reader's words for a held event ('' when it counted as asked): "major counted as meaningful: today's major is used". */
-export function pacingNote(tier, used, skipped, date = '') {
+export function pacingNote(tier, used, skipped, date = '', day = null) {
     if (!skipped.length || used === tier) return '';
-    const full = `today's ${list(skipped)} ${skipped.length > 1 ? 'are' : 'is'} used${date ? ` on ${date}` : ''}`;
+    const when = date || (Number.isInteger(day) ? `story day ${day + 1}` : '');
+    const full = `today's ${list(skipped)} ${skipped.length > 1 ? 'are' : 'is'} used${when ? ` on ${when}` : ''}`;
     return used ? `${tier} counted as ${used}: ${full}` : full;
 }
 
