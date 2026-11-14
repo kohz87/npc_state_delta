@@ -31,7 +31,7 @@ export function createConnectPart(session, deps) {
     let hostRef = null;          // the Story Block global we connected to
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let offHead = null;          // unsubscribes from the host's 'head' event
-    let offCommitted = null;     // unsubscribes from the host's 'committed' event (a command's write moves hostRev too)
+    let offsRev = [];            // unsubscribe from the host's 'committed' / 'feature' / 'modules' events (they move hostRev too)
     let offCardSettings = null;  // unregisters Delta's card settings
 
     async function register(sdk, from, attempt) {
@@ -63,10 +63,12 @@ export function createConnectPart(session, deps) {
             const off = typeof sdk.on === 'function' ? sdk.on('head', portraitFill) : null;
             offHead = typeof off === 'function' ? off : null;
         } catch (error) { warn('Story Suite v2 head events are not available', error); }
-        try {
-            const off = typeof sdk.on === 'function' ? sdk.on('committed', () => { session.hostRev += 1; }) : null;
-            offCommitted = typeof off === 'function' ? off : null;
-        } catch (error) { warn('Story Suite v2 committed events are not available', error); }
+        for (const name of ['committed', 'feature', 'modules']) {   // (a command's write, a Feature switched, a module's state moved: each can move what the host answers)
+            try {
+                const off = typeof sdk.on === 'function' ? sdk.on(name, () => { session.hostRev += 1; }) : null;
+                if (typeof off === 'function') offsRev.push(off);
+            } catch (error) { warn(`Story Suite v2 ${name} events are not available`, error); }
+        }
         offCardSettings = registerCardSettings(sdk, cardSettings);
         session.offPublicPaths = registerPublicPaths(sdk);
         session.baselineKey = dossiersReady() ? chatKeyOf() : null;
@@ -126,8 +128,8 @@ export function createConnectPart(session, deps) {
         offTurn = null;
         try { offHead?.(); } catch { /* the host is gone */ }
         offHead = null;
-        try { offCommitted?.(); } catch { /* the host is gone */ }
-        offCommitted = null;
+        for (const off of offsRev) { try { off(); } catch { /* the host is gone */ } }
+        offsRev = [];
         try { offCardSettings?.(); } catch { /* the host is gone */ }
         offCardSettings = null;
         try { session.offPublicPaths?.(); } catch { /* the host is gone */ }

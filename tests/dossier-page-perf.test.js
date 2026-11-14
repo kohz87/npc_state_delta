@@ -274,6 +274,10 @@ test('hosted: the view token reads the host\'s views once per host revision (hea
         const afterHead = sdk.queries;
         api.dossierViewToken();
         out.queriesAfterHead = sdk.queries - afterHead;
+        const afterFeature = sdk.queries;
+        for (const fn of sdk.listeners.get('feature') || []) { try { fn({}); } catch { /* the adapter's own step */ } }
+        api.dossierViewToken();
+        out.queriesAfterFeature = sdk.queries - afterFeature;
         console.log('RESULT ' + JSON.stringify(out));
     });
     const out = JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
@@ -281,6 +285,7 @@ test('hosted: the view token reads the host\'s views once per host revision (hea
     assert.equal(out.queriesWhileStill, 0, 'no host query while the revision holds still');
     assert.equal(out.stable, true);
     assert.ok(out.queriesAfterHead > 0, "a host head event makes the next token read the host again");
+    assert.ok(out.queriesAfterFeature > 0, 'so does a Feature switched');
 });
 
 test('generationActive: true from a (non-quiet, non-dry-run) generation start to its end or stop, also without streaming', () => {
@@ -297,6 +302,9 @@ test('generationActive: true from a (non-quiet, non-dry-run) generation start to
         out.dryRun = api.generationActive();
         await emit('generation_started', 'normal', {}, false);
         out.started = api.generationActive();
+        await emit('generation_started', 'quiet', {}, false);
+        await emit('generation_started', 'normal', {}, true);
+        out.quietMidReply = api.generationActive();
         await emit('generation_ended', 3);
         out.ended = api.generationActive();
         await emit('generation_started', 'swipe', {}, false);
@@ -305,7 +313,7 @@ test('generationActive: true from a (non-quiet, non-dry-run) generation start to
         console.log('RESULT ' + JSON.stringify(out));
     });
     const out = JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
-    assert.deepEqual(out, { idle: false, quiet: false, dryRun: false, started: true, ended: false, stopped: false });
+    assert.deepEqual(out, { idle: false, quiet: false, dryRun: false, started: true, quietMidReply: true, ended: false, stopped: false });
 });
 
 test('refresh asks do not wait forever on a generation that never ends: after the bound the check runs', async () => {

@@ -139,3 +139,26 @@ test('the hosted Dossiers list shows no bullet marks: its <li> rows are not unde
     const css = readFileSync(new URL('../style-cast.css', import.meta.url), 'utf8');
     assert.match(css, /\.npc-state-delta-v2-dossiers \.npc-state-delta-story-list > \.ss-listcard-row \{ list-style: none; \}/);
 });
+
+test('a hosted Cast redraw reads Delta\'s dossier list once, however many people have meters (each read is a host query)', async () => {
+    const doc = fakePage();
+    const delta = fakeDelta();
+    const people = ['Ana', 'Ben', 'Cy', 'Dee', 'Eli', 'Fay'];
+    let reads = 0;
+    const suiteApi = { npcs: () => { reads += 1; return people.map((name, i) => ({ id: `n${i}`, name, present: i < 2, archived: false })); } };
+    const cast = people.map(name => ({ key: name.toLowerCase(), name, rank: 'Friend', bars: [], opened: [], locked: [] }));
+    const sdk = { registerModule: async () => true, on: () => () => {}, query: name => (name === 'npc.cast' ? cast : []), settings: () => ({}) };
+    const host = { apiVersion: 2, sdk, ready: Promise.resolve(sdk) };
+    const hosted = createStorySuiteV2Adapter({ suiteApi, delta: () => ({ ...delta.api, getNpc: id => ({ id, name: id, secrets: [] }) }), host: () => host, doc, logger: { warn() {} }, retryMs: 1, aliveMs: 100000 });
+    hosted.start?.();
+    for (let i = 0; i < 20 && !doc.documentElement.dataset.npcStateDeltaStoryBlockV2; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(doc.documentElement.dataset.npcStateDeltaStoryBlockV2, '1', 'hosted');
+    const pane = element(doc);
+    hosted.definition.tabs[0].render(pane, {}, {});
+    reads = 0;
+    pane.html = '';   // (a different card text: the redraw is not skipped as unchanged)
+    pane.__npcStateDeltaV2Cast = null;
+    hosted.definition.tabs[0].render(pane, {}, {});
+    assert.ok(reads >= 1 && reads <= 2, `the list was read ${reads} times for one redraw of ${people.length} people`);
+    hosted.stop();
+});

@@ -5,7 +5,7 @@ import { elementOf, PANE_CLASS } from './dom.js';
 
 export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
     const {
-        doc, enabled, npcList, part, runtime, timeline, worldShown,
+        doc, enabled, npcList, withNpcList = fn => fn(), part, runtime, timeline, worldShown,
     } = deps;
 
     // ---- the Dossiers tab (once Cast) ----
@@ -38,7 +38,8 @@ export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
     // screen) leaves castEl, the Story panel's tab pane, alone. `people` (only Story Director's World → Now, the page API)
     // draws "People here": portrait, name, standing chip and the description; the Look and field lines, the Next line and the
     // notes (opened and hidden) stay in the dossier and on the Dossiers screen.
-    function renderCast(el, { track = true, cast = true, list = false, people = false } = {}) {
+    function renderCast(el, options = {}) { return withNpcList(() => renderCastOnce(el, options)); }
+    function renderCastOnce(el, { track = true, cast = true, list = false, people = false } = {}) {
         if (!el) return;
         if (track) session.castEl = el;
         bindCastActions(el);

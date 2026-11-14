@@ -212,7 +212,7 @@ export function createStorySuiteV2Adapter({
 
     return Object.freeze({
         definition,
-        /** Moves with every host 'turn' / 'head' event (and a hosted change): the key the dossier view token caches the host's views by. */
+        /** Moves with every host 'turn', 'head', 'committed', 'feature' and 'modules' event (and a hosted change): the key the dossier view token caches the host's views by. */
         hostRevision: () => session.hostRev + (session.hosted ? 0.5 : 0),
         /** The catch-up after a fallback and the rebuild: status() for the banner, skip() (not a Story Block command: that would write an op), rebuild({ replies }). */
         catchUp: timelinePart.timeline.catchUp,
