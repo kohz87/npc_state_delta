@@ -283,7 +283,6 @@ export class DossierUiPanel {
         }
         this.generationDeferSince = 0;
         this.refreshFirstAsk = 0;
-        this.generationDeferSince = 0;
         const token = this.viewToken();
         if (token && token === this.renderedToken) return;
         void this.refresh();

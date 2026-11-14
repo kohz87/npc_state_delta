@@ -55,18 +55,21 @@ export function createConnectPart(session, deps) {
         }
         if (!session.started || hostRef !== from || session.sdkRef !== sdk) return false;
         session.hosted = true;
+        session.eventsSeen = 0;   // how many of the five change events the host took (hostRevision is only trusted with all five)
         try {
             const off = typeof sdk.on === 'function' ? sdk.on('turn', onTurn) : null;
             offTurn = typeof off === 'function' ? off : null;
+            if (offTurn) session.eventsSeen += 1;
         } catch (error) { warn('Story Suite v2 turn events are not available', error); }
         try {
             const off = typeof sdk.on === 'function' ? sdk.on('head', portraitFill) : null;
             offHead = typeof off === 'function' ? off : null;
+            if (offHead) session.eventsSeen += 1;
         } catch (error) { warn('Story Suite v2 head events are not available', error); }
         for (const name of ['committed', 'feature', 'modules']) {   // (a command's write, a Feature switched, a module's state moved: each can move what the host answers)
             try {
                 const off = typeof sdk.on === 'function' ? sdk.on(name, () => { session.hostRev += 1; }) : null;
-                if (typeof off === 'function') offsRev.push(off);
+                if (typeof off === 'function') { offsRev.push(off); session.eventsSeen += 1; }
             } catch (error) { warn(`Story Suite v2 ${name} events are not available`, error); }
         }
         offCardSettings = registerCardSettings(sdk, cardSettings);
@@ -123,6 +126,7 @@ export function createConnectPart(session, deps) {
         aliveTimer = null;
         const was = session.hosted;
         session.hosted = false;
+        session.eventsSeen = 0;
         stopTimeline();
         try { offTurn?.(); } catch { /* the host is gone */ }
         offTurn = null;

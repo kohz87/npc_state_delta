@@ -288,6 +288,76 @@ test('hosted: the view token reads the host\'s views once per host revision (hea
     assert.ok(out.queriesAfterFeature > 0, 'so does a Feature switched');
 });
 
+const settingsScenario = name => {
+    const output = runHostScenario(name, async () => {
+        const sdk = {
+            registered: [], listeners: new Map(), queries: 0, stored: {},
+            registerModule(def) { sdk.registered.push(def); },
+            on(eventName, fn) { sdk.listeners.set(eventName, [...(sdk.listeners.get(eventName) || []), fn]); return () => {}; },
+            command: async () => ({ ok: true }),
+            query: () => { sdk.queries += 1; return []; },
+            settings: id => (id === undefined ? { host: 1 } : { ...(sdk.stored[id] ?? {}) }),
+            modules: () => [{ id: 'npc-state-delta' }, { id: 'story-director' }],
+            features: () => [{ id: 'f1', on: sdk.featureOn !== false }],
+        };
+        mockState.sdk = sdk;
+                globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    }, async () => {
+        const api = globalThis.NPCStateDelta;
+        await sleep(400);
+        const sdk = mockState.sdk;
+        const out = {};
+        api.dossierViewToken();
+        let base = sdk.queries; api.dossierViewToken(); out.still = sdk.queries - base;
+        // a module's setting changed (a meter added): no host event announces it
+        sdk.stored['npc-state-delta'] = { meters: ['loyalty'] };
+        base = sdk.queries; api.dossierViewToken(); out.afterModuleSetting = sdk.queries - base;
+        base = sdk.queries; api.dossierViewToken(); out.stillAgain = sdk.queries - base;
+        sdk.stored['story-director'] = { keyPeople: ['Mira'] };
+        base = sdk.queries; api.dossierViewToken(); out.afterOtherModuleSetting = sdk.queries - base;
+        // a feature switch (read without its event)
+        sdk.featureOn = false;
+        base = sdk.queries; api.dossierViewToken(); out.afterFeatureSwitch = sdk.queries - base;
+        console.log('RESULT ' + JSON.stringify(out));
+    });
+    return JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
+};
+
+test('hosted: the cached host views follow the host\'s settings and feature switches too (no event announces a settings change)', () => {
+    const out = settingsScenario('dossier-host-settings-key');
+    assert.equal(out.still, 0, 'nothing read while nothing moved');
+    assert.ok(out.afterModuleSetting > 0, 'a module setting changed: the host is read again');
+    assert.equal(out.stillAgain, 0, 'and then holds still');
+    assert.ok(out.afterOtherModuleSetting > 0, 'another module\'s setting too');
+    assert.ok(out.afterFeatureSwitch > 0, 'a feature switch too');
+});
+
+test('hosted: when the host cannot be observed for one of its change events, nothing is cached (every token reads the host)', () => {
+    const output = runHostScenario('dossier-host-views-unobserved', async () => {
+        const sdk = {
+            registered: [], listeners: new Map(), queries: 0,
+            registerModule(def) { sdk.registered.push(def); },
+            on(name, fn) { if (name === 'modules') return undefined; sdk.listeners.set(name, [fn]); return () => {}; },   // 'modules' cannot be subscribed to
+            command: async () => ({ ok: true }),
+            query: () => { sdk.queries += 1; return []; },
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    }, async () => {
+        const api = globalThis.NPCStateDelta;
+        await sleep(400);
+        const sdk = mockState.sdk;
+        api.dossierViewToken();
+        const base = sdk.queries;
+        for (let i = 0; i < 5; i += 1) api.dossierViewToken();
+        console.log('RESULT ' + JSON.stringify({ hosted: sdk.registered.length > 0, queries: sdk.queries - base }));
+    });
+    const out = JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
+    assert.equal(out.hosted, true);
+    assert.ok(out.queries >= 5, 'each token reads the host');
+});
+
 test('generationActive: true from a (non-quiet, non-dry-run) generation start to its end or stop, also without streaming', () => {
     const output = runHostScenario('dossier-generation-active', async () => {
         Object.assign(mockState.context.eventTypes, { GENERATION_STARTED: 'generation_started', GENERATION_ENDED: 'generation_ended', GENERATION_STOPPED: 'generation_stopped' });

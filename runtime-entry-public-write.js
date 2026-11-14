@@ -97,7 +97,7 @@ export function createPublicApiStatePart(deps) {
     } = deps;
 
     // (perf) What the view token reads from the host (the slice's numbers, the scene's presence, every host view) as one value, kept until the
-    // host's revision (adapter.hostRevision: its 'turn' / 'head' events), the stored revision, the chat or the latest reply moves. No host
+    // host's revision (adapter.hostRevision: its change events), its settings key (hostSettingsKey), Delta's settings, the stored revision, the chat or the latest reply moves. No host
     // revision (not hosted, an older adapter): nothing is kept and every call reads the host.
     let hostPartKept = null;
     const hostPart = (key, state) => {
@@ -108,7 +108,11 @@ export function createPublicApiStatePart(deps) {
         let revision = null;
         try { revision = storySuiteV2Meters()?.hostRevision?.(); } catch { revision = null; }
         if (!Number.isFinite(revision)) return read();
-        const stamp = `${key}|${revision}|${Number(stateVersions.get(key) || 0)}|${latestReplyIndex()}|${JSON.stringify(getSettings().sourceOfTruth ?? null)}`;
+        // The settings that the host's queries and Delta's own views read have no event of their own (a meter added in a setting, a changed custom field): they are in the key.
+        let hostSettings = null;
+        try { hostSettings = storySuiteV2Meters()?.hostSettingsKey?.(); } catch { hostSettings = null; }
+        if (typeof hostSettings !== 'string') return read();
+        const stamp = `${key}|${revision}|${Number(stateVersions.get(key) || 0)}|${latestReplyIndex()}|${JSON.stringify(getSettings())}|${hostSettings}`;
         if (hostPartKept?.stamp !== stamp) hostPartKept = { stamp, part: read() };
         return hostPartKept.part;
     };

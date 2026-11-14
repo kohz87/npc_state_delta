@@ -27,7 +27,7 @@ export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
         el.addEventListener?.('input', event => {
             const box = event.target;
             if (!box?.classList?.contains?.('npc-state-delta-story-search')) return;
-            el.__npcStateDeltaV2Find = String(box.value ?? '').slice(0, 80);
+            el.__npcStateDeltaV2Find = session.dossierFind = String(box.value ?? '').slice(0, 80);
             const list = el.querySelector?.('.npc-state-delta-story-list');
             if (list) list.replaceChildren(...dossier.dossierRowNodesFor(el.__npcStateDeltaV2Find, list.ownerDocument ?? doc));
         });
@@ -43,6 +43,8 @@ export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
         if (!el) return;
         if (track) session.castEl = el;
         bindCastActions(el);
+        // The host draws a refresh into a new pane: the search the reader typed in the last one goes on in this one.
+        if (list && typeof el.__npcStateDeltaV2Find !== 'string' && typeof session.dossierFind === 'string') el.__npcStateDeltaV2Find = session.dossierFind;
         const api = runtime();
         const owner = el.ownerDocument ?? doc;
         let body = '';

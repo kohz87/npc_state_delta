@@ -205,6 +205,23 @@ test('Dossiers lists every dossier with v1\'s rows; a row opens its dossier; sea
     adapter.stop();
 });
 
+test('Dossiers: a host refresh draws a NEW pane (Story Block\'s tab host swaps panes): the search text carries over to it', async () => {
+    const { doc, def, adapter } = await setup({ world: true });
+    const first = element(doc);
+    first.dataset.tabId = CAST_TAB_ID;
+    def.tabs[0].render(first, {}, {});
+    const box = first.search();
+    box.value = 'mil';
+    first.fire('input', { target: box });
+    const next = element(doc);   // the refreshed pane, as the tab host's detached draw gives it
+    next.dataset.tabId = CAST_TAB_ID;
+    def.tabs[0].render(next, {}, {});
+    assert.equal(next.search().value, 'mil', 'the new search box has the text');
+    assert.match(next.list().serialize(), /Oren/);
+    assert.doesNotMatch(next.list().serialize(), /Mira/, 'and the list is filtered by it');
+    adapter.stop();
+});
+
 test('with Story Director\'s World on, Dossiers has no present cards (World has them); without it they stay on top', async () => {
     const withWorld = await setup({ world: true });
     const a = element(withWorld.doc);
