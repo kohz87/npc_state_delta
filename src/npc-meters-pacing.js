@@ -6,10 +6,17 @@ import { describeGate, gateEventProblems, normalizeApproachKind } from '../npc-m
 
 const list = words => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : words[0]);
 
+/**
+ * The day rule (1: a meter line is judged on the story time in effect at that line, so a `~ time` of the same reply counts; 0: on the minute
+ * before the reply, as replies read before this rule did). A first read is 1; a Re-read keeps what the reply's earlier read used: 1 only when
+ * its receipt for this person carries `dayRule: 1` (result data).
+ */
+export const dayRuleFor = (ctx, key) => (!ctx?.standing || (Array.isArray(ctx.standingReceipts) && ctx.standingReceipts.some(item => item?.data?.key === key && item.data.dayRule === 1)) ? 1 : 0);
+
 /** The reader's words for a held event ('' when it counted as asked): "major counted as meaningful: today's major is used". */
-export function pacingNote(tier, used, skipped) {
+export function pacingNote(tier, used, skipped, date = '') {
     if (!skipped.length || used === tier) return '';
-    const full = `today's ${list(skipped)} ${skipped.length > 1 ? 'are' : 'is'} used`;
+    const full = `today's ${list(skipped)} ${skipped.length > 1 ? 'are' : 'is'} used${date ? ` on ${date}` : ''}`;
     return used ? `${tier} counted as ${used}: ${full}` : full;
 }
 

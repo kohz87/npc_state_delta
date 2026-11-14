@@ -74,7 +74,7 @@ import { createNpcCommands } from './npc-meters-commands.js';
 import { createNpcQueries } from './npc-meters-queries.js';
 import { createNpcPrompt } from './npc-meters-prompt.js';
 import { normalizeAllowance, pacedTier, spendFlatEvent } from './relationship-pacing.js';
-import { askedOf, cutToTier, movesOf, nextEvent, pacingNote, withEvidence } from './npc-meters-pacing.js';
+import { askedOf, cutToTier, dayRuleFor, movesOf, nextEvent, pacingNote, withEvidence } from './npc-meters-pacing.js';
 import { gateStoryLine } from '../npc-meters-gate.js';
 import { noteKinds } from './npc-notes-kinds.js';
 export { NPC_DOMAIN, NPC_KIND, MILESTONE_KIND, BUILT_IN_METERS, BUILT_IN_RANGE, CUSTOM_RANGE, MAX_CUSTOM_METERS, MAX_NPCS, MAX_METERS_PER_NPC, MAX_STAGES_PER_METER, MAX_SECRETS, MAX_GENERATED_SECRETS, MAX_UNLOCKED, MAX_PROBLEMS, MAX_MILESTONES, MAX_RUNGS, MAX_TRACKS, MAX_BANDS, MAX_NEEDS, DEFAULT_CHANGE_CAP, MAX_CHANGE_CAP, DEFAULT_CONFLICT_AT, DEFAULT_DEMOTE_AFTER, DAY_MINUTES, RECENT_MESSAGES, SECRET_TEXT_MAX, SECRET_TITLE_MAX, SECRET_WHEN_MAX, NOTE_SOURCES, MILESTONE_MAX, DESCRIBE_MAX, TAIL_SECRETS_PER_NPC, CONTEXT_BUDGET, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, FEATURES, replyKey, slug, npcKey, KEY_PEOPLE_QUERY, wordKey, parseBands, bandWord, parseNeeds, normalizeMeterSettings, meterDefs, thresholdReached, stageAt, parseMeterValue } from './npc-meters-config.js';
@@ -115,22 +115,18 @@ export function createNpcPart(hooks = {}) {
         const found = call(hooks.resolve, null, name);
         return isObject(found) && typeof found.name === 'string' && found.name.trim() ? found : null;
     };
-    const baseline = () => {
-        const value = call(hooks.baseline, {});
-        return isObject(value) ? value : {};
-    };
+    const baseline = () => (value => (isObject(value) ? value : {}))(call(hooks.baseline, {}));
     // Delta's impact-tier caps, normalized; null when the host gives none (then a story line is held by the per-reply cap alone).
     const tierCaps = () => {
         const value = call(hooks.caps, null);
         return isObject(value) ? normalizeRelationshipCaps(value) : null;
     };
     // The events-per-day allowance and the story day before the reply (null: no clock, or Delta owns the calendar).
-    const tierAllowance = () => {
-        const value = call(hooks.allowance, null);
-        return isObject(value) ? normalizeAllowance(value) : null;
-    };
-    const clockMinutes = at => (call(hooks.calendarOwn, false) === true ? null : (m => (isInt(m) ? m : null))(call(hooks.startTime, null, at)));
-    const clockDay = at => { const minutes = clockMinutes(at); return minutes === null ? null : Math.floor(minutes / DAY_MINUTES); };
+    const tierAllowance = () => (value => (isObject(value) ? normalizeAllowance(value) : null))(call(hooks.allowance, null));
+    // `now`: the story minute in effect at the line (the day rule, npc-meters-pacing.js dayRuleFor); without it, the minute before the reply.
+    const clockMinutes = (at, now = null) => (call(hooks.calendarOwn, false) === true ? null : isInt(now) ? now : (m => (isInt(m) ? m : null))(call(hooks.startTime, null, at)));
+    const clockDay = (at, now = null) => { const minutes = clockMinutes(at, now); return minutes === null ? null : Math.floor(minutes / DAY_MINUTES); };
+    const dateOf = (at, now = null) => (clockDay(at, now) === null ? '' : isInt(now) ? call(hooks.dateAt, '', now) : call(hooks.startDate, '', at));
     // The story minute by the host's clock now (a scan's change names no reply); null without a clock.
     const timeMinutes = ctx => {
         try { const minutes = ctx.time(); return isInt(minutes) ? minutes : null; } catch { return null; }
@@ -344,14 +340,15 @@ export function createNpcPart(hooks = {}) {
         // Pacing (relationship-pacing.js): one event per line or scanner change, counted once whatever number of meters it names.
         // A story line (`impact`) and a forwarded scanner change (`scanTier`) share the record's count; a change with neither is not paced.
         const asked = impact?.tier ?? pacedTier(scanTier);
-        const spent = asked && mine.length && limit ? spendFlatEvent(record.impactDay, { tier: asked, reply: replyKey(reply, reply), clockDay: clockDay(at), allowance: tierAllowance() }) : null;
+        const rule = dayRuleFor(ctx, who.key), now = rule ? timeMinutes(ctx) : null;
+        const spent = asked && mine.length && limit ? spendFlatEvent(record.impactDay, { tier: asked, reply: replyKey(reply, reply), clockDay: clockDay(at, now), allowance: tierAllowance() }) : null;
         if (spent?.next) record.impactDay = spent.next;
-        const pace = spent ? pacingNote(asked, spent.used, spent.skipped) : '';
+        const pace = spent ? pacingNote(asked, spent.used, spent.skipped, rule && clockDay(at, now) !== null ? dateOf(at, now) || `story day ${clockDay(at, now) + 1}` : '') : '';
         const askedNow = spent ? askedOf(mine, id => meterValue(record, defs.find(def => def.id === id))) : null;
         // The anti-lever gate (npc-meters-gate.js): a story line's named approach, repeated to this person within the window, gives
         // less, then backfires; the ring is written with the move. Not a scan's, not a line the day's allowance held, not without a story day.
         const gated = via && story && limit && featureOn(FEATURE_GATE, ctx) && !(spent && !spent.used) ? gateStoryLine({
-            changes: mine, read: id => meterValue(record, defs.find(def => def.id === id)), via, day: clockDay(at), reply: replyKey(reply, reply), name: record.name, settings: ctx.settings(), stored: record.via, cap: impact ? normalizeRelationshipCaps(impact.caps)[spent?.used ?? impact.tier] : null,
+            changes: mine, read: id => meterValue(record, defs.find(def => def.id === id)), via, day: clockDay(at, now), reply: replyKey(reply, reply), name: record.name, settings: ctx.settings(), stored: record.via, cap: impact ? normalizeRelationshipCaps(impact.caps)[spent?.used ?? impact.tier] : null,
         }) : null;
         if (gated) { mine = gated.changes; if (gated.ring) record.via = gated.ring; }
         let stepped = mine;
@@ -361,13 +358,13 @@ export function createNpcPart(hooks = {}) {
         const moved = moveMeters(record, stepped, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup), story });
         // Mood (npc-mood.js; feature mood-pull): the trust this line moved, as code reads it, is a trust drop or a betrayal.
         if (limit && moved.length && featureOn(FEATURE_MOOD_PULL, ctx) && moodStands(ctx, who.key)) {
-            const day = clockMinutes(at) ?? timeMinutes(ctx);
+            const day = clockMinutes(at, now) ?? timeMinutes(ctx);
             const events = day === null ? [] : eventsFromMoves(moved.map(item => ({ meter: item.meter, change: item.after - item.before })), { reason, impact: spent?.used ?? asked });
-            if (events.length) writeMood(ctx, who.key, record, { prev: readLeaf(record.mood), mood: applyEvents(readLeaf(record.mood), day, events), day, n: isInt(at) ? at : null, s: isReplyId(reply) ? reply : null, date: clockDay(at) === null ? '' : call(hooks.startDate, '', at) });
+            if (events.length) writeMood(ctx, who.key, record, { prev: readLeaf(record.mood), mood: applyEvents(readLeaf(record.mood), day, events), day, n: isInt(at) ? at : null, s: isReplyId(reply) ? reply : null, date: dateOf(at, now) });
         }
         // This event's outcome, written whole on the record (display only; the card's tier, held and asked).
         if (spent && replyKey(reply, reply) !== null) {
-            const text = nextEvent(record.lastEvent, { reply: replyKey(reply, reply), date: clockDay(at) === null ? '' : call(hooks.startDate, '', at), src: impact ? 'story' : 'scan', ask: askedNow, tier: spent.used ?? asked, held: !spent.used, note: pace, via: gated?.via, gate: gated?.event, why: reasonKept(ctx, who.key, reason || scanWhy), mv: movesOf(moved), n: isInt(at) ? at : null, log: logKept(ctx, who.key, replyKey(reply, reply)) });
+            const text = nextEvent(record.lastEvent, { reply: replyKey(reply, reply), date: dateOf(at, now), src: impact ? 'story' : 'scan', ask: askedNow, tier: spent.used ?? asked, held: !spent.used, note: pace, via: gated?.via, gate: gated?.event, why: reasonKept(ctx, who.key, reason || scanWhy), mv: movesOf(moved), n: isInt(at) ? at : null, log: logKept(ctx, who.key, replyKey(reply, reply)) });
             if (text) record.lastEvent = text;
         }
         if (!limit) {
@@ -407,7 +404,7 @@ export function createNpcPart(hooks = {}) {
             ctx.fail('REFUSED', 'Nothing to update.');
         }
         note(slice, ctx.rev, problems);
-        return result({ name: record.name, key: who.key, moved, settled, problems, created, disposition, milestone: marked, pace });
+        return result({ name: record.name, key: who.key, moved, settled, problems, created, disposition, milestone: marked, pace, dayRule: rule });
     }
 
     const shared = {
@@ -425,8 +422,8 @@ export function createNpcPart(hooks = {}) {
         commands,
         queries,
         kinds: {
-            [NPC_KIND]: { grammar: '~ npc Name | trust: +N | affection: -N', apply: captureLine },
-            [MILESTONE_KIND]: { grammar: '+ milestone Name — the turning point that just happened between you (once, when a bond changes for good; e.g. + milestone Person A — a promise was kept)', apply: captureLine, feature: FEATURE_STAGES },
+            [NPC_KIND]: { grammar: '~ npc Name | trust: +N | affection: -N', apply: captureLine, after: ['time'] },
+            [MILESTONE_KIND]: { grammar: '+ milestone Name — the turning point that just happened between you (once, when a bond changes for good; e.g. + milestone Person A — a promise was kept)', apply: captureLine, feature: FEATURE_STAGES, after: ['time'] },
             ...noteKinds(captureLine),
         },
         context: { static: staticText, tail, budget: CONTEXT_BUDGET },

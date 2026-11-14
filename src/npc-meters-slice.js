@@ -413,7 +413,7 @@ function changeText(name, moved, pace = '') {
 
 // The receipt: stage, ladder and note lines are what the next reply is told (narrate when a stage or
 // a rung moved); the numbers are for the reply's card.
-export function result({ name, key, moved, settled, problems, created, disposition, milestone = null, pace = '' }) {
+export function result({ name, key, moved, settled, problems, created, disposition, milestone = null, pace = '', dayRule = 0 }) {
     const notes = [...settled.stages.map(move => move.text), ...settled.ranks.map(move => move.text), ...settled.unlocked.map(note => note.text)];
     const numbers = changeText(name, moved, pace);
     const marked = milestone ? `${name}: milestone “${milestone.name}”` : '';
@@ -431,6 +431,7 @@ export function result({ name, key, moved, settled, problems, created, dispositi
             stages: settled.stages.map(({ meter, from, to }) => ({ meter, from, to })),
             ...(settled.ranks.length ? { ranks: settled.ranks.map(({ from, to }) => ({ from, to })) } : {}),
             ...(milestone ? { milestone: milestone.key } : {}),
+            ...(dayRule ? { dayRule } : {}),
             unlocked: settled.unlocked.map(note => note.id),
             problems,
         },

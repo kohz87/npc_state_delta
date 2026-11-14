@@ -160,7 +160,7 @@ export function markNote(kind, result, labels, rule) {
     return kind === 'taste' ? markTasteResult(result, labels.likes ?? labels.dislikes, rule) : kind === 'know' ? markKnowResult(result, labels, rule) : result;
 }
 /** The `kinds` entries for the host: every note kind handled by `capture` and behind the notes feature. */
-export const noteKinds = capture => Object.fromEntries(Object.keys(KINDS).map(kind => [kind, { grammar: GRAMMAR[kind], apply: capture, feature: FEATURE_NOTES }]));
+export const noteKinds = capture => Object.fromEntries(Object.keys(KINDS).map(kind => [kind, { grammar: GRAMMAR[kind], apply: capture, feature: FEATURE_NOTES, after: ['time'] }]));
 export const isNoteKind = kind => Object.hasOwn(KINDS, kind);
 export const noteField = kind => KINDS[kind]?.field ?? null;
 

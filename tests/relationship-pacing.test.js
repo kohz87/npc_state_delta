@@ -126,7 +126,7 @@ test('two majors on one story day: the second counts as meaningful, then ordinar
     assert.equal(s.npc('Oren').meters.trust, 3, 'the first major is worth 3');
     await s.say([major()]);
     assert.equal(s.npc('Oren').meters.trust, 5, 'the second counts as meaningful: +2');
-    assert.match(JSON.stringify(s.host.store.receipts()), /Oren: trust 3 → 5 \(major counted as meaningful: today's major is used\)/);
+    assert.match(JSON.stringify(s.host.store.receipts()), /Oren: trust 3 → 5 \(major counted as meaningful: today's major is used on [^)]*\)/);
     await s.say([major()]);
     assert.equal(s.npc('Oren').meters.trust, 6, 'then ordinary: +1');
     await s.say([major()]);
@@ -134,7 +134,7 @@ test('two majors on one story day: the second counts as meaningful, then ordinar
     assert.equal(s.npc('Oren').meters.trust, 8, 'ordinary is allowed three times a day');
     await s.say([major()]);
     assert.equal(s.npc('Oren').meters.trust, 8, 'nothing is left: ignored');
-    assert.match(JSON.stringify(s.host.store.receipts()), /Oren: nothing changed \(today's ordinary, meaningful and major are used\)/);
+    assert.match(JSON.stringify(s.host.store.receipts()), /Oren: nothing changed \(today's ordinary, meaningful and major are used on [^)]*\)/);
     assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
     await s.setDay(4);
     await s.say([major()]);
@@ -152,36 +152,35 @@ test('one line naming three meters is one event; a different person has their ow
     assert.equal(s.npc('Sister Temiwa').meters.trust, 3, 'Temiwa\'s major is her own');
 });
 
-test('an event down the chain keeps the story day it started on: a time line inside the reply does not bring the allowance back', async () => {
+test('an event down the chain counts on the story day in effect when it arrives: a time line inside the reply (the day rule)', async () => {
     const s = await suite();
     await s.setDay(2);
     const index = await s.say([major()]);
     await s.setDay(3);   // midnight passes inside the same reply, before Delta's own change for it arrives
     await s.adapter.adjust({ name: 'Oren', meters: { affection: 2 }, reply: index, impact: 'major' });   // (a meter the line moved is the line's: yieldToStory)
-    assert.equal(s.day('oren').day, 2, 'the reply\'s day is the one it started on');
-    assert.equal(s.day('oren').major, 1);
-    assert.equal(s.day('oren').meaningful, 1, 'the forwarded major counted as meaningful');
+    assert.equal(s.day('oren').day, 3, 'the day in effect at the change, not the one before the reply');
+    assert.equal(s.day('oren').major, 1, 'a new day: the forwarded major is counted as a major');
 });
 
-test('time set before the first NPC line or a scanner-only event cannot refresh that reply', async () => {
+test('time set in the reply puts its NPC lines and a scanner-only event on the new day (the day rule)', async () => {
     const s = await suite();
     await s.setDay(2);
     await s.say([major()]);
     const index = await s.say([`~ date ${3 * DAY}`, major(), major('Sister Temiwa')]);
-    assert.equal(s.npc('Oren').meters.trust, 5);
-    assert.equal(s.day('oren').day, 2);
-    assert.equal(s.day('sister-temiwa').day, 2);
+    assert.equal(s.npc('Oren').meters.trust, 6, 'the new day takes its own major');
+    assert.equal(s.day('oren').day, 3);
+    assert.equal(s.day('sister-temiwa').day, 3);
     assert.equal((await s.host.sdk.reread(index)).ok, true);
-    assert.equal(s.day('oren').day, 2, 'Re-read also starts before the time line');
-    assert.equal(s.npc('Oren').meters.trust, 5);
+    assert.equal(s.day('oren').day, 3, 'a Re-read keeps the rule its first read used (the receipt carries it)');
+    assert.equal(s.npc('Oren').meters.trust, 6);
 
     const t = await suite();
     await t.setDay(2);
     await t.say([major()]);
     const scanReply = await t.say([`~ date ${3 * DAY}`]);
     await t.adapter.adjust({ name: 'Oren', meters: { affection: 3 }, reply: scanReply, impact: 'major' });
-    assert.equal(t.npc('Oren').meters.affection, 2);
-    assert.equal(t.day('oren').day, 2);
+    assert.equal(t.npc('Oren').meters.affection, 3, 'the scanner change counts on the new day: a major');
+    assert.equal(t.day('oren').day, 3);
     await t.say([major()]);
     assert.equal(t.day('oren').day, 3, 'the following reply uses the advanced clock');
 });
