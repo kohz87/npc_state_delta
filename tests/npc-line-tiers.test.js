@@ -165,3 +165,78 @@ test('double count: while hosted, Delta\'s scan of a reply leaves a meter the st
     assert.equal(again.ok, true);
     assert.equal(trust(s).trust, 2, 'a new swipe with no story line: the scan moves trust');
 });
+
+// The day rule: a meter line is judged on the story time in effect at that line, so a `~ time` of the same reply (before or after it) counts.
+const dayClock = () => ({
+    id: 'clock', name: 'Clock', domains: { director: { initial: () => ({ time: { minutes: 600 } }), validate: () => [] } },
+    queries: { 'director.time': state => state?.domains?.director?.time },
+    capture: { kinds: { time: { grammar: '~ time Day | at: N' } }, apply: (ctx, line) => { ctx.draft('director').time = { minutes: Number(line.labels?.at) }; return { summary: 'time set', data: {} }; } },
+});
+const DAY2 = 1440 + 465;   // the next morning, 07:45
+
+test('day rule: a ~ time line of the same reply puts its meter lines on the new day, whatever order they are written in', async () => {
+    for (const lines of [['~ time Day | at: 1905', '~ npc Oren | trust: +1 | impact: major'], ['~ npc Oren | trust: +1 | impact: major', '~ time Day | at: 1905']]) {
+        const s = await suite({ modules: [dayClock()], allowance: { ordinary: 0, meaningful: 0, major: 1, extreme: 0 } });
+        await s.say(['~ npc Oren | trust: +1 | impact: major']);   // day 0: the day's one major
+        const held = await s.say(['~ npc Oren | trust: +1 | impact: major']);
+        assert.equal(trust(s).trust, 1, 'the same day: held');
+        assert.match(JSON.stringify(s.host.head().domains.npc.npcs.oren.lastEvent), /used/);
+        await s.say(lines);
+        assert.equal(trust(s).trust, 2, `the new day takes the major (${lines[0]}) after reply ${held}`);
+        const note = JSON.stringify(s.host.head().domains.npc.npcs.oren.lastEvent);
+        assert.doesNotMatch(note, /"held":true/);
+        assert.ok(s.receipts().some(item => item.data?.dayRule === 1), 'the receipt carries the day rule mark');
+    }
+});
+
+test('day rule: a held line names the story day it used ("used on <date>"); a reply read before the rule keeps the old day on a Re-read', async () => {
+    const s = await suite({ modules: [dayClock()], allowance: { ordinary: 0, meaningful: 0, major: 1, extreme: 0 } });
+    await s.say(['~ npc Oren | trust: +1 | impact: major']);
+    await s.say(['~ time Day | at: 700', '~ npc Oren | trust: +1 | impact: major']);
+    assert.match(JSON.stringify(s.host.head().domains.npc.npcs.oren.lastEvent), / used on January 1/);
+    const { dayRuleFor } = await import('../src/npc-meters-pacing.js');
+    assert.equal(dayRuleFor({ standing: null }, 'oren'), 1, 'a first read');
+    assert.equal(dayRuleFor({ standing: {}, standingReceipts: [{ data: { key: 'oren' } }] }, 'oren'), 0, 'a Re-read of a reply read before the rule');
+    assert.equal(dayRuleFor({ standing: {}, standingReceipts: [{ data: { key: 'oren', dayRule: 1 } }] }, 'oren'), 1);
+});
+
+// An old reply (its receipts carry no `dayRule`) whose lines were written npc-before-time: a Re-read gives the same numbers, last event and card as
+// before the `after: ['time']` change (golden values taken from the build before it). Only the receipts' ORDER differs: the kind's `after` is
+// registry-wide, so the reply's time line now runs (and is listed) first; the same receipts, rev numbers swapped.
+test('day rule: a Re-read of an old reply written npc-before-time keeps its numbers, last event and card; only the receipt order follows the new kind order', async () => {
+    const s = await suite({ modules: [dayClock()], allowance: { ordinary: 0, meaningful: 0, major: 1, extreme: 0 } });
+    await s.say(['~ npc Oren | trust: +1 | impact: major']);
+    const index = await s.say(['~ npc Oren | trust: +1 | impact: major', '~ time Day | at: 1905']);
+    const strip = node => { if (node && typeof node === 'object') for (const key of Object.keys(node)) { if (key === 'dayRule') delete node[key]; else strip(node[key]); } };
+    strip(s.host.ctx.chat);   // as a reply stored before the rule: no mark on its receipts
+    s.host.store.rebuild();
+    assert.equal(/dayRule/.test(JSON.stringify(s.host.store.receipts())), false);
+    assert.equal((await s.host.sdk.reread(index)).ok, true);
+    const norm = value => JSON.stringify(JSON.parse(JSON.stringify(value), (key, item) => (item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : 1))) : item))).replace(/sw_[0-9a-f]{12}/g, 'R');
+    assert.equal(norm(s.npc('Oren')), '{"event":{"at":"R","date":"January 1","events":[{"ask":{"trust":1},"held":true,"note":"today\'s ordinary, meaningful and major are used","src":"story","tier":"major"}],"n":4,"prev":[{"at":"R","date":"January 1","held":false,"mv":{"trust":1},"n":2}]},"key":"oren","meters":{"affection":0,"desire":0,"tension":0,"trust":1},"name":"Oren","recent":[{"ask":{"trust":1},"at":"R","date":"January 1","held":true,"n":4,"note":"today\'s ordinary, meaningful and major are used"},{"at":"R","date":"January 1","held":false,"mv":{"trust":1},"n":2}],"reply":4,"stages":{},"unlocked":[],"window":{"from":{"affection":0,"desire":0,"tension":0,"trust":1},"story":[]}}', 'the changes card');
+    assert.match(JSON.stringify(s.host.head().domains.npc.npcs.oren.lastEvent), /"date\\":\\"January 1\\".*"held\\":true/, 'the last event: the old day, held');
+    assert.doesNotMatch(JSON.stringify(s.host.head().domains.npc.npcs.oren.lastEvent), / used on /, 'the old text');
+    assert.deepEqual(s.host.store.receipts().filter(item => item.index === index).map(item => item.receipt.type).sort(), ['capture.npc', 'capture.time', 'npc.tick']);
+});
+
+// New memories take the date of the reply they are recorded in: the story's date AFTER that reply, so a `~ time` earlier or later in the same
+// reply counts (Sieke / Sister Temiwa: `~ time Goldwane 14, 07:45 am` and their new memories -> Goldwane 14). Stored stamps never move.
+test('memory dates: a reply that moves the clock stamps its new memories with the new day, whichever order its lines are written in; an old stamp stays', async () => {
+    const { setStoryDateAtSource, stampChangedFields } = await import('../core.js');
+    for (const lines of [['~ time Day | at: 1905', '~ npc Oren | trust: +1'], ['~ npc Oren | trust: +1', '~ time Day | at: 1905']]) {
+        const s = await suite({ modules: [dayClock()] });
+        await s.say(['~ npc Oren | trust: +1']);
+        const earlier = s.host.store.headIndex();
+        const index = await s.say(lines);
+        setStoryDateAtSource(at => s.adapter.storyDateText(at));
+        try {
+            const old = { id: 'npc_sieke', name: 'Sieke', memories: ['Paid off the branch arrears'], memoryStamps: { 'paid off the branch arrears': { m: earlier, d: 'January 1' } } };
+            const next = { ...old, memories: [...old.memories, 'Returned to the Guild annex the following morning', 'Let him ask after the stitched leg'] };
+            const stamped = stampChangedFields(old, next, { turn: 3, message: index });
+            const dates = Object.fromEntries(Object.entries(stamped.memoryStamps).map(([key, stamp]) => [key, stamp.d]));
+            assert.equal(dates['paid off the branch arrears'], 'January 1', 'a stored stamp is not back-dated');
+            assert.equal(dates['returned to the guild annex the following morning'], 'January 2', lines[0]);
+            assert.equal(dates['let him ask after the stitched leg'], 'January 2');
+        } finally { setStoryDateAtSource(null); }
+    }
+});

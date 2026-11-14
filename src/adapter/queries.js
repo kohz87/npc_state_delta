@@ -121,6 +121,7 @@ export function createQueriesPart(session, deps) {
                 return Number.isInteger(time) ? time : time?.minutes ?? null;
             } catch { return null; }
         },
+        dateAt: minutes => { try { return Number.isInteger(minutes) ? storyMinuteText(minutes, director.directorCalendar()) : ''; } catch { return ''; } },
         startDate: index => {
             if (!Number.isInteger(index) || index < 1) return '';
             try {

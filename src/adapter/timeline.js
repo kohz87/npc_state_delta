@@ -214,10 +214,10 @@ export function createTimelinePart(session, deps) {
         participant: timeline.participant,
         capture: {
             kinds: {
-                [NPC_KIND]: { grammar: part.kinds[NPC_KIND].grammar },
-                [MILESTONE_KIND]: { grammar: part.kinds[MILESTONE_KIND].grammar, feature: FEATURE_STAGES },
-                // The notes kinds (lie, know, taste, tie): each behind the notes feature, all handled by the one apply below.
-                ...Object.fromEntries(Object.entries(part.kinds).filter(([kind]) => kind !== NPC_KIND && kind !== MILESTONE_KIND).map(([kind, entry]) => [kind, { grammar: entry.grammar, feature: entry.feature }])),
+                [NPC_KIND]: { grammar: part.kinds[NPC_KIND].grammar, after: part.kinds[NPC_KIND].after },
+                [MILESTONE_KIND]: { grammar: part.kinds[MILESTONE_KIND].grammar, feature: FEATURE_STAGES, after: part.kinds[MILESTONE_KIND].after },
+                // The notes kinds (lie, know, taste, tie): each behind the notes feature, all handled by the one apply below. `after: ['time']`: a line runs behind the reply's time line (the day rule).
+                ...Object.fromEntries(Object.entries(part.kinds).filter(([kind]) => kind !== NPC_KIND && kind !== MILESTONE_KIND).map(([kind, entry]) => [kind, { grammar: entry.grammar, feature: entry.feature, after: entry.after }])),
             },
             apply: (ctx, line) => part.kinds[NPC_KIND].apply(ctx, line),
         },
