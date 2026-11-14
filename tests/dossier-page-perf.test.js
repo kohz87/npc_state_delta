@@ -276,6 +276,18 @@ test('page-API change notifications: only the streamed-token cast render is coal
     assert.equal(calls, 5, 'nothing stays scheduled');
 });
 
+test('page-API notifications: the first marked one during an active generation is held (not run at once), and a plain one still goes out at once', async () => {
+    const { watchers, notifyChange } = createWatchers({ warn: () => {}, delta: () => ({ generationActive: () => true }) });
+    let calls = 0;
+    watchers.add(() => { calls += 1; });
+    notifyChange(true);
+    assert.equal(calls, 0, 'the first marked notification of an active generation is held');
+    notifyChange();
+    assert.equal(calls, 1, 'an unmarked one goes out at once and takes the waiting call');
+    await new Promise(resolve => setTimeout(resolve, 900));
+    assert.equal(calls, 1, 'nothing stays scheduled');
+});
+
 test('the real adapter wiring: Delta turned off during a generation tells the page API at once; the streamed-token cast render is held until the generation ends', async () => {
     const listeners = new Map();
     const doc = { documentElement: { dataset: {} }, getElementById: () => null, addEventListener: (name, fn) => listeners.set(name, [...(listeners.get(name) ?? []), fn]), dispatchEvent: () => true };
@@ -348,6 +360,55 @@ test('inline cards: only a render caused by the streaming message\'s growth says
         callback(mutationIn(5));   // not streaming
         await settle();
         assert.deepEqual(details, [false], 'without a stream nothing is marked');
+    } finally {
+        globalThis.MutationObserver = saved;
+        globalThis.document = savedDocument;
+    }
+});
+
+test('inline cards: a streamed render that is skipped or throws leaves no mark; a direct render and a manual mutation in the same stream reach the World subscriber at once', async () => {
+    const saved = globalThis.MutationObserver;
+    const savedDocument = globalThis.document;
+    let callback = null;
+    globalThis.MutationObserver = class { constructor(fn) { callback = fn; } observe() {} disconnect() {} };
+    const details = [];
+    let onDetail = () => {};
+    globalThis.document = { dispatchEvent: event => { details.push(event.detail?.streaming); onDetail(event.detail); }, querySelectorAll: () => [] };
+    const chat = { querySelectorAll: () => [] };
+    const mutationIn = id => [{ type: 'childList', target: { closest: selector => (selector === '.mes' ? { getAttribute: () => String(id) } : null) } }];
+    let hydration = 'loading';
+    let throwing = false;
+    const { watchers, notifyChange } = createWatchers({ warn: () => {}, delta: () => ({ generationActive: () => true }) });   // a stream is running
+    let worldCalls = 0;
+    watchers.add(() => { worldCalls += 1; });
+    onDetail = detail => notifyChange(detail?.streaming === true);   // what timeline.js does
+    try {
+        const part = createInlineCardsMountPart({}, { chatHydrationStatus: () => hydration, getChatKey: () => 'chat-1', getChatState: () => ({}), streamingMessageId: () => 5 }, {
+            chatElementForInlineObserver: () => chat, messageElement: () => null, inlineRosterHtml: () => '', inChatCastMode: () => 'on',
+            inlineEntriesForRender: () => { if (throwing) throw new Error('boom'); return []; }, meguminIntegrationMessageId: () => null, meguminBlockCardForMessage: () => null,
+            cleanupStaleMeguminIntegrations: () => {}, inlineAnchorMessageId: () => null, mountNpcStateInsideMeguminBlock: () => false,
+        });
+        part.ensureInlineObserver();
+        const settle = () => new Promise(resolve => setTimeout(resolve, 150));
+        const warn = console.warn;
+        console.warn = () => {};
+        try {
+            callback(mutationIn(5));   // streamed render, skipped: hydration is not ready
+            await settle();
+            hydration = 'ready';
+            throwing = true;
+            callback(mutationIn(5));   // streamed render that throws
+            await settle();
+            throwing = false;
+        } finally { console.warn = warn; }
+        assert.deepEqual(details, [], 'neither the skipped nor the throwing render reached the event');
+        part.renderInlineCards();   // a direct call (the public renderInline)
+        assert.deepEqual(details, [false], 'a direct render is never marked');
+        assert.equal(worldCalls, 1, 'the World subscriber got it at once, in the middle of the stream');
+        part.queueInlineRender(0);   // a real manual mutation (portrait removal) renders
+        await settle();
+        assert.deepEqual(details, [false, false]);
+        assert.equal(worldCalls, 2, 'and again at once');
     } finally {
         globalThis.MutationObserver = saved;
         globalThis.document = savedDocument;

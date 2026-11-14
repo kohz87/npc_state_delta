@@ -10,7 +10,6 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
 
     let inlineRenderTimer = null;
     let pendingStreamed = false;   // every render asked since the last one came from the streaming message's own growth
-    let renderStreamed = false;    // the render now running is one of those
     let inlineWatchdogTimer = null;
 
     function ensureInlineObserver() {
@@ -92,7 +91,8 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
         inlineWatchdogTimer?.unref?.();
     }
 
-    function renderInlineCards() {
+    // `streamed` is a parameter of one queued invocation only: nothing is shared between calls, so a skipped or throwing render cannot mark a later direct one.
+    function renderInlineCardsOnce(streamed) {
         let chatKey;
         try { chatKey = getChatKey(); } catch { return { rendered: 0, missing: 0 }; }
         if (chatKey === 'no-chat' || chatHydrationStatus(chatKey) !== 'ready') return { rendered: 0, missing: 0 };
@@ -155,11 +155,11 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
             fillPresentSceneText(anchor);
             rendered += 1;
         }
-        const streamed = renderStreamed && streamingMessageId() != null;
-        renderStreamed = false;
-        document.dispatchEvent?.(new CustomEvent('npc-state-delta:cast-rendered', { detail: { streaming: streamed } }));
+        document.dispatchEvent?.(new CustomEvent('npc-state-delta:cast-rendered', { detail: { streaming: streamed === true && streamingMessageId() != null } }));
         return { rendered, missing };
     }
+    // The public/direct entry is always unmarked.
+    function renderInlineCards() { return renderInlineCardsOnce(false); }
 
     const INLINE_RENDER_RETRY_DELAYS = [80, 180, 350, 700, 1400];
     function queueInlineRender(delay = 0, retryIndex = 0, streamed = false) {
@@ -167,10 +167,10 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
         if (inlineRenderTimer) clearTimeout(inlineRenderTimer);
         inlineRenderTimer = setTimeout(() => {
             inlineRenderTimer = null;
-            renderStreamed = pendingStreamed;
+            const streamedNow = pendingStreamed;
             pendingStreamed = false;
             try {
-                const result = renderInlineCards();
+                const result = renderInlineCardsOnce(streamedNow);
                 if (result?.missing > 0 && retryIndex < INLINE_RENDER_RETRY_DELAYS.length) {
                     queueInlineRender(INLINE_RENDER_RETRY_DELAYS[retryIndex], retryIndex + 1);
                 }
