@@ -7,8 +7,8 @@ import { normalizeApproachKind } from '../npc-meters-gate.js';
 import { NPC_DOMAIN, BUILT_IN_METERS, FEATURE_GATE, FEATURE_MOOD_PULL, FEATURE_NOTES, MILESTONE_KIND, DAY_MINUTES, MILESTONE_MAX, DISPOSITION_MAX, REASON_LABELS, FEATURE_STAGES, FEATURE_DRIFT, KEY_PEOPLE_QUERY, isObject, isInt, isReplyId, readLeaf, replyKey, clamp, clean, slug, wordKey, tierOf, parseMeterValue } from './npc-meters-config.js';
 import { stepPull } from '../npc-instincts.js';
 import { growDrives, DRIVE_RULE } from './npc-notes-drives.js';
-import { mergeRefreshTastes, tasteRuleFor, markTasteResult } from './npc-notes-tastes.js';
-import { runKind, noteLine, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
+import { mergeRefreshTastes } from './npc-notes-tastes.js';
+import { runKind, noteLine, noteRule, markNote, isNoteKind, noteField, driveScale, seedNotes, lookStamp, readLookStamp, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-kinds.js';
 import { applyEvents, applyWord, moodFromWord, moodNumbers, restMood, restingMood } from '../npc-mood.js';
 import { CAST_QUERY, observeKeyAway, observeCast, meterValue, sentence, asStored, writeMood } from './npc-meters-slice.js';
 
@@ -43,15 +43,15 @@ export function createNpcCommands({
         const problems = [];
         const cues = [];
         const notes = { run: change => changes.push(...change.changes), flag: (text, cue) => (cue ? (problems.push(text), cues.push(cue)) : cues.push(text)) };
-        const tasteRule = tasteRuleFor(ctx.standing, who.key, reply, labels.likes ?? labels.dislikes, ctx.standingReceipts);
-        const out = runKind(line.kind, current, noteLine(line.kind, labels, { current, r: reply, day }), { name: who.name, day, r: reply, userText: ctx.chat?.lastUser ?? '', tier: CAUGHT_TIER, drop: CAUGHT_DROP, notes, tasteRule });
+        const rule = noteRule(line.kind, ctx, who.key, reply, labels);
+        const out = runKind(line.kind, current, noteLine(line.kind, labels, { current, r: reply, day }), { name: who.name, day, r: reply, userText: ctx.chat?.lastUser ?? '', tier: CAUGHT_TIER, drop: CAUGHT_DROP, notes, tasteRule: rule, knowRule: rule });
         if (out.problem) ctx.fail('REFUSED', out.problem);
         const moves = changes.length > 0;
         const done = run(ctx, {
             label: line.name, changes, problems, limit: moves, reply: moves ? reply : null, at: moves ? at : null, allowEmpty: true, story: moves,
             impact: moves && tierCaps() ? { tier: CAUGHT_TIER, caps: tierCaps() } : null, reason: moves ? `caught lying to ${clean(labels.to, 40)}` : '', leaf: { field: out.field, text: out.text },
         });
-        const marked = line.kind === 'taste' ? markTasteResult(done, labels.likes ?? labels.dislikes, tasteRule) : done;
+        const marked = markNote(line.kind, done, labels, rule);
         return cues.length ? { ...marked, summary: sentence(moves ? [...cues, done.summary] : cues), narrate: true } : marked;
     }
 

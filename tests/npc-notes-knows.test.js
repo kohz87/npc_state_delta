@@ -2,7 +2,7 @@
 // and the dossier rows. Pure functions only (src/npc-notes-knows.js); no host.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KNOWS_MAX, KNOWS_TAIL_MAX, addKnow, knowFact, knowsTail, knowsView, openKnow, readKnows } from '../src/npc-notes-knows.js';
+import { KNOW_RULE, KNOWS_MAX, KNOWS_TAIL_MAX, addKnow, knowRuleFor, markKnowResult, readHow, knowFact, knowsTail, knowsView, openKnow, readKnows } from '../src/npc-notes-knows.js';
 
 const gate = { about: 'Oren', fact: 'copies the gate-logs', how: 'saw', secret: true };
 const weather = { about: 'Mira', fact: 'is afraid of rain', how: 'heard' };
@@ -134,4 +134,35 @@ test('the tail is capped at KNOWS_TAIL_MAX lines in all, in the order given', ()
 test('the tail gives nothing for people who know nothing, and a bad name is skipped', () => {
     assert.deepEqual(knowsTail([{ name: 'Mira', knows: '' }, { name: '  ', knows: addKnow('', 'r1', [weather]).text }, null]), []);
     assert.deepEqual(knowsTail(undefined), []);
+});
+
+test('how: is read by its words: seeing words give saw, hearing words heard, both give saw', () => {
+    for (const how of ['seen and verified', 'shown in Guild folio', 'told and shown', 'saw', 'Witnessed it', 'checked']) assert.equal(readHow(how), 'saw', how);
+    for (const how of ['heard', 'told', 'overheard', 'a rumour', 'gossip at the dock', 'reported by Klaas']) assert.equal(readHow(how), 'heard', how);
+    for (const how of ['', 'guessed', 'dreamed', undefined]) assert.equal(readHow(how), null, String(how));
+});
+
+test('the owner lines (14 Nov) are kept with a canonical how when read by the rule, and still refused when how names neither', () => {
+    const hows = ['seen and verified', 'seen and verified', 'shown in Guild folio', 'told and shown'];
+    const lines = hows.map((how, i) => ({ about: 'Astra', fact: `fact ${i}`, how }));
+    const out = addKnow('', 'r1', lines, { tolerant: true });
+    assert.equal(out.problem, null);
+    assert.deepEqual(readKnows(out.text).map(e => e.how), ['saw', 'saw', 'saw', 'saw']);
+    assert.equal(addKnow('', 'r1', [{ about: 'Astra', fact: 'x', how: 'guessed' }], { tolerant: true }).problem, 'know needs about, fact and how (saw or heard)');
+    assert.equal(addKnow('', 'r1', [lines[0]]).problem, 'know needs about, fact and how (saw or heard)', 'strict reading (a stored reply) still refuses it');
+    assert.equal(readKnows(addKnow('', 'r1', [{ about: 'A', fact: 'f', how: 'rumour' }], { tolerant: true }).text)[0].how, 'heard');
+});
+
+test('knowRuleFor: a new line reads by the rule; a Re-read keeps a refused line refused', () => {
+    const labels = { about: 'Astra', fact: 'fact 0', how: 'seen and verified' };
+    const standing = text => ({ domains: { npc: { npcs: { roeland: { knows: text } } } } });
+    assert.equal(knowRuleFor(null, 'roeland', 'r1', labels), KNOW_RULE);
+    assert.equal(knowRuleFor(standing(''), 'roeland', 'r1', labels), 0, 'nothing stored: the old read refused it');
+    const kept = addKnow('', 'r1', [labels], { tolerant: true }).text;
+    assert.equal(knowRuleFor(standing(kept), 'roeland', 'r1', labels), KNOW_RULE);
+    assert.equal(knowRuleFor(standing(kept), 'roeland', 'r2', labels), 0);
+    const receipt = { type: 'capture.know', data: { key: 'roeland', knowRule: KNOW_RULE, knowId: 'astra|fact 0' } };
+    assert.equal(knowRuleFor(standing(''), 'roeland', 'r1', labels, [receipt]), KNOW_RULE);
+    assert.equal(markKnowResult({ data: {} }, labels, KNOW_RULE).data.knowId, 'astra|fact 0');
+    assert.deepEqual(markKnowResult({ data: {} }, labels, 0), { data: {} });
 });

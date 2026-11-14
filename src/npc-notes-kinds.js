@@ -8,8 +8,8 @@
 // Pure: no storage, never imports npc-meters.js.
 import { FEATURE_NOTES, npcKey } from './npc-meters-config.js';
 import { readLies, addLie, catchLie, lieTail, lieRows, caughtSummary, CAUGHT_TIER, CAUGHT_DROP } from './npc-notes-lies.js';
-import { readKnows, addKnow, openKnow, knowsTail, knowsView, KNOWS_MAX, KNOWS_TEXT_MAX } from './npc-notes-knows.js';
-import { readTastes, addTaste, tastesText, tasteTail, TASTE_LIMITS } from './npc-notes-tastes.js';
+import { readKnows, addKnow, openKnow, knowRuleFor, markKnowResult, knowsTail, knowsView, KNOWS_MAX, KNOWS_TEXT_MAX } from './npc-notes-knows.js';
+import { readTastes, addTaste, tastesText, tasteTail, tasteRuleFor, markTasteResult, TASTE_LIMITS } from './npc-notes-tastes.js';
 import { readTies, applyTags, tiesText, tiesView, tagsFromRelation, owedBy } from './npc-notes-ties.js';
 import { readDrives, driveRows, setDrives, applyStrength } from './npc-notes-drives.js';
 import { readLookStamp, lookStamp } from './npc-notes-look.js';
@@ -41,7 +41,7 @@ function lieKind(current, line, ctx) {
 // know: `~ know` records one reply's lines (lines: [{ about, fact, how, secret? }]); `~ know open` opens a secret (about, fact).
 function knowKind(current, line, ctx) {
     if (line.open) return { text: openKnow(current, line.about, line.fact) ?? current, problem: '' };
-    const out = addKnow(current, ctx.r, line.lines);
+    const out = addKnow(current, ctx.r, line.lines, { tolerant: ctx.knowRule === 1 });
     return { text: out.text ?? current, problem: out.problem ?? '' };
 }
 
@@ -152,6 +152,14 @@ const GRAMMAR = Object.freeze({
 });
 
 /** The `kinds` entries for the host: every note kind handled by `capture` and behind the notes feature. */
+/** The rule marks of a note line: `rule` (taste or know, 0 when strict) and the matching mark for the result. */
+export function noteRule(kind, ctx, key, reply, labels) {
+    return kind === 'taste' ? tasteRuleFor(ctx.standing, key, reply, labels.likes ?? labels.dislikes, ctx.standingReceipts)
+        : kind === 'know' ? knowRuleFor(ctx.standing, key, reply, labels, ctx.standingReceipts) : 0;
+}
+export function markNote(kind, result, labels, rule) {
+    return kind === 'taste' ? markTasteResult(result, labels.likes ?? labels.dislikes, rule) : kind === 'know' ? markKnowResult(result, labels, rule) : result;
+}
 export const noteKinds = capture => Object.fromEntries(Object.keys(KINDS).map(kind => [kind, { grammar: GRAMMAR[kind], apply: capture, feature: FEATURE_NOTES }]));
 export const isNoteKind = kind => Object.hasOwn(KINDS, kind);
 export const noteField = kind => KINDS[kind]?.field ?? null;
