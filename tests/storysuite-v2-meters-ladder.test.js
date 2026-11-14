@@ -819,7 +819,7 @@ test('event card: a line the day held shows "Held: …. Nothing moved." and what
     const { html } = cardOf(s);
     assert.match(html, /delta-rel-impact-ordinary">Ordinary</);
     assert.match(html, new RegExp(`Reply #${reply} · ${storyMinuteText(12 * 1440)}`));
-    assert.match(html, /Held: today&#039;s ordinary is used\. Nothing moved\./);
+    assert.match(html, /Held: today&#039;s ordinary is used on [^.]*\. Nothing moved\./);
     assert.match(html, /Asked: Trust \+1, Affection \+1/);
     assert.doesNotMatch(html, /Progress only|Old sidecar/);
 });
