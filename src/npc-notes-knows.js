@@ -11,7 +11,17 @@ export const KNOWS_TEXT_MAX = 2000;
 export const KNOWS_TAIL_PER_NPC = 1;
 export const KNOWS_TAIL_MAX = 4;
 export const KNOW_HOW = Object.freeze(['saw', 'heard']);
+export const KNOW_RULE = 1;
 const REPLY_KEY_MAX = 80;
+// Rule mark (KNOW_RULE): `how:` is read by its words (see/hear families). Only new lines read so; a stored reply whose line was refused replays refused.
+const SEE_WORDS = new Set(['saw', 'seen', 'see', 'sees', 'seeing', 'shown', 'show', 'showed', 'shows', 'witnessed', 'watched', 'verified', 'read', 'found', 'spotted', 'noticed', 'checked', 'inspected']);
+const HEAR_WORDS = new Set(['heard', 'hear', 'hears', 'told', 'tell', 'said', 'overheard', 'rumour', 'rumor', 'rumours', 'rumors', 'gossip', 'reported', 'informed']);
+/** The canonical 'saw' or 'heard' for a written `how:` value, or null when it names neither. Both kinds in one value give 'saw'. */
+export function readHow(value) {
+    const words = String(value ?? '').toLowerCase().match(/[a-z]+/g) ?? [];
+    if (words.some(word => SEE_WORDS.has(word))) return 'saw';
+    return words.some(word => HEAR_WORDS.has(word)) ? 'heard' : null;
+}
 const SECRET_TAIL_NOTE = 'never reveal it unless the story shows them telling.';
 
 // The same cleaning as the neighbours (control characters to spaces, runs of space to one, cut to `max` characters).
@@ -32,6 +42,7 @@ function knowOf(item) {
     if (item.day !== undefined && item.day !== null && wholeDay(item.day) === null) return null;
     const entry = { about, fact, how: item.how, day: wholeDay(item.day), r: item.r };
     if (item.secret === true) entry.secret = true;
+    if (item.rule === KNOW_RULE) entry.rule = KNOW_RULE;
     return entry;
 }
 
@@ -56,17 +67,37 @@ export function readKnows(text) {
  * The list keeps the newest KNOWS_MAX. → { text, problem }: `text` is the whole new leaf, or null with a `problem` when a line is
  * bad (the whole reply's command is then refused, nothing is written). An empty `lines` clears the reply's entries.
  */
-export function addKnow(prior, reply, lines) {
+export function addKnow(prior, reply, lines, { tolerant = false } = {}) {
     if (!replyKeyOk(reply) || !Array.isArray(lines)) return { text: null, problem: 'know needs a reply key and a list of lines' };
     const written = [];
     for (const line of lines) {
-        const entry = knowOf({ ...line, r: reply });
+        // The rule mark is stored only on an entry whose written how: was not already exactly saw/heard (old bytes stay old bytes).
+        const widened = tolerant && !KNOW_HOW.includes(line?.how);
+        const entry = knowOf({ ...line, how: widened ? readHow(line?.how) : line?.how, r: reply, rule: widened || line?.rule === KNOW_RULE ? KNOW_RULE : 0 });
         if (!entry) return { text: null, problem: 'know needs about, fact and how (saw or heard)' };
         written.push(entry);
     }
     const kept = listOf(prior).filter(old => old.r !== reply && !written.some(entry => sameFact(entry, old)));
     return { text: JSON.stringify([...kept, ...written].slice(-KNOWS_MAX)), problem: null };
 }
+
+const ruleKey = (about, fact) => `${clean(about, KNOW_ABOUT_MAX)}|${clean(fact, KNOW_FACT_MAX)}`.toLowerCase();
+
+/**
+ * KNOW_RULE for a new line whose how: needs the tolerant read; for a Re-read (`standing` set) only when the reply's stored entry (its own
+ * rule mark) or receipt shows the line was kept under the rule, else 0 (strict). A how: already exactly saw/heard is never marked (both reads agree).
+ */
+export function knowRuleFor(standing, key, reply, labels, receipts = []) {
+    if (KNOW_HOW.includes(labels.how)) return 0;
+    if (!standing) return KNOW_RULE;
+    const id = ruleKey(labels.about, labels.fact);
+    if (Array.isArray(receipts) && receipts.some(r => r?.type === 'capture.know' && r.data?.key === key && r.data?.knowRule === KNOW_RULE && r.data?.knowId === id)) return KNOW_RULE;
+    const how = readHow(labels.how);
+    return readKnows(standing.domains?.npc?.npcs?.[key]?.knows).some(e => e.r === reply && e.rule === KNOW_RULE && e.how === how && ruleKey(e.about, e.fact) === id) ? KNOW_RULE : 0;
+}
+
+export const markKnowResult = (result, labels, rule) => rule === KNOW_RULE
+    ? { ...result, data: { ...result.data, knowRule: KNOW_RULE, knowId: ruleKey(labels.about, labels.fact) } } : result;
 
 /**
  * The story (or a `told` line) opens a secret: the matching entries (same about and fact, ignoring case) lose `secret`.
