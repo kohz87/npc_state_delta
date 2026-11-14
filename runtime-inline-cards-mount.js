@@ -6,9 +6,11 @@
 import { fillPresentSceneText } from './present-scene.js';
 
 export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObserver, messageElement, inlineRosterHtml, inChatCastMode, inlineEntriesForRender, meguminIntegrationMessageId, meguminBlockCardForMessage, cleanupStaleMeguminIntegrations, inlineAnchorMessageId, mountNpcStateInsideMeguminBlock }) {
-    const { chatHydrationStatus, getChatKey, getChatState, generationActive = () => false } = deps;
+    const { chatHydrationStatus, getChatKey, getChatState, streamingMessageId = () => null } = deps;
 
     let inlineRenderTimer = null;
+    let pendingStreamed = false;   // every render asked since the last one came from the streaming message's own growth
+    let renderStreamed = false;    // the render now running is one of those
     let inlineWatchdogTimer = null;
 
     function ensureInlineObserver() {
@@ -21,14 +23,16 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
         rt.inlineObserver = new globalThis.MutationObserver(mutations => {
             // Ignore text-only mutations inside our own card. Host message redraws, removed
             // anchors, pagination and markdown replacements all arrive as child-list changes.
-            const relevant = (mutations || []).some(mutation => {
+            const relevant = (mutations || []).filter(mutation => {
                 if (mutation?.type && mutation.type !== 'childList') return false;
                 const target = mutation?.target;
                 if (typeof target?.closest === 'function' && target.closest('.npc-state-delta-inline-anchor, .npc-state-delta-megumin-pane')) return false;
                 return true;
             });
-            // While a reply is being made its text grows by child-list changes in the chat: no render for each (one follows the generation's end).
-            if (relevant && !generationActive()) queueInlineRender(45);
+            // (perf) A render caused only by the growth of the message being streamed says so: its page-API notification is coalesced.
+            const streaming = streamingMessageId();
+            const streamed = streaming !== null && streaming !== undefined && relevant.every(mutation => String(mutation.target?.closest?.('.mes')?.getAttribute?.('mesid')) === String(streaming));
+            if (relevant.length) queueInlineRender(45, 0, streamed);
         });
         try {
             rt.inlineObserver.observe(chat, { childList: true, subtree: true });
@@ -151,15 +155,20 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
             fillPresentSceneText(anchor);
             rendered += 1;
         }
-        document.dispatchEvent?.(new CustomEvent('npc-state-delta:cast-rendered'));
+        const streamed = renderStreamed && streamingMessageId() != null;
+        renderStreamed = false;
+        document.dispatchEvent?.(new CustomEvent('npc-state-delta:cast-rendered', { detail: { streaming: streamed } }));
         return { rendered, missing };
     }
 
     const INLINE_RENDER_RETRY_DELAYS = [80, 180, 350, 700, 1400];
-    function queueInlineRender(delay = 0, retryIndex = 0) {
+    function queueInlineRender(delay = 0, retryIndex = 0, streamed = false) {
+        pendingStreamed = streamed && (inlineRenderTimer ? pendingStreamed : true);
         if (inlineRenderTimer) clearTimeout(inlineRenderTimer);
         inlineRenderTimer = setTimeout(() => {
             inlineRenderTimer = null;
+            renderStreamed = pendingStreamed;
+            pendingStreamed = false;
             try {
                 const result = renderInlineCards();
                 if (result?.missing > 0 && retryIndex < INLINE_RENDER_RETRY_DELAYS.length) {

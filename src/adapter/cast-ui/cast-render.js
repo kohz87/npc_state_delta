@@ -5,7 +5,7 @@ import { elementOf, PANE_CLASS } from './dom.js';
 
 export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
     const {
-        doc, enabled, npcList, withNpcList = fn => fn(), part, runtime, timeline, worldShown,
+        doc, enabled, npcList, part, runtime, timeline, worldShown,
     } = deps;
 
     // ---- the Dossiers tab (once Cast) ----
@@ -27,7 +27,7 @@ export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
         el.addEventListener?.('input', event => {
             const box = event.target;
             if (!box?.classList?.contains?.('npc-state-delta-story-search')) return;
-            el.__npcStateDeltaV2Find = session.dossierFind = String(box.value ?? '').slice(0, 80);
+            el.__npcStateDeltaV2Find = String(box.value ?? '').slice(0, 80);
             const list = el.querySelector?.('.npc-state-delta-story-list');
             if (list) list.replaceChildren(...dossier.dossierRowNodesFor(el.__npcStateDeltaV2Find, list.ownerDocument ?? doc));
         });
@@ -38,13 +38,10 @@ export function createCastRenderPart(session, deps, dossier, { portraitFill }) {
     // screen) leaves castEl, the Story panel's tab pane, alone. `people` (only Story Director's World → Now, the page API)
     // draws "People here": portrait, name, standing chip and the description; the Look and field lines, the Next line and the
     // notes (opened and hidden) stay in the dossier and on the Dossiers screen.
-    function renderCast(el, options = {}) { return withNpcList(() => renderCastOnce(el, options)); }
-    function renderCastOnce(el, { track = true, cast = true, list = false, people = false } = {}) {
+    function renderCast(el, { track = true, cast = true, list = false, people = false } = {}) {
         if (!el) return;
         if (track) session.castEl = el;
         bindCastActions(el);
-        // The host draws a refresh into a new pane: the search the reader typed in the last one goes on in this one.
-        if (list && typeof el.__npcStateDeltaV2Find !== 'string' && typeof session.dossierFind === 'string') el.__npcStateDeltaV2Find = session.dossierFind;
         const api = runtime();
         const owner = el.ownerDocument ?? doc;
         let body = '';

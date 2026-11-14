@@ -41,16 +41,7 @@ export function createQueriesPart(session, deps) {
 
     // ---- queries (read-only; fresh plain copies; empty while Delta is off or still loading) ----
 
-    // (perf) One read of the list per synchronous pass: a cast render asks it once per card, per dossier lookup and per meter, and each ask is a
-    // host query (the scene's presence; the host settles for every query). Inside withNpcList the first read is kept for the pass.
-    let npcListHeld = null;
-    const withNpcList = fn => {
-        if (npcListHeld) return fn();
-        npcListHeld = npcListNow();
-        try { return fn(); } finally { npcListHeld = null; }
-    };
-    const npcList = () => npcListHeld ?? npcListNow();
-    const npcListNow = () => {
+    const npcList = () => {
         if (!enabled()) return [];
         try {
             const list = suiteApi?.npcs?.();
@@ -413,7 +404,7 @@ export function createQueriesPart(session, deps) {
     }
 
     return {
-        warn, storyDateText, storyDayNumber, runtime, enabled, panel, npcList, withNpcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
+        warn, storyDateText, storyDayNumber, runtime, enabled, panel, npcList, presentList, dossierOf, storedSettings, catalog, setupOf, part, sliceEntries,
         entryFor, queries, ...director, send, sliceView,
     };
 }

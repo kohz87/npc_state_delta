@@ -14,7 +14,7 @@ export function createConnectPart(session, deps) {
     const {
         aliveMs, announceHosted, attempts, cardSettings, chatKeyOf, definition, dossiersReady, host, listen, loadDossierList,
         doc, loadEmptyCast, onTurn: runTurn, portraitFill: fillPortraits, registerCardSettings, registerPublicPaths, retryMs, startTimeline, stopTimeline,
-        syncDrawer, timers, unmountSection, warn, flushNotify,
+        syncDrawer, timers, unmountSection, warn,
     } = deps;
 
     // A host capture or Re-read that settles after Delta's last render: an open dossier panel asks to draw again (it draws only
@@ -132,7 +132,6 @@ export function createConnectPart(session, deps) {
         unmountSection();
         syncDrawer();
         if (was) announceHosted(false);
-        try { flushNotify?.(); } catch { /* nothing waiting */ }
     }
 
     /** Checks that the host is still there; restores the drawer and looks again when it is not. */

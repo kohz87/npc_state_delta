@@ -6,7 +6,7 @@ import { findKeyEntry, isKey } from '../../key-people.js';
 import { elementOf, meterBarNode } from './dom.js';
 
 export function createDossierListPart(session, deps) {
-    const { dossierOf, headReply, keyPeople, npcList, withNpcList = fn => fn(), part, presentList, runtime, warn } = deps;
+    const { dossierOf, headReply, keyPeople, npcList, part, presentList, runtime, warn } = deps;
     let rowsCache = { key: null, rows: [] };
 
     // Every dossier as a row of v1's list (dossier-ui.js dossierIndexProjection), kept until Delta's state
@@ -116,8 +116,7 @@ export function createDossierListPart(session, deps) {
     // The NPCs the meters show, in order: the present dossiers' (dossier order), then (beta) the people the story's change
     // lines gave meters who have no dossier yet (no scan has made one), straight from the state: those Story Block's scene has
     // here, or all of them when the scene cannot say. → { shown, byKey, cast } or null.
-    function meterEntries() { return withNpcList(meterEntriesOnce); }
-    function meterEntriesOnce() {
+    function meterEntries() {
         if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
         let cast;
         try {

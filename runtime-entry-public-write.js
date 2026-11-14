@@ -4,7 +4,7 @@
 
 import { readAheadOf } from './scan-context.js';
 import { activeReplyIds } from './src/transcript.js';
-import { chatContext, inReplay, generationActiveNow } from './runtime-scan-helpers.js';
+import { chatContext, inReplay } from './runtime-scan-helpers.js';
 import { normalizeAllowance } from './src/relationship-pacing.js';
 import { effectiveCustomFieldNames } from './runtime-settings.js';
 
@@ -193,8 +193,8 @@ export function createPublicApiStatePart(deps) {
         }
         return { turn: state.turn, reply: latestReplyIndex(), npcs: viewNpcCopies(scenePresenceView(hostedMeterView(state.npcs))), portraitAssets: {}, formPortraits, customFieldNames: [...effectiveCustomFieldNames()], ...dossierHostViews(state) };
     },
-    /** (perf) True while a reply is being made (streaming, a non-streaming wait, the planner pre-call; runtime-scan-helpers.js generationRunning): the dossier panel draws nothing then and catches up when it ends. */
-    generationActive: () => generationActiveNow(),
+    /** (perf) True while a reply is streaming: the dossier panel draws nothing then and catches up when it ends. */
+    generationActive: () => Boolean(chatContext()?.streamingProcessor),
     /** (perf) What the dossier panel needs before it draws: the chat and its load state (uiStatus also builds branch diagnostics). */
     dossierViewStatus: () => {
         const key = getChatKey();

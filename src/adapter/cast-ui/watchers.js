@@ -1,6 +1,6 @@
 // Page-API change listeners: the subscriber set and the one notification loop used by the rendered cast and key-person pin.
 //
-// (perf) Only the cast-rendered notification (the chat's own redraws, one per streamed token) is coalesced: notifyChange(true) runs the first at
+// (perf) Only the cast-rendered notification of a render caused by the streaming message's growth (one per streamed token) is coalesced: notifyChange(true) runs the first at
 // once, further ones inside COALESCE_MS become one trailing call, and none runs while a reply is being made (a generation: checked again every
 // RECHECK_MS, at most MAX_HOLD_MS, then it runs anyway). Every other change (Delta turned on or off, the host going away, a timeline change)
 // is notifyChange() and goes out at once, with whatever trailing call was waiting folded into it.
@@ -43,12 +43,5 @@ export function createWatchers({ warn, delta = null }) {
         if (wait > 0) { later(wait); return; }
         run();
     }
-    // The host went away or Delta stopped: a call that is waiting runs now (the listeners must hear it), and nothing stays scheduled.
-    function flush() {
-        if (timer === null) return;
-        clearTimeout(timer);
-        timer = null;
-        run();
-    }
-    return { watchers, notifyChange, flush };
+    return { watchers, notifyChange };
 }

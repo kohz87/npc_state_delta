@@ -25,15 +25,6 @@ export function chatContext() {
     const real = getContext();
     return replay ? Object.create(real, { chat: { value: replay.chat } }) : real;
 }
-// (perf) Whether a reader-facing generation is under way: set by SillyTavern's GENERATION_STARTED (not quiet, not a dry run), cleared by
-// GENERATION_ENDED / GENERATION_STOPPED, a received message or a chat change. It is bounded: a start that never gets its end (SillyTavern
-// emits the end only when the stop button was shown) stops counting after GENERATION_MAX_MS.
-export const GENERATION_MAX_MS = 180000;
-let generationSince = 0;
-export const markGeneration = on => { generationSince = on ? Date.now() : 0; };
-export const generationRunning = () => generationSince > 0 && Date.now() - generationSince < GENERATION_MAX_MS;
-// A reply is being made right now: SillyTavern's stream is open, or a generation start has not met its end yet (bounded, above).
-export const generationActiveNow = () => { try { return Boolean(chatContext()?.streamingProcessor) || generationRunning(); } catch { return generationRunning(); } };
 export const clockNow = () => (replay ? replay.now() : Date.now());
 export async function inReplay(scope, fn) {
     replay = scope;

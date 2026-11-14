@@ -247,66 +247,9 @@ test('refresh asks coalesce: a burst of mutations costs one token check, and non
     }
 });
 
-test('generationActive: true from a (non-quiet, non-dry-run) generation start to its end or stop, also without streaming', () => {
-    const output = runHostScenario('dossier-generation-active', async () => {
-        Object.assign(mockState.context.eventTypes, { GENERATION_STARTED: 'generation_started', GENERATION_ENDED: 'generation_ended', GENERATION_STOPPED: 'generation_stopped' });
-    }, async () => {
-        const api = globalThis.NPCStateDelta;
-        await sleep(300);
-        const emit = async (name, ...args) => { await Promise.all((mockState.listeners.get(name) || []).map(fn => fn(...args))); };
-        const out = { idle: api.generationActive() };
-        await emit('generation_started', 'quiet', {}, false);
-        out.quiet = api.generationActive();
-        await emit('generation_started', 'normal', {}, true);
-        out.dryRun = api.generationActive();
-        await emit('generation_started', 'normal', {}, false);
-        out.started = api.generationActive();
-        await emit('generation_started', 'quiet', {}, false);
-        await emit('generation_started', 'normal', {}, true);
-        out.quietMidReply = api.generationActive();
-        await emit('generation_ended', 3);
-        out.ended = api.generationActive();
-        await emit('generation_started', 'swipe', {}, false);
-        await emit('generation_stopped');
-        out.stopped = api.generationActive();
-        console.log('RESULT ' + JSON.stringify(out));
-    });
-    const out = JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
-    assert.deepEqual(out, { idle: false, quiet: false, dryRun: false, started: true, quietMidReply: true, ended: false, stopped: false });
-});
-
-test('refresh asks do not wait forever on a generation that never ends: after the bound the check runs', async () => {
-    const saved = { document: globalThis.document, MutationObserver: globalThis.MutationObserver };
-    globalThis.document = { getElementById: () => null };
-    try {
-        let tokenReads = 0;
-        const api = {
-            dossierViewStatus: () => ({ chatKey: 'chat-1', hydrationStatus: 'ready' }),
-            dossierViewToken: () => { tokenReads += 1; return `t${tokenReads}`; },
-            generationActive: () => true,   // an aborted stream left it set
-            getDossierState: () => ({ npcs: [{ id: 'a', name: 'Aster' }] }),
-        };
-        const ui = new DeltaDossierUi(api);
-        let draws = 0;
-        ui.root = { querySelector: () => null };
-        ui.renderFromProjection = () => { draws += 1; };
-        ui.panelOpen = true;
-        ui.scheduleRefresh();
-        await new Promise(resolve => setTimeout(resolve, 400));
-        assert.deepEqual([tokenReads, draws], [0, 0], 'held back while the generation counts');
-        ui.generationDeferSince = Date.now() - 400000;   // as if it had been held back past the bound
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        assert.equal(draws, 1, 'the bound ended the wait: one check and draw');
-        clearTimeout(ui.refreshTimer);
-    } finally {
-        globalThis.document = saved.document;
-        globalThis.MutationObserver = saved.MutationObserver;
-    }
-});
-
 test('page-API change notifications: only the streamed-token cast render is coalesced and held; every other change goes out at once', async () => {
     let generating = false;
-    const { watchers, notifyChange, flush } = createWatchers({ warn: () => {}, delta: () => ({ generationActive: () => generating }) });
+    const { watchers, notifyChange } = createWatchers({ warn: () => {}, delta: () => ({ generationActive: () => generating }) });
     let calls = 0;
     watchers.add(() => { calls += 1; });
     notifyChange(true);
@@ -327,16 +270,16 @@ test('page-API change notifications: only the streamed-token cast render is coal
     notifyChange(true);
     assert.equal(calls, 4, 'after the generation the first one runs at once');
     notifyChange(true);   // inside the quiet gap of that run: waits
-    flush();
-    assert.equal(calls, 5, 'flush ran the waiting call and left nothing scheduled');
-    flush();
+    notifyChange();       // an immediate one takes the waiting call with it
     assert.equal(calls, 5);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(calls, 5, 'nothing stays scheduled');
 });
 
 test('the real adapter wiring: Delta turned off during a generation tells the page API at once; the streamed-token cast render is held until the generation ends', async () => {
     const listeners = new Map();
     const doc = { documentElement: { dataset: {} }, getElementById: () => null, addEventListener: (name, fn) => listeners.set(name, [...(listeners.get(name) ?? []), fn]), dispatchEvent: () => true };
-    const fire = name => { for (const fn of listeners.get(name) ?? []) fn({ type: name }); };
+    const fire = (name, detail) => { for (const fn of listeners.get(name) ?? []) fn({ type: name, detail }); };
     let enabled = true;
     let generating = false;
     const npc = { id: 'mira', name: 'Mira', present: true };
@@ -353,45 +296,58 @@ test('the real adapter wiring: Delta turned off during a generation tells the pa
     const off = adapter.pageApi.onChange(() => { calls += 1; seen.push(adapter.pageApi.available()); });
     try {
         generating = true;
-        fire('npc-state-delta:cast-rendered');   // the first runs at once
+        fire('npc-state-delta:cast-rendered', { streaming: true });   // the first runs at once
         const first = calls;
-        for (let i = 0; i < 20; i += 1) fire('npc-state-delta:cast-rendered');   // one per streamed token
+        for (let i = 0; i < 20; i += 1) fire('npc-state-delta:cast-rendered', { streaming: true });   // one per streamed token
         assert.equal(calls, first, 'the streamed-token renders wait');
+        fire('npc-state-delta:cast-rendered', { streaming: false });   // a manual dossier edit's render (not the streaming message's growth)
+        assert.equal(calls, first + 1, 'a render not caused by the stream goes out at once, mid-generation');
+        const base = calls;
         enabled = false;
         fire('npc-state-delta:enabled-changed');
-        assert.equal(calls, first + 1, 'Delta turned off goes out at once, in the middle of the generation');
+        assert.equal(calls, base + 1, 'Delta turned off goes out at once, in the middle of the generation');
         assert.equal(seen.at(-1), false, 'and the page API already says it is off');
         await new Promise(resolve => setTimeout(resolve, 1000));
-        assert.equal(calls, first + 1, 'nothing else is run for the held renders');
+        assert.equal(calls, base + 1, 'nothing else is run for the held renders');
     } finally { off(); adapter.stop(); generating = false; }
 });
 
-test('inline cards: the chat observer asks for no render while a reply is being made (its text grows by child-list changes); a mutation after it does', async () => {
+test('inline cards: only a render caused by the streaming message\'s growth says so in its cast-rendered event; every other render does not', async () => {
     const saved = globalThis.MutationObserver;
+    const savedDocument = globalThis.document;
     let callback = null;
     globalThis.MutationObserver = class { constructor(fn) { callback = fn; } observe() {} disconnect() {} };
-    const savedDocument = globalThis.document;
-    globalThis.document = { dispatchEvent() {}, querySelectorAll: () => [] };
-    let renders = 0;
-    let generating = false;
+    const details = [];
+    globalThis.document = { dispatchEvent: event => { details.push(event.detail?.streaming); }, querySelectorAll: () => [] };
+    let streaming = null;
     const chat = { querySelectorAll: () => [] };
+    const mutationIn = id => [{ type: 'childList', target: { closest: selector => (selector === '.mes' ? { getAttribute: () => String(id) } : null) } }];
     try {
-        const rt = {};
-        const part = createInlineCardsMountPart(rt, { chatHydrationStatus: () => 'ready', getChatKey: () => 'chat-1', getChatState: () => ({}), generationActive: () => generating }, {
+        const part = createInlineCardsMountPart({}, { chatHydrationStatus: () => 'ready', getChatKey: () => 'chat-1', getChatState: () => ({}), streamingMessageId: () => streaming }, {
             chatElementForInlineObserver: () => chat, messageElement: () => null, inlineRosterHtml: () => '', inChatCastMode: () => 'on',
-            inlineEntriesForRender: () => { renders += 1; return []; }, meguminIntegrationMessageId: () => null, meguminBlockCardForMessage: () => null,
+            inlineEntriesForRender: () => [], meguminIntegrationMessageId: () => null, meguminBlockCardForMessage: () => null,
             cleanupStaleMeguminIntegrations: () => {}, inlineAnchorMessageId: () => null, mountNpcStateInsideMeguminBlock: () => false,
         });
         part.ensureInlineObserver();
-        const mutation = [{ type: 'childList', target: { closest: () => null } }];
-        generating = true;
-        for (let i = 0; i < 100; i += 1) callback(mutation);
-        await new Promise(resolve => setTimeout(resolve, 200));
-        assert.equal(renders, 0, 'no render per streamed token');
-        generating = false;
-        callback(mutation);
-        await new Promise(resolve => setTimeout(resolve, 200));
-        assert.equal(renders, 1, 'one render once the generation is over');
+        const settle = () => new Promise(resolve => setTimeout(resolve, 150));
+        streaming = 5;
+        for (let i = 0; i < 20; i += 1) callback(mutationIn(5));
+        await settle();
+        assert.deepEqual(details, [true], 'the streaming message grew: one render, marked streaming');
+        details.length = 0;
+        callback(mutationIn(3));   // another message redrew
+        await settle();
+        assert.deepEqual(details, [false], 'a render of another message is not marked');
+        details.length = 0;
+        callback(mutationIn(5));
+        part.queueInlineRender(0);   // a manual edit asks in the same window
+        await settle();
+        assert.deepEqual(details, [false], 'a manual ask in the same window makes it an ordinary render');
+        details.length = 0;
+        streaming = null;
+        callback(mutationIn(5));   // not streaming
+        await settle();
+        assert.deepEqual(details, [false], 'without a stream nothing is marked');
     } finally {
         globalThis.MutationObserver = saved;
         globalThis.document = savedDocument;

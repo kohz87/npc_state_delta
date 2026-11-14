@@ -1,6 +1,6 @@
 /* NPC State Delta dossier surface: panel lifecycle, shell, events, observers and portrait lightbox. */
 import { escapeHtml } from './src/util/html.js';
-import { OBSERVER_RETRY_LIMIT, OBSERVER_RETRY_MS, REFRESH_DEBOUNCE_MS, REFRESH_MAX_WAIT_MS, REFRESH_STREAM_MAX_MS, REFRESH_STREAM_RECHECK_MS, ROOT_ID, SETTINGS_ID, STYLE_ID } from './dossier-ui-constants.js';
+import { OBSERVER_RETRY_LIMIT, OBSERVER_RETRY_MS, REFRESH_DEBOUNCE_MS, REFRESH_MAX_WAIT_MS, REFRESH_STREAM_RECHECK_MS, ROOT_ID, SETTINGS_ID, STYLE_ID } from './dossier-ui-constants.js';
 import { createPortraitRefs } from './dossier-ui-html.js';
 import { STYLES } from './dossier-ui-styles.js';
 import { BOARD_STYLES } from './dossier-ui-styles-board.js';
@@ -22,9 +22,9 @@ export class DossierUiPanel {
         this.lastChatKey = '';
         this.lastScreenSignature = '';
         this.dirtyWhileClosed = true;
+        this.refreshQueued = false;
         this.refreshTimer = null;
         this.refreshFirstAsk = 0;
-        this.generationDeferSince = 0;
         this.legacyObserver = null;
         this.observerRetryTimer = null;
         this.observerAttempts = 0;
@@ -264,6 +264,7 @@ export class DossierUiPanel {
         if (!this.refreshFirstAsk) this.refreshFirstAsk = now;
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
         const wait = Math.max(0, Math.min(REFRESH_DEBOUNCE_MS, this.refreshFirstAsk + REFRESH_MAX_WAIT_MS - now));
+        this.refreshQueued = true;
         this.refreshTimer = setTimeout(() => this.runScheduledRefresh(), wait);
     }
 
@@ -274,14 +275,13 @@ export class DossierUiPanel {
 
     runScheduledRefresh() {
         this.refreshTimer = null;
-        if (!this.panelOpen) { this.generationDeferSince = 0; this.refreshFirstAsk = 0; this.dirtyWhileClosed = true; return; }
-        if (!this.generationDeferSince) this.generationDeferSince = Date.now();
-        if (this.generationActive() && Date.now() - this.generationDeferSince < REFRESH_STREAM_MAX_MS) {   // a reply is being made: look again later, draw nothing now (bounded)
+        if (!this.panelOpen) { this.refreshQueued = false; this.refreshFirstAsk = 0; this.dirtyWhileClosed = true; return; }
+        if (this.generationActive()) {   // streaming: look again later, draw nothing now
             this.refreshFirstAsk = Date.now();
             this.refreshTimer = setTimeout(() => this.runScheduledRefresh(), REFRESH_STREAM_RECHECK_MS);
             return;
         }
-        this.generationDeferSince = 0;
+        this.refreshQueued = false;
         this.refreshFirstAsk = 0;
         const token = this.viewToken();
         if (token && token === this.renderedToken) return;
