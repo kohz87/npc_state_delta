@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { DeltaDossierUi } from '../dossier-ui.js';
 import { openNpc, showScreen } from '../dossier-ui-screens.js';
 import { runHostScenario } from './helpers/host-scenario.js';
+import { createInlineCardsMountPart } from '../runtime-inline-cards-mount.js';
+import { createWatchers } from '../src/adapter/cast-ui/watchers.js';
 
 // The dossier page at a long chat's scale: portraits reach the panel by reference (never escaped into its markup or copied by the
 // runtime's read), and a focus or a settings-panel mutation draws again only when something the panel shows changed.
@@ -241,5 +243,153 @@ test('refresh asks coalesce: a burst of mutations costs one token check, and non
     } finally {
         globalThis.document = saved.document;
         globalThis.MutationObserver = saved.MutationObserver;
+    }
+});
+
+test('hosted: the view token reads the host\'s views once per host revision (head / turn events), not per call', () => {
+    const output = runHostScenario('dossier-host-views-cache', async () => {
+        const sdk = {
+            registered: [], listeners: new Map(), queries: 0,
+            registerModule(def) { sdk.registered.push(def); },
+            on(name, fn) { sdk.listeners.set(name, [...(sdk.listeners.get(name) || []), fn]); return () => {}; },
+            command: async () => ({ ok: true }),
+            query: () => { sdk.queries += 1; return []; },
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    }, async () => {
+        const api = globalThis.NPCStateDelta;
+        await sleep(400);
+        const sdk = mockState.sdk;
+        const out = {};
+        out.hosted = sdk.registered.length > 0 && (sdk.listeners.get('head') || []).length > 0;
+        api.dossierViewToken();   // first read computes the host views
+        const base = sdk.queries;
+        const first = api.dossierViewToken();
+        for (let i = 0; i < 20; i += 1) api.dossierViewToken();
+        out.queriesWhileStill = sdk.queries - base;
+        out.stable = api.dossierViewToken() === first;
+        for (const fn of sdk.listeners.get('head') || []) { try { fn({ index: 0 }); } catch { /* the adapter's own step */ } }
+        const afterHead = sdk.queries;
+        api.dossierViewToken();
+        out.queriesAfterHead = sdk.queries - afterHead;
+        console.log('RESULT ' + JSON.stringify(out));
+    });
+    const out = JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
+    assert.equal(out.hosted, true);
+    assert.equal(out.queriesWhileStill, 0, 'no host query while the revision holds still');
+    assert.equal(out.stable, true);
+    assert.ok(out.queriesAfterHead > 0, "a host head event makes the next token read the host again");
+});
+
+test('generationActive: true from a (non-quiet, non-dry-run) generation start to its end or stop, also without streaming', () => {
+    const output = runHostScenario('dossier-generation-active', async () => {
+        Object.assign(mockState.context.eventTypes, { GENERATION_STARTED: 'generation_started', GENERATION_ENDED: 'generation_ended', GENERATION_STOPPED: 'generation_stopped' });
+    }, async () => {
+        const api = globalThis.NPCStateDelta;
+        await sleep(300);
+        const emit = async (name, ...args) => { await Promise.all((mockState.listeners.get(name) || []).map(fn => fn(...args))); };
+        const out = { idle: api.generationActive() };
+        await emit('generation_started', 'quiet', {}, false);
+        out.quiet = api.generationActive();
+        await emit('generation_started', 'normal', {}, true);
+        out.dryRun = api.generationActive();
+        await emit('generation_started', 'normal', {}, false);
+        out.started = api.generationActive();
+        await emit('generation_ended', 3);
+        out.ended = api.generationActive();
+        await emit('generation_started', 'swipe', {}, false);
+        await emit('generation_stopped');
+        out.stopped = api.generationActive();
+        console.log('RESULT ' + JSON.stringify(out));
+    });
+    const out = JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
+    assert.deepEqual(out, { idle: false, quiet: false, dryRun: false, started: true, ended: false, stopped: false });
+});
+
+test('refresh asks do not wait forever on a generation that never ends: after the bound the check runs', async () => {
+    const saved = { document: globalThis.document, MutationObserver: globalThis.MutationObserver };
+    globalThis.document = { getElementById: () => null };
+    try {
+        let tokenReads = 0;
+        const api = {
+            dossierViewStatus: () => ({ chatKey: 'chat-1', hydrationStatus: 'ready' }),
+            dossierViewToken: () => { tokenReads += 1; return `t${tokenReads}`; },
+            generationActive: () => true,   // an aborted stream left it set
+            getDossierState: () => ({ npcs: [{ id: 'a', name: 'Aster' }] }),
+        };
+        const ui = new DeltaDossierUi(api);
+        let draws = 0;
+        ui.root = { querySelector: () => null };
+        ui.renderFromProjection = () => { draws += 1; };
+        ui.panelOpen = true;
+        ui.scheduleRefresh();
+        await new Promise(resolve => setTimeout(resolve, 400));
+        assert.deepEqual([tokenReads, draws], [0, 0], 'held back while the generation counts');
+        ui.generationDeferSince = Date.now() - 400000;   // as if it had been held back past the bound
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        assert.equal(draws, 1, 'the bound ended the wait: one check and draw');
+        clearTimeout(ui.refreshTimer);
+    } finally {
+        globalThis.document = saved.document;
+        globalThis.MutationObserver = saved.MutationObserver;
+    }
+});
+
+test('page-API change notifications coalesce: the first runs at once, a burst becomes one trailing call, none while a reply is being made, flush runs a waiting one', async () => {
+    let generating = false;
+    const { watchers, notifyChange, flush } = createWatchers({ warn: () => {}, delta: () => ({ generationActive: () => generating }) });
+    let calls = 0;
+    watchers.add(() => { calls += 1; });
+    notifyChange();
+    assert.equal(calls, 1, 'the first one runs at once');
+    for (let i = 0; i < 50; i += 1) notifyChange();
+    assert.equal(calls, 1, 'the burst waits');
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(calls, 2, 'the burst became one trailing call');
+    generating = true;
+    for (let i = 0; i < 50; i += 1) notifyChange();
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    assert.equal(calls, 2, 'nothing runs while a reply is being made');
+    generating = false;
+    await new Promise(resolve => setTimeout(resolve, 900));
+    assert.equal(calls, 3, 'one call after it ended');
+    notifyChange();   // inside the quiet gap of the last run: waits
+    flush();
+    assert.equal(calls, 4, 'flush ran the waiting call and left nothing scheduled');
+    flush();
+    assert.equal(calls, 4);
+});
+
+test('inline cards: the chat observer asks for no render while a reply is being made (its text grows by child-list changes); a mutation after it does', async () => {
+    const saved = globalThis.MutationObserver;
+    let callback = null;
+    globalThis.MutationObserver = class { constructor(fn) { callback = fn; } observe() {} disconnect() {} };
+    const savedDocument = globalThis.document;
+    globalThis.document = { dispatchEvent() {}, querySelectorAll: () => [] };
+    let renders = 0;
+    let generating = false;
+    const chat = { querySelectorAll: () => [] };
+    try {
+        const rt = {};
+        const part = createInlineCardsMountPart(rt, { chatHydrationStatus: () => 'ready', getChatKey: () => 'chat-1', getChatState: () => ({}), generationActive: () => generating }, {
+            chatElementForInlineObserver: () => chat, messageElement: () => null, inlineRosterHtml: () => '', inChatCastMode: () => 'on',
+            inlineEntriesForRender: () => { renders += 1; return []; }, meguminIntegrationMessageId: () => null, meguminBlockCardForMessage: () => null,
+            cleanupStaleMeguminIntegrations: () => {}, inlineAnchorMessageId: () => null, mountNpcStateInsideMeguminBlock: () => false,
+        });
+        part.ensureInlineObserver();
+        const mutation = [{ type: 'childList', target: { closest: () => null } }];
+        generating = true;
+        for (let i = 0; i < 100; i += 1) callback(mutation);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        assert.equal(renders, 0, 'no render per streamed token');
+        generating = false;
+        callback(mutation);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        assert.equal(renders, 1, 'one render once the generation is over');
+    } finally {
+        globalThis.MutationObserver = saved;
+        globalThis.document = savedDocument;
     }
 });

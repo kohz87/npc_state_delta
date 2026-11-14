@@ -265,14 +265,18 @@ test('onChange: called when Delta draws its cast again (a scan that ends after t
     const api = page[PAGE_API];
     let calls = 0;
     const off = api.onChange(() => { calls += 1; });
+    await new Promise(resolve => setTimeout(resolve, 300));   // (hosting just notified: notifications are coalesced, 250 ms between two calls)
     doc.fire('npc-state-delta:cast-rendered');
     assert.equal(calls, 1);
+    await new Promise(resolve => setTimeout(resolve, 300));
     doc.fire('npc-state-delta:enabled-changed');
     assert.equal(calls, 2);
+    await new Promise(resolve => setTimeout(resolve, 300));
     // A listener that throws does not stop the others.
     api.onChange(() => { throw new Error('boom'); });
     doc.fire('npc-state-delta:cast-rendered');
     assert.equal(calls, 3);
+    await new Promise(resolve => setTimeout(resolve, 300));
     off();
     doc.fire('npc-state-delta:cast-rendered');
     assert.equal(calls, 3, 'unsubscribed');

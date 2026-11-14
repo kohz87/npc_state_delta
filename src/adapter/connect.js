@@ -14,7 +14,7 @@ export function createConnectPart(session, deps) {
     const {
         aliveMs, announceHosted, attempts, cardSettings, chatKeyOf, definition, dossiersReady, host, listen, loadDossierList,
         doc, loadEmptyCast, onTurn: runTurn, portraitFill: fillPortraits, registerCardSettings, registerPublicPaths, retryMs, startTimeline, stopTimeline,
-        syncDrawer, timers, unmountSection, warn,
+        syncDrawer, timers, unmountSection, warn, flushNotify,
     } = deps;
 
     // A host capture or Re-read that settles after Delta's last render: an open dossier panel asks to draw again (it draws only
@@ -23,13 +23,15 @@ export function createConnectPart(session, deps) {
         try { doc?.getElementById?.('npc_state_delta_dossier_root')?.__npcStateDeltaStage1Ui?.scheduleRefresh?.(); } catch { /* no panel open */ }
     }
     // The host's 'turn' and 'head' events run Delta's own steps, then the panel's refresh.
-    const onTurn = turn => { try { return runTurn(turn); } finally { refreshPanel(); } };
-    const portraitFill = (...args) => { try { return fillPortraits(...args); } finally { refreshPanel(); } };
+    // Each also moves session.hostRev, which the dossier view token caches the host's views by (hostRevision).
+    const onTurn = turn => { session.hostRev += 1; try { return runTurn(turn); } finally { refreshPanel(); } };
+    const portraitFill = (...args) => { session.hostRev += 1; try { return fillPortraits(...args); } finally { refreshPanel(); } };
 
     let aliveTimer = null;
     let hostRef = null;          // the Story Block global we connected to
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let offHead = null;          // unsubscribes from the host's 'head' event
+    let offCommitted = null;     // unsubscribes from the host's 'committed' event (a command's write moves hostRev too)
     let offCardSettings = null;  // unregisters Delta's card settings
 
     async function register(sdk, from, attempt) {
@@ -61,6 +63,10 @@ export function createConnectPart(session, deps) {
             const off = typeof sdk.on === 'function' ? sdk.on('head', portraitFill) : null;
             offHead = typeof off === 'function' ? off : null;
         } catch (error) { warn('Story Suite v2 head events are not available', error); }
+        try {
+            const off = typeof sdk.on === 'function' ? sdk.on('committed', () => { session.hostRev += 1; }) : null;
+            offCommitted = typeof off === 'function' ? off : null;
+        } catch (error) { warn('Story Suite v2 committed events are not available', error); }
         offCardSettings = registerCardSettings(sdk, cardSettings);
         session.offPublicPaths = registerPublicPaths(sdk);
         session.baselineKey = dossiersReady() ? chatKeyOf() : null;
@@ -120,6 +126,8 @@ export function createConnectPart(session, deps) {
         offTurn = null;
         try { offHead?.(); } catch { /* the host is gone */ }
         offHead = null;
+        try { offCommitted?.(); } catch { /* the host is gone */ }
+        offCommitted = null;
         try { offCardSettings?.(); } catch { /* the host is gone */ }
         offCardSettings = null;
         try { session.offPublicPaths?.(); } catch { /* the host is gone */ }
@@ -132,6 +140,7 @@ export function createConnectPart(session, deps) {
         unmountSection();
         syncDrawer();
         if (was) announceHosted(false);
+        try { flushNotify?.(); } catch { /* nothing waiting */ }
     }
 
     /** Checks that the host is still there; restores the drawer and looks again when it is not. */

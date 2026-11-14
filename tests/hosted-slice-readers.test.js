@@ -42,7 +42,7 @@ test('diagnostics renders the selected relationship view without changing the st
     fs.copyFileSync(fileURLToPath(new URL('../runtime-entry-public-write.js', import.meta.url)), path.join(temp, 'runtime-entry-public-write.js'));
     fs.writeFileSync(path.join(temp, 'scan-context.js'), 'export const readAheadOf = () => [];');
     fs.writeFileSync(path.join(temp, 'src/transcript.js'), 'export const activeReplyIds = () => [];');
-    fs.writeFileSync(path.join(temp, 'runtime-scan-helpers.js'), 'export const chatContext = () => ({}); export const inReplay = () => {};');
+    fs.writeFileSync(path.join(temp, 'runtime-scan-helpers.js'), 'export const chatContext = () => ({}); export const inReplay = () => {}; export const generationActiveNow = () => false;');
     fs.writeFileSync(path.join(temp, 'src/relationship-pacing.js'), 'export const normalizeAllowance = x => x;');
     fs.writeFileSync(path.join(temp, 'runtime-settings.js'), 'export const effectiveCustomFieldNames = () => [];');
     const { createPublicApiStatePart } = await import(pathToFileURL(path.join(temp, 'runtime-entry-public-write.js')).href);

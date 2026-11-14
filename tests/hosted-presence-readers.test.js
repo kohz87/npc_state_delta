@@ -23,9 +23,13 @@ const scenario = async () => {
         token: api.dossierViewToken(),
         profile: suiteApi ? suiteApi.npcProfiles()[0]?.present : null,
     });
+    // Story Block tells its listeners (head) whenever its scene moves; the panel's view token keeps the host's views until it does.
+    const sceneMoved = () => { for (const fn of mockState.sdkOn?.get('head') || []) fn({ index: 0 }); };
     mockState.scene = ['Yunyun'];
+    sceneMoved();
     const here = read();
     mockState.scene = [];
+    sceneMoved();
     const away = read();
     // The player's pending message names her: with the scene saying she is away, she is "called in" and her dossier is in the prompt.
     mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Yunyun, come here.' });
@@ -33,7 +37,7 @@ const scenario = async () => {
     console.log('RESULT ' + JSON.stringify({ here, away, named, hosted: globalThis.document.documentElement.dataset.npcStateDeltaStoryBlockV2 ?? null }));
 };
 const hostedPrelude = async () => {
-    const sdk = { registered: [], sent: [], registerModule(def) { sdk.registered.push(def); }, command: async (type, payload) => { sdk.sent.push({ type, payload }); return { ok: true }; }, query: name => (name === 'scene.present' ? mockState.scene : []), settings: () => ({}) };
+    const sdk = { registered: [], sent: [], registerModule(def) { sdk.registered.push(def); }, on(name, fn) { (mockState.sdkOn ??= new Map()).set(name, [...(mockState.sdkOn.get(name) || []), fn]); return () => {}; }, command: async (type, payload) => { sdk.sent.push({ type, payload }); return { ok: true }; }, query: name => (name === 'scene.present' ? mockState.scene : []), settings: () => ({}) };
     mockState.sdk = sdk;
     globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
 };

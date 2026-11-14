@@ -4,7 +4,7 @@
 
 import { readAheadOf } from './scan-context.js';
 import { activeReplyIds } from './src/transcript.js';
-import { chatContext, inReplay } from './runtime-scan-helpers.js';
+import { chatContext, inReplay, generationActiveNow } from './runtime-scan-helpers.js';
 import { normalizeAllowance } from './src/relationship-pacing.js';
 import { effectiveCustomFieldNames } from './runtime-settings.js';
 
@@ -96,6 +96,22 @@ export function createPublicApiStatePart(deps) {
         removeNpcPortrait, flushStateFile, setNpcArchiveStateById, deleteNpcById, storySuiteV2Meters,
     } = deps;
 
+    // (perf) What the view token reads from the host (the slice's numbers, the scene's presence, every host view) as one value, kept until the
+    // host's revision (adapter.hostRevision: its 'turn' / 'head' events), the stored revision, the chat or the latest reply moves. No host
+    // revision (not hosted, an older adapter): nothing is kept and every call reads the host.
+    let hostPartKept = null;
+    const hostPart = (key, state) => {
+        const read = () => {
+            const npcs = scenePresenceView(hostedMeterView(state.npcs));   // hosted: the scene's presence moves the panel too
+            return [npcs === state.npcs ? null : npcs.map(npc => [npc?.relationship ?? null, Boolean(npc?.present)]), dossierHostViews(state)];
+        };
+        let revision = null;
+        try { revision = storySuiteV2Meters()?.hostRevision?.(); } catch { revision = null; }
+        if (!Number.isFinite(revision)) return read();
+        const stamp = `${key}|${revision}|${Number(stateVersions.get(key) || 0)}|${latestReplyIndex()}|${JSON.stringify(getSettings().sourceOfTruth ?? null)}`;
+        if (hostPartKept?.stamp !== stamp) hostPartKept = { stamp, part: read() };
+        return hostPartKept.part;
+    };
     return {
     // (timeline participant) A state as installState keeps it: normalized like the chat's state, on a copy (nothing stored).
     normalizeState: state => structuredClone(normalizeChatState(state)),
@@ -193,8 +209,8 @@ export function createPublicApiStatePart(deps) {
         }
         return { turn: state.turn, reply: latestReplyIndex(), npcs: viewNpcCopies(scenePresenceView(hostedMeterView(state.npcs))), portraitAssets: {}, formPortraits, customFieldNames: [...effectiveCustomFieldNames()], ...dossierHostViews(state) };
     },
-    /** (perf) True while a reply is streaming: the dossier panel draws nothing then and catches up when it ends. */
-    generationActive: () => Boolean(chatContext()?.streamingProcessor),
+    /** (perf) True while a reply is being made (streaming, a non-streaming wait, the planner pre-call; runtime-scan-helpers.js generationRunning): the dossier panel draws nothing then and catches up when it ends. */
+    generationActive: () => generationActiveNow(),
     /** (perf) What the dossier panel needs before it draws: the chat and its load state (uiStatus also builds branch diagnostics). */
     dossierViewStatus: () => {
         const key = getChatKey();
@@ -210,9 +226,7 @@ export function createPublicApiStatePart(deps) {
         const hydration = chatHydrationStatus(key);
         if (key === 'no-chat' || hydration !== 'ready') return JSON.stringify([key, hydration, hydrationErrors.get(key)?.message || null]);
         const state = getChatState(key);
-        const npcs = scenePresenceView(hostedMeterView(state.npcs));   // hosted: the scene's presence moves the panel too
-        return JSON.stringify([key, hydration, Number(stateVersions.get(key) || 0), latestReplyIndex(), effectiveCustomFieldNames(), portraitFilesVersion(),
-            npcs === state.npcs ? null : npcs.map(npc => [npc?.relationship ?? null, Boolean(npc?.present)]), dossierHostViews(state)]);
+        return JSON.stringify([key, hydration, Number(stateVersions.get(key) || 0), latestReplyIndex(), effectiveCustomFieldNames(), portraitFilesVersion(), ...hostPart(key, state)]);
     },
     persistenceStatus: () => {
         const key = getChatKey();

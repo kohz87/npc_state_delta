@@ -9,3 +9,5 @@ export const OBSERVER_RETRY_LIMIT = 80;
 export const REFRESH_DEBOUNCE_MS = 250;
 export const REFRESH_MAX_WAIT_MS = 1500;
 export const REFRESH_STREAM_RECHECK_MS = 700;
+// A generation that never reports its end (an aborted stream) holds the panel's refresh back at most this long; then it checks anyway.
+export const REFRESH_STREAM_MAX_MS = 200000;

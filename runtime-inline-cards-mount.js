@@ -6,7 +6,7 @@
 import { fillPresentSceneText } from './present-scene.js';
 
 export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObserver, messageElement, inlineRosterHtml, inChatCastMode, inlineEntriesForRender, meguminIntegrationMessageId, meguminBlockCardForMessage, cleanupStaleMeguminIntegrations, inlineAnchorMessageId, mountNpcStateInsideMeguminBlock }) {
-    const { chatHydrationStatus, getChatKey, getChatState } = deps;
+    const { chatHydrationStatus, getChatKey, getChatState, generationActive = () => false } = deps;
 
     let inlineRenderTimer = null;
     let inlineWatchdogTimer = null;
@@ -27,7 +27,8 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
                 if (typeof target?.closest === 'function' && target.closest('.npc-state-delta-inline-anchor, .npc-state-delta-megumin-pane')) return false;
                 return true;
             });
-            if (relevant) queueInlineRender(45);
+            // While a reply is being made its text grows by child-list changes in the chat: no render for each (one follows the generation's end).
+            if (relevant && !generationActive()) queueInlineRender(45);
         });
         try {
             rt.inlineObserver.observe(chat, { childList: true, subtree: true });

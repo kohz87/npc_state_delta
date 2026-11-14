@@ -33,7 +33,7 @@ export function createCastUiPart(session, deps) {
     const presets = createPresetsPart(session, deps);
 
     return {
-        watchers: watchersPart.watchers, syncDrawer: drawer.syncDrawer, unmountSection: section.unmountSection, mountSection: section.mountSection, renderDossiers: castRender.renderDossiers, notifyChange: watchersPart.notifyChange, pageApi: page.pageApi, offerPage: page.offerPage,
+        watchers: watchersPart.watchers, syncDrawer: drawer.syncDrawer, unmountSection: section.unmountSection, mountSection: section.mountSection, renderDossiers: castRender.renderDossiers, notifyChange: watchersPart.notifyChange, flushNotify: watchersPart.flush, pageApi: page.pageApi, offerPage: page.offerPage,
         castStillShown: views.castStillShown, redrawCastViews: views.redrawCastViews, castWidget: views.castWidget, castScreen: views.castScreen, presetsBlock: presets.presetsBlock, onTurn: turn.onTurn, portraitFill: turn.portraitFill,
     };
 }

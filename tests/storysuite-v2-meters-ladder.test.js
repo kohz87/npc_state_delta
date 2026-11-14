@@ -709,7 +709,8 @@ test('net change card: the open-panel token covers the host views, so a changed 
     const before = JSON.stringify(s.adapter.dossierMeters(Object.values(s.delta.records)));
     await s.say(['~ npc Mira | trust: +5']);
     assert.notEqual(JSON.stringify(s.adapter.dossierMeters(Object.values(s.delta.records))), before);
-    assert.match(runtimeSource(), /dossierHostViews\(state\)\]\);/, 'dossierViewToken ends with the host views');
+    assert.match(runtimeSource(), /\.\.\.hostPart\(key, state\)\]\);/, 'dossierViewToken ends with the host part (the slice view, presence and host views)');
+    assert.match(runtimeSource(), /dossierHostViews\(state\)\]/, 'which holds the host views');
 });
 
 test('net change card: the same reply\'s sidecar event is not listed again under "Earlier changes"; an older one still is', async () => {

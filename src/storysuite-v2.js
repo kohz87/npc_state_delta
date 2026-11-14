@@ -170,6 +170,7 @@ export function createStorySuiteV2Adapter({
         pollTimer: null,
         sdkRef: null,           // the sdk we registered with (once per sdk)
         hosted: false,
+        hostRev: 0,             // counts the host's 'turn' and 'head' events (the dossier view token caches the host's views by it)
         emptyCast: fallbackEmptyCast,
         mounted: null,          // { el, node, placeholder, drawer } while the panel is in the overlay
         pendingSection: null,   // a section element waiting for the panel to mount
@@ -211,6 +212,8 @@ export function createStorySuiteV2Adapter({
 
     return Object.freeze({
         definition,
+        /** Moves with every host 'turn' / 'head' event (and a hosted change): the key the dossier view token caches the host's views by. */
+        hostRevision: () => session.hostRev + (session.hosted ? 0.5 : 0),
         /** The catch-up after a fallback and the rebuild: status() for the banner, skip() (not a Story Block command: that would write an op), rebuild({ replies }). */
         catchUp: timelinePart.timeline.catchUp,
         /** The page API Story Director's World screen uses (PAGE_API). */

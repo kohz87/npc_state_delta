@@ -16,7 +16,7 @@ export function createEventRegistration(rt, deps) {
         closeNpcEditor, staleHostChats, retiredInSessionChats, openingHostChats, isCanonicalChatKey,
         maybeInheritKnownBranch, branchInheritancePending, deferLoadingReceipt, loadingReconcilePending, seedBranchTracking, persist, isScanBusy, renderDossier,
         ensureInlineObserver, drainPendingAutoScan, castPortraitDue, castSync, evictDormantChatStates,
-        runBoundedLifecycleEvent, removeDeletedChatState, moveRenamedChatState, chatStateCache,
+        runBoundedLifecycleEvent, removeDeletedChatState, moveRenamedChatState, chatStateCache, markGeneration = () => {},
     } = deps;
     let lifecycleEventSequence = 0;
 
@@ -109,6 +109,9 @@ export function createEventRegistration(rt, deps) {
                 rt.narrationCaptureWatch = rt.narrationCaptureArmed ? structuredClone(rt.lastInjection.captureEventWatch || []) : [];
             });
         }
+        // (perf) The dossier panel draws nothing while a reply is being made (the planner pre-call, a stream, or a non-streaming wait).
+        if (events.GENERATION_STARTED) source.on(events.GENERATION_STARTED, (type, _options, dryRun) => markGeneration(!dryRun && type !== 'quiet'));
+        for (const name of ['GENERATION_ENDED', 'GENERATION_STOPPED', 'MESSAGE_RECEIVED', 'CHAT_CHANGED']) if (events[name]) source.on(events[name], () => { markGeneration(false); if (name === 'GENERATION_ENDED' || name === 'GENERATION_STOPPED') queueInlineRender(60); });   // (the chat's own redraws held back during the generation: one render now)
         if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { rt.sentCaptureRules = ''; rt.replacingReply = null; disarmNarrationCapture(); });
         if (events.CHAT_COMPLETION_PROMPT_READY) source.on(events.CHAT_COMPLETION_PROMPT_READY, eventData => keepCaptureRules(eventData));
 
