@@ -23,15 +23,13 @@ export function createConnectPart(session, deps) {
         try { doc?.getElementById?.('npc_state_delta_dossier_root')?.__npcStateDeltaStage1Ui?.scheduleRefresh?.(); } catch { /* no panel open */ }
     }
     // The host's 'turn' and 'head' events run Delta's own steps, then the panel's refresh.
-    // Each also moves session.hostRev, which the dossier view token caches the host's views by (hostRevision).
-    const onTurn = turn => { session.hostRev += 1; try { return runTurn(turn); } finally { refreshPanel(); } };
-    const portraitFill = (...args) => { session.hostRev += 1; try { return fillPortraits(...args); } finally { refreshPanel(); } };
+    const onTurn = turn => { try { return runTurn(turn); } finally { refreshPanel(); } };
+    const portraitFill = (...args) => { try { return fillPortraits(...args); } finally { refreshPanel(); } };
 
     let aliveTimer = null;
     let hostRef = null;          // the Story Block global we connected to
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let offHead = null;          // unsubscribes from the host's 'head' event
-    let offsRev = [];            // unsubscribe from the host's 'committed' / 'feature' / 'modules' events (they move hostRev too)
     let offCardSettings = null;  // unregisters Delta's card settings
 
     async function register(sdk, from, attempt) {
@@ -55,23 +53,14 @@ export function createConnectPart(session, deps) {
         }
         if (!session.started || hostRef !== from || session.sdkRef !== sdk) return false;
         session.hosted = true;
-        session.eventsSeen = 0;   // how many of the five change events the host took (hostRevision is only trusted with all five)
         try {
             const off = typeof sdk.on === 'function' ? sdk.on('turn', onTurn) : null;
             offTurn = typeof off === 'function' ? off : null;
-            if (offTurn) session.eventsSeen += 1;
         } catch (error) { warn('Story Suite v2 turn events are not available', error); }
         try {
             const off = typeof sdk.on === 'function' ? sdk.on('head', portraitFill) : null;
             offHead = typeof off === 'function' ? off : null;
-            if (offHead) session.eventsSeen += 1;
         } catch (error) { warn('Story Suite v2 head events are not available', error); }
-        for (const name of ['committed', 'feature', 'modules']) {   // (a command's write, a Feature switched, a module's state moved: each can move what the host answers)
-            try {
-                const off = typeof sdk.on === 'function' ? sdk.on(name, () => { session.hostRev += 1; }) : null;
-                if (typeof off === 'function') { offsRev.push(off); session.eventsSeen += 1; }
-            } catch (error) { warn(`Story Suite v2 ${name} events are not available`, error); }
-        }
         offCardSettings = registerCardSettings(sdk, cardSettings);
         session.offPublicPaths = registerPublicPaths(sdk);
         session.baselineKey = dossiersReady() ? chatKeyOf() : null;
@@ -126,14 +115,11 @@ export function createConnectPart(session, deps) {
         aliveTimer = null;
         const was = session.hosted;
         session.hosted = false;
-        session.eventsSeen = 0;
         stopTimeline();
         try { offTurn?.(); } catch { /* the host is gone */ }
         offTurn = null;
         try { offHead?.(); } catch { /* the host is gone */ }
         offHead = null;
-        for (const off of offsRev) { try { off(); } catch { /* the host is gone */ } }
-        offsRev = [];
         try { offCardSettings?.(); } catch { /* the host is gone */ }
         offCardSettings = null;
         try { session.offPublicPaths?.(); } catch { /* the host is gone */ }

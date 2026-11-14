@@ -96,26 +96,6 @@ export function createPublicApiStatePart(deps) {
         removeNpcPortrait, flushStateFile, setNpcArchiveStateById, deleteNpcById, storySuiteV2Meters,
     } = deps;
 
-    // (perf) What the view token reads from the host (the slice's numbers, the scene's presence, every host view) as one value, kept until the
-    // host's revision (adapter.hostRevision: its change events), its settings key (hostSettingsKey), Delta's settings, the stored revision, the chat or the latest reply moves. No host
-    // revision (not hosted, an older adapter): nothing is kept and every call reads the host.
-    let hostPartKept = null;
-    const hostPart = (key, state) => {
-        const read = () => {
-            const npcs = scenePresenceView(hostedMeterView(state.npcs));   // hosted: the scene's presence moves the panel too
-            return [npcs === state.npcs ? null : npcs.map(npc => [npc?.relationship ?? null, Boolean(npc?.present)]), dossierHostViews(state)];
-        };
-        let revision = null;
-        try { revision = storySuiteV2Meters()?.hostRevision?.(); } catch { revision = null; }
-        if (!Number.isFinite(revision)) return read();
-        // The settings that the host's queries and Delta's own views read have no event of their own (a meter added in a setting, a changed custom field): they are in the key.
-        let hostSettings = null;
-        try { hostSettings = storySuiteV2Meters()?.hostSettingsKey?.(); } catch { hostSettings = null; }
-        if (typeof hostSettings !== 'string') return read();
-        const stamp = `${key}|${revision}|${Number(stateVersions.get(key) || 0)}|${latestReplyIndex()}|${JSON.stringify(getSettings())}|${hostSettings}`;
-        if (hostPartKept?.stamp !== stamp) hostPartKept = { stamp, part: read() };
-        return hostPartKept.part;
-    };
     return {
     // (timeline participant) A state as installState keeps it: normalized like the chat's state, on a copy (nothing stored).
     normalizeState: state => structuredClone(normalizeChatState(state)),
@@ -230,7 +210,9 @@ export function createPublicApiStatePart(deps) {
         const hydration = chatHydrationStatus(key);
         if (key === 'no-chat' || hydration !== 'ready') return JSON.stringify([key, hydration, hydrationErrors.get(key)?.message || null]);
         const state = getChatState(key);
-        return JSON.stringify([key, hydration, Number(stateVersions.get(key) || 0), latestReplyIndex(), effectiveCustomFieldNames(), portraitFilesVersion(), ...hostPart(key, state)]);
+        const npcs = scenePresenceView(hostedMeterView(state.npcs));   // hosted: the scene's presence moves the panel too
+        return JSON.stringify([key, hydration, Number(stateVersions.get(key) || 0), latestReplyIndex(), effectiveCustomFieldNames(), portraitFilesVersion(),
+            npcs === state.npcs ? null : npcs.map(npc => [npc?.relationship ?? null, Boolean(npc?.present)]), dossierHostViews(state)]);
     },
     persistenceStatus: () => {
         const key = getChatKey();

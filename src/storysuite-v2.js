@@ -170,8 +170,6 @@ export function createStorySuiteV2Adapter({
         pollTimer: null,
         sdkRef: null,           // the sdk we registered with (once per sdk)
         hosted: false,
-        eventsSeen: 0,          // the host's change events (turn, head, committed, feature, modules) this session subscribed to: 5 = hostRevision can be trusted
-        hostRev: 0,             // counts the host's 'turn' and 'head' events (the dossier view token caches the host's views by it)
         emptyCast: fallbackEmptyCast,
         mounted: null,          // { el, node, placeholder, drawer } while the panel is in the overlay
         pendingSection: null,   // a section element waiting for the panel to mount
@@ -213,16 +211,6 @@ export function createStorySuiteV2Adapter({
 
     return Object.freeze({
         definition,
-        /** Moves with every host 'turn', 'head', 'committed', 'feature' and 'modules' event (and a hosted change): the key the dossier view token caches the host's views by. */
-        hostRevision: () => (session.hosted && session.eventsSeen < 5 ? null : session.hostRev + (session.hosted ? 0.5 : 0)),   // null: a change event is not observable, so nothing may be cached by it
-        /** Everything configured on the host that its queries read and no event announces: the host's own settings, each module's settings and the feature switches (the other half of the view token's cache key). */
-        hostSettingsKey: () => {
-            const sdk = session.sdkRef;
-            if (!sdk) return '';
-            try {
-                return JSON.stringify([sdk.settings?.() ?? null, (sdk.modules?.() ?? []).map(module => [module?.id, sdk.settings?.(module?.id) ?? null]), (sdk.features?.() ?? []).map(feature => [feature?.id, feature?.on])]);
-            } catch { return null; }   // unreadable: the caller reads fresh
-        },
         /** The catch-up after a fallback and the rebuild: status() for the banner, skip() (not a Story Block command: that would write an op), rebuild({ replies }). */
         catchUp: timelinePart.timeline.catchUp,
         /** The page API Story Director's World screen uses (PAGE_API). */

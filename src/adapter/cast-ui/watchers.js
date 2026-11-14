@@ -1,8 +1,9 @@
 // Page-API change listeners: the subscriber set and the one notification loop used by the rendered cast and key-person pin.
 //
-// (perf) The notification is coalesced: the first one runs at once, further ones inside COALESCE_MS become one trailing call, and none runs
-// while a reply is being made (a generation: checked again every RECHECK_MS, at most MAX_HOLD_MS, then it runs anyway). Story Director's World
-// screen redraws its cards on each call (a settle of the host per query), and the chat's own redraws fire this many times in a row.
+// (perf) Only the cast-rendered notification (the chat's own redraws, one per streamed token) is coalesced: notifyChange(true) runs the first at
+// once, further ones inside COALESCE_MS become one trailing call, and none runs while a reply is being made (a generation: checked again every
+// RECHECK_MS, at most MAX_HOLD_MS, then it runs anyway). Every other change (Delta turned on or off, the host going away, a timeline change)
+// is notifyChange() and goes out at once, with whatever trailing call was waiting folded into it.
 
 const COALESCE_MS = 250;
 const RECHECK_MS = 700;
@@ -24,10 +25,15 @@ export function createWatchers({ warn, delta = null }) {
         }
     }
     function later(wait) {
-        timer = setTimeout(() => { timer = null; notifyChange(); }, wait);
+        timer = setTimeout(() => { timer = null; notifyChange(true); }, wait);
         timer?.unref?.();
     }
-    function notifyChange() {
+    function notifyChange(coalesce = false) {
+        if (!coalesce) {
+            if (timer !== null) { clearTimeout(timer); timer = null; }
+            run();
+            return;
+        }
         if (timer !== null) return;   // one is already waiting: it tells the listeners about the newest state
         if (generating()) {
             if (!heldSince) heldSince = Date.now();

@@ -303,7 +303,7 @@ export function createTimelinePart(session, deps) {
         // Delta's own page events (a cast drawn in the chat, Delta turned on or off) redraw the Cast
         // tab only while the pane still shows it; once the reader has moved to another tab the pane
         // is let go until the host renders the Cast tab again.
-        const rerender = () => {
+        const rerender = coalesce => {
             if (!session.hosted) return;
             // A scan that finished late moved moods and presence: the host compares and tells `story:changed`.
             // The first render of a chat's loaded dossiers is no news: its values are the baseline (a quiet re-registration).
@@ -314,7 +314,7 @@ export function createTimelinePart(session, deps) {
                 } else session.offPublicPaths?.changed?.();
             } catch (error) { warn('Story Block public paths change failed', error); }
             // Story Director's World screen (the page API's subscribers) redraws its cards too.
-            notifyChange();
+            notifyChange(coalesce);   // only the streamed-token cast render is coalesced/held in a generation; Delta on/off goes out at once
             redrawCastViews();
             if (!session.castEl) return;
             if (!session.castEl.isConnected || !castStillShown(session.castEl)) {
@@ -323,8 +323,8 @@ export function createTimelinePart(session, deps) {
             }
             try { renderDossiers(session.castEl); } catch (error) { warn('Story Suite v2 Dossiers tab failed', error); }
         };
-        doc.addEventListener(EVENTS.castRendered, rerender);
-        doc.addEventListener(EVENTS.enabledChanged, rerender);
+        doc.addEventListener(EVENTS.castRendered, () => rerender(true));
+        doc.addEventListener(EVENTS.enabledChanged, () => rerender(false));
     }
 
     // Delta's card settings (src/card-settings.js), for a Story Block that has sdk.registerCardSettings (2.21.0); an older one

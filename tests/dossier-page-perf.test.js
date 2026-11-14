@@ -5,6 +5,7 @@ import { openNpc, showScreen } from '../dossier-ui-screens.js';
 import { runHostScenario } from './helpers/host-scenario.js';
 import { createInlineCardsMountPart } from '../runtime-inline-cards-mount.js';
 import { createWatchers } from '../src/adapter/cast-ui/watchers.js';
+import { createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
 
 // The dossier page at a long chat's scale: portraits reach the panel by reference (never escaped into its markup or copied by the
 // runtime's read), and a focus or a settings-panel mutation draws again only when something the panel shows changed.
@@ -246,118 +247,6 @@ test('refresh asks coalesce: a burst of mutations costs one token check, and non
     }
 });
 
-test('hosted: the view token reads the host\'s views once per host revision (head / turn events), not per call', () => {
-    const output = runHostScenario('dossier-host-views-cache', async () => {
-        const sdk = {
-            registered: [], listeners: new Map(), queries: 0,
-            registerModule(def) { sdk.registered.push(def); },
-            on(name, fn) { sdk.listeners.set(name, [...(sdk.listeners.get(name) || []), fn]); return () => {}; },
-            command: async () => ({ ok: true }),
-            query: () => { sdk.queries += 1; return []; },
-            settings: () => ({}),
-        };
-        mockState.sdk = sdk;
-        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
-    }, async () => {
-        const api = globalThis.NPCStateDelta;
-        await sleep(400);
-        const sdk = mockState.sdk;
-        const out = {};
-        out.hosted = sdk.registered.length > 0 && (sdk.listeners.get('head') || []).length > 0;
-        api.dossierViewToken();   // first read computes the host views
-        const base = sdk.queries;
-        const first = api.dossierViewToken();
-        for (let i = 0; i < 20; i += 1) api.dossierViewToken();
-        out.queriesWhileStill = sdk.queries - base;
-        out.stable = api.dossierViewToken() === first;
-        for (const fn of sdk.listeners.get('head') || []) { try { fn({ index: 0 }); } catch { /* the adapter's own step */ } }
-        const afterHead = sdk.queries;
-        api.dossierViewToken();
-        out.queriesAfterHead = sdk.queries - afterHead;
-        const afterFeature = sdk.queries;
-        for (const fn of sdk.listeners.get('feature') || []) { try { fn({}); } catch { /* the adapter's own step */ } }
-        api.dossierViewToken();
-        out.queriesAfterFeature = sdk.queries - afterFeature;
-        console.log('RESULT ' + JSON.stringify(out));
-    });
-    const out = JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
-    assert.equal(out.hosted, true);
-    assert.equal(out.queriesWhileStill, 0, 'no host query while the revision holds still');
-    assert.equal(out.stable, true);
-    assert.ok(out.queriesAfterHead > 0, "a host head event makes the next token read the host again");
-    assert.ok(out.queriesAfterFeature > 0, 'so does a Feature switched');
-});
-
-const settingsScenario = name => {
-    const output = runHostScenario(name, async () => {
-        const sdk = {
-            registered: [], listeners: new Map(), queries: 0, stored: {},
-            registerModule(def) { sdk.registered.push(def); },
-            on(eventName, fn) { sdk.listeners.set(eventName, [...(sdk.listeners.get(eventName) || []), fn]); return () => {}; },
-            command: async () => ({ ok: true }),
-            query: () => { sdk.queries += 1; return []; },
-            settings: id => (id === undefined ? { host: 1 } : { ...(sdk.stored[id] ?? {}) }),
-            modules: () => [{ id: 'npc-state-delta' }, { id: 'story-director' }],
-            features: () => [{ id: 'f1', on: sdk.featureOn !== false }],
-        };
-        mockState.sdk = sdk;
-                globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
-    }, async () => {
-        const api = globalThis.NPCStateDelta;
-        await sleep(400);
-        const sdk = mockState.sdk;
-        const out = {};
-        api.dossierViewToken();
-        let base = sdk.queries; api.dossierViewToken(); out.still = sdk.queries - base;
-        // a module's setting changed (a meter added): no host event announces it
-        sdk.stored['npc-state-delta'] = { meters: ['loyalty'] };
-        base = sdk.queries; api.dossierViewToken(); out.afterModuleSetting = sdk.queries - base;
-        base = sdk.queries; api.dossierViewToken(); out.stillAgain = sdk.queries - base;
-        sdk.stored['story-director'] = { keyPeople: ['Mira'] };
-        base = sdk.queries; api.dossierViewToken(); out.afterOtherModuleSetting = sdk.queries - base;
-        // a feature switch (read without its event)
-        sdk.featureOn = false;
-        base = sdk.queries; api.dossierViewToken(); out.afterFeatureSwitch = sdk.queries - base;
-        console.log('RESULT ' + JSON.stringify(out));
-    });
-    return JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
-};
-
-test('hosted: the cached host views follow the host\'s settings and feature switches too (no event announces a settings change)', () => {
-    const out = settingsScenario('dossier-host-settings-key');
-    assert.equal(out.still, 0, 'nothing read while nothing moved');
-    assert.ok(out.afterModuleSetting > 0, 'a module setting changed: the host is read again');
-    assert.equal(out.stillAgain, 0, 'and then holds still');
-    assert.ok(out.afterOtherModuleSetting > 0, 'another module\'s setting too');
-    assert.ok(out.afterFeatureSwitch > 0, 'a feature switch too');
-});
-
-test('hosted: when the host cannot be observed for one of its change events, nothing is cached (every token reads the host)', () => {
-    const output = runHostScenario('dossier-host-views-unobserved', async () => {
-        const sdk = {
-            registered: [], listeners: new Map(), queries: 0,
-            registerModule(def) { sdk.registered.push(def); },
-            on(name, fn) { if (name === 'modules') return undefined; sdk.listeners.set(name, [fn]); return () => {}; },   // 'modules' cannot be subscribed to
-            command: async () => ({ ok: true }),
-            query: () => { sdk.queries += 1; return []; },
-            settings: () => ({}),
-        };
-        mockState.sdk = sdk;
-        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
-    }, async () => {
-        const api = globalThis.NPCStateDelta;
-        await sleep(400);
-        const sdk = mockState.sdk;
-        api.dossierViewToken();
-        const base = sdk.queries;
-        for (let i = 0; i < 5; i += 1) api.dossierViewToken();
-        console.log('RESULT ' + JSON.stringify({ hosted: sdk.registered.length > 0, queries: sdk.queries - base }));
-    });
-    const out = JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
-    assert.equal(out.hosted, true);
-    assert.ok(out.queries >= 5, 'each token reads the host');
-});
-
 test('generationActive: true from a (non-quiet, non-dry-run) generation start to its end or stop, also without streaming', () => {
     const output = runHostScenario('dossier-generation-active', async () => {
         Object.assign(mockState.context.eventTypes, { GENERATION_STARTED: 'generation_started', GENERATION_ENDED: 'generation_ended', GENERATION_STOPPED: 'generation_stopped' });
@@ -415,29 +304,66 @@ test('refresh asks do not wait forever on a generation that never ends: after th
     }
 });
 
-test('page-API change notifications coalesce: the first runs at once, a burst becomes one trailing call, none while a reply is being made, flush runs a waiting one', async () => {
+test('page-API change notifications: only the streamed-token cast render is coalesced and held; every other change goes out at once', async () => {
     let generating = false;
     const { watchers, notifyChange, flush } = createWatchers({ warn: () => {}, delta: () => ({ generationActive: () => generating }) });
     let calls = 0;
     watchers.add(() => { calls += 1; });
-    notifyChange();
+    notifyChange(true);
     assert.equal(calls, 1, 'the first one runs at once');
-    for (let i = 0; i < 50; i += 1) notifyChange();
+    for (let i = 0; i < 50; i += 1) notifyChange(true);
     assert.equal(calls, 1, 'the burst waits');
     await new Promise(resolve => setTimeout(resolve, 400));
     assert.equal(calls, 2, 'the burst became one trailing call');
     generating = true;
-    for (let i = 0; i < 50; i += 1) notifyChange();
+    for (let i = 0; i < 50; i += 1) notifyChange(true);
     await new Promise(resolve => setTimeout(resolve, 1000));
     assert.equal(calls, 2, 'nothing runs while a reply is being made');
+    notifyChange();   // a user-driven change (not the streamed-token render): out at once, also in a generation
+    assert.equal(calls, 3, 'it did not wait for the generation');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    assert.equal(calls, 3, 'it also took the waiting trailing call with it');
     generating = false;
-    await new Promise(resolve => setTimeout(resolve, 900));
-    assert.equal(calls, 3, 'one call after it ended');
-    notifyChange();   // inside the quiet gap of the last run: waits
+    notifyChange(true);
+    assert.equal(calls, 4, 'after the generation the first one runs at once');
+    notifyChange(true);   // inside the quiet gap of that run: waits
     flush();
-    assert.equal(calls, 4, 'flush ran the waiting call and left nothing scheduled');
+    assert.equal(calls, 5, 'flush ran the waiting call and left nothing scheduled');
     flush();
-    assert.equal(calls, 4);
+    assert.equal(calls, 5);
+});
+
+test('the real adapter wiring: Delta turned off during a generation tells the page API at once; the streamed-token cast render is held until the generation ends', async () => {
+    const listeners = new Map();
+    const doc = { documentElement: { dataset: {} }, getElementById: () => null, addEventListener: (name, fn) => listeners.set(name, [...(listeners.get(name) ?? []), fn]), dispatchEvent: () => true };
+    const fire = name => { for (const fn of listeners.get(name) ?? []) fn({ type: name }); };
+    let enabled = true;
+    let generating = false;
+    const npc = { id: 'mira', name: 'Mira', present: true };
+    const delta = { isEnabled: () => enabled, generationActive: () => generating, presentCastHtml: () => '', fillPresentCast: () => {}, dossierRevision: () => 'chat|1', getNpc: () => npc, dossiersReady: () => true };
+    const sdk = { registerModule: async () => true, on: () => () => {}, query: () => [], settings: () => ({}), feature: () => false };
+    const host = { apiVersion: 2, sdk, ready: Promise.resolve(sdk) };
+    const timers = { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} };
+    const adapter = createStorySuiteV2Adapter({ suiteApi: { npcs: () => [npc] }, delta: () => delta, host: () => host, doc, page: {}, timers, logger: { warn() {} }, loadEmptyCast: async () => null });
+    adapter.start();
+    await adapter.settled();
+    assert.equal(adapter.hosted(), true);
+    let calls = 0;
+    const seen = [];
+    const off = adapter.pageApi.onChange(() => { calls += 1; seen.push(adapter.pageApi.available()); });
+    try {
+        generating = true;
+        fire('npc-state-delta:cast-rendered');   // the first runs at once
+        const first = calls;
+        for (let i = 0; i < 20; i += 1) fire('npc-state-delta:cast-rendered');   // one per streamed token
+        assert.equal(calls, first, 'the streamed-token renders wait');
+        enabled = false;
+        fire('npc-state-delta:enabled-changed');
+        assert.equal(calls, first + 1, 'Delta turned off goes out at once, in the middle of the generation');
+        assert.equal(seen.at(-1), false, 'and the page API already says it is off');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        assert.equal(calls, first + 1, 'nothing else is run for the held renders');
+    } finally { off(); adapter.stop(); generating = false; }
 });
 
 test('inline cards: the chat observer asks for no render while a reply is being made (its text grows by child-list changes); a mutation after it does', async () => {
