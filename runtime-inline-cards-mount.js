@@ -9,7 +9,8 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
     const { chatHydrationStatus, getChatKey, getChatState, streamingMessageId = () => null } = deps;
 
     let inlineRenderTimer = null;
-    let pendingStreamed = false;   // every render asked since the last one came from the streaming message's own growth
+    let pendingStreamed = null;   // mesid of the streaming message when every render asked since the last one was that message's own growth
+    let growth = { id: null, size: 0 };   // the streaming message's reply length at the last observer call
     let inlineWatchdogTimer = null;
 
     function ensureInlineObserver() {
@@ -28,10 +29,9 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
                 if (typeof target?.closest === 'function' && target.closest('.npc-state-delta-inline-anchor, .npc-state-delta-megumin-pane')) return false;
                 return true;
             });
-            // (perf) A render caused only by the growth of the message being streamed says so: its page-API notification is coalesced.
-            const streaming = streamingMessageId();
-            const streamed = streaming !== null && streaming !== undefined && relevant.every(mutation => String(mutation.target?.closest?.('.mes')?.getAttribute?.('mesid')) === String(streaming));
-            if (relevant.length) queueInlineRender(45, 0, streamed);
+            // (perf) Only the GROWTH of the message being streamed marks its render (the page-API notification is then coalesced).
+            // Removals, replacements that do not lengthen the reply and any other message are ordinary renders.
+            if (relevant.length) queueInlineRender(45, 0, streamedGrowth(relevant));
         });
         try {
             rt.inlineObserver.observe(chat, { childList: true, subtree: true });
@@ -42,6 +42,38 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
             rt.inlineObserverChat = null;
             return false;
         }
+    }
+
+    // The streaming message's mesid when all `mutations` are additions inside it and its reply is longer than at the last call; else null.
+    function streamedGrowth(mutations) {
+        const streaming = streamingMessageId();
+        if (streaming === null || streaming === undefined) { growth = { id: null, size: 0 }; return null; }
+        const id = String(streaming);
+        const mes = m => m.target?.closest?.('.mes');
+        const inside = mutations.every(m => String(mes(m)?.getAttribute?.('mesid')) === id);
+        const element = mes(mutations[0]);
+        // The reply and, while a model is still thinking, its reasoning block (a sibling of the reply text) both grow the message.
+        const parts = ['.mes_text', '.mes_reasoning'].map(selector => element?.querySelector?.(selector)).filter(Boolean);
+        const size = (parts.length ? parts : [element]).reduce((sum, node) => sum + String(node?.textContent ?? '').length, 0);
+        const before = growth.id === id ? growth.size : null;
+        if (inside) growth = { id, size };
+        const grew = inside && before !== null && size > before && mutations.some(m => m.addedNodes?.length > 0) && onlyAppends(mutations);
+        return grew ? id : null;
+    }
+
+    // True growth: per changed parent, whatever was removed is the start of what was added (the host re-sets a text node while appending: "Hel" out,
+    // "Hello" in). A longer replacement with other text, or a removal of something else in the same delivery, is not growth.
+    function onlyAppends(mutations) {
+        const text = list => Array.from(list || [], node => String(node?.textContent ?? '')).join('');
+        const perTarget = new Map();
+        for (const m of mutations) {
+            const entry = perTarget.get(m.target) || { added: '', removed: '', bare: false };
+            entry.added += text(m.addedNodes);
+            entry.removed += text(m.removedNodes);
+            if (Array.from(m.removedNodes || []).some(node => node?.nodeType !== 3 && !String(node?.textContent ?? ''))) entry.bare = true;   // an element without text went away
+            perTarget.set(m.target, entry);
+        }
+        return [...perTarget.values()].every(e => !e.bare && e.added.startsWith(e.removed));
     }
 
     function inlineMountNeedsRepair() {
@@ -91,8 +123,9 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
         inlineWatchdogTimer?.unref?.();
     }
 
-    // `streamed` is a parameter of one queued invocation only: nothing is shared between calls, so a skipped or throwing render cannot mark a later direct one.
-    function renderInlineCardsOnce(streamed) {
+    // `streamedId` is a parameter of one queued invocation only: nothing is shared between calls, so a skipped or throwing render cannot mark a later direct one.
+    // The mark is kept only while that same message is still the one streaming when the render runs.
+    function renderInlineCardsOnce(streamedId) {
         let chatKey;
         try { chatKey = getChatKey(); } catch { return { rendered: 0, missing: 0 }; }
         if (chatKey === 'no-chat' || chatHydrationStatus(chatKey) !== 'ready') return { rendered: 0, missing: 0 };
@@ -155,20 +188,20 @@ export function createInlineCardsMountPart(rt, deps, { chatElementForInlineObser
             fillPresentSceneText(anchor);
             rendered += 1;
         }
-        document.dispatchEvent?.(new CustomEvent('npc-state-delta:cast-rendered', { detail: { streaming: streamed === true && streamingMessageId() != null } }));
+        document.dispatchEvent?.(new CustomEvent('npc-state-delta:cast-rendered', { detail: { streaming: streamedId != null && String(streamingMessageId()) === String(streamedId) } }));
         return { rendered, missing };
     }
     // The public/direct entry is always unmarked.
-    function renderInlineCards() { return renderInlineCardsOnce(false); }
+    function renderInlineCards() { return renderInlineCardsOnce(null); }
 
     const INLINE_RENDER_RETRY_DELAYS = [80, 180, 350, 700, 1400];
-    function queueInlineRender(delay = 0, retryIndex = 0, streamed = false) {
-        pendingStreamed = streamed && (inlineRenderTimer ? pendingStreamed : true);
+    function queueInlineRender(delay = 0, retryIndex = 0, streamedId = null) {
+        pendingStreamed = streamedId != null && (inlineRenderTimer ? pendingStreamed === streamedId : true) ? streamedId : null;
         if (inlineRenderTimer) clearTimeout(inlineRenderTimer);
         inlineRenderTimer = setTimeout(() => {
             inlineRenderTimer = null;
             const streamedNow = pendingStreamed;
-            pendingStreamed = false;
+            pendingStreamed = null;
             try {
                 const result = renderInlineCardsOnce(streamedNow);
                 if (result?.missing > 0 && retryIndex < INLINE_RENDER_RETRY_DELAYS.length) {

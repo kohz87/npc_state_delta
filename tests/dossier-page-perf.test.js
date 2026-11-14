@@ -333,7 +333,12 @@ test('inline cards: only a render caused by the streaming message\'s growth says
     globalThis.document = { dispatchEvent: event => { details.push(event.detail?.streaming); }, querySelectorAll: () => [] };
     let streaming = null;
     const chat = { querySelectorAll: () => [] };
-    const mutationIn = id => [{ type: 'childList', target: { closest: selector => (selector === '.mes' ? { getAttribute: () => String(id) } : null) } }];
+    const replies = new Map();   // mesid -> reply text length, as the page shows it
+    const mutationIn = (id, { added = 1, removed = 0, grow = 8 } = {}) => {
+        replies.set(id, (replies.get(id) ?? 0) + grow);
+        const mes = { getAttribute: () => String(id), querySelector: () => ({ textContent: 'x'.repeat(replies.get(id)) }) };
+        return [{ type: 'childList', target: { closest: selector => (selector === '.mes' ? mes : null) }, addedNodes: Array(added).fill({}), removedNodes: Array(removed).fill({}) }];
+    };
     try {
         const part = createInlineCardsMountPart({}, { chatHydrationStatus: () => 'ready', getChatKey: () => 'chat-1', getChatState: () => ({}), streamingMessageId: () => streaming }, {
             chatElementForInlineObserver: () => chat, messageElement: () => null, inlineRosterHtml: () => '', inChatCastMode: () => 'on',
@@ -343,6 +348,10 @@ test('inline cards: only a render caused by the streaming message\'s growth says
         part.ensureInlineObserver();
         const settle = () => new Promise(resolve => setTimeout(resolve, 150));
         streaming = 5;
+        callback(mutationIn(5));   // the first look at the streaming message sets the baseline: an ordinary render
+        await settle();
+        assert.deepEqual(details, [false], 'no earlier length to compare: not marked');
+        details.length = 0;
         for (let i = 0; i < 20; i += 1) callback(mutationIn(5));
         await settle();
         assert.deepEqual(details, [true], 'the streaming message grew: one render, marked streaming');
@@ -375,7 +384,12 @@ test('inline cards: a streamed render that is skipped or throws leaves no mark; 
     let onDetail = () => {};
     globalThis.document = { dispatchEvent: event => { details.push(event.detail?.streaming); onDetail(event.detail); }, querySelectorAll: () => [] };
     const chat = { querySelectorAll: () => [] };
-    const mutationIn = id => [{ type: 'childList', target: { closest: selector => (selector === '.mes' ? { getAttribute: () => String(id) } : null) } }];
+    const replies = new Map();   // mesid -> reply text length, as the page shows it
+    const mutationIn = (id, { added = 1, removed = 0, grow = 8 } = {}) => {
+        replies.set(id, (replies.get(id) ?? 0) + grow);
+        const mes = { getAttribute: () => String(id), querySelector: () => ({ textContent: 'x'.repeat(replies.get(id)) }) };
+        return [{ type: 'childList', target: { closest: selector => (selector === '.mes' ? mes : null) }, addedNodes: Array(added).fill({}), removedNodes: Array(removed).fill({}) }];
+    };
     let hydration = 'loading';
     let throwing = false;
     const { watchers, notifyChange } = createWatchers({ warn: () => {}, delta: () => ({ generationActive: () => true }) });   // a stream is running
@@ -393,6 +407,7 @@ test('inline cards: a streamed render that is skipped or throws leaves no mark; 
         const warn = console.warn;
         console.warn = () => {};
         try {
+            callback(mutationIn(5)); await settle(); details.length = 0; worldCalls = 0;   // baseline
             callback(mutationIn(5));   // streamed render, skipped: hydration is not ready
             await settle();
             hydration = 'ready';
@@ -412,5 +427,103 @@ test('inline cards: a streamed render that is skipped or throws leaves no mark; 
     } finally {
         globalThis.MutationObserver = saved;
         globalThis.document = savedDocument;
+    }
+});
+
+test('inline cards + real adapter + page-API subscriber (the People widget\'s contract): only the reply growing in the streaming message is held; removals, replacements, other messages and a changed streaming message go out at once', async () => {
+    const saved = { observer: globalThis.MutationObserver, document: globalThis.document };
+    let callback = null;
+    globalThis.MutationObserver = class { constructor(fn) { callback = fn; } observe() {} disconnect() {} };
+    const listeners = new Map();
+    const doc = {
+        documentElement: { dataset: {} }, getElementById: () => null, querySelectorAll: () => [],
+        addEventListener: (name, fn) => listeners.set(name, [...(listeners.get(name) ?? []), fn]),
+        dispatchEvent: event => { for (const fn of listeners.get(event.type) ?? []) fn(event); return true; },
+    };
+    globalThis.document = doc;
+    let streaming = 5;
+    const npc = { id: 'mira', name: 'Mira', present: true };
+    const delta = { isEnabled: () => true, generationActive: () => streaming !== null, presentCastHtml: () => '', fillPresentCast: () => {}, dossierRevision: () => 'chat|1', getNpc: () => npc, dossiersReady: () => true };
+    const sdk = { registerModule: async () => true, on: () => () => {}, query: () => [], settings: () => ({}), feature: () => false };
+    const host = { apiVersion: 2, sdk, ready: Promise.resolve(sdk) };
+    const timers = { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} };
+    const adapter = createStorySuiteV2Adapter({ suiteApi: { npcs: () => [npc] }, delta: () => delta, host: () => host, doc, page: {}, timers, logger: { warn() {} }, loadEmptyCast: async () => null });
+    adapter.start();
+    await adapter.settled();
+    let widgetCalls = 0;
+    const off = adapter.pageApi.onChange(() => { widgetCalls += 1; });   // what SD's People widget does: page.onChange(refresh)
+    const lengths = new Map();
+    const thinking = new Map();   // mesid -> reasoning length (its own block, beside the reply text)
+    const node = text => ({ nodeType: 3, textContent: text });
+    const mutation = (id, { added = 1, removed = 0, size, reasoning, addedText = '', removedText = '' }) => {
+        lengths.set(id, size);
+        if (reasoning !== undefined) thinking.set(id, reasoning);
+        const mes = { getAttribute: () => String(id), querySelector: sel => (sel === '.mes_text' ? { textContent: 'x'.repeat(lengths.get(id)) } : sel === '.mes_reasoning' && thinking.has(id) ? { textContent: 'r'.repeat(thinking.get(id)) } : null) };
+        return [{ type: 'childList', target: { closest: s => (s === '.mes' ? mes : null) }, addedNodes: Array(added).fill(node(addedText)), removedNodes: Array(removed).fill(node(removedText)) }];
+    };
+    const part = createInlineCardsMountPart({}, { chatHydrationStatus: () => 'ready', getChatKey: () => 'chat-1', getChatState: () => ({}), streamingMessageId: () => streaming }, {
+        chatElementForInlineObserver: () => ({ querySelectorAll: () => [] }), messageElement: () => null, inlineRosterHtml: () => '', inChatCastMode: () => 'on',
+        inlineEntriesForRender: () => [], meguminIntegrationMessageId: () => null, meguminBlockCardForMessage: () => null,
+        cleanupStaleMeguminIntegrations: () => {}, inlineAnchorMessageId: () => null, mountNpcStateInsideMeguminBlock: () => false,
+    });
+    const settle = () => new Promise(resolve => setTimeout(resolve, 150));
+    const marks = [];
+    doc.addEventListener('npc-state-delta:cast-rendered', event => marks.push(event.detail.streaming));
+    try {
+        part.ensureInlineObserver();
+        callback(mutation(5, { size: 10 })); await settle();   // baseline
+        const base = widgetCalls;
+        marks.length = 0;
+        for (let i = 1; i <= 15; i += 1) { callback(mutation(5, { size: 10 + i * 5 })); }
+        await settle();
+        assert.deepEqual(marks, [true], 'growth: marked');
+        assert.equal(widgetCalls, base, 'growth: held for the subscriber');
+        for (let i = 1; i <= 5; i += 1) callback(mutation(5, { size: 85, reasoning: i * 20 }));   // a model thinking: only the reasoning block grows
+        await settle();
+        assert.deepEqual(marks, [true, true], 'reasoning growth is growth: marked');
+        assert.equal(widgetCalls, base, 'and held');
+        thinking.delete(5);
+        marks.length = 0;
+        callback(mutation(5, { added: 0, removed: 2, size: 60 })); await settle();   // a removal
+        assert.deepEqual(marks, [false]); assert.equal(widgetCalls, base + 1, 'removal: at once');
+        callback(mutation(5, { added: 1, removed: 1, size: 60 })); await settle();   // replaced by text of the same length
+        assert.equal(widgetCalls, base + 2, 'replacement without growth: at once');
+        callback(mutation(5, { added: 1, removed: 1, size: 20 })); await settle();   // replaced by shorter text
+        assert.equal(widgetCalls, base + 3, 'shorter replacement: at once');
+        callback(mutation(3, { size: 40 })); await settle();   // another message
+        assert.equal(widgetCalls, base + 4, 'other message: at once');
+        callback(mutation(5, { size: 30 })); callback(mutation(5, { added: 0, removed: 1, size: 25 })); await settle();   // growth then a removal in two calls in one debounce window
+        assert.equal(widgetCalls, base + 5, 'a mixed window is an ordinary render');
+        // the host re-sets the text node while appending: "Hel" out, "Hello" in -> growth, held
+        marks.length = 0;
+        callback(mutation(5, { added: 1, removed: 1, size: 70, addedText: 'Hello', removedText: 'Hel' })); await settle();
+        assert.deepEqual(marks, [true], 'replace-while-appending (removed text is the start of the added text): growth');
+        const heldAt = widgetCalls;
+        // a longer replacement with other text is not growth
+        callback(mutation(5, { added: 1, removed: 1, size: 90, addedText: 'Goodbye now', removedText: 'Hello' })); await settle();
+        assert.equal(marks.at(-1), false, 'a longer replacement with other text: unmarked');
+        assert.ok(widgetCalls > heldAt, 'and out at once (it also flushes the held growth)');
+        const afterReplace = widgetCalls;
+        // one observer delivery: growth in one record and an independent removal in another
+        const mixed = [...mutation(5, { size: 100, addedText: 'more' }), ...mutation(5, { added: 0, removed: 1, size: 100, removedText: 'gone' })];
+        callback(mixed); await settle();
+        assert.equal(marks.at(-1), false, 'growth + an independent removal in one delivery: unmarked');
+        assert.ok(widgetCalls > afterReplace, 'out at once');
+        // one delivery of two growth records is still growth
+        callback(mutation(5, { size: 110, addedText: 'a' })); await settle();
+        callback([...mutation(5, { size: 120, addedText: 'b' }), ...mutation(5, { size: 130, addedText: 'c' })]); await settle();
+        assert.equal(marks.at(-1), true, 'two growth records in one delivery: growth');
+        marks.length = 0;
+        const beforeChanged = widgetCalls;
+        callback(mutation(5, { size: 140 }));   // growth queued ...
+        streaming = 6;                          // ... but the streaming message is another one when the render runs
+        await settle();
+        assert.deepEqual(marks, [false], 'a changed streaming message at render time: unmarked');
+        assert.ok(widgetCalls > beforeChanged, 'and out at once');
+        streaming = null;
+    } finally {
+        off(); adapter.stop();
+        globalThis.MutationObserver = saved.observer;
+        globalThis.document = saved.document;
     }
 });

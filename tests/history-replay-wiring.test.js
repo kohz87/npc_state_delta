@@ -13,7 +13,14 @@ import { fileURLToPath } from 'node:url';
 const TRY_MARKER = '\ntry {\n    await import(pathToFileURL(path.join(extRoot, \'index.js\'))';
 const REPLAY_URL = new URL('../src/storysuite-participant/history-replay.js', import.meta.url).href;
 
-function runScenario(name, scenario) {
+// A fake Story Block v2 global beside Delta: its Story Suite adapter is loaded and hosted (the same setup as storysuite-v2-hosted.test.js).
+const HOSTED_SETUP = `globalThis.document.documentElement = { dataset: {} };
+globalThis.document.readyState = 'loading';
+fs.cpSync(path.join(sourceRoot, 'src'), path.join(extRoot, 'src'), { recursive: true });
+mockState.storyBlockTabs = [];
+{ const sdk = { registered: [], registerModule(def) { sdk.registered.push(def); } }; mockState.sdk = sdk; globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk }; }`;
+
+function runScenario(name, scenario, { hosted = false } = {}) {
     let source = fs.readFileSync(new URL('./runtime-smoke.mjs', import.meta.url), 'utf8');
     source = source.replace('const here = path.dirname(fileURLToPath(import.meta.url));', `const here = ${JSON.stringify(fileURLToPath(new URL('.', import.meta.url)))};`);
     const cut = source.indexOf(TRY_MARKER);
@@ -22,12 +29,14 @@ function runScenario(name, scenario) {
 mockState.context.eventTypes.GENERATION_AFTER_COMMANDS = 'generation_after_commands';
 mockState.context.eventTypes.GENERATION_STOPPED = 'generation_stopped';
 mockState.context.eventTypes.CHAT_COMPLETION_PROMPT_READY = 'chat_completion_prompt_ready';
+${hosted ? HOSTED_SETUP : ''}
 try {
     await import(pathToFileURL(path.join(extRoot, 'index.js')).href + \`?t=\${Date.now()}\`);
     await sleep(30);
     eventSource.emit('app_ready');
     eventSource.emit('extension_settings_loaded');
     await sleep(30);
+    ${hosted ? "await import(pathToFileURL(path.join(extRoot, 'story-block-tabs.js')).href); await sleep(30);" : ''}
     const helpers = await (${helpers.toString()})(mockState, eventSource, sleep, ${JSON.stringify(REPLAY_URL)});
     await (${scenario.toString()})(helpers);
     console.log('history replay scenario ${name} passed');
@@ -438,8 +447,7 @@ test('a publication that fails after a successful install: the catch-up is done,
 });
 
 // (ONEPASSCAPR2-1) A reply whose one-pass block was accepted is rebuilt from that accepted block, not from a model's answer: replay == live.
-test('parity: a captured one-pass reply (memory, tie string, edge) replays to the live dossiers; the old reply read again keeps its bytes', () => {
-    runScenario('captured-parity', async h => {
+const capturedParity = async h => {
         h.settings.narrationCapture = true;
         const mockState = h.mockState;
         const block = payload => `\n\n<!--npc_state_delta\n${JSON.stringify(payload)}\n-->`;
@@ -470,7 +478,13 @@ test('parity: a captured one-pass reply (memory, tie string, edge) replays to th
         }
         if (moved.includes('pendingBackfills')) h.fail(`backfills ${JSON.stringify(live.pendingBackfills)} vs ${JSON.stringify(replayed.pendingBackfills)}`);
         h.equal(moved, [], 'replay of captured replies == the live run (nothing lost)');
-    });
+};
+test('parity: a captured one-pass reply (memory, tie string, edge) replays to the live dossiers; the old reply read again keeps its bytes', () => {
+    runScenario('captured-parity', capturedParity);
+});
+
+test('hosted (a Story Block v2 host and the adapter loaded): parity: a captured one-pass reply (memory, tie string, edge) replays to the live dossiers; the old reply read again keeps its bytes', () => {
+    runScenario('captured-parity-hosted', capturedParity, { hosted: true });
 });
 
 // (ONEPASSCAPR2-8) With Full scan every reply on, a deferred full scan of a reply the automatic scan already read is skipped: one read per reply.
@@ -490,8 +504,7 @@ test('full scan: a reply the automatic scan covered is not read again by the ful
 
 // (ONEPASSCAPR2-1) The new readings (string ties, folded ids, no ambiguous binding) apply to a reply the SCANNER read live too, so replay reads them the same way;
 // a reply with no journal entry (read before the journal existed) is a historical re-read and keeps the old bytes.
-test('parity: a scanner-read reply with a string tie and an underscore-id edge replays to the live dossier; an old reply (no journal entry) keeps its old reading', () => {
-    runScenario('scanner-new-shapes', async h => {
+const scannerNewShapes = async h => {
         const ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
         const row = (name, extra = {}) => ({ name, present: true, role: 'regular', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO, ...extra });
         const prompts = [];
@@ -523,7 +536,35 @@ test('parity: a scanner-read reply with a string tie and an underscore-id edge r
         await old.idle();
         h.check(prompts.slice(beforeOld).every(prompt => !prompt.includes('background in npcs[]')), 'the old reply uses the old scanner wording');
         h.equal(h.runtime.getState().npcs.find(npc => npc.name === 'Sieke').keyRelationships, [], 'an old reply keeps its old bytes: the string tie is still not read');
-    });
+};
+test('parity: a scanner-read reply with a string tie and an underscore-id edge replays to the live dossier; an old reply (no journal entry) keeps its old reading', () => {
+    runScenario('scanner-new-shapes', scannerNewShapes);
+});
+
+test('hosted (a Story Block v2 host and the adapter loaded): parity: a scanner-read reply with a string tie and an underscore-id edge replays to the live dossier; an old reply (no journal entry) keeps its old reading', () => {
+    runScenario('scanner-new-shapes-hosted', scannerNewShapes, { hosted: true });
+});
+
+// A hosted replay (Story Block host + adapter loaded; the adapter is frozen) whose scan admits a new person must finish `done` and keep the dossier:
+// the replay's adapter view used to be a Proxy over the frozen adapter, which threw on packNames ("dossier scan failed").
+test('hosted replay: a replayed scan that admits a new person finishes done and keeps the dossier; the frozen adapter is read as of the reply', () => {
+    runScenario('hosted-replay-admits', async h => {
+        const ZERO = { trust: 0, affection: 0, desire: 0, tension: 0 };
+        h.mockState.quietResponder = async (args = {}) => {
+            if (!/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            return JSON.stringify({ npcs: [{ name: 'Mara', present: true, role: 'regular', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipDelta: ZERO, personality: 'dry, watchful', about: 'keeps the ferry' }] });
+        };
+        await h.turn('Hello.', 'Mara keeps the ferry and nods at you.');
+        const live = h.stable(h.runtime.getState());
+        h.check(live.npcs.some(npc => npc.name === 'Mara'), 'the live scan admitted Mara');
+        const catchUp = h.controller();
+        catchUp.rebuild({ replies: null });
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'the hosted replay finished done, not failed');
+        const replayed = h.stable(h.runtime.getState());
+        h.check(replayed.npcs.some(npc => npc.name === 'Mara'), 'the dossier is kept after the replay');
+        h.equal(replayed.npcs.map(npc => npc.name), live.npcs.map(npc => npc.name), 'same people live and replayed');
+    }, { hosted: true });
 });
 
 test('ONEPASSMISS-1: replay does not invent missing-capture fallbacks for old replies', () => {
